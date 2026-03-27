@@ -1,0 +1,23 @@
+# Dependencies
+GoJIRA-App/node_modules/
+GoJIRA-App/build/
+
+# Go binary
+GoJIRA-API/gojira-api
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# Cache
+GoJIRA-API/cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/
