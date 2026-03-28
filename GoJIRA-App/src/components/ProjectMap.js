@@ -54,6 +54,8 @@ export default function ProjectMap() {
   const [viewRange, setViewRange] = useState(getDefaultView);
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, project }
   const [dialog, setDialog] = useState(null);   // { project, mode: 'detail'|'edit' }
+  const [sortKey, setSortKey] = useState('startDate'); // startDate|endDate|name|dept
+  const [sortAsc, setSortAsc] = useState(true);
   const graphRef = useRef(null);
   const headerRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -154,8 +156,31 @@ export default function ProjectMap() {
     if (sidebarRef.current) sidebarRef.current.scrollTop = el.scrollTop;
   }
 
+  // 21: Sort projects
+  function getFirstDate(p) {
+    const s = (p.Schedules || [])[0];
+    return s ? toDate(Object.values(s)[0]) : new Date(0);
+  }
+  function getLastDate(p) {
+    const arr = p.Schedules || [];
+    const s = arr[arr.length - 1];
+    return s ? toDate(Object.values(s)[0]) : new Date(0);
+  }
+
+  const sortedProjects = [...projects].sort((a, b) => {
+    let cmp = 0;
+    switch (sortKey) {
+      case 'startDate': cmp = getFirstDate(a) - getFirstDate(b); break;
+      case 'endDate': cmp = getLastDate(a) - getLastDate(b); break;
+      case 'name': cmp = (a.Name || '').localeCompare(b.Name || ''); break;
+      case 'dept': cmp = (a.DevTeam || '').localeCompare(b.DevTeam || ''); break;
+      default: cmp = 0;
+    }
+    return sortAsc ? cmp : -cmp;
+  });
+
   const allDates = [];
-  projects.forEach((p) => {
+  sortedProjects.forEach((p) => {
     (p.Schedules || []).forEach((s) => {
       const val = Object.values(s)[0];
       if (val) allDates.push(toDate(val));
@@ -183,12 +208,22 @@ export default function ProjectMap() {
     cur.setMonth(cur.getMonth() + 1);
   }
 
+  // Calculate left padding first: ensure project names are not clipped
+  // Estimate max project name width (~7px per char) + margin
+  let leftPadding = 0;
+  sortedProjects.forEach((p) => {
+    const nameWidth = (p.Name || '').length * 7 + 16;
+    if (nameWidth > leftPadding) leftPadding = nameWidth;
+  });
+
   const monthCount = monthList.length;
-  const evenWidth = graphWidth / monthCount;
+  // Calculate month width from available space (graphWidth minus leftPadding)
+  const availableWidth = graphWidth - leftPadding;
+  const evenWidth = availableWidth / monthCount;
   const months = monthList.map((m) => ({
     ...m,
     label: `${m.year}.${String(m.month).padStart(2, '0')}`,
-    width: Math.max(MIN_MONTH_WIDTH, evenWidth),
+    width: Math.max(1, evenWidth),
   }));
 
   // Year groups
@@ -203,14 +238,6 @@ export default function ProjectMap() {
     }
   }
 
-  // Calculate left padding: ensure the earliest project name is not clipped
-  // Estimate max project name width (~7px per char) + margin
-  let leftPadding = 0;
-  projects.forEach((p) => {
-    const nameWidth = (p.Name || '').length * 7 + 16;
-    if (nameWidth > leftPadding) leftPadding = nameWidth;
-  });
-
   // Assign x positions with left padding
   let accX = leftPadding;
   for (const m of months) {
@@ -218,7 +245,7 @@ export default function ProjectMap() {
     accX += m.width;
   }
   const totalWidth = accX;
-  const totalHeight = projects.length * ROW_HEIGHT;
+  const totalHeight = sortedProjects.length * ROW_HEIGHT;
 
   function dateToX(date) {
     for (let i = 0; i < months.length; i++) {
@@ -255,6 +282,30 @@ export default function ProjectMap() {
       {/* Slider bar + Add button */}
       <div className="pm-topbar">
         <RangeSlider viewRange={viewRange} onChange={setViewRange} />
+        <div className="pm-sort">
+          <span className="pm-sort-label">정렬:</span>
+          {[
+            { key: 'startDate', label: '시작일' },
+            { key: 'endDate', label: '종료일' },
+            { key: 'name', label: '과제명' },
+            { key: 'dept', label: '부서명' },
+          ].map((opt) => (
+            <button
+              key={opt.key}
+              className={`pm-sort-btn ${sortKey === opt.key ? 'pm-sort-active' : ''}`}
+              onClick={() => {
+                if (sortKey === opt.key) {
+                  setSortAsc(!sortAsc);
+                } else {
+                  setSortKey(opt.key);
+                  setSortAsc(true);
+                }
+              }}
+            >
+              {opt.label} {sortKey === opt.key ? (sortAsc ? '\u25B2' : '\u25BC') : ''}
+            </button>
+          ))}
+        </div>
         <button
           className="pm-add-btn"
           onClick={() => setDialog({ project: newProjectTemplate(), mode: 'edit' })}
@@ -302,7 +353,7 @@ export default function ProjectMap() {
 
         {/* Sidebar */}
         <div className="pm-sidebar" ref={sidebarRef}>
-          {projects.map((p, i) => (
+          {sortedProjects.map((p, i) => (
             <div key={i} className="pm-sidebar-row" style={{ height: ROW_HEIGHT }}>
               {p.Name}
             </div>
@@ -318,7 +369,7 @@ export default function ProjectMap() {
               </clipPath>
             </defs>
             {/* Row grid lines */}
-            {projects.map((_, i) => (
+            {sortedProjects.map((_, i) => (
               <line
                 key={`grid-${i}`}
                 x1={0}
@@ -356,7 +407,7 @@ export default function ProjectMap() {
             })()}
             {/* Project rows (clipped) */}
             <g clipPath="url(#graphClip)">
-              {projects.map((p, rowIdx) => {
+              {sortedProjects.map((p, rowIdx) => {
                 const now = new Date();
                 // 18: Status === "Done" -> completed
                 const isCompleted = (p.State || '').toLowerCase() === 'done';
@@ -449,7 +500,8 @@ function RangeSlider({ viewRange, onChange }) {
       const monthOffset = Math.round(pct * totalMonths);
       const newDate = addMonths(sliderRange.min, monthOffset);
 
-      const spanMonths = DEFAULT_SPAN_YEARS * 12;
+      // Use current span (preserves Shift-expanded range)
+      const spanMonths = monthsBetween(viewRange.start, viewRange.end);
 
       if (shiftHeld.current) {
         // Free mode: move only the dragged knob
@@ -614,11 +666,14 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
       )}
 
       {/* Milestone circles */}
-      {allMilestones.map((m, i) => (
+      {allMilestones.map((m, i) => {
+        // 3.1: days since previous milestone (0 for first)
+        const daysDiff = i === 0 ? 0 : daysBetween(allMilestones[i - 1].date, m.date);
+        return (
         <g key={i}>
           <circle cx={m.x} cy={y} r={MILESTONE_R} className="pm-milestone" />
           <text x={m.x} y={y + 4} textAnchor="middle" className="pm-day">
-            {dayOfMonth(m.date)}
+            {daysDiff}
           </text>
           <text
             x={m.x}
@@ -629,7 +684,8 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
             {m.name}
           </text>
         </g>
-      ))}
+        );
+      })}
 
       {/* Project name (rendered last = on top) with white background */}
       {(() => {
