@@ -274,6 +274,15 @@ func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []s
 			continue
 		}
 
+		// Skip dirty issues — local changes not yet synced to JIRA
+		local, _ := FindIssueByKey(ctx, key)
+		if local != nil {
+			if dirty, ok := local["_dirty"].(bool); ok && dirty {
+				log.Printf("pull: skipping %s (dirty — local changes pending)", key)
+				continue
+			}
+		}
+
 		// Transform to cache_schema format
 		doc := TransformToCache(issue)
 		doc["_dirty"] = false

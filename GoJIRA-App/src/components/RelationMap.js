@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import CommonBar from './CommonBar';
 import './RelationMap.css';
 
 const API_BASE = 'http://localhost:9000/api/v2';
@@ -136,6 +137,17 @@ export default function RelationMap({ project, onBack }) {
   }, [projectCode]);
 
   useEffect(() => { fetchIssues(); }, [fetchIssues]);
+
+  const handlePull = useCallback(async () => {
+    try {
+      await fetch(`${API_BASE}/Issue/fetch`, {
+        headers: { XBody: JSON.stringify({ prjID: projectCode }) },
+      });
+      fetchIssues();
+    } catch (err) {
+      alert('Pull 실패: ' + err.message);
+    }
+  }, [projectCode, fetchIssues]);
 
   const connections = buildConnections(issues);
   const highlighted = getHighlightChain(selectedKey, connections);
@@ -339,7 +351,7 @@ export default function RelationMap({ project, onBack }) {
     fetch(`${API_BASE}/Issue`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...issue, summary: newSummary }),
+      body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),
     })
       .then(() => setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, summary: newSummary } : i))))
       .catch((err) => alert('수정 실패: ' + err.message));
@@ -364,13 +376,12 @@ export default function RelationMap({ project, onBack }) {
 
   /* ---------- render ---------- */
 
+  const barTitle = `${project.Name} (${projectCode}) - Relation Map`;
+
   if (loading) {
     return (
       <div className="rm-wrapper">
-        <div className="rm-topbar">
-          <button className="rm-back-btn" onClick={onBack}>&larr; Project Map</button>
-          <span className="rm-title">{project.Name} - Relation Map</span>
-        </div>
+        <CommonBar title={barTitle} onBack={onBack} onPull={handlePull} onEditChange={setEditMode} />
         <div className="rm-loading">로딩 중...</div>
       </div>
     );
@@ -378,32 +389,12 @@ export default function RelationMap({ project, onBack }) {
 
   return (
     <div className="rm-wrapper">
-      {/* top bar */}
-      <div className="rm-topbar">
-        <button className="rm-back-btn" onClick={onBack}>&larr; Project Map</button>
-        <span className="rm-title">{project.Name} ({projectCode}) - Relation Map</span>
-        <button
-          className="rm-pull-btn"
-          onClick={async () => {
-            try {
-              await fetch(`${API_BASE}/Issue/fetch`, {
-                headers: { XBody: JSON.stringify({ prjID: projectCode }) },
-              });
-              fetchIssues();
-            } catch (err) {
-              alert('Pull 실패: ' + err.message);
-            }
-          }}
-        >
-          Pull
-        </button>
-        <button
-          className={`rm-edit-toggle ${editMode ? 'rm-edit-active' : ''}`}
-          onClick={() => { setEditMode(!editMode); setLinking(null); }}
-        >
-          {editMode ? '편집모드 ON' : '편집모드'}
-        </button>
-      </div>
+      <CommonBar
+        title={barTitle}
+        onBack={onBack}
+        onPull={handlePull}
+        onEditChange={(mode) => { setEditMode(mode); if (!mode) setLinking(null); }}
+      />
 
       {/* content area */}
       <div
