@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import CommonBar from './CommonBar';
+import IssueDetailDialog from './IssueDetailDialog';
 import './RelationMap.css';
 
 const API_BASE = 'http://localhost:9000/api/v2';
 
-const COLUMN_DEFS = [
+const COLUMN_DEFS_BASE = [
   { id: 'vos', label: 'VOS', types: ['VOS'], addBtns: ['VOS'] },
   { id: 'feature', label: 'Feature', types: ['Feature'], addBtns: ['Feature'] },
   { id: 'requirement', label: 'Requirement', types: ['Requirement'], addBtns: ['QA', 'FR', 'CNST'] },
-  { id: 'design', label: 'Design', types: ['Architectueral Design', 'Detaied Design'], addBtns: ['ADSN', 'DDSN'] },
 ];
+const COLUMN_DESIGN = { id: 'design', label: 'Design', types: ['Architectueral Design', 'Detaied Design'], addBtns: ['ADSN', 'DDSN'] };
+const COLUMN_TEST = { id: 'test', label: 'Test', types: ['Test'], addBtns: ['Test'] };
 
 const SUBTYPE_COLORS = {
   VOS: '#70ad47',
@@ -113,12 +115,16 @@ export default function RelationMap({ project, onBack }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [filterASR, setFilterASR] = useState(false);
+  const [showReserved, setShowReserved] = useState(true);
+  const [showTest, setShowTest] = useState(false);
   const [selectedKey, setSelectedKey] = useState(null);
   const [sortByHighlight, setSortByHighlight] = useState(false);
   const [positions, setPositions] = useState({});
   const [linking, setLinking] = useState(null);   // { fromKey }
   const [mousePos, setMousePos] = useState(null);
   const [hoverConn, setHoverConn] = useState(null);
+  const [detailIssue, setDetailIssue] = useState(null);
 
   const canvasRef = useRef(null);
   const cardElems = useRef({});
@@ -149,16 +155,26 @@ export default function RelationMap({ project, onBack }) {
     }
   }, [projectCode, fetchIssues]);
 
-  const connections = buildConnections(issues);
+  /* filter issues based on options */
+  const filteredIssues = issues.filter((i) => {
+    if (filterASR && i.issueType === 'Requirement' && !(i.labels || []).includes('ASR')) return false;
+    if (!showReserved && (i.labels || []).includes('Reserved')) return false;
+    return true;
+  });
+
+  const connections = buildConnections(filteredIssues);
   const highlighted = getHighlightChain(selectedKey, connections);
 
+  /* dynamic column defs based on T option */
+  const COLUMN_DEFS = [...COLUMN_DEFS_BASE, showTest ? COLUMN_TEST : COLUMN_DESIGN];
+
   /* subtype sort order within columns */
-  const SUBTYPE_ORDER = { QA: 0, CNST: 1, FR: 2, ADSN: 0, DDSN: 1, VOS: 0, UC: 0, Feature: 0 };
+  const SUBTYPE_ORDER = { QA: 0, CNST: 1, FR: 2, ADSN: 0, DDSN: 1, VOS: 0, UC: 0, Feature: 0, Test: 0 };
 
   /* group into columns with sorting per spec §9 */
   const columns = COLUMN_DEFS.map((col) => ({
     ...col,
-    issues: issues
+    issues: filteredIssues
       .filter((i) => col.types.includes(i.issueType))
       .sort((a, b) => {
         // 0순위: 강조된 이슈 우선 (Shift+클릭 시에만)
@@ -203,7 +219,7 @@ export default function RelationMap({ project, onBack }) {
   useEffect(() => {
     const id = requestAnimationFrame(measurePositions);
     return () => cancelAnimationFrame(id);
-  }, [issues, editMode, sortByHighlight, selectedKey, measurePositions]);
+  }, [issues, editMode, sortByHighlight, selectedKey, filterASR, showReserved, showTest, measurePositions]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -346,6 +362,19 @@ export default function RelationMap({ project, onBack }) {
     }
   }
 
+  async function handleDetailSave(key, data) {
+    try {
+      await fetch(`${API_BASE}/Issue`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, data }),
+      });
+      setIssues((prev) => prev.map((i) => (i.key === key ? { ...i, ...data } : i)));
+    } catch (err) {
+      alert('저장 실패: ' + err.message);
+    }
+  }
+
   function handleSummaryBlur(issue, newSummary) {
     if (newSummary === issue.summary) return;
     fetch(`${API_BASE}/Issue`, {
@@ -381,7 +410,17 @@ export default function RelationMap({ project, onBack }) {
   if (loading) {
     return (
       <div className="rm-wrapper">
-        <CommonBar title={barTitle} onBack={onBack} onPull={handlePull} onEditChange={setEditMode} />
+        <CommonBar
+          title={barTitle}
+          onBack={onBack}
+          onPull={handlePull}
+          onEditChange={setEditMode}
+          options={[
+            { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
+            { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
+            { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
+          ]}
+        />
         <div className="rm-loading">로딩 중...</div>
       </div>
     );
@@ -394,6 +433,11 @@ export default function RelationMap({ project, onBack }) {
         onBack={onBack}
         onPull={handlePull}
         onEditChange={(mode) => { setEditMode(mode); if (!mode) setLinking(null); }}
+        options={[
+          { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
+          { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
+          { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
+        ]}
       />
 
       {/* content area */}
@@ -454,7 +498,11 @@ export default function RelationMap({ project, onBack }) {
 
                       {/* card header: subkey badge + key or action buttons */}
                       <div className="rm-card-header">
-                        <span className="rm-subkey" style={{ background: cardColor, color: subkeyTextColor, fontWeight: hasASR ? 700 : 'normal' }}>
+                        <span
+                          className="rm-subkey"
+                          style={{ background: cardColor, color: subkeyTextColor, fontWeight: hasASR ? 700 : 'normal', cursor: 'pointer' }}
+                          onClick={(e) => { e.stopPropagation(); setDetailIssue(issue); }}
+                        >
                           {issue.subKey || subtype}
                         </span>
                         {editMode ? (
@@ -609,6 +657,16 @@ export default function RelationMap({ project, onBack }) {
         {selectedKey && ` | 선택: ${selectedKey}`}
         {linking && ' | 연결 그리기 중 (ESC 취소)'}
       </div>
+
+      {/* Issue Detail Dialog */}
+      {detailIssue && (
+        <IssueDetailDialog
+          issue={detailIssue}
+          editMode={editMode}
+          onClose={() => setDetailIssue(null)}
+          onSave={handleDetailSave}
+        />
+      )}
     </div>
   );
 }

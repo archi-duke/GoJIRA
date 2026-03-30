@@ -29,6 +29,42 @@
   flex: 1;
 }
 
+.cb-options-label {
+  font-size: 12px;
+  color: #888;
+  margin-left: 4px;
+}
+
+.cb-opt-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: lightgray;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: normal;
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cb-opt-btn:hover {
+  opacity: 0.8;
+}
+.cb-opt-btn-active {
+  background: tomato;
+  color: #fff;
+}
+
+.cb-divider {
+  width: 1px;
+  height: 24px;
+  background: #ccc;
+  margin: 0 4px;
+}
+
 .cb-btn {
   padding: 6px 16px;
   border: none;

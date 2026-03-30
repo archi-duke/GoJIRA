@@ -38,6 +38,116 @@
    2순위 ASR 오름차순 (라벨에 ASR 이 있으면 우선)
    3순위 서브키 오름차순
 
+10. 이슈의 타입별 서브키 prefix는 아래와 같다
+    - VOS : VOS
+    - Feature : UC
+    - Requirement : QA(ReqType이 QA 또는 NFR), CNST(ReqType이 CNST), FR(ReqType이 FR)
+    -Design : ADSN(IssueType이 Architectueral Design), DDSN(IssueType이 Detailed Design)
+
+11. relation map이 제공하는 옵션은 아래와 같다
+    A : ASR 라벨을 가진 이슈만 표시
+    R : Reserved 라벨을 가진 이슈도 표시 (오프되면 Reserved 라벨을 가진 이슈는 표시하지 않음)
+    T : 마지막 커럼을 Test 타입 이슈로 변경 (오프되면 기본값인 Design 타입으로 변경)
     
+
+12. 이슈별 상세 내용은 아래와 같다
+    -별로도 형식을 지정하지 않은 경우, 일반 텍스트 이다
+    -수정모드에서만 편집 가능하고 조회모드에서는 일반 텍스트로 표시 된다
+
+    12.1 VOS
+        - Summary : 이슈 summary
+        - Description : 이슈 description
+        - Status : 이슈 status (dropbox)
+        - Priority : 이슈 priority (dropbox)
+        - Due Date : 이슈 due date (date picker)
+        - Assignee : 이슈 assignee 
+        - Reporter : 이슈 reporter  (readonly)
+        - Client : 이슈 customfield_15235 
+            
+    12.2 Feature
+        - Summary : 이슈 summary
+        - Description : 이슈 description
+        - Status : 이슈 status (dropbox)
+        - Priority : 이슈 priority (dropbox)
+        - Due Date : 이슈 due date (date picker)
+        - Assignee : 이슈 assignee 
+        - Reporter : 이슈 reporter  (readonly)
+       
+       # Tab : Use Scenrio
+        - Actor : 이슈 customfield_15215
+        - Pre Condition : 이슈 customfield_15216 
+        - Basic Flow : 이슈 customfield_15217
+        - Alternative Flow : 이슈 customfield_15227
+        - Post Condition : 이슈 customfield_15218
+
+    12.3 Requirement
+        - Summary : 이슈 summary
+        - Description : 이슈 description
+        - Status : 이슈 status (dropbox)
+        - Priority : 이슈 priority (dropbox)
+        - Due Date : 이슈 due date (date picker)
+        - Assignee : 이슈 assignee 
+        - Reporter : 이슈 reporter  (readonly)
+
+        - Type : 이슈 customfield_15214
         
+        * QA 인 경우
+        # Tab : Quality Attribute Scenario
+        - Quality : 이슈 customfield_15214
+        - Source : 이슈 customfield_15215
+        - Stimulus : 이슈 customfield_15216 
+        - Environment : 이슈 environment
+        - Artifact : 이슈 customfield_15208
+        - Response : 이슈 customfield_15217
+        - Measure : 이슈 customfield_15217
+        # Tab : Priority Score
+        - QAD : 이슈 customfield_15217
+        - QAI : 이슈 customfield_15217
+        - QAS : 이슈 customfield_15217
+        
+
+    12.4 Design
+        - Summary : 이슈 summary
+        - Status : 이슈 status (dropbox)
+        - Priority : 이슈 priority (dropbox)
+        - Due Date : 이슈 due date (date picker)
+        - Assignee : 이슈 assignee 
+        - Reporter : 이슈 reporter  (readonly)
+
+        * ADSN 인 경우
+        # Tab : Architecture Design
+        - Architecture Diagram : 이슈 customfield_18215
+        - Structure Diagram : 이슈 customfield_18204
+        - Behavior Diagram : 이슈 customfield_18205
+        - Design Objective : 이슈 customfield_18206
+        - Description : 이슈 description
+        - Pros : 이슈 customfield_18207
+        - Cons : 이슈 customfield_15218
+        - Score : 이슈 customfield_15219
+        - Evaluation : 이슈 customfield_15220
+        - Decision : 이슈 customfield_15221
+        # Tab : Trade Off 
+        - Risks : 이슈 customfield_15222
+        - TradeOffs : 이슈 customfield_15224
+        - Sensitivities : 이슈 customfield_15225
+
+        * DDSN 인 경우
+        # Tab : Detailed Design
+        - Structure Diagram : 이슈 customfield_18204
+        - Behavior Diagram : 이슈 customfield_18205
+        - Design Objective : 이슈 customfield_18206
+        - Description : 이슈 description
+
+
+
+    12.5 Test
+        - Summary : 이슈 summary
+        - Status : 이슈 status (dropbox)
+        - Priority : 이슈 priority (dropbox)
+        - Due Date : 이슈 due date (date picker)
+        - Assignee : 이슈 assignee 
+        - Reporter : 이슈 reporter  (readonly)
+
+
+            
     
