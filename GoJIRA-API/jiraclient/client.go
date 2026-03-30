@@ -172,9 +172,9 @@ func RemoveLabel(issueKey, label string) error {
 }
 
 // CreateIssueLink creates a link between two issues.
-func CreateIssueLink(inwardKey, outwardKey, linkTypeName string) error {
+func CreateIssueLink(inwardKey, outwardKey string) error {
 	payload := map[string]interface{}{
-		"type":         map[string]string{"name": linkTypeName},
+		"type":         map[string]string{"name": "Contains(WBSGantt)"},
 		"inwardIssue":  map[string]string{"key": inwardKey},
 		"outwardIssue": map[string]string{"key": outwardKey},
 	}

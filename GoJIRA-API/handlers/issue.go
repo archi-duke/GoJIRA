@@ -77,16 +77,26 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 	var filter bson.M
 	switch req.InfoType {
 	case "designs":
-		filter = bson.M{"fields.issuetype.name": bson.M{
+		filter = bson.M{"issueType": bson.M{
 			"$in": []string{"Architectueral Design", "Detaied Design"},
 		}}
 	case "nonTestIssues":
-		filter = bson.M{"fields.issuetype.name": bson.M{"$ne": "Test"}}
+		filter = bson.M{"issueType": bson.M{"$ne": "Test"}}
 	case "isBusy":
 		respondJSON(w, http.StatusOK, false)
 		return
 	default:
 		filter = nil
+	}
+
+	// Filter by project if prjID is provided (match key prefix)
+	if req.PrjID != "" {
+		prjFilter := bson.M{"key": bson.M{"$regex": "^" + req.PrjID + "-"}}
+		if filter != nil {
+			filter = bson.M{"$and": []bson.M{filter, prjFilter}}
+		} else {
+			filter = prjFilter
+		}
 	}
 
 	issues, err := db.FindAllIssues(ctx, filter)

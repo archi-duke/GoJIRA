@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"gojira-api/db"
@@ -18,7 +19,18 @@ func IssueFetchHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	count, err := db.PullFromJira(ctx)
+	// Support filtered fetch by project and issue types
+	var issueTypes []string
+	if req.Query != "" {
+		// Query can be comma-separated issue types
+		for _, t := range splitAndTrim(req.Query) {
+			if t != "" {
+				issueTypes = append(issueTypes, t)
+			}
+		}
+	}
+
+	count, err := db.PullFromJiraFiltered(ctx, req.PrjID, issueTypes)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -30,6 +42,17 @@ func IssueFetchHandler(w http.ResponseWriter, r *http.Request) {
 		"total":    len(issues),
 		"upserted": count,
 	})
+}
+
+func splitAndTrim(s string) []string {
+	parts := []string{}
+	for _, p := range strings.Split(s, ",") {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
 }
 
 // PUT /api/v{version}/Issue/cache — Push dirty issues from MongoDB to JIRA

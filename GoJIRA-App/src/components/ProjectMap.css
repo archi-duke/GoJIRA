@@ -234,6 +234,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.pm-sidebar-clickable {
+  cursor: pointer;
+}
+.pm-sidebar-clickable:hover {
+  background: #eaf0f8;
+  color: #2980b9;
+}
 
 /* Graph area */
 .pm-graph {

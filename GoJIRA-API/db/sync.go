@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -38,63 +39,224 @@ func syncDirtyToJira() {
 			continue
 		}
 
-		fields, _ := issue["fields"].(bson.M)
-		if fields == nil {
-			continue
-		}
-
-		// Convert bson.M to map[string]interface{} for jiraclient
+		// Cache schema stores fields at top level (no "fields" wrapper).
+		// Build fieldsMap from top-level keys for JIRA sync.
 		fieldsMap := make(map[string]interface{})
-		for k, v := range fields {
-			fieldsMap[k] = v
-		}
-
-		// Check if this issue exists in JIRA
-		_, err := jiraclient.GetIssue(key)
-		if err != nil {
-			// Issue doesn't exist in JIRA — create it
-			createFields := map[string]interface{}{
-				"summary": fieldsMap["summary"],
-			}
-			if it, ok := fieldsMap["issuetype"]; ok {
-				createFields["issuetype"] = it
-			}
-			if desc, ok := fieldsMap["description"]; ok {
-				createFields["description"] = desc
-			}
-			if _, err := jiraclient.CreateIssue(createFields); err != nil {
-				log.Printf("sync: create %s failed: %v", key, err)
-				continue
+		if fields, ok := issue["fields"].(bson.M); ok {
+			for k, v := range fields {
+				fieldsMap[k] = v
 			}
 		} else {
-			// Issue exists — update it
-			updateFields := make(map[string]interface{})
-			if s, ok := fieldsMap["summary"]; ok {
-				updateFields["summary"] = s
-			}
-			if d, ok := fieldsMap["description"]; ok {
-				updateFields["description"] = d
-			}
-			if l, ok := fieldsMap["labels"]; ok {
-				updateFields["labels"] = l
-			}
-			if len(updateFields) > 0 {
-				if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
-					log.Printf("sync: update %s failed: %v", key, err)
+			// Flat cache schema — use top-level fields directly
+			for k, v := range issue {
+				if k == "_id" || k == "_dirty" || k == "_syncedAt" || k == "issueLinks" {
 					continue
+				}
+				fieldsMap[k] = v
+			}
+		}
+
+		// Sync field changes to JIRA (summary, description, labels)
+		if summary, ok := fieldsMap["summary"]; ok && summary != nil {
+			_, err := jiraclient.GetIssue(key)
+			if err != nil {
+				createFields := map[string]interface{}{
+					"summary": fieldsMap["summary"],
+				}
+				if it, ok := fieldsMap["issueType"]; ok {
+					createFields["issuetype"] = map[string]interface{}{"name": it}
+				}
+				if desc, ok := fieldsMap["description"]; ok {
+					createFields["description"] = desc
+				}
+				if _, err := jiraclient.CreateIssue(createFields); err != nil {
+					log.Printf("sync: create %s failed: %v", key, err)
+				}
+			} else {
+				updateFields := make(map[string]interface{})
+				if s, ok := fieldsMap["summary"]; ok {
+					updateFields["summary"] = s
+				}
+				if d, ok := fieldsMap["description"]; ok {
+					updateFields["description"] = d
+				}
+				if l, ok := fieldsMap["labels"]; ok {
+					updateFields["labels"] = l
+				}
+				if len(updateFields) > 0 {
+					if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
+						log.Printf("sync: update %s failed: %v", key, err)
+					}
 				}
 			}
 		}
+
+		// Sync new links (tmp_ prefixed) to JIRA
+		syncNewLinks(ctx, issue)
+
+		// Sync deleted links to JIRA
+		syncDeletedLinks(ctx, key, issue)
 
 		ClearDirtyFlag(ctx, key)
 		log.Printf("sync: synced %s to JIRA", key)
 	}
 }
 
+// syncDeletedLinks processes _deletedLinks and deletes them from JIRA.
+// tmp_ prefixed IDs are skipped (never existed in JIRA).
+func syncDeletedLinks(ctx context.Context, key string, issue bson.M) {
+	var ids []interface{}
+	switch v := issue["_deletedLinks"].(type) {
+	case bson.A:
+		ids = []interface{}(v)
+	case []interface{}:
+		ids = v
+	default:
+		return
+	}
+
+	for _, raw := range ids {
+		linkID, _ := raw.(string)
+		if linkID == "" || strings.HasPrefix(linkID, "tmp_") {
+			continue
+		}
+		if err := jiraclient.DeleteIssueLink(linkID); err != nil {
+			log.Printf("sync: delete link %s from JIRA failed: %v", linkID, err)
+		} else {
+			log.Printf("sync: deleted link %s from JIRA (issue %s)", linkID, key)
+		}
+	}
+
+	// Clear _deletedLinks array
+	Issues().UpdateOne(ctx, bson.M{"key": key}, bson.M{
+		"$set": bson.M{"_deletedLinks": bson.A{}},
+	})
+}
+
+// syncNewLinks finds tmp_ prefixed links in an issue and creates them in JIRA.
+// issueLinks are stored at the top level of the MongoDB document (not inside fields).
+func syncNewLinks(ctx context.Context, issue bson.M) {
+	key, _ := issue["key"].(string)
+	rawLinks := issue["issueLinks"]
+	if rawLinks == nil {
+		return
+	}
+
+	var links []interface{}
+	switch v := rawLinks.(type) {
+	case bson.A:
+		links = []interface{}(v)
+	case []interface{}:
+		links = v
+	default:
+		log.Printf("sync: %s issueLinks unexpected type %T", key, rawLinks)
+		return
+	}
+
+	created := false
+	for _, raw := range links {
+		m := toBsonM(raw)
+		if m == nil {
+			continue
+		}
+
+		linkID, _ := m["id"].(string)
+		if !strings.HasPrefix(linkID, "tmp_") {
+			continue
+		}
+
+		// Only process from the inward side (has outwardIssue) to avoid duplicate
+		outwardM := toBsonM(m["outwardIssue"])
+		if outwardM == nil {
+			continue
+		}
+		outwardKey, _ := outwardM["key"].(string)
+		if key == "" || outwardKey == "" {
+			continue
+		}
+
+		if err := jiraclient.CreateIssueLink(key, outwardKey); err != nil {
+			log.Printf("sync: create link %s->%s failed: %v", key, outwardKey, err)
+		} else {
+			log.Printf("sync: created link %s->%s in JIRA", key, outwardKey)
+			created = true
+		}
+	}
+
+	// After creating links in JIRA, re-fetch the issue to get real link IDs
+	if created {
+		refreshIssueLinks(ctx, key)
+	}
+}
+
+// refreshIssueLinks fetches issuelinks from JIRA and updates MongoDB with real IDs.
+func refreshIssueLinks(ctx context.Context, key string) {
+	jiraIssue, err := jiraclient.GetIssue(key)
+	if err != nil {
+		log.Printf("sync: refresh links for %s failed: %v", key, err)
+		return
+	}
+	fields, _ := jiraIssue["fields"].(map[string]interface{})
+	if fields == nil {
+		return
+	}
+	newLinks := transformLinks(fields["issuelinks"])
+	if newLinks == nil {
+		newLinks = []interface{}{}
+	}
+	Issues().UpdateOne(ctx, bson.M{"key": key}, bson.M{
+		"$set": bson.M{"issueLinks": newLinks},
+	})
+	log.Printf("sync: refreshed links for %s (%d links)", key, len(newLinks))
+}
+
+// toBsonM converts various BSON types to bson.M for uniform access.
+func toBsonM(v interface{}) bson.M {
+	switch t := v.(type) {
+	case bson.M:
+		return t
+	case bson.D:
+		m := bson.M{}
+		for _, e := range t {
+			m[e.Key] = e.Value
+		}
+		return m
+	case map[string]interface{}:
+		return bson.M(t)
+	}
+	return nil
+}
+
 // PullFromJira fetches issues from JIRA and upserts into MongoDB.
 // Only updates issues that are newer in JIRA (based on fields.updated).
 func PullFromJira(ctx context.Context) (int, error) {
-	result, err := jiraclient.ListIssues(0, 10000)
+	return PullFromJiraFiltered(ctx, "", nil)
+}
+
+// PullFromJiraFiltered fetches issues from JIRA with optional project and issuetype filter,
+// transforms to cache_schema format, and upserts into MongoDB.
+func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []string) (int, error) {
+	var result map[string]interface{}
+	var err error
+
+	if projectKey != "" || len(issueTypes) > 0 {
+		// Build JQL
+		clauses := []string{}
+		if projectKey != "" {
+			clauses = append(clauses, "project = "+projectKey)
+		}
+		if len(issueTypes) > 0 {
+			quoted := make([]string, len(issueTypes))
+			for i, t := range issueTypes {
+				quoted[i] = "\"" + t + "\""
+			}
+			clauses = append(clauses, "issuetype in ("+joinStrings(quoted, ",")+")")
+		}
+		jql := joinStrings(clauses, " AND ")
+		result, err = jiraclient.SearchIssues(jql, 0, 10000)
+	} else {
+		result, err = jiraclient.ListIssues(0, 10000)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -112,29 +274,10 @@ func PullFromJira(ctx context.Context) (int, error) {
 			continue
 		}
 
-		// Check if local version exists and compare updated time
-		local, err := FindIssueByKey(ctx, key)
-		if err == nil && local != nil {
-			localFields, _ := local["fields"].(bson.M)
-			remoteFields, _ := issue["fields"].(map[string]interface{})
-			localUpdated, _ := localFields["updated"].(string)
-			remoteUpdated, _ := remoteFields["updated"].(string)
-
-			// Skip if local is same or newer
-			if localUpdated >= remoteUpdated {
-				continue
-			}
-		}
-
-		doc := bson.M{
-			"key":       key,
-			"id":        issue["id"],
-			"self":      issue["self"],
-			"expand":    issue["expand"],
-			"fields":    issue["fields"],
-			"_dirty":    false,
-			"_syncedAt": time.Now(),
-		}
+		// Transform to cache_schema format
+		doc := TransformToCache(issue)
+		doc["_dirty"] = false
+		doc["_syncedAt"] = time.Now()
 
 		if err := UpsertIssue(ctx, key, doc); err != nil {
 			log.Printf("pull: upsert %s failed: %v", key, err)
@@ -144,6 +287,17 @@ func PullFromJira(ctx context.Context) (int, error) {
 	}
 
 	return upserted, nil
+}
+
+func joinStrings(strs []string, sep string) string {
+	result := ""
+	for i, s := range strs {
+		if i > 0 {
+			result += sep
+		}
+		result += s
+	}
+	return result
 }
 
 // PushToJira pushes only dirty (changed/added) issues from MongoDB to JIRA.
@@ -160,47 +314,58 @@ func PushToJira(ctx context.Context) (int, error) {
 			continue
 		}
 
-		fields, _ := issue["fields"].(bson.M)
-		if fields == nil {
-			continue
-		}
-
+		// Cache schema stores fields at top level (no "fields" wrapper).
 		fieldsMap := make(map[string]interface{})
-		for k, v := range fields {
-			fieldsMap[k] = v
-		}
-
-		// Try update first, create if not found
-		_, getErr := jiraclient.GetIssue(key)
-		if getErr != nil {
-			createFields := map[string]interface{}{
-				"summary": fieldsMap["summary"],
-			}
-			if it, ok := fieldsMap["issuetype"]; ok {
-				createFields["issuetype"] = it
-			}
-			if _, err := jiraclient.CreateIssue(createFields); err != nil {
-				log.Printf("push: create %s failed: %v", key, err)
-				continue
+		if fields, ok := issue["fields"].(bson.M); ok {
+			for k, v := range fields {
+				fieldsMap[k] = v
 			}
 		} else {
-			updateFields := make(map[string]interface{})
-			if s, ok := fieldsMap["summary"]; ok {
-				updateFields["summary"] = s
-			}
-			if d, ok := fieldsMap["description"]; ok {
-				updateFields["description"] = d
-			}
-			if l, ok := fieldsMap["labels"]; ok {
-				updateFields["labels"] = l
-			}
-			if len(updateFields) > 0 {
-				if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
-					log.Printf("push: update %s failed: %v", key, err)
+			for k, v := range issue {
+				if k == "_id" || k == "_dirty" || k == "_syncedAt" || k == "issueLinks" {
 					continue
+				}
+				fieldsMap[k] = v
+			}
+		}
+
+		// Sync field changes to JIRA
+		if summary, ok := fieldsMap["summary"]; ok && summary != nil {
+			_, getErr := jiraclient.GetIssue(key)
+			if getErr != nil {
+				createFields := map[string]interface{}{
+					"summary": fieldsMap["summary"],
+				}
+				if it, ok := fieldsMap["issueType"]; ok {
+					createFields["issuetype"] = map[string]interface{}{"name": it}
+				}
+				if _, err := jiraclient.CreateIssue(createFields); err != nil {
+					log.Printf("push: create %s failed: %v", key, err)
+				}
+			} else {
+				updateFields := make(map[string]interface{})
+				if s, ok := fieldsMap["summary"]; ok {
+					updateFields["summary"] = s
+				}
+				if d, ok := fieldsMap["description"]; ok {
+					updateFields["description"] = d
+				}
+				if l, ok := fieldsMap["labels"]; ok {
+					updateFields["labels"] = l
+				}
+				if len(updateFields) > 0 {
+					if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
+						log.Printf("push: update %s failed: %v", key, err)
+					}
 				}
 			}
 		}
+
+		// Sync new links (tmp_ prefixed) via POST /rest/api/2/issueLink
+		syncNewLinks(ctx, issue)
+
+		// Sync deleted links to JIRA
+		syncDeletedLinks(ctx, key, issue)
 
 		ClearDirtyFlag(ctx, key)
 		pushed++

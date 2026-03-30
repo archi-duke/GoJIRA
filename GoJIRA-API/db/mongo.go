@@ -106,6 +106,31 @@ func ClearDirtyFlag(ctx context.Context, key string) error {
 	return err
 }
 
+// --- Issue Links ---
+
+// AddIssueLink appends a link entry to an issue's issueLinks array and marks it dirty.
+func AddIssueLink(ctx context.Context, key string, link bson.M) error {
+	_, err := Issues().UpdateOne(ctx, bson.M{"key": key}, bson.M{
+		"$push": bson.M{"issueLinks": link},
+		"$set":  bson.M{"_dirty": true},
+	})
+	return err
+}
+
+// RemoveIssueLink removes a link by linkID from all issues' issueLinks arrays,
+// records the linkID in _deletedLinks for JIRA sync, and marks them dirty.
+func RemoveIssueLink(ctx context.Context, linkID string) error {
+	_, err := Issues().UpdateMany(ctx,
+		bson.M{"issueLinks.id": linkID},
+		bson.M{
+			"$pull": bson.M{"issueLinks": bson.M{"id": linkID}},
+			"$push": bson.M{"_deletedLinks": linkID},
+			"$set":  bson.M{"_dirty": true},
+		},
+	)
+	return err
+}
+
 // --- Comments ---
 
 func InsertComment(ctx context.Context, doc bson.M) error {

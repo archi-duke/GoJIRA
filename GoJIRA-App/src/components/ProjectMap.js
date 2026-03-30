@@ -48,7 +48,7 @@ function getDefaultView() {
   };
 }
 
-export default function ProjectMap() {
+export default function ProjectMap({ onProjectClick, onRelationMap }) {
   const [projects, setProjects] = useState([]);
   const [graphWidth, setGraphWidth] = useState(0);
   const [viewRange, setViewRange] = useState(getDefaultView);
@@ -97,6 +97,8 @@ export default function ProjectMap() {
         }
         break;
       case 'relationMap':
+        if (onRelationMap) onRelationMap(project);
+        break;
       case 'satam':
         alert(`${action} 기능은 준비 중입니다.`);
         break;
@@ -354,7 +356,13 @@ export default function ProjectMap() {
         {/* Sidebar */}
         <div className="pm-sidebar" ref={sidebarRef}>
           {sortedProjects.map((p, i) => (
-            <div key={i} className="pm-sidebar-row" style={{ height: ROW_HEIGHT }}>
+            <div
+              key={i}
+              className="pm-sidebar-row pm-sidebar-clickable"
+              style={{ height: ROW_HEIGHT }}
+              onClick={() => onProjectClick && onProjectClick(p)}
+              title={`${p.Name} 이슈 보기`}
+            >
               {p.Name}
             </div>
           ))}
@@ -432,6 +440,7 @@ export default function ProjectMap() {
                     isCompleted={isCompleted}
                     isOverdue={isOverdue}
                     onContextMenu={handleContextMenu}
+                    onProjectClick={onProjectClick}
                   />
                 );
               })}
@@ -569,7 +578,7 @@ function RangeSlider({ viewRange, onChange }) {
 }
 
 // --- Project Row ---
-function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, onContextMenu }) {
+function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, onContextMenu, onProjectClick }) {
   const schedules = project.Schedules || [];
   const allMilestones = schedules
     .map((s) => {
@@ -700,12 +709,16 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
               height={18}
               fill="#fff"
               rx={2}
+              style={{ cursor: 'pointer' }}
+              onClick={() => onProjectClick && onProjectClick(project)}
             />
             <text
               x={nameX}
               y={y + 4}
               textAnchor="end"
               className="pm-prj-name"
+              style={{ cursor: 'pointer' }}
+              onClick={() => onProjectClick && onProjectClick(project)}
             >
               {project.Name}
             </text>

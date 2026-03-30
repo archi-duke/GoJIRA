@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"gojira-api/jiraclient"
+	"gojira-api/db"
 	"gojira-api/models"
 )
 
@@ -21,15 +25,34 @@ func LinkCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	linkType := req.LinkType
-	if linkType == "" {
-		linkType = "Relates"
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	if err := jiraclient.CreateIssueLink(req.InwardKey, req.OutwardKey, linkType); err != nil {
+	// Generate a temporary link ID
+	linkID := fmt.Sprintf("tmp_%d", time.Now().UnixMilli())
+
+	// Add outwardIssue link to inward issue's issueLinks
+	inwardLink := bson.M{
+		"id":           linkID,
+		"type":         bson.M{"name": "Contains(WBSGantt)"},
+		"outwardIssue": bson.M{"key": req.OutwardKey},
+	}
+	if err := db.AddIssueLink(ctx, req.InwardKey, inwardLink); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Add inwardIssue link to outward issue's issueLinks
+	outwardLink := bson.M{
+		"id":          linkID,
+		"type":        bson.M{"name": "Contains(WBSGantt)"},
+		"inwardIssue": bson.M{"key": req.InwardKey},
+	}
+	if err := db.AddIssueLink(ctx, req.OutwardKey, outwardLink); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	respondJSON(w, http.StatusOK, "link created")
 }
 
@@ -45,7 +68,10 @@ func LinkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := jiraclient.DeleteIssueLink(req.LinkID); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := db.RemoveIssueLink(ctx, req.LinkID); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -55,13 +81,15 @@ func LinkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/v{version}/Issue/link/{linkId}/of/{key}
 func LinkDeleteByKeyHandler(w http.ResponseWriter, r *http.Request) {
 	linkID := chi.URLParam(r, "linkId")
-	// key is available but link deletion only needs linkID
 	if linkID == "" {
 		respondError(w, http.StatusBadRequest, "linkId is required")
 		return
 	}
 
-	if err := jiraclient.DeleteIssueLink(linkID); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := db.RemoveIssueLink(ctx, linkID); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

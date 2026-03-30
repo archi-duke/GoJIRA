@@ -102,15 +102,39 @@ def search_issues(jql: str = "", start_at: int = 0, max_results: int = 50) -> di
     filtered = issues
     if jql:
         jql_lower = jql.lower()
+
+        # Filter by project
         if "project" in jql_lower:
-            parts = jql.split("=")
-            if len(parts) >= 2:
-                project_key = parts[1].strip().strip('"').strip("'").split(" ")[0]
+            import re
+            pm = re.search(r'project\s*=\s*["\']?(\w+)["\']?', jql, re.IGNORECASE)
+            if pm:
+                project_key = pm.group(1).upper()
                 filtered = [
                     i for i in filtered
-                    if i.get("fields", {}).get("project", {}).get("key", "").upper() == project_key.upper()
-                    or i.get("key", "").startswith(project_key.upper() + "-")
+                    if i.get("fields", {}).get("project", {}).get("key", "").upper() == project_key
+                    or i.get("key", "").startswith(project_key + "-")
                 ]
+
+        # Filter by issuetype in (...)
+        if "issuetype" in jql_lower:
+            import re
+            itm = re.search(r'issuetype\s+in\s*\(([^)]+)\)', jql, re.IGNORECASE)
+            if itm:
+                raw_types = [t.strip().strip('"').strip("'") for t in itm.group(1).split(",")]
+                type_set = {t.lower() for t in raw_types}
+                filtered = [
+                    i for i in filtered
+                    if i.get("fields", {}).get("issuetype", {}).get("name", "").lower() in type_set
+                ]
+            else:
+                # issuetype = "xxx"
+                itm2 = re.search(r'issuetype\s*=\s*["\']?([^"\'&]+)["\']?', jql, re.IGNORECASE)
+                if itm2:
+                    it_name = itm2.group(1).strip().lower()
+                    filtered = [
+                        i for i in filtered
+                        if i.get("fields", {}).get("issuetype", {}).get("name", "").lower() == it_name
+                    ]
 
     total = len(filtered)
     page = filtered[start_at:start_at + max_results]
