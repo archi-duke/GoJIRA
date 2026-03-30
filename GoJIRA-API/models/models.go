@@ -3,11 +3,14 @@ package models
 // --- Request Models ---
 
 type IssueCreateRequest struct {
-	PrjID     string `json:"prjID"`
-	IssueType string `json:"issueType"`
-	ReqType   string `json:"reqType,omitempty"`
-	Summary   string `json:"summary"`
-	Desc      string `json:"desc,omitempty"`
+	PrjID      string   `json:"prjID"`
+	ProjectKey string   `json:"projectKey,omitempty"`
+	IssueType  string   `json:"issueType"`
+	ReqType    string   `json:"reqtype,omitempty"`
+	Summary    string   `json:"summary"`
+	Desc       string   `json:"desc,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
+	SubKey     string   `json:"subKey,omitempty"`
 }
 
 type IssueGetRequest struct {

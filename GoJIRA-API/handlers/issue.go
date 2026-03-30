@@ -25,42 +25,90 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create in JIRA first to get key
-	fields := map[string]interface{}{
-		"summary":   req.Summary,
-		"issuetype": map[string]string{"name": req.IssueType},
-	}
-	if req.Desc != "" {
-		fields["description"] = req.Desc
+	prjKey := req.ProjectKey
+	if prjKey == "" {
+		prjKey = req.PrjID
 	}
 
-	result, err := jiraclient.CreateIssue(fields)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	key, _ := result["key"].(string)
-
-	// Save to MongoDB
+	// Save to MongoDB first (with _dirty flag for JIRA sync)
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
 	doc := bson.M{
-		"key":    key,
-		"id":     result["id"],
-		"self":   result["self"],
-		"fields": fields,
-		"_dirty": false, // already synced to JIRA
-		"_syncedAt": time.Now(),
+		"key":       "",
+		"issueType": req.IssueType,
+		"subKey":    req.SubKey,
+		"summary":   req.Summary,
+		"labels":    req.Labels,
+		"reqtype":   req.ReqType,
+		"_dirty":    true,
+		"_syncedAt": nil,
 	}
-	if req.ReqType != "" {
-		fields["customfield_12555"] = req.ReqType
+	if req.Desc != "" {
+		doc["description"] = req.Desc
 	}
 
-	db.UpsertIssue(ctx, key, doc)
+	// Use subKey as temporary key until JIRA assigns a real one
+	tempKey := prjKey + "-" + req.SubKey
+	doc["key"] = tempKey
+	db.UpsertIssue(ctx, tempKey, doc)
 
-	respondJSON(w, http.StatusOK, result)
+	// Create in JIRA asynchronously
+	go func() {
+		fields := map[string]interface{}{
+			"summary":   req.Summary,
+			"issuetype": map[string]string{"name": req.IssueType},
+		}
+		if req.Desc != "" {
+			fields["description"] = req.Desc
+		}
+		if len(req.Labels) > 0 {
+			fields["labels"] = req.Labels
+		}
+		if req.ReqType != "" {
+			fields["customfield_12555"] = map[string]string{"value": req.ReqType}
+		}
+		if req.SubKey != "" {
+			fields["customfield_15209"] = req.SubKey
+		}
+		if prjKey != "" {
+			fields["project"] = map[string]string{"key": prjKey}
+		}
+
+		result, err := jiraclient.CreateIssue(fields)
+		if err != nil {
+			log.Printf("async create JIRA issue failed: %v", err)
+			return
+		}
+
+		jiraKey, _ := result["key"].(string)
+		if jiraKey == "" {
+			return
+		}
+
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Remove temp doc and re-fetch from JIRA with real key
+		db.DeleteIssueByKey(bgCtx, tempKey)
+
+		jiraIssue, err := jiraclient.GetIssue(jiraKey)
+		if err != nil {
+			// Fallback: save with real key
+			doc["key"] = jiraKey
+			doc["_dirty"] = false
+			doc["_syncedAt"] = time.Now()
+			db.UpsertIssue(bgCtx, jiraKey, doc)
+		} else {
+			newDoc := db.TransformToCache(jiraIssue)
+			newDoc["_dirty"] = false
+			newDoc["_syncedAt"] = time.Now()
+			db.UpsertIssue(bgCtx, jiraKey, newDoc)
+		}
+		log.Printf("async: created JIRA issue %s (subKey: %s)", jiraKey, req.SubKey)
+	}()
+
+	respondJSON(w, http.StatusOK, map[string]string{"key": tempKey, "subKey": req.SubKey})
 }
 
 // GET /api/v{version}/Issue — read from MongoDB

@@ -287,6 +287,25 @@ export default function RelationMap({ project, onBack }) {
     }
   }
 
+  const SUBKEY_PREFIX = {
+    VOS: 'VOS', Feature: 'UC',
+    QA: 'QA', CNST: 'CNST', FR: 'FR',
+    ADSN: 'ADSN', DDSN: 'DDSN',
+  };
+
+  function getNextSubKey(subtype) {
+    const prefix = (SUBKEY_PREFIX[subtype] || subtype) + '_';
+    let maxNum = 0;
+    issues.forEach((i) => {
+      const sk = i.subKey || '';
+      if (sk.startsWith(prefix)) {
+        const num = parseInt(sk.substring(prefix.length), 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      }
+    });
+    return prefix + String(maxNum + 1).padStart(3, '0');
+  }
+
   async function addIssue(subtype) {
     let issueType, reqtype = '';
     switch (subtype) {
@@ -298,6 +317,7 @@ export default function RelationMap({ project, onBack }) {
       case 'DDSN':    issueType = 'Detaied Design'; break;
       default:        issueType = subtype;
     }
+    const subKey = getNextSubKey(subtype);
     try {
       await fetch(`${API_BASE}/Issue`, {
         method: 'POST',
@@ -305,6 +325,7 @@ export default function RelationMap({ project, onBack }) {
         body: JSON.stringify({
           projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
           labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
+          subKey,
         }),
       });
       fetchIssues();
