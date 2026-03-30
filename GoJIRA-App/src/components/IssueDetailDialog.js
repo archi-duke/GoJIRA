@@ -213,12 +213,49 @@ export default function IssueDetailDialog({ issue, editMode, onClose, onSave }) 
         )}
 
         <div className="idd-body">
-          {currentFields.map((f) => (
-            <div key={f.key} className="idd-field">
-              <label className="idd-label">{f.label}</label>
-              {renderField(f, form, editMode, handleChange)}
-            </div>
-          ))}
+          {(() => {
+            const ROW_GROUPS = [
+              new Set(['status', 'priority', 'duedate']),
+              new Set(['qad', 'qai', 'qas']),
+            ];
+            const getGroup = (key) => ROW_GROUPS.findIndex((g) => g.has(key));
+            const result = [];
+            let rowGroup = [];
+            let rowIdx = -1;
+            const flushRow = () => {
+              if (rowGroup.length > 0) {
+                result.push(
+                  <div key={`inline-row-${rowIdx}`} className="idd-inline-row">
+                    {rowGroup.map((rf) => (
+                      <div key={rf.key} className="idd-field idd-field-inline">
+                        <label className="idd-label">{rf.label}</label>
+                        {renderField(rf, form, editMode, handleChange)}
+                      </div>
+                    ))}
+                  </div>
+                );
+                rowGroup = [];
+              }
+            };
+            currentFields.forEach((f) => {
+              const gi = getGroup(f.key);
+              if (gi >= 0) {
+                if (rowGroup.length > 0 && rowIdx !== gi) flushRow();
+                rowIdx = gi;
+                rowGroup.push(f);
+              } else {
+                flushRow();
+                result.push(
+                  <div key={f.key} className="idd-field">
+                    <label className="idd-label">{f.label}</label>
+                    {renderField(f, form, editMode, handleChange)}
+                  </div>
+                );
+              }
+            });
+            flushRow();
+            return result;
+          })()}
         </div>
 
         <div className="idd-footer">

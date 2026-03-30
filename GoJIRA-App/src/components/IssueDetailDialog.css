@@ -81,6 +81,17 @@
   flex: 1;
 }
 
+.idd-inline-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.idd-field-inline {
+  flex: 1;
+  margin-bottom: 0;
+}
+
 .idd-field {
   margin-bottom: 12px;
 }
