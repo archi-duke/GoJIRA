@@ -38,6 +38,8 @@ function getSubtype(issue) {
 
 function buildConnections(issues) {
   const keySet = new Set(issues.map((i) => i.key));
+  const issueMap = {};
+  issues.forEach((i) => { issueMap[i.key] = i; });
   const conns = [];
   const seen = new Set();
   issues.forEach((issue) => {
@@ -46,34 +48,55 @@ function buildConnections(issues) {
       if (target && keySet.has(target.key)) {
         const id = `${issue.key}->${target.key}`;
         if (!seen.has(id)) {
-          conns.push({ id, linkId: link.id, from: issue.key, to: target.key, type: link.type?.name || '' });
+          const targetIssue = issueMap[target.key];
+          const sameType = targetIssue && targetIssue.issueType === issue.issueType;
+          conns.push({ id, linkId: link.id, from: issue.key, to: target.key, type: link.type?.name || '', sameType });
           seen.add(id);
         }
       }
     });
   });
+  // Same-type connections first (rendered behind), cross-type on top
+  conns.sort((a, b) => (a.sameType === b.sameType ? 0 : a.sameType ? -1 : 1));
   return conns;
 }
 
 function getHighlightChain(selectedKey, connections) {
   if (!selectedKey) return { cards: new Set(), conns: new Set() };
-  const adj = {};
+
+  // Build directional adjacency: from→to (children) and to→from (parents)
+  const children = {};  // from -> [{ key: to, id }]
+  const parents = {};   // to -> [{ key: from, id }]
   connections.forEach((c) => {
-    if (!adj[c.from]) adj[c.from] = [];
-    if (!adj[c.to]) adj[c.to] = [];
-    adj[c.from].push({ key: c.to, id: c.id });
-    adj[c.to].push({ key: c.from, id: c.id });
+    if (!children[c.from]) children[c.from] = [];
+    if (!parents[c.to]) parents[c.to] = [];
+    children[c.from].push({ key: c.to, id: c.id });
+    parents[c.to].push({ key: c.from, id: c.id });
   });
+
   const cards = new Set([selectedKey]);
   const highlightedConns = new Set();
-  const queue = [selectedKey];
-  while (queue.length > 0) {
-    const cur = queue.shift();
-    (adj[cur] || []).forEach(({ key, id }) => {
+
+  // Traverse children (forward: selected → to → to → ...)
+  const fwd = [selectedKey];
+  while (fwd.length > 0) {
+    const cur = fwd.shift();
+    (children[cur] || []).forEach(({ key, id }) => {
       highlightedConns.add(id);
-      if (!cards.has(key)) { cards.add(key); queue.push(key); }
+      if (!cards.has(key)) { cards.add(key); fwd.push(key); }
     });
   }
+
+  // Traverse parents (backward: ... → from → from → selected)
+  const bwd = [selectedKey];
+  while (bwd.length > 0) {
+    const cur = bwd.shift();
+    (parents[cur] || []).forEach(({ key, id }) => {
+      highlightedConns.add(id);
+      if (!cards.has(key)) { cards.add(key); bwd.push(key); }
+    });
+  }
+
   return { cards, conns: highlightedConns };
 }
 
@@ -448,8 +471,8 @@ export default function RelationMap({ project, onBack }) {
             ))}
           </div>
 
-          {/* SVG connections overlay */}
-          <svg className={`rm-svg ${editMode ? 'rm-svg-edit' : ''}`}>
+          {/* SVG visible connections (behind cards, z-index: 0) */}
+          <svg className="rm-svg">
             {connections.map((conn) => {
               const fp = positions[conn.from];
               const tp = positions[conn.to];
@@ -461,33 +484,44 @@ export default function RelationMap({ project, onBack }) {
               const isHover = hoverConn === conn.id;
 
               return (
-                <g key={conn.id}>
-                  {/* wider invisible hit area for hover/click in edit mode */}
-                  {editMode && (
-                    <path
-                      d={d}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth={14}
-                      style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
-                      onMouseEnter={() => setHoverConn(conn.id)}
-                      onMouseLeave={() => setHoverConn(null)}
-                      onClick={(e) => { e.stopPropagation(); deleteLink(conn); }}
-                    />
-                  )}
-                  <path
-                    d={d}
-                    fill="none"
-                    className={
-                      'rm-conn' +
-                      (isHL ? ' rm-conn-hl' : '') +
-                      (isDimmed ? ' rm-conn-dimmed' : '') +
-                      (isHover ? ' rm-conn-hover' : '')
-                    }
-                    strokeWidth={isHover ? 3 : 2}
-                    style={{ pointerEvents: 'none' }}
-                  />
-                </g>
+                <path
+                  key={conn.id}
+                  d={d}
+                  fill="none"
+                  className={
+                    'rm-conn' +
+                    (isHL ? ' rm-conn-hl' : '') +
+                    (isDimmed ? ' rm-conn-dimmed' : '') +
+                    (isHover ? ' rm-conn-hover' : '')
+                  }
+                  strokeWidth={isHover ? 3 : editMode ? 2 : 1}
+                  style={{ pointerEvents: 'none' }}
+                />
+              );
+            })}
+          </svg>
+
+          {/* SVG hit areas (above cards, z-index: 2) — always rendered for hover, click only in edit mode */}
+          <svg className="rm-svg rm-svg-edit">
+            {connections.map((conn) => {
+              const fp = positions[conn.from];
+              const tp = positions[conn.to];
+              if (!fp || !tp) return null;
+
+              const d = bezierPath(fp.right, fp.cy, tp.left, tp.cy);
+
+              return (
+                <path
+                  key={conn.id}
+                  d={d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={14}
+                  style={{ cursor: editMode ? 'pointer' : 'default', pointerEvents: 'stroke' }}
+                  onMouseEnter={() => setHoverConn(conn.id)}
+                  onMouseLeave={() => setHoverConn(null)}
+                  onClick={editMode ? (e) => { e.stopPropagation(); deleteLink(conn); } : undefined}
+                />
               );
             })}
 
