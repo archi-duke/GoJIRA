@@ -182,108 +182,138 @@ function sortIssues(issues) {
 
 /* ---------- 편집 팝업 컴포넌트 ---------- */
 
-function SATAMEditPopup({ designIssue, reqIssue, dicts, onSave, onClose }) {
+function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, onClose }) {
   const designData = dicts.byDesign[designIssue.key] || { risks: [], sensitivities: [], mitigations: [] };
   const cellInfo = getCellInfo(designIssue, reqIssue, dicts);
+  const isAddMode = mode === 'add';
 
-  // 현재 선택된 타입 결정
-  const getInitialType = () => {
-    if (cellInfo.risks.length > 0) return 'Risk';
-    if (cellInfo.sensitivities.length > 0) return 'Sensitivity';
-    if (cellInfo.mitigations.length > 0) return 'Mitigation';
-    return 'Nothing';
+  // editItem: { id, type('R'|'S'|'M'), description, counterRisk } — 수정 대상 항목
+  const TYPE_MAP = { R: 'Risk', S: 'Sensitivity', M: 'Mitigation' };
+  const initialType = isAddMode ? 'Risk' : (editItem ? TYPE_MAP[editItem.type] : 'Risk');
+
+  // 5.2 라디오 활성화 규칙 (add 모드면 모두 활성)
+  const getEnabledTypes = () => {
+    if (isAddMode) return { Sensitivity: true, Risk: true, Mitigation: true };
+    if (!editItem) return { Sensitivity: true, Risk: true, Mitigation: true };
+
+    const isResolved = editItem.type === 'R' && globalResolvedRiskIds && globalResolvedRiskIds.has(editItem.id);
+
+    if (editItem.type === 'R' && !isResolved) {
+      // mitigate 되지 않은 risk → Sensitivity로만 변경 가능
+      return { Sensitivity: true, Risk: true, Mitigation: false };
+    }
+    if (editItem.type === 'S') {
+      // Sensitivity → Risk로만 변경 가능
+      return { Sensitivity: true, Risk: true, Mitigation: false };
+    }
+    // 나머지 (mitigated risk, mitigation 등) → 타입 변경 불가, description만 수정
+    return { Sensitivity: false, Risk: false, Mitigation: false };
   };
 
-  const [selectedType, setSelectedType] = useState(getInitialType);
-  const [description, setDescription] = useState(() => {
-    if (cellInfo.risks.length > 0) return cellInfo.risks[0].description;
-    if (cellInfo.sensitivities.length > 0) return cellInfo.sensitivities[0].description;
-    if (cellInfo.mitigations.length > 0) return cellInfo.mitigations[0].description;
-    return '';
-  });
+  // globalResolvedRiskIds는 부모에서 전달받지 않으므로 직접 계산
+  const globalResolvedRiskIds = useMemo(() => {
+    const resolved = new Set();
+    Object.values(dicts.byDesign).forEach((data) => {
+      data.mitigations.forEach((m) => {
+        m.counterRisk.forEach((cr) => {
+          const [rId] = cr.split(':');
+          resolved.add(rId);
+        });
+      });
+    });
+    return resolved;
+  }, [dicts]);
 
-  // Mitigation의 Counter-Risk 체크 상태
-  const reqRisks = designData.risks.filter((r) => r.qa.includes(reqIssue.key));
+  const enabledTypes = getEnabledTypes();
+
+  const [selectedType, setSelectedType] = useState(initialType);
+  const [description, setDescription] = useState(editItem ? editItem.description : '');
+
+  // 해당 requirement를 대상으로 하는 모든 risk 목록
+  const allReqRisks = (dicts.byQA[reqIssue.key] || { risks: [] }).risks;
   const [counterRiskChecked, setCounterRiskChecked] = useState(() => {
-    if (cellInfo.mitigations.length > 0) {
-      const m = cellInfo.mitigations[0];
+    if (editItem && editItem.type === 'M' && editItem.counterRisk) {
       const checked = {};
-      reqRisks.forEach((r) => {
-        checked[r.id] = m.counterRisk.some((cr) => cr.startsWith(r.id + ':'));
+      allReqRisks.forEach((r) => {
+        checked[r.id] = editItem.counterRisk.some((cr) => cr.startsWith(r.id + ':'));
       });
       return checked;
     }
     return {};
   });
 
-  function getNextId(prefix, existing) {
+  // 언더바 표시용
+  const underlineMap = {
+    Sensitivity: cellInfo.sensitivities.length > 0,
+    Risk: cellInfo.risks.length > 0,
+    Mitigation: cellInfo.mitigations.length > 0,
+  };
+
+  function getNextId(prefix) {
+    // 전체 디자인의 R/S/M ID를 대상으로 최대값+1 산출
     let max = 0;
-    existing.forEach((item) => {
-      const num = parseInt(item.id.replace(prefix, ''), 10);
-      if (!isNaN(num) && num > max) max = num;
+    Object.values(dicts.byDesign).forEach((data) => {
+      const lists = { R: data.risks, S: data.sensitivities, M: data.mitigations };
+      (lists[prefix] || []).forEach((item) => {
+        const num = parseInt(item.id.replace(prefix, ''), 10);
+        if (!isNaN(num) && num > max) max = num;
+      });
     });
     return prefix + (max + 1);
   }
 
   function handleSave() {
-    // 기존 데이터를 복사
-    let newRisks = [...designData.risks];
-    let newSens = [...designData.sensitivities];
-    let newMiti = [...designData.mitigations];
+    const newRisks = designData.risks.map((r) => ({ ...r, qa: [...r.qa], counterRisk: [...r.counterRisk] }));
+    const newSens = designData.sensitivities.map((s) => ({ ...s, qa: [...s.qa], counterRisk: [...s.counterRisk] }));
+    const newMiti = designData.mitigations.map((m) => ({ ...m, qa: [...m.qa], counterRisk: [...m.counterRisk] }));
 
-    // 먼저 기존 항목에서 이 requirement를 제거
-    newRisks.forEach((r) => { r.qa = r.qa.filter((k) => k !== reqIssue.key); });
-    newSens.forEach((s) => { s.qa = s.qa.filter((k) => k !== reqIssue.key); });
-    newMiti.forEach((m) => {
-      m.qa = m.qa.filter((k) => k !== reqIssue.key);
-      m.counterRisk = m.counterRisk.filter((cr) => !cr.endsWith(':' + reqIssue.key));
-    });
-
-    // 빈 항목 제거
-    newRisks = newRisks.filter((r) => r.qa.length > 0);
-    newSens = newSens.filter((s) => s.qa.length > 0);
-    newMiti = newMiti.filter((m) => m.qa.length > 0);
-
-    if (selectedType === 'Risk') {
-      // 기존 같은 description의 risk가 있으면 거기에 추가, 없으면 새로 생성
-      let found = newRisks.find((r) => r.description === description);
-      if (found) {
-        found.qa.push(reqIssue.key);
-      } else {
-        newRisks.push({
-          id: getNextId('R', newRisks),
-          qa: [reqIssue.key],
-          counterRisk: [],
-          description,
-        });
+    if (isAddMode) {
+      // 추가 모드: 새 항목 생성
+      if (selectedType === 'Risk') {
+        newRisks.push({ id: getNextId('R'), qa: [reqIssue.key], counterRisk: [], description });
+      } else if (selectedType === 'Sensitivity') {
+        newSens.push({ id: getNextId('S'), qa: [reqIssue.key], counterRisk: [], description });
+      } else if (selectedType === 'Mitigation') {
+        const crList = Object.entries(counterRiskChecked).filter(([, v]) => v).map(([rId]) => `${rId}:${reqIssue.key}`);
+        newMiti.push({ id: getNextId('M'), qa: [reqIssue.key], counterRisk: crList, description });
       }
-    } else if (selectedType === 'Sensitivity') {
-      let found = newSens.find((s) => s.description === description);
-      if (found) {
-        found.qa.push(reqIssue.key);
+    } else if (editItem) {
+      // 5.3 수정 모드: 해당 ID의 내용 수정 + 타입 변경 처리
+      const origType = editItem.type;
+      const PREFIX_MAP = { Risk: 'R', Sensitivity: 'S', Mitigation: 'M' };
+      const newTypeKey = PREFIX_MAP[selectedType];
+
+      if (origType === newTypeKey) {
+        // 같은 타입 → description/counterRisk만 수정
+        const lists = { R: newRisks, S: newSens, M: newMiti };
+        const item = lists[origType].find((i) => i.id === editItem.id);
+        if (item) {
+          item.description = description;
+          if (origType === 'M') {
+            item.counterRisk = Object.entries(counterRiskChecked).filter(([, v]) => v).map(([rId]) => `${rId}:${reqIssue.key}`);
+          }
+        }
       } else {
-        newSens.push({
-          id: getNextId('S', newSens),
-          qa: [reqIssue.key],
-          counterRisk: [],
-          description,
-        });
-      }
-    } else if (selectedType === 'Mitigation') {
-      const crList = Object.entries(counterRiskChecked)
-        .filter(([, v]) => v)
-        .map(([rId]) => `${rId}:${reqIssue.key}`);
-      let found = newMiti.find((m) => m.description === description);
-      if (found) {
-        found.qa.push(reqIssue.key);
-        found.counterRisk = [...found.counterRisk, ...crList];
-      } else {
-        newMiti.push({
-          id: getNextId('M', newMiti),
-          qa: [reqIssue.key],
-          counterRisk: crList,
-          description,
-        });
+        // 타입 변경: 기존 항목에서 이 req를 제거하고, 새 타입에 추가
+        const origLists = { R: newRisks, S: newSens, M: newMiti };
+        const origItem = origLists[origType].find((i) => i.id === editItem.id);
+        if (origItem) {
+          origItem.qa = origItem.qa.filter((k) => k !== reqIssue.key);
+        }
+        // 빈 항목 제거
+        const filterEmpty = (arr) => arr.filter((i) => i.qa.length > 0);
+        if (origType === 'R') { origLists.R.splice(0, origLists.R.length, ...filterEmpty(origLists.R)); }
+        if (origType === 'S') { origLists.S.splice(0, origLists.S.length, ...filterEmpty(origLists.S)); }
+
+        // 새 타입에 추가
+        if (selectedType === 'Risk') {
+          newRisks.push({ id: getNextId('R'), qa: [reqIssue.key], counterRisk: [], description });
+        } else if (selectedType === 'Sensitivity') {
+          newSens.push({ id: getNextId('S'), qa: [reqIssue.key], counterRisk: [], description });
+        } else if (selectedType === 'Mitigation') {
+          const crList = Object.entries(counterRiskChecked).filter(([, v]) => v).map(([rId]) => `${rId}:${reqIssue.key}`);
+          newMiti.push({ id: getNextId('M'), qa: [reqIssue.key], counterRisk: crList, description });
+        }
       }
     }
 
@@ -292,7 +322,6 @@ function SATAMEditPopup({ designIssue, reqIssue, dicts, onSave, onClose }) {
       sensitivity: serializeRST(newSens),
       mitigation: serializeRST(newMiti),
     };
-
     onSave(designIssue.key, data);
   }
 
@@ -311,17 +340,23 @@ function SATAMEditPopup({ designIssue, reqIssue, dicts, onSave, onClose }) {
         <div className="satam-popup-section">
           <div className="satam-popup-label">Is</div>
           <div className="satam-popup-checks">
-            {['Sensitivity', 'Risk', 'Mitigation', 'Nothing'].map((t) => (
-              <label key={t} className="satam-popup-check">
-                <input
-                  type="radio"
-                  name="satam-type"
-                  checked={selectedType === t}
-                  onChange={() => setSelectedType(t)}
-                />
-                {t}
-              </label>
-            ))}
+            {['Sensitivity', 'Risk', 'Mitigation'].map((t) => {
+              const enabled = isAddMode || enabledTypes[t];
+              return (
+                <label key={t} className={`satam-popup-check ${!enabled ? 'satam-popup-disabled' : ''}`}>
+                  <input
+                    type="radio"
+                    name="satam-type"
+                    checked={selectedType === t}
+                    disabled={!enabled}
+                    onChange={() => setSelectedType(t)}
+                  />
+                  <span style={underlineMap[t] ? { textDecoration: 'underline' } : undefined}>
+                    {t}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </div>
 
@@ -339,11 +374,11 @@ function SATAMEditPopup({ designIssue, reqIssue, dicts, onSave, onClose }) {
         </div>
 
         {/* Counter-Risk (Mitigation인 경우에만) */}
-        {selectedType === 'Mitigation' && reqRisks.length > 0 && (
+        {selectedType === 'Mitigation' && (
           <div className="satam-popup-section">
             <div className="satam-popup-label">Counter-Risk:</div>
             <div className="satam-popup-checks">
-              {reqRisks.map((r) => (
+              {allReqRisks.length > 0 ? allReqRisks.map((r) => (
                 <label key={r.id} className="satam-popup-check">
                   <input
                     type="checkbox"
@@ -356,23 +391,23 @@ function SATAMEditPopup({ designIssue, reqIssue, dicts, onSave, onClose }) {
                     {r.id}
                   </span>
                 </label>
-              ))}
+              )) : (
+                <span className="satam-popup-empty">등록된 Risk 없음</span>
+              )}
             </div>
           </div>
         )}
 
         {/* Description */}
-        {selectedType !== 'Nothing' && (
-          <div className="satam-popup-section">
-            <div className="satam-popup-label">Description</div>
-            <textarea
-              className="satam-popup-textarea"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-            />
-          </div>
-        )}
+        <div className="satam-popup-section">
+          <div className="satam-popup-label">Description</div>
+          <textarea
+            className="satam-popup-textarea"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+          />
+        </div>
 
         {/* 버튼 */}
         <div className="satam-popup-footer">
@@ -380,6 +415,39 @@ function SATAMEditPopup({ designIssue, reqIssue, dicts, onSave, onClose }) {
           <button className="satam-popup-cancel" onClick={onClose}>취소</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- 셀 컨텍스트 메뉴 (5.4) ---------- */
+
+function SATAMCellMenu({ x, y, hasEditItem, onAction, onClose, hasContains }) {
+  const ref = React.useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [onClose]);
+
+  return (
+    <div className="satam-ctx-menu" style={{ left: x, top: y }} ref={ref}>
+      {hasEditItem && (
+        <div className="satam-ctx-item" onClick={() => { onAction('edit'); onClose(); }}>수정</div>
+      )}
+      {hasEditItem && (
+        <div className="satam-ctx-item" onClick={() => { onAction('delete'); onClose(); }}>삭제</div>
+      )}
+      <div className="satam-ctx-item" onClick={() => { onAction('add'); onClose(); }}>추가</div>
+      <div className="satam-ctx-divider" />
+      {!hasContains && (
+        <div className="satam-ctx-item" onClick={() => { onAction('linkSolution'); onClose(); }}>Link as Solution</div>
+      )}
+      {hasContains && (
+        <div className="satam-ctx-item" onClick={() => { onAction('unlinkSolution'); onClose(); }}>Remove from Solution</div>
+      )}
     </div>
   );
 }
@@ -408,7 +476,7 @@ function EffectsLegend() {
 
 /* ---------- Effects Description Table ---------- */
 
-function EffectsTable({ designIssues, dicts }) {
+function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
   const rows = [];
 
   designIssues.forEach((d) => {
@@ -416,17 +484,16 @@ function EffectsTable({ designIssues, dicts }) {
     if (!data) return;
 
     data.risks.forEach((r) => {
-      rows.push({ designKey: d.subKey, id: r.id, type: 'Risk', description: r.description });
+      rows.push({ designKey: d.subKey, id: r.id, type: 'Risk', description: r.description, resolved: resolvedRiskIds.has(r.id) });
     });
     data.sensitivities.forEach((s) => {
-      rows.push({ designKey: d.subKey, id: s.id, type: 'Sensitivity', description: s.description });
+      rows.push({ designKey: d.subKey, id: s.id, type: 'Sensitivity', description: s.description, resolved: false });
     });
     data.mitigations.forEach((m) => {
-      // counterRisk 해결된 risk 표시
       const crText = m.counterRisk.length > 0
         ? ` [Counter: ${m.counterRisk.join(', ')}]`
         : '';
-      rows.push({ designKey: d.subKey, id: m.id, type: 'TradeOff/Solution', description: m.description + crText });
+      rows.push({ designKey: d.subKey, id: m.id, type: 'TradeOff/Solution', description: m.description + crText, resolved: false });
     });
   });
 
@@ -445,7 +512,7 @@ function EffectsTable({ designIssues, dicts }) {
         <tbody>
           {rows.map((row, i) => (
             <tr key={i}>
-              <td>{row.id}</td>
+              <td className={row.resolved ? 'satam-resolved' : ''}>{row.id}</td>
               <td>{row.type}</td>
               <td>{row.description}</td>
             </tr>
@@ -464,7 +531,8 @@ export default function SATAM({ project, onBack }) {
   const [editMode, setEditMode] = useState(false);
   const [filterASR, setFilterASR] = useState(false);
   const [showReserved, setShowReserved] = useState(true);
-  const [editCell, setEditCell] = useState(null); // { design, req }
+  const [editCell, setEditCell] = useState(null); // { design, req, editItem, mode }
+  const [cellMenu, setCellMenu] = useState(null); // { x, y, design, req, editItem }
 
   const projectCode = project.JiraCode || '';
 
@@ -515,6 +583,22 @@ export default function SATAM({ project, onBack }) {
   /* 사전 빌드 */
   const dicts = useMemo(() => buildDictionaries(designIssues), [designIssues]);
 
+  /* 전역 resolved Risk ID (모든 디자인의 mitigation counterRisk에서 수집) */
+  const globalResolvedRiskIds = useMemo(() => {
+    const resolved = new Set();
+    designIssues.forEach((d) => {
+      const data = dicts.byDesign[d.key];
+      if (!data) return;
+      data.mitigations.forEach((m) => {
+        m.counterRisk.forEach((cr) => {
+          const [rId] = cr.split(':');
+          resolved.add(rId);
+        });
+      });
+    });
+    return resolved;
+  }, [designIssues, dicts]);
+
   /* 이슈 업데이트 */
   async function handleSave(key, data) {
     try {
@@ -528,6 +612,86 @@ export default function SATAM({ project, onBack }) {
       alert('저장 실패: ' + err.message);
     }
     setEditCell(null);
+  }
+
+  /* contains 링크 생성 */
+  async function handleCreateLink(fromKey, toKey) {
+    try {
+      await fetch(`${API_BASE}/Issue/link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inwardKey: fromKey, outwardKey: toKey }),
+      });
+      fetchIssues();
+    } catch (err) {
+      alert('연결 생성 실패: ' + err.message);
+    }
+  }
+
+  /* contains 링크 삭제 */
+  async function handleDeleteLink(linkId, fromKey, toKey) {
+    try {
+      await fetch(`${API_BASE}/Issue/link`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linkId, fromKey, toKey }),
+      });
+      fetchIssues();
+    } catch (err) {
+      alert('연결 삭제 실패: ' + err.message);
+    }
+  }
+
+  /* contains 링크 ID 찾기 */
+  function findContainsLinkId(reqIssue, designKey) {
+    for (const link of (reqIssue.issueLinks || [])) {
+      const linkType = link.type?.name || '';
+      if (!linkType.toLowerCase().includes('contains')) continue;
+      const targetKey = link.inwardIssue?.key || link.outwardIssue?.key;
+      if (targetKey === designKey) return link.id;
+    }
+    return null;
+  }
+
+  /* 5.4 셀 삭제: 해당 항목에서 req key를 제거 */
+  async function handleDeleteItem(designIssue, reqKey, editItem) {
+    const designData = dicts.byDesign[designIssue.key] || { risks: [], sensitivities: [], mitigations: [] };
+    const newRisks = designData.risks.map((r) => ({ ...r, qa: [...r.qa], counterRisk: [...r.counterRisk] }));
+    const newSens = designData.sensitivities.map((s) => ({ ...s, qa: [...s.qa], counterRisk: [...s.counterRisk] }));
+    const newMiti = designData.mitigations.map((m) => ({ ...m, qa: [...m.qa], counterRisk: [...m.counterRisk] }));
+
+    const lists = { R: newRisks, S: newSens, M: newMiti };
+    const item = lists[editItem.type].find((i) => i.id === editItem.id);
+    if (item) {
+      item.qa = item.qa.filter((k) => k !== reqKey);
+    }
+
+    const data = {
+      risk: serializeRST(newRisks.filter((r) => r.qa.length > 0)),
+      sensitivity: serializeRST(newSens.filter((s) => s.qa.length > 0)),
+      mitigation: serializeRST(newMiti.filter((m) => m.qa.length > 0)),
+    };
+    await handleSave(designIssue.key, data);
+  }
+
+  /* 5.4 컨텍스트 메뉴 액션 */
+  function handleCellMenuAction(action) {
+    if (!cellMenu) return;
+    const { design, req, editItem } = cellMenu;
+
+    if (action === 'edit' && editItem) {
+      setEditCell({ design, req, editItem, mode: 'edit' });
+    } else if (action === 'delete' && editItem) {
+      handleDeleteItem(design, req.key, editItem);
+    } else if (action === 'add') {
+      setEditCell({ design, req, editItem: null, mode: 'add' });
+    } else if (action === 'linkSolution') {
+      handleCreateLink(req.key, design.key);
+    } else if (action === 'unlinkSolution') {
+      const linkId = findContainsLinkId(req, design.key);
+      if (linkId) handleDeleteLink(linkId, req.key, design.key);
+    }
+    setCellMenu(null);
   }
 
   /* ---------- render ---------- */
@@ -626,76 +790,79 @@ export default function SATAM({ project, onBack }) {
                     {designIssues.map((d) => {
                       const cell = getCellInfo(d, req, dicts);
                       const hasRST = cell.risks.length > 0 || cell.sensitivities.length > 0 || cell.mitigations.length > 0;
-                      const typeCount = [cell.risks.length > 0, cell.sensitivities.length > 0, cell.mitigations.length > 0].filter(Boolean).length;
 
-                      // 우선순위: Risk > Sensitivity > Trade-off
-                      let primaryColor = null;
+                      // 타입별 마크 그룹 (R > S > M 우선순위 순서)
+                      const markGroups = [];
                       if (cell.risks.length > 0) {
-                        primaryColor = MARK_COLORS.R;
-                      } else if (cell.sensitivities.length > 0) {
-                        primaryColor = MARK_COLORS.S;
-                      } else if (cell.mitigations.length > 0) {
-                        primaryColor = MARK_COLORS.M;
+                        markGroups.push({ color: MARK_COLORS.R, items: cell.risks, type: 'R' });
+                      }
+                      if (cell.sensitivities.length > 0) {
+                        markGroups.push({ color: MARK_COLORS.S, items: cell.sensitivities, type: 'S' });
+                      }
+                      if (cell.mitigations.length > 0) {
+                        markGroups.push({ color: MARK_COLORS.M, items: cell.mitigations, type: 'M' });
                       }
 
-                      // Counter-Risk로 해결된 risk인지 확인
-                      const resolvedRiskIds = new Set();
-                      cell.mitigations.forEach((m) => {
-                        m.counterRisk.forEach((cr) => {
-                          const [rId] = cr.split(':');
-                          resolvedRiskIds.add(rId);
-                        });
-                      });
+                      const renderMark = (group) => (
+                        <span
+                          key={group.type}
+                          className="satam-mark"
+                          style={{
+                            background: group.color,
+                            borderWidth: cell.hasContains ? 3 : 0,
+                            borderColor: '#333',
+                            borderStyle: 'solid',
+                          }}
+                        >
+                          {group.items.map((item) => (
+                            <span key={item.id} className={group.type === 'R' && globalResolvedRiskIds.has(item.id) ? 'satam-resolved' : ''}>
+                              {item.id}
+                            </span>
+                          ))}
+                        </span>
+                      );
 
                       return (
                         <td key={d.key} className="satam-cell">
                           {editMode ? (
-                            <button
-                              className="satam-cell-btn"
-                              onClick={() => setEditCell({ design: d, req })}
-                            >
-                              {hasRST && (
-                                <span className="satam-mark" style={{ background: primaryColor, borderWidth: cell.hasContains ? 3 : 0, borderColor: '#333', borderStyle: 'solid' }}>
-                                  {typeCount >= 2 && <span className="satam-badge" />}
-                                  {cell.risks.map((r) => (
-                                    <span key={r.id} className={resolvedRiskIds.has(r.id) ? 'satam-resolved' : ''}>
-                                      {r.id}
-                                    </span>
-                                  ))}
-                                  {cell.sensitivities.map((s) => <span key={s.id}>{s.id}</span>)}
-                                  {cell.mitigations.map((m) => <span key={m.id}>{m.id}</span>)}
-                                </span>
-                              )}
-                              {!hasRST && cell.hasContains && (
-                                <span className="satam-dot-contains" />
-                              )}
-                            </button>
-                          ) : (
-                            <>
-                              {hasRST && (
-                                <span
-                                  className="satam-mark"
-                                  style={{
-                                    background: primaryColor,
-                                    borderWidth: cell.hasContains ? 3 : 0,
-                                    borderColor: '#333',
-                                    borderStyle: 'solid',
+                            <div className="satam-cell-edit">
+                              {markGroups.length > 0 ? markGroups.map((group) => (
+                                <button
+                                  key={group.type}
+                                  className="satam-cell-btn"
+                                  onClick={(e) => {
+                                    const item = group.items[0];
+                                    setCellMenu({
+                                      x: e.clientX, y: e.clientY,
+                                      design: d, req,
+                                      editItem: { id: item.id, type: group.type, description: item.description, counterRisk: item.counterRisk || [] },
+                                    });
                                   }}
                                 >
-                                  {typeCount >= 2 && <span className="satam-badge" />}
-                                  {cell.risks.map((r) => (
-                                    <span key={r.id} className={resolvedRiskIds.has(r.id) ? 'satam-resolved' : ''}>
-                                      {r.id}
-                                    </span>
-                                  ))}
-                                  {cell.sensitivities.map((s) => <span key={s.id}>{s.id}</span>)}
-                                  {cell.mitigations.map((m) => <span key={m.id}>{m.id}</span>)}
-                                </span>
+                                  {renderMark(group)}
+                                </button>
+                              )) : (
+                                <button
+                                  className="satam-cell-btn"
+                                  onClick={(e) => {
+                                    setCellMenu({
+                                      x: e.clientX, y: e.clientY,
+                                      design: d, req,
+                                      editItem: null,
+                                    });
+                                  }}
+                                >
+                                  {cell.hasContains && <span className="satam-dot-contains" />}
+                                </button>
                               )}
+                            </div>
+                          ) : (
+                            <div className="satam-cell-marks">
+                              {markGroups.map((group) => renderMark(group))}
                               {!hasRST && cell.hasContains && (
                                 <span className="satam-dot-contains" />
                               )}
-                            </>
+                            </div>
                           )}
                         </td>
                       );
@@ -713,7 +880,7 @@ export default function SATAM({ project, onBack }) {
         <EffectsLegend />
 
         {/* Effects 상세 테이블 */}
-        <EffectsTable designIssues={designIssues} dicts={dicts} />
+        <EffectsTable designIssues={designIssues} dicts={dicts} resolvedRiskIds={globalResolvedRiskIds} />
       </div>
 
       {/* 상태바 */}
@@ -726,9 +893,26 @@ export default function SATAM({ project, onBack }) {
         <SATAMEditPopup
           designIssue={editCell.design}
           reqIssue={editCell.req}
+          editItem={editCell.editItem}
+          mode={editCell.mode}
           dicts={dicts}
           onSave={handleSave}
           onClose={() => setEditCell(null)}
+        />
+      )}
+
+      {/* 5.4 셀 컨텍스트 메뉴 */}
+      {cellMenu && (
+        <SATAMCellMenu
+          x={cellMenu.x}
+          y={cellMenu.y}
+          hasEditItem={!!cellMenu.editItem}
+          hasContains={(() => {
+            const ci = getCellInfo(cellMenu.design, cellMenu.req, dicts);
+            return ci.hasContains;
+          })()}
+          onAction={handleCellMenuAction}
+          onClose={() => setCellMenu(null)}
         />
       )}
     </div>
