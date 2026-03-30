@@ -78,7 +78,9 @@
                 "name": "Medium",
                 "id": "3"
             },
-            "labels": [],
+            "labels": [
+                "ASR"
+            ],
             "environment": null,
             "duedate": null,
             "issuelinks": [
@@ -129,7 +131,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T09:56:10.049+0900",
+            "updated": "2026-03-30T11:00:29.831+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",

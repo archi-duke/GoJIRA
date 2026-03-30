@@ -85,7 +85,7 @@ func UpsertIssue(ctx context.Context, key string, doc bson.M) error {
 
 func UpdateIssueFields(ctx context.Context, key string, fields bson.M) error {
 	fields["_dirty"] = true
-	fields["fields.updated"] = time.Now().Format("2006-01-02T15:04:05.000+0900")
+	fields["updated"] = time.Now().Format("2006-01-02T15:04:05.000+0900")
 	_, err := Issues().UpdateOne(ctx, bson.M{"key": key}, bson.M{"$set": fields})
 	return err
 }

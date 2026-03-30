@@ -113,6 +113,7 @@ export default function RelationMap({ project, onBack }) {
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [selectedKey, setSelectedKey] = useState(null);
+  const [sortByHighlight, setSortByHighlight] = useState(false);
   const [positions, setPositions] = useState({});
   const [linking, setLinking] = useState(null);   // { fromKey }
   const [mousePos, setMousePos] = useState(null);
@@ -136,16 +137,39 @@ export default function RelationMap({ project, onBack }) {
 
   useEffect(() => { fetchIssues(); }, [fetchIssues]);
 
-  /* group into columns */
+  const connections = buildConnections(issues);
+  const highlighted = getHighlightChain(selectedKey, connections);
+
+  /* subtype sort order within columns */
+  const SUBTYPE_ORDER = { QA: 0, CNST: 1, FR: 2, ADSN: 0, DDSN: 1, VOS: 0, UC: 0, Feature: 0 };
+
+  /* group into columns with sorting per spec §9 */
   const columns = COLUMN_DEFS.map((col) => ({
     ...col,
     issues: issues
       .filter((i) => col.types.includes(i.issueType))
-      .sort((a, b) => (a.subKey || '').localeCompare(b.subKey || '', undefined, { numeric: true })),
-  }));
+      .sort((a, b) => {
+        // 0순위: 강조된 이슈 우선 (Shift+클릭 시에만)
+        if (sortByHighlight && selectedKey) {
+          const aHL = highlighted.cards.has(a.key) ? 0 : 1;
+          const bHL = highlighted.cards.has(b.key) ? 0 : 1;
+          if (aHL !== bHL) return aHL - bHL;
+        }
 
-  const connections = buildConnections(issues);
-  const highlighted = getHighlightChain(selectedKey, connections);
+        // 1순위: 서브타입 순서
+        const aType = SUBTYPE_ORDER[getSubtype(a)] ?? 99;
+        const bType = SUBTYPE_ORDER[getSubtype(b)] ?? 99;
+        if (aType !== bType) return aType - bType;
+
+        // 2순위: ASR 라벨 있는 이슈 우선
+        const aASR = (a.labels || []).includes('ASR') ? 0 : 1;
+        const bASR = (b.labels || []).includes('ASR') ? 0 : 1;
+        if (aASR !== bASR) return aASR - bASR;
+
+        // 3순위: 서브키 오름차순
+        return (a.subKey || '').localeCompare(b.subKey || '', undefined, { numeric: true });
+      }),
+  }));
 
   /* measure card positions for SVG bezier drawing */
   const measurePositions = useCallback(() => {
@@ -167,7 +191,7 @@ export default function RelationMap({ project, onBack }) {
   useEffect(() => {
     const id = requestAnimationFrame(measurePositions);
     return () => cancelAnimationFrame(id);
-  }, [issues, editMode, measurePositions]);
+  }, [issues, editMode, sortByHighlight, selectedKey, measurePositions]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -193,6 +217,7 @@ export default function RelationMap({ project, onBack }) {
   function handleCanvasClick(e) {
     if (e.target.closest('.rm-card')) return;
     setSelectedKey(null);
+    setSortByHighlight(false);
     if (linking) setLinking(null);
   }
 
@@ -208,12 +233,11 @@ export default function RelationMap({ project, onBack }) {
     const labels = issue.labels || [];
     const has = labels.includes(label);
     const newLabels = has ? labels.filter((l) => l !== label) : [...labels, label];
-    const updated = { ...issue, labels: newLabels };
     try {
       await fetch(`${API_BASE}/Issue`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
+        body: JSON.stringify({ key: issue.key, data: { labels: newLabels } }),
       });
       setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, labels: newLabels } : i)));
     } catch (err) {
@@ -278,7 +302,10 @@ export default function RelationMap({ project, onBack }) {
       await fetch(`${API_BASE}/Issue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectKey: projectCode, issueType, reqtype, summary: '새 이슈' }),
+        body: JSON.stringify({
+          projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
+          labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
+        }),
       });
       fetchIssues();
     } catch (err) {
@@ -335,6 +362,21 @@ export default function RelationMap({ project, onBack }) {
         <button className="rm-back-btn" onClick={onBack}>&larr; Project Map</button>
         <span className="rm-title">{project.Name} ({projectCode}) - Relation Map</span>
         <button
+          className="rm-pull-btn"
+          onClick={async () => {
+            try {
+              await fetch(`${API_BASE}/Issue/fetch`, {
+                headers: { XBody: JSON.stringify({ prjID: projectCode }) },
+              });
+              fetchIssues();
+            } catch (err) {
+              alert('Pull 실패: ' + err.message);
+            }
+          }}
+        >
+          Pull
+        </button>
+        <button
           className={`rm-edit-toggle ${editMode ? 'rm-edit-active' : ''}`}
           onClick={() => { setEditMode(!editMode); setLinking(null); }}
         >
@@ -382,7 +424,11 @@ export default function RelationMap({ project, onBack }) {
                       style={isSelected || isHL ? { borderColor: cardColor } : undefined}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (!linking) setSelectedKey(isSelected ? null : issue.key);
+                        if (!linking) {
+                          const newKey = isSelected ? null : issue.key;
+                          setSelectedKey(newKey);
+                          setSortByHighlight(e.shiftKey && newKey !== null);
+                        }
                       }}
                     >
                       {/* left dot (link target) */}
@@ -396,12 +442,12 @@ export default function RelationMap({ project, onBack }) {
 
                       {/* card header: subkey badge + key or action buttons */}
                       <div className="rm-card-header">
-                        <span className="rm-subkey" style={{ background: cardColor, color: subkeyTextColor }}>
+                        <span className="rm-subkey" style={{ background: cardColor, color: subkeyTextColor, fontWeight: hasASR ? 700 : 'normal' }}>
                           {issue.subKey || subtype}
                         </span>
                         {editMode ? (
                           <span className="rm-card-actions">
-                            {isReq && (
+                            {isReq && subtype === 'FR' && (
                               <button
                                 className={`rm-action-btn rm-btn-a ${hasASR ? 'rm-btn-active' : ''}`}
                                 onClick={(e) => { e.stopPropagation(); toggleLabel(issue, 'ASR'); }}

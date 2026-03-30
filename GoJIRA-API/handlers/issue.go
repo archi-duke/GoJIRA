@@ -132,10 +132,10 @@ func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// Build field updates with "fields." prefix
+	// Build field updates (flat cache schema — no "fields." prefix)
 	updates := bson.M{}
 	for k, v := range req.Data {
-		updates["fields."+k] = v
+		updates[k] = v
 	}
 	updates["_dirty"] = true
 
