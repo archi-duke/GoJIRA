@@ -2,6 +2,7 @@ import { useState } from 'react';
 import ProjectMap from './components/ProjectMap';
 import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
+import SATAM from './components/SATAM';
 
 function App() {
   const [page, setPage] = useState('map');
@@ -25,6 +26,15 @@ function App() {
     );
   }
 
+  if (page === 'satam' && selectedProject) {
+    return (
+      <SATAM
+        project={selectedProject}
+        onBack={() => setPage('map')}
+      />
+    );
+  }
+
   return (
     <ProjectMap
       onProjectClick={(project) => {
@@ -34,6 +44,10 @@ function App() {
       onRelationMap={(project) => {
         setSelectedProject(project);
         setPage('relationMap');
+      }}
+      onSATAM={(project) => {
+        setSelectedProject(project);
+        setPage('satam');
       }}
     />
   );

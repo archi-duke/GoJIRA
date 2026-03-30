@@ -48,7 +48,7 @@ function getDefaultView() {
   };
 }
 
-export default function ProjectMap({ onProjectClick, onRelationMap }) {
+export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
   const [projects, setProjects] = useState([]);
   const [graphWidth, setGraphWidth] = useState(0);
   const [viewRange, setViewRange] = useState(getDefaultView);
@@ -100,7 +100,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap }) {
         if (onRelationMap) onRelationMap(project);
         break;
       case 'satam':
-        alert(`${action} 기능은 준비 중입니다.`);
+        if (onSATAM) onSATAM(project);
         break;
       default:
         break;
