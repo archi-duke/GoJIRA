@@ -791,34 +791,27 @@ export default function SATAM({ project, onBack }) {
                       const cell = getCellInfo(d, req, dicts);
                       const hasRST = cell.risks.length > 0 || cell.sensitivities.length > 0 || cell.mitigations.length > 0;
 
-                      // 타입별 마크 그룹 (R > S > M 우선순위 순서)
-                      const markGroups = [];
-                      if (cell.risks.length > 0) {
-                        markGroups.push({ color: MARK_COLORS.R, items: cell.risks, type: 'R' });
-                      }
-                      if (cell.sensitivities.length > 0) {
-                        markGroups.push({ color: MARK_COLORS.S, items: cell.sensitivities, type: 'S' });
-                      }
-                      if (cell.mitigations.length > 0) {
-                        markGroups.push({ color: MARK_COLORS.M, items: cell.mitigations, type: 'M' });
-                      }
+                      // 항목별 개별 마크 (R > S > M 우선순위, 같은 타입도 개별 표시)
+                      const marks = [
+                        ...cell.risks.map((item) => ({ color: MARK_COLORS.R, item, type: 'R' })),
+                        ...cell.sensitivities.map((item) => ({ color: MARK_COLORS.S, item, type: 'S' })),
+                        ...cell.mitigations.map((item) => ({ color: MARK_COLORS.M, item, type: 'M' })),
+                      ];
 
-                      const renderMark = (group) => (
+                      const renderMark = (mark) => (
                         <span
-                          key={group.type}
+                          key={mark.item.id}
                           className="satam-mark"
                           style={{
-                            background: group.color,
+                            background: mark.color,
                             borderWidth: cell.hasContains ? 3 : 0,
                             borderColor: '#333',
                             borderStyle: 'solid',
                           }}
                         >
-                          {group.items.map((item) => (
-                            <span key={item.id} className={group.type === 'R' && globalResolvedRiskIds.has(item.id) ? 'satam-resolved' : ''}>
-                              {item.id}
-                            </span>
-                          ))}
+                          <span className={mark.type === 'R' && globalResolvedRiskIds.has(mark.item.id) ? 'satam-resolved' : ''}>
+                            {mark.item.id}
+                          </span>
                         </span>
                       );
 
@@ -826,20 +819,19 @@ export default function SATAM({ project, onBack }) {
                         <td key={d.key} className="satam-cell">
                           {editMode ? (
                             <div className="satam-cell-edit">
-                              {markGroups.length > 0 ? markGroups.map((group) => (
+                              {marks.length > 0 ? marks.map((mark) => (
                                 <button
-                                  key={group.type}
+                                  key={mark.item.id}
                                   className="satam-cell-btn"
                                   onClick={(e) => {
-                                    const item = group.items[0];
                                     setCellMenu({
                                       x: e.clientX, y: e.clientY,
                                       design: d, req,
-                                      editItem: { id: item.id, type: group.type, description: item.description, counterRisk: item.counterRisk || [] },
+                                      editItem: { id: mark.item.id, type: mark.type, description: mark.item.description, counterRisk: mark.item.counterRisk || [] },
                                     });
                                   }}
                                 >
-                                  {renderMark(group)}
+                                  {renderMark(mark)}
                                 </button>
                               )) : (
                                 <button
@@ -858,7 +850,7 @@ export default function SATAM({ project, onBack }) {
                             </div>
                           ) : (
                             <div className="satam-cell-marks">
-                              {markGroups.map((group) => renderMark(group))}
+                              {marks.map((mark) => renderMark(mark))}
                               {!hasRST && cell.hasContains && (
                                 <span className="satam-dot-contains" />
                               )}

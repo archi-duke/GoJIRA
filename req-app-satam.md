@@ -39,11 +39,12 @@ relation map과 공통된 기능들이 있으니 참조하자. (공통기능을 
     3.1. 디자인의 risk에 해당 행의 requirement key가 등록된 경우, 해당 risk의 ID를 빨강(#e83a1e)으로 표시
     3.2. 디자인의 sensitivity에 해당 행의 requirement key가 등록된 경우, 해당 sensitivity의 ID를 파랑(#4cafe8)으로 표시
     3.3. 디자인의 trade-off에 해당 행의 requirement key가 등록된 경우, 해당 trade-off의 ID를 주황(#ff9a1e)으로 표시
-    3.4. 둘 이상 중복 시 Risk > Sensitivity > Trade-off 우선순위로 위에서 아래로 세로 나열한다 (각 타입별 개별 마크)
-    3.5. requirement의 issueLink에 해당 design이 contains로 연결된 경우:
+    3.4. 같은 타입이 여러 개인 경우(예: R1, R2)에도 각각 개별 마크로 나누어 표시한다 (하나로 합치지 않음)
+    3.5. 둘 이상 중복 시 Risk > Sensitivity > Trade-off 우선순위로 위에서 아래로 세로 나열한다
+    3.6. requirement의 issueLink에 해당 design이 contains로 연결된 경우:
          - R/S/M이 없으면 검은색 원(10px)을 표시
          - R/S/M이 있으면 해당 마크에 3px 두께의 검은 테두리를 그린다
-    3.6. 위의 모든 경우에 해당되지 않으면 빈칸으로 둔다
+    3.7. 위의 모든 경우에 해당되지 않으면 빈칸으로 둔다
 - Counter Risk에서 체크된(mitigate된) risk의 ID는 전체 테이블에서 취소선(line-through)으로 표시한다
   (셀 마크 + 하단 Effects 테이블 ID 컬럼 모두 적용)
 
