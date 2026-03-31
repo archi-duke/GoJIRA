@@ -14,8 +14,8 @@ const SUBTYPE_ORDER = { QA: 0, CNST: 1, FR: 2 };
 
 const MARK_COLORS = {
   R: '#e83a1e',   // Risk - 빨강
-  S: '#4cafe8',   // Sensitivity - 파랑
-  M: '#ff9a1e',   // Mitigation(Trade-off) - 주황
+  S: '#ff9a1e',   // Sensitivity - 주황
+  M: '#4cafe8',   // Mitigation - 파랑
 };
 
 /* ---------- YAML-like 파서 ---------- */
@@ -330,7 +330,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
       <div className="satam-popup" onClick={(e) => e.stopPropagation()}>
         {/* Design 정보 */}
         <div className="satam-popup-issue-box">
-          <span className="satam-popup-subkey" style={{ background: SUBTYPE_COLORS.ADSN }}>
+          <span className="satam-popup-subkey" style={{ background: SUBTYPE_COLORS[getSubtype(designIssue)] || SUBTYPE_COLORS.ADSN }}>
             {designIssue.subKey}
           </span>
           <span className="satam-popup-summary">{designIssue.summary}</span>
@@ -468,7 +468,7 @@ function EffectsLegend() {
         <span className="satam-legend-mark" style={{ background: MARK_COLORS.R }}>R</span> Risk
       </span>
       <span className="satam-legend-item">
-        <span className="satam-legend-mark" style={{ background: MARK_COLORS.M }}>M</span> Mitigation / Trade-off
+        <span className="satam-legend-mark" style={{ background: MARK_COLORS.M }}>M</span> Mitigation
       </span>
     </div>
   );
@@ -493,7 +493,7 @@ function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
       const crText = m.counterRisk.length > 0
         ? ` [Counter: ${m.counterRisk.join(', ')}]`
         : '';
-      rows.push({ designKey: d.subKey, id: m.id, type: 'TradeOff/Solution', description: m.description + crText, resolved: false });
+      rows.push({ designKey: d.subKey, id: m.id, type: 'Mitigation', description: m.description + crText, resolved: false });
     });
   });
 
@@ -531,6 +531,9 @@ export default function SATAM({ project, onBack }) {
   const [editMode, setEditMode] = useState(false);
   const [filterASR, setFilterASR] = useState(false);
   const [showReserved, setShowReserved] = useState(true);
+  const [showFR, setShowFR] = useState(true);            // F: FR 포함 (기본 ON)
+  const [onlyDecision, setOnlyDecision] = useState(false); // S: Decision 있는 디자인만
+  const [showDDSN, setShowDDSN] = useState(true);       // D: Detailed Design 포함 (기본 ON)
   const [editCell, setEditCell] = useState(null); // { design, req, editItem, mode }
   const [cellMenu, setCellMenu] = useState(null); // { x, y, design, req, editItem }
 
@@ -563,21 +566,30 @@ export default function SATAM({ project, onBack }) {
   /* 디자인/요구사항 분리, 필터링, 정렬 */
   const designIssues = useMemo(() =>
     sortIssues(issues.filter((i) => {
-      if (i.issueType !== 'Architectueral Design') return false;
-      if (!showReserved && (i.labels || []).includes('Reserved')) return false;
-      return true;
+      if (i.issueType === 'Architectueral Design') {
+        if (!showReserved && (i.labels || []).includes('Reserved')) return false;
+        if (onlyDecision && (!i.decision || i.decision === '')) return false;
+        return true;
+      }
+      if (i.issueType === 'Detaied Design') {
+        if (!showDDSN) return false;
+        if (!showReserved && (i.labels || []).includes('Reserved')) return false;
+        return true;
+      }
+      return false;
     })),
-    [issues, showReserved]
+    [issues, showReserved, onlyDecision, showDDSN]
   );
 
   const reqIssues = useMemo(() =>
     sortIssues(issues.filter((i) => {
       if (i.issueType !== 'Requirement') return false;
+      if (!showFR && i.reqtype === 'FR') return false;
       if (filterASR && !(i.labels || []).includes('ASR')) return false;
       if (!showReserved && (i.labels || []).includes('Reserved')) return false;
       return true;
     })),
-    [issues, filterASR, showReserved]
+    [issues, filterASR, showReserved, showFR]
   );
 
   /* 사전 빌드 */
@@ -708,6 +720,9 @@ export default function SATAM({ project, onBack }) {
           onEditChange={setEditMode}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
+            { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
+            { label: 'S', active: onlyDecision, handler: () => setOnlyDecision((v) => !v) },
+            { label: 'D', active: showDDSN, handler: () => setShowDDSN((v) => !v) },
             { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
           ]}
         />
@@ -725,14 +740,15 @@ export default function SATAM({ project, onBack }) {
         onEditChange={(mode) => { setEditMode(mode); if (!mode) setEditCell(null); }}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
+          { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
+          { label: 'S', active: onlyDecision, handler: () => setOnlyDecision((v) => !v) },
+          { label: 'D', active: showDDSN, handler: () => setShowDDSN((v) => !v) },
           { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
         ]}
       />
 
       <div className="satam-content">
         {/* 프로젝트 라벨 */}
-        <div className="satam-project-label">Project : {project.Name}</div>
-
         <div className="satam-table-wrap">
           <table className="satam-table">
             <colgroup>
@@ -751,7 +767,9 @@ export default function SATAM({ project, onBack }) {
                   <tr key={d.key} className="satam-stair-tr">
                     {/* 첫 번째 디자인 행에서만 rowSpan으로 좌상단 빈칸 */}
                     {idx === 0 && (
-                      <th className="satam-corner" rowSpan={designIssues.length} />
+                      <th className="satam-corner" rowSpan={designIssues.length}>
+                      Project : {project.Name}
+                    </th>
                     )}
                     {/* 이 디자인 컬럼 앞의 빈 셀들 (개별 셀로 테두리 표시) */}
                     {Array.from({ length: idx }, (_, ci) => (
@@ -763,7 +781,7 @@ export default function SATAM({ project, onBack }) {
                       className={`satam-stair-cell ${isLast ? 'satam-stair-cell-last' : ''}`}
                     >
                       <div className="satam-stair-label">
-                        <span className="satam-stair-subkey" style={{ background: SUBTYPE_COLORS.ADSN }}>
+                        <span className="satam-stair-subkey" style={{ background: SUBTYPE_COLORS[getSubtype(d)] || SUBTYPE_COLORS.ADSN }}>
                           {d.subKey}
                         </span>
                         <span className="satam-stair-summary">{d.summary}</span>
@@ -776,12 +794,15 @@ export default function SATAM({ project, onBack }) {
             <tbody>
               {reqIssues.map((req) => {
                 const subtype = getSubtype(req);
-                const color = SUBTYPE_COLORS[subtype] || '#999';
+                const hasASR = (req.labels || []).includes('ASR');
+                const isFRnoASR = subtype === 'FR' && !hasASR;
+                const bgColor = isFRnoASR ? '#ffb4b4' : (SUBTYPE_COLORS[subtype] || '#999');
+                const textColor = isFRnoASR ? '#000' : '#fff';
                 return (
                   <tr key={req.key}>
                     {/* 요구사항 행 헤더 */}
                     <td className="satam-row-header">
-                      <span className="satam-row-subkey" style={{ background: color }}>
+                      <span className="satam-row-subkey" style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}>
                         {req.subKey}
                       </span>
                       <span className="satam-row-summary">{req.summary}</span>

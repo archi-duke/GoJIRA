@@ -24,13 +24,6 @@
   font-size: 14px;
 }
 
-.satam-project-label {
-  font-size: 15px;
-  font-weight: 700;
-  color: #2c3e50;
-  margin-bottom: 16px;
-}
-
 /* ===== Table ===== */
 .satam-table-wrap {
   overflow: auto;
@@ -64,12 +57,17 @@
 
 /* ===== Staircase header ===== */
 
-/* 좌상단 빈칸 */
+/* 좌상단 프로젝트 라벨 */
 .satam-stair-tr .satam-corner {
   background: #f8f9fa;
   border: none !important;
   border-right: 1px solid #ccc !important;
   border-bottom: 1px solid #ccc !important;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 15px;
+  font-weight: 700;
+  color: #2c3e50;
 }
 
 /* 계단 왼쪽 개별 빈 셀: 오른쪽 세로선만 (세로 연장) */
@@ -280,6 +278,15 @@
   border: 1px solid #ddd;
   padding: 4px 8px;
   text-align: left;
+}
+
+.satam-effects-table th:nth-child(1),
+.satam-effects-table td:nth-child(1),
+.satam-effects-table th:nth-child(2),
+.satam-effects-table td:nth-child(2) {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .satam-effects-table th {
