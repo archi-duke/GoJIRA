@@ -111,7 +111,13 @@ function bezierPath(x1, y1, x2, y2) {
 
 /* ---------- main component ---------- */
 
-export default function RelationMap({ project, onBack }) {
+const NAV_ITEMS = [
+  { key: 'issues', label: 'Issues' },
+  { key: 'relationMap', label: 'Relation Map' },
+  { key: 'satam', label: 'SATAM' },
+];
+
+export default function RelationMap({ project, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -405,7 +411,10 @@ export default function RelationMap({ project, onBack }) {
 
   /* ---------- render ---------- */
 
-  const barTitle = `${project.Name} (${projectCode}) - Relation Map`;
+  const barTitle = `${project.Name} (${projectCode})`;
+  const nav = onNavigate ? NAV_ITEMS.map((n) => ({
+    ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
+  })) : [];
 
   if (loading) {
     return (
@@ -415,6 +424,7 @@ export default function RelationMap({ project, onBack }) {
           onBack={onBack}
           onPull={handlePull}
           onEditChange={setEditMode}
+          nav={nav}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
             { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
@@ -433,6 +443,7 @@ export default function RelationMap({ project, onBack }) {
         onBack={onBack}
         onPull={handlePull}
         onEditChange={(mode) => { setEditMode(mode); if (!mode) setLinking(null); }}
+        nav={nav}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
           { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },

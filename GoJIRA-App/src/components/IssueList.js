@@ -1,58 +1,79 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import CommonBar from './CommonBar';
+import IssueDetailDialog from './IssueDetailDialog';
 import './IssueList.css';
-
-const ISSUE_TYPES = [
-  'VOS', 'Feature', 'Requirement',
-  'Architectueral Design', 'Detaied Design', 'Test',
-];
 
 const API_BASE = 'http://localhost:9000/api/v2';
 
-export default function IssueList({ project, onBack }) {
+const NAV_ITEMS = [
+  { key: 'issues', label: 'Issues' },
+  { key: 'relationMap', label: 'Relation Map' },
+  { key: 'satam', label: 'SATAM' },
+];
+
+// 옵션 키 → issueType 매핑
+const TYPE_FILTER = {
+  V: ['VOS'],
+  F: ['Feature'],
+  R: ['Requirement'],
+  A: ['Architectueral Design'],
+  D: ['Detaied Design'],
+};
+
+export default function IssueList({ project, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [pulling, setPulling] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [sortKey, setSortKey] = useState('key');
   const [sortAsc, setSortAsc] = useState(true);
-  const [filterType, setFilterType] = useState('');
+  const [detailIssue, setDetailIssue] = useState(null);
+
+  // 필터 옵션 (기본 모두 ON)
+  const [showV, setShowV] = useState(true);
+  const [showF, setShowF] = useState(true);
+  const [showR, setShowR] = useState(true);
+  const [showA, setShowA] = useState(true);
+  const [showD, setShowD] = useState(true);
 
   const projectCode = project.JiraCode || '';
 
-  useEffect(() => {
-    fetchIssues();
-  }, [projectCode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function fetchIssues() {
+  const fetchIssues = useCallback(() => {
     setLoading(true);
     const xbody = JSON.stringify({ prjID: projectCode, infoType: '' });
     fetch(`${API_BASE}/Issue`, { headers: { XBody: xbody } })
       .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) setIssues(data);
-        else setIssues([]);
-      })
+      .then((data) => setIssues(Array.isArray(data) ? data : []))
       .catch(() => setIssues([]))
       .finally(() => setLoading(false));
-  }
+  }, [projectCode]);
 
-  function handlePull() {
-    setPulling(true);
-    const xbody = JSON.stringify({
-      prjID: projectCode,
-      query: ISSUE_TYPES.join(','),
-    });
-    fetch(`${API_BASE}/Issue/fetch`, { headers: { XBody: xbody } })
-      .then((res) => res.json())
-      .then((data) => {
-        alert(`${data.upserted || 0}건 가져옴 (전체 ${data.total || 0}건)`);
-        fetchIssues();
-      })
-      .catch((err) => alert('Pull 실패: ' + err.message))
-      .finally(() => setPulling(false));
-  }
+  useEffect(() => { fetchIssues(); }, [fetchIssues]);
+
+  const handlePull = useCallback(async () => {
+    try {
+      await fetch(`${API_BASE}/Issue/fetch`, {
+        headers: { XBody: JSON.stringify({ prjID: projectCode }) },
+      });
+      fetchIssues();
+    } catch (err) {
+      alert('Pull 실패: ' + err.message);
+    }
+  }, [projectCode, fetchIssues]);
+
+  // 허용된 issueType 목록
+  const allowedTypes = [
+    ...(showV ? TYPE_FILTER.V : []),
+    ...(showF ? TYPE_FILTER.F : []),
+    ...(showR ? TYPE_FILTER.R : []),
+    ...(showA ? TYPE_FILTER.A : []),
+    ...(showD ? TYPE_FILTER.D : []),
+  ];
+
+  // Filter
+  const filtered = issues.filter((i) => allowedTypes.includes(i.issueType));
 
   // Sort
-  const sorted = [...issues].sort((a, b) => {
+  const sorted = [...filtered].sort((a, b) => {
     let va = a[sortKey] || '';
     let vb = b[sortKey] || '';
     if (typeof va === 'object') va = va.name || '';
@@ -60,11 +81,6 @@ export default function IssueList({ project, onBack }) {
     const cmp = String(va).localeCompare(String(vb), undefined, { numeric: true });
     return sortAsc ? cmp : -cmp;
   });
-
-  // Filter by issue type
-  const filtered = filterType
-    ? sorted.filter((i) => i.issueType === filterType)
-    : sorted;
 
   function handleSort(key) {
     if (sortKey === key) setSortAsc(!sortAsc);
@@ -76,8 +92,33 @@ export default function IssueList({ project, onBack }) {
     return sortAsc ? ' \u25B2' : ' \u25BC';
   }
 
+  async function handleDetailSave(key, data) {
+    try {
+      await fetch(`${API_BASE}/Issue`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, data }),
+      });
+      setIssues((prev) => prev.map((i) => (i.key === key ? { ...i, ...data } : i)));
+    } catch (err) {
+      alert('저장 실패: ' + err.message);
+    }
+  }
+
+  function handleSummaryBlur(issue, newSummary) {
+    if (newSummary === issue.summary) return;
+    fetch(`${API_BASE}/Issue`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),
+    })
+      .then(() => setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, summary: newSummary } : i))))
+      .catch((err) => alert('수정 실패: ' + err.message));
+  }
+
   const columns = [
     { key: 'key', label: 'Key', width: 120 },
+    { key: 'subKey', label: 'SubKey', width: 100 },
     { key: 'issueType', label: 'Type', width: 140 },
     { key: 'summary', label: 'Summary', width: 0 },
     { key: 'status', label: 'Status', width: 100 },
@@ -86,7 +127,6 @@ export default function IssueList({ project, onBack }) {
 
   function cellValue(issue, col) {
     const v = issue[col.key];
-    // Requirement → reqtype (FR, QA, CNST)
     if (col.key === 'issueType' && v === 'Requirement' && issue.reqtype) {
       return issue.reqtype;
     }
@@ -94,31 +134,27 @@ export default function IssueList({ project, onBack }) {
     return v || '';
   }
 
+  const barTitle = `${project.Name} (${projectCode})`;
+  const nav = onNavigate ? NAV_ITEMS.map((n) => ({
+    ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
+  })) : [];
+
   return (
     <div className="il-wrapper">
-      <div className="il-topbar">
-        <button className="il-back-btn" onClick={onBack}>&larr; Project Map</button>
-        <span className="il-title">{project.Name} ({projectCode}) - Issues</span>
-        <div className="il-controls">
-          <select
-            className="il-filter"
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-          >
-            <option value="">All Types</option>
-            {ISSUE_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-          <button
-            className="il-pull-btn"
-            onClick={handlePull}
-            disabled={pulling}
-          >
-            {pulling ? 'Pulling...' : 'Issue Pull'}
-          </button>
-        </div>
-      </div>
+      <CommonBar
+        title={barTitle}
+        onBack={onBack}
+        onPull={handlePull}
+        onEditChange={setEditMode}
+        nav={nav}
+        options={[
+          { label: 'V', active: showV, handler: () => setShowV((v) => !v) },
+          { label: 'F', active: showF, handler: () => setShowF((v) => !v) },
+          { label: 'R', active: showR, handler: () => setShowR((v) => !v) },
+          { label: 'A', active: showA, handler: () => setShowA((v) => !v) },
+          { label: 'D', active: showD, handler: () => setShowD((v) => !v) },
+        ]}
+      />
 
       <div className="il-grid-container">
         {loading ? (
@@ -139,18 +175,46 @@ export default function IssueList({ project, onBack }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {sorted.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length} className="il-empty">
-                    이슈가 없습니다. Issue Pull 버튼으로 가져오세요.
+                    이슈가 없습니다. Pull 버튼으로 가져오세요.
                   </td>
                 </tr>
               ) : (
-                filtered.map((issue, i) => (
+                sorted.map((issue, i) => (
                   <tr key={issue.key || i}>
-                    {columns.map((col) => (
-                      <td key={col.key}>{cellValue(issue, col)}</td>
-                    ))}
+                    {columns.map((col) => {
+                      // Key, SubKey 클릭 → 상세 팝업
+                      if (col.key === 'key' || col.key === 'subKey') {
+                        return (
+                          <td key={col.key}>
+                            <span
+                              className="il-clickable"
+                              onClick={() => setDetailIssue(issue)}
+                            >
+                              {cellValue(issue, col)}
+                            </span>
+                          </td>
+                        );
+                      }
+                      // Summary 편집모드
+                      if (col.key === 'summary' && editMode) {
+                        return (
+                          <td key={col.key}>
+                            <div
+                              className="il-summary-edit"
+                              contentEditable
+                              suppressContentEditableWarning
+                              onBlur={(e) => handleSummaryBlur(issue, e.target.textContent)}
+                            >
+                              {issue.summary || ''}
+                            </div>
+                          </td>
+                        );
+                      }
+                      return <td key={col.key}>{cellValue(issue, col)}</td>;
+                    })}
                   </tr>
                 ))
               )}
@@ -160,8 +224,18 @@ export default function IssueList({ project, onBack }) {
       </div>
 
       <div className="il-statusbar">
-        총 {filtered.length}건{filterType ? ` (${filterType} 필터)` : ''}
+        총 {sorted.length}건
       </div>
+
+      {/* Issue Detail Dialog */}
+      {detailIssue && (
+        <IssueDetailDialog
+          issue={detailIssue}
+          editMode={editMode}
+          onClose={() => setDetailIssue(null)}
+          onSave={handleDetailSave}
+        />
+      )}
     </div>
   );
 }

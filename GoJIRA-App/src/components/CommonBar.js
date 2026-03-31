@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import './CommonBar.css';
 
-export default function CommonBar({ title, onBack, onPull, onEditChange, options }) {
+export default function CommonBar({ title, onBack, onPull, onEditChange, options, nav }) {
   const [editMode, setEditMode] = useState(false);
 
   function handleEditToggle() {
@@ -14,6 +14,22 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
     <div className="cb-topbar">
       <button className="cb-back-btn" onClick={onBack}>&larr; Back</button>
       <span className="cb-title">{title}</span>
+
+      {/* 컴포넌트 네비게이션 */}
+      {(nav || []).length > 0 && (
+        <>
+          {nav.map((item) => (
+            <button
+              key={item.key}
+              className={`cb-nav-btn ${item.active ? 'cb-nav-active' : ''}`}
+              onClick={item.handler}
+            >
+              {item.label}
+            </button>
+          ))}
+          <span className="cb-divider" />
+        </>
+      )}
 
       {/* 컴포넌트별 옵션 버튼 */}
       {(options || []).length > 0 && (

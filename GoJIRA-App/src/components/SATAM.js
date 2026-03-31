@@ -525,7 +525,13 @@ function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
 
 /* ---------- 메인 SATAM 컴포넌트 ---------- */
 
-export default function SATAM({ project, onBack }) {
+const NAV_ITEMS = [
+  { key: 'issues', label: 'Issues' },
+  { key: 'relationMap', label: 'Relation Map' },
+  { key: 'satam', label: 'SATAM' },
+];
+
+export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -708,7 +714,10 @@ export default function SATAM({ project, onBack }) {
 
   /* ---------- render ---------- */
 
-  const barTitle = `${project.Name} (${projectCode}) - SATAM`;
+  const barTitle = `${project.Name} (${projectCode})`;
+  const nav = onNavigate ? NAV_ITEMS.map((n) => ({
+    ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
+  })) : [];
 
   if (loading) {
     return (
@@ -718,6 +727,7 @@ export default function SATAM({ project, onBack }) {
           onBack={onBack}
           onPull={handlePull}
           onEditChange={setEditMode}
+          nav={nav}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
             { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
@@ -738,6 +748,7 @@ export default function SATAM({ project, onBack }) {
         onBack={onBack}
         onPull={handlePull}
         onEditChange={(mode) => { setEditMode(mode); if (!mode) setEditCell(null); }}
+        nav={nav}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
           { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
