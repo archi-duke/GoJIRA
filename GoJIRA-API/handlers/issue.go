@@ -128,13 +128,33 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 	if req.PrjID != "" {
 		prjDoc := db.FindProjectByCode(ctx, req.PrjID)
 		if prjDoc != nil {
-			if issueKeys, ok := prjDoc["issues"]; ok {
+			var issueKeys []string
+			if raw, ok := prjDoc["issues"]; ok {
+				switch arr := raw.(type) {
+				case bson.A:
+					for _, v := range arr {
+						if s, ok := v.(string); ok {
+							issueKeys = append(issueKeys, s)
+						}
+					}
+				case []interface{}:
+					for _, v := range arr {
+						if s, ok := v.(string); ok {
+							issueKeys = append(issueKeys, s)
+						}
+					}
+				}
+			}
+			if len(issueKeys) > 0 {
 				prjFilter := bson.M{"key": bson.M{"$in": issueKeys}}
 				if filter != nil {
 					filter = bson.M{"$and": []bson.M{filter, prjFilter}}
 				} else {
 					filter = prjFilter
 				}
+			} else {
+				respondJSON(w, http.StatusOK, []bson.M{})
+				return
 			}
 		}
 	}
