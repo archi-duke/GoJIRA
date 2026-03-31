@@ -90,9 +90,17 @@ type PageImagesRequest struct {
 	Images []interface{} `json:"images"`
 }
 
+type JiraCodeEntry struct {
+	JiraCode string `json:"jiraCode"`
+}
+
+type JiraCodes struct {
+	Main JiraCodeEntry `json:"main"`
+}
+
 type ProjectRequest struct {
 	Name       string                 `json:"name"`
-	JiraCode   string                 `json:"jiraCode"`
+	JiraCodes  JiraCodes              `json:"jiraCodes"`
 	Schedules  []map[string]string    `json:"schedules,omitempty"`
 	Feature    string                 `json:"feature,omitempty"`
 	Architect  map[string]string      `json:"architect,omitempty"`
@@ -105,6 +113,11 @@ type ProjectRequest struct {
 	PLMCode    []string               `json:"PLMCode,omitempty"`
 	Diagrams   map[string]interface{} `json:"diagrams,omitempty"`
 	Documents  map[string]string      `json:"documents,omitempty"`
+}
+
+// MainJiraCode returns the main jira code string for convenience.
+func (r *ProjectRequest) MainJiraCode() string {
+	return r.JiraCodes.Main.JiraCode
 }
 
 type ProjectGetRequest struct {

@@ -212,7 +212,8 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		projects, _ := db.FindAllProjects(ctx, nil)
 		for _, prj := range projects {
-			if code, ok := prj["jiraCode"].(string); ok {
+			code := extractJiraCode(prj)
+			if code != "" {
 				db.RemoveIssueFromProject(ctx, code, req.Key)
 			}
 		}

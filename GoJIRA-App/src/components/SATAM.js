@@ -550,7 +550,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   const [hoverCell, setHoverCell] = useState(null); // { row: reqKey, col: designKey }
   const [detailIssue, setDetailIssue] = useState(null);
 
-  const projectCode = project.jiraCode || '';
+  const projectCode = project.jiraCodes?.main?.jiraCode || '';
 
   /* fetch issues */
   const fetchIssues = useCallback(() => {

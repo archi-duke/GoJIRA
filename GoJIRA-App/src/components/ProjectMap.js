@@ -6,6 +6,10 @@ import config from '../config';
 
 const API_BASE = config.API_BASE;
 
+function getJiraCode(p) {
+  return p?.jiraCodes?.main?.jiraCode || '';
+}
+
 const MIN_MONTH_WIDTH = 30;
 const ROW_HEIGHT = 48;
 const MILESTONE_R = 10;
@@ -95,7 +99,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...project, status: 'Deleted' }),
           }).then(() => {
-            setProjects((prev) => prev.filter((p) => p.jiraCode !== project.jiraCode));
+            setProjects((prev) => prev.filter((p) => getJiraCode(p) !== getJiraCode(project)));
           });
         }
         break;
@@ -112,7 +116,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
 
   function handleDialogSave(updated) {
     // New project (POST) vs existing (PUT)
-    const isNew = !projects.some((p) => p.jiraCode === updated.jiraCode);
+    const isNew = !projects.some((p) => getJiraCode(p) === getJiraCode(updated));
     fetch(`${API_BASE}/Project`, {
       method: isNew ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -139,7 +143,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
   function newProjectTemplate() {
     return {
       name: '',
-      jiraCode: '',
+      jiraCodes: { main: { jiraCode: '' } },
       status: 'In Progress',
       devTeam: '',
       devGroup: '',

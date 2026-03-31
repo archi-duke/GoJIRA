@@ -19,6 +19,20 @@ func decodeJSON(r *http.Request, v interface{}) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+// extractJiraCode extracts jiraCodes.main.jiraCode from a project bson.M document.
+func extractJiraCode(prj map[string]interface{}) string {
+	jiraCodes, _ := prj["jiraCodes"].(map[string]interface{})
+	if jiraCodes == nil {
+		return ""
+	}
+	main, _ := jiraCodes["main"].(map[string]interface{})
+	if main == nil {
+		return ""
+	}
+	code, _ := main["jiraCode"].(string)
+	return code
+}
+
 // parseXBody parses the XBody header as JSON.
 func parseXBody(r *http.Request, v interface{}) error {
 	xbody := r.Header.Get("XBody")

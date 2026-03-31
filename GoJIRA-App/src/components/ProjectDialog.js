@@ -49,8 +49,8 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
           <div className="dlg-grid">
             <Field label="과제명" value={form.name} editable={isEdit}
               onChange={(v) => handleChange('name', v)} />
-            <Field label="JIRA Code" value={form.jiraCode} editable={isEdit && !form._id}
-              onChange={(v) => handleChange('jiraCode', v)} />
+            <Field label="JIRA Code" value={form.jiraCodes?.main?.jiraCode || ''} editable={isEdit && !form._id}
+              onChange={(v) => setForm((prev) => ({ ...prev, jiraCodes: { main: { jiraCode: v } } }))} />
             <Field label="상태" value={form.status} editable={isEdit}
               onChange={(v) => handleChange('status', v)} />
             <Field label="Feature" value={form.feature} editable={isEdit}

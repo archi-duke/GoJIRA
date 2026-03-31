@@ -136,7 +136,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
   const canvasRef = useRef(null);
   const cardElems = useRef({});
 
-  const projectCode = project.jiraCode || '';
+  const projectCode = project.jiraCodes?.main?.jiraCode || '';
 
   /* fetch issues */
   const fetchIssues = useCallback(() => {

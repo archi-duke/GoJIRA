@@ -39,7 +39,7 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
   const [showA, setShowA] = useState(true);
   const [showD, setShowD] = useState(true);
 
-  const projectCode = project.jiraCode || '';
+  const projectCode = project.jiraCodes?.main?.jiraCode || '';
 
   const fetchIssues = useCallback(() => {
     setLoading(true);

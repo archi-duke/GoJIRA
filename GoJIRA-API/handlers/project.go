@@ -18,8 +18,9 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name == "" || req.JiraCode == "" {
-		respondError(w, http.StatusBadRequest, "name and jiraCode are required")
+	code := req.MainJiraCode()
+	if req.Name == "" || code == "" {
+		respondError(w, http.StatusBadRequest, "name and jiraCodes.main.jiraCode are required")
 		return
 	}
 
@@ -28,7 +29,7 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	doc := bson.M{
 		"name":       req.Name,
-		"jiraCode":   req.JiraCode,
+		"jiraCodes":  bson.M{"main": bson.M{"jiraCode": code}},
 		"status":     req.Status,
 		"devTeam":    req.DevTeam,
 		"devGroup":   req.DevGroup,
@@ -44,7 +45,7 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 		"createdAt":  time.Now(),
 	}
 
-	if err := db.UpsertProject(ctx, req.JiraCode, doc); err != nil {
+	if err := db.UpsertProject(ctx, code, doc); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -63,7 +64,7 @@ func ProjectGetHandler(w http.ResponseWriter, r *http.Request) {
 
 	var filter bson.M
 	if req.JiraCode != "" {
-		filter = bson.M{"jiraCode": req.JiraCode}
+		filter = bson.M{"jiraCodes.main.jiraCode": req.JiraCode}
 	}
 
 	projects, err := db.FindAllProjects(ctx, filter)
@@ -81,8 +82,9 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.JiraCode == "" {
-		respondError(w, http.StatusBadRequest, "jiraCode is required")
+	code := req.MainJiraCode()
+	if code == "" {
+		respondError(w, http.StatusBadRequest, "jiraCodes.main.jiraCode is required")
 		return
 	}
 
@@ -91,7 +93,7 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	doc := bson.M{
 		"name":       req.Name,
-		"jiraCode":   req.JiraCode,
+		"jiraCodes":  bson.M{"main": bson.M{"jiraCode": code}},
 		"status":     req.Status,
 		"devTeam":    req.DevTeam,
 		"devGroup":   req.DevGroup,
@@ -106,7 +108,7 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		"documents":  req.Documents,
 	}
 
-	if err := db.UpsertProject(ctx, req.JiraCode, doc); err != nil {
+	if err := db.UpsertProject(ctx, code, doc); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
