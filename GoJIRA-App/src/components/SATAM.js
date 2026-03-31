@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import CommonBar from './CommonBar';
+import IssueDetailDialog from './IssueDetailDialog';
 import './SATAM.css';
 
 const API_BASE = 'http://localhost:9000/api/v2';
@@ -186,6 +187,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
   const designData = dicts.byDesign[designIssue.key] || { risks: [], sensitivities: [], mitigations: [] };
   const cellInfo = getCellInfo(designIssue, reqIssue, dicts);
   const isAddMode = mode === 'add';
+  const isReadonly = mode === 'readonly';
 
   // editItem: { id, type('R'|'S'|'M'), description, counterRisk } — 수정 대상 항목
   const TYPE_MAP = { R: 'Risk', S: 'Sensitivity', M: 'Mitigation' };
@@ -341,7 +343,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
           <div className="satam-popup-label">Is</div>
           <div className="satam-popup-checks">
             {['Sensitivity', 'Risk', 'Mitigation'].map((t) => {
-              const enabled = isAddMode || enabledTypes[t];
+              const enabled = !isReadonly && (isAddMode || enabledTypes[t]);
               return (
                 <label key={t} className={`satam-popup-check ${!enabled ? 'satam-popup-disabled' : ''}`}>
                   <input
@@ -383,6 +385,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
                   <input
                     type="checkbox"
                     checked={!!counterRiskChecked[r.id]}
+                    disabled={isReadonly}
                     onChange={(e) =>
                       setCounterRiskChecked((prev) => ({ ...prev, [r.id]: e.target.checked }))
                     }
@@ -404,6 +407,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
           <textarea
             className="satam-popup-textarea"
             value={description}
+            readOnly={isReadonly}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
           />
@@ -411,8 +415,8 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
 
         {/* 버튼 */}
         <div className="satam-popup-footer">
-          <button className="satam-popup-save" onClick={handleSave}>저장</button>
-          <button className="satam-popup-cancel" onClick={onClose}>취소</button>
+          {!isReadonly && <button className="satam-popup-save" onClick={handleSave}>저장</button>}
+          <button className="satam-popup-cancel" onClick={onClose}>{isReadonly ? '닫기' : '취소'}</button>
         </div>
       </div>
     </div>
@@ -543,6 +547,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   const [editCell, setEditCell] = useState(null); // { design, req, editItem, mode }
   const [cellMenu, setCellMenu] = useState(null); // { x, y, design, req, editItem }
   const [hoverCell, setHoverCell] = useState(null); // { row: reqKey, col: designKey }
+  const [detailIssue, setDetailIssue] = useState(null);
 
   const projectCode = project.JiraCode || '';
 
@@ -857,7 +862,11 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                           const bg = isADSNnoDecision ? 'lightgray' : (SUBTYPE_COLORS[sub] || SUBTYPE_COLORS.ADSN);
                           const clr = isADSNnoDecision ? '#000' : '#fff';
                           return (
-                            <span className="satam-stair-subkey" style={{ background: bg, color: clr, fontWeight: isADSNnoDecision ? 'normal' : 700 }}>
+                            <span
+                              className="satam-stair-subkey satam-subkey-click"
+                              style={{ background: bg, color: clr, fontWeight: isADSNnoDecision ? 'normal' : 700 }}
+                              onClick={() => setDetailIssue(d)}
+                            >
                               {d.subKey}
                             </span>
                           );
@@ -880,7 +889,11 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                   <tr key={req.key}>
                     {/* 요구사항 행 헤더 */}
                     <td className={`satam-row-header ${hoverCell && hoverCell.row === req.key ? 'satam-row-hl' : ''}`}>
-                      <span className="satam-row-subkey" style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}>
+                      <span
+                        className="satam-row-subkey satam-subkey-click"
+                        style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}
+                        onClick={() => setDetailIssue(req)}
+                      >
                         {req.subKey}
                       </span>
                       <span className="satam-row-summary">{req.summary}</span>
@@ -956,7 +969,19 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                             </div>
                           ) : (
                             <div className="satam-cell-marks">
-                              {marks.map((mark) => renderMark(mark))}
+                              {marks.map((mark) => (
+                                <span
+                                  key={mark.item.id}
+                                  className="satam-mark-click"
+                                  onClick={() => setEditCell({
+                                    design: d, req,
+                                    editItem: { id: mark.item.id, type: mark.type, description: mark.item.description, counterRisk: mark.item.counterRisk || [] },
+                                    mode: 'readonly',
+                                  })}
+                                >
+                                  {renderMark(mark)}
+                                </span>
+                              ))}
                               {!hasRST && cell.hasContains && (
                                 <span className="satam-dot-contains" />
                               )}
@@ -1011,6 +1036,16 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
           })()}
           onAction={handleCellMenuAction}
           onClose={() => setCellMenu(null)}
+        />
+      )}
+
+      {/* Issue Detail Dialog */}
+      {detailIssue && (
+        <IssueDetailDialog
+          issue={detailIssue}
+          editMode={editMode}
+          onClose={() => setDetailIssue(null)}
+          onSave={handleSave}
         />
       )}
     </div>
