@@ -542,6 +542,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   const [showDDSN, setShowDDSN] = useState(true);       // D: Detailed Design 포함 (기본 ON)
   const [editCell, setEditCell] = useState(null); // { design, req, editItem, mode }
   const [cellMenu, setCellMenu] = useState(null); // { x, y, design, req, editItem }
+  const [hoverCell, setHoverCell] = useState(null); // { row: reqKey, col: designKey }
 
   const projectCode = project.JiraCode || '';
 
@@ -616,6 +617,51 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
     });
     return resolved;
   }, [designIssues, dicts]);
+
+  /* 이슈 추가 (RelationMap과 동일) */
+  const SUBKEY_PREFIX = {
+    QA: 'QA', CNST: 'CNST', FR: 'FR',
+    ADSN: 'ADSN', DDSN: 'DDSN',
+  };
+
+  function getNextSubKey(subtype) {
+    const prefix = (SUBKEY_PREFIX[subtype] || subtype) + '_';
+    let maxNum = 0;
+    issues.forEach((i) => {
+      const sk = i.subKey || '';
+      if (sk.startsWith(prefix)) {
+        const num = parseInt(sk.substring(prefix.length), 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      }
+    });
+    return prefix + String(maxNum + 1).padStart(3, '0');
+  }
+
+  async function addIssue(subtype) {
+    let issueType, reqtype = '';
+    switch (subtype) {
+      case 'FR': case 'QA': case 'CNST':
+        issueType = 'Requirement'; reqtype = subtype; break;
+      case 'ADSN': issueType = 'Architectueral Design'; break;
+      case 'DDSN': issueType = 'Detaied Design'; break;
+      default: issueType = subtype;
+    }
+    const subKey = getNextSubKey(subtype);
+    try {
+      await fetch(`${API_BASE}/Issue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
+          labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
+          subKey,
+        }),
+      });
+      fetchIssues();
+    } catch (err) {
+      alert('이슈 생성 실패: ' + err.message);
+    }
+  }
 
   /* 이슈 업데이트 */
   async function handleSave(key, data) {
@@ -765,7 +811,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
             <colgroup>
               <col className="satam-col-req" />
               {designIssues.map((d) => (
-                <col key={d.key} className="satam-col-design" />
+                <col key={d.key} className={`satam-col-design ${hoverCell && hoverCell.col === d.key ? 'satam-col-hl' : ''}`} />
               ))}
               {/* 라벨 확장용 여분 컬럼 */}
               <col className="satam-col-extra" />
@@ -779,7 +825,20 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                     {/* 첫 번째 디자인 행에서만 rowSpan으로 좌상단 빈칸 */}
                     {idx === 0 && (
                       <th className="satam-corner" rowSpan={designIssues.length}>
-                      Project : {project.Name}
+                      {editMode && (
+                        <div className="satam-corner-top-right">
+                          <button className="satam-corner-btn" onClick={() => addIssue('ADSN')}>+ADSN</button>
+                          <button className="satam-corner-btn" onClick={() => addIssue('DDSN')}>+DDSN</button>
+                        </div>
+                      )}
+                      <span className="satam-corner-label">Project : {project.Name}</span>
+                      {editMode && (
+                        <div className="satam-corner-bottom-left">
+                          <button className="satam-corner-btn" onClick={() => addIssue('QA')}>+QA</button>
+                          <button className="satam-corner-btn" onClick={() => addIssue('FR')}>+FR</button>
+                          <button className="satam-corner-btn" onClick={() => addIssue('CNST')}>+CNST</button>
+                        </div>
+                      )}
                     </th>
                     )}
                     {/* 이 디자인 컬럼 앞의 빈 셀들 (개별 셀로 테두리 표시) */}
@@ -792,9 +851,17 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                       className={`satam-stair-cell ${isLast ? 'satam-stair-cell-last' : ''}`}
                     >
                       <div className="satam-stair-label">
-                        <span className="satam-stair-subkey" style={{ background: SUBTYPE_COLORS[getSubtype(d)] || SUBTYPE_COLORS.ADSN }}>
-                          {d.subKey}
-                        </span>
+                        {(() => {
+                          const sub = getSubtype(d);
+                          const isADSNnoDecision = sub === 'ADSN' && (!d.decision || d.decision === '');
+                          const bg = isADSNnoDecision ? 'lightgray' : (SUBTYPE_COLORS[sub] || SUBTYPE_COLORS.ADSN);
+                          const clr = isADSNnoDecision ? '#000' : '#fff';
+                          return (
+                            <span className="satam-stair-subkey" style={{ background: bg, color: clr, fontWeight: isADSNnoDecision ? 'normal' : 700 }}>
+                              {d.subKey}
+                            </span>
+                          );
+                        })()}
                         <span className="satam-stair-summary">{d.summary}</span>
                       </div>
                     </td>
@@ -812,7 +879,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                 return (
                   <tr key={req.key}>
                     {/* 요구사항 행 헤더 */}
-                    <td className="satam-row-header">
+                    <td className={`satam-row-header ${hoverCell && hoverCell.row === req.key ? 'satam-row-hl' : ''}`}>
                       <span className="satam-row-subkey" style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}>
                         {req.subKey}
                       </span>
@@ -847,8 +914,15 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                         </span>
                       );
 
+                      const hasContent = marks.length > 0 || cell.hasContains;
+
                       return (
-                        <td key={d.key} className="satam-cell">
+                        <td
+                          key={d.key}
+                          className={`satam-cell ${hoverCell && hoverCell.row === req.key ? 'satam-cell-hl' : ''}`}
+                          onMouseEnter={hasContent ? () => setHoverCell({ row: req.key, col: d.key }) : undefined}
+                          onMouseLeave={hasContent ? () => setHoverCell(null) : undefined}
+                        >
                           {editMode ? (
                             <div className="satam-cell-edit">
                               {marks.length > 0 ? marks.map((mark) => (

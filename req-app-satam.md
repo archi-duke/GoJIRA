@@ -28,7 +28,7 @@ relation map과 공통된 기능들이 있으니 참조하자. (공통기능을 
 ## 구현 사양
 
 ### 1. 테이블 축 구성
-- 가로축(컬럼): Design 이슈 (Architectueral Design = ADSN)
+- 가로축(컬럼): Design 이슈 (Architectueral Design = ADSN, Detaied Design = DDSN)
 - 세로축(행): Requirement 이슈 (QA, FR, CNST)
 
 ### 2. 정렬
@@ -36,27 +36,43 @@ relation map과 공통된 기능들이 있으니 참조하자. (공통기능을 
 
 ### 3. 교차 셀 표시 규칙
 - 셀 내부에 라운드 사각형(border-radius: 3px)으로 마크 표시
-    3.1. 디자인의 risk에 해당 행의 requirement key가 등록된 경우, 해당 risk의 ID를 빨강(#e83a1e)으로 표시
-    3.2. 디자인의 sensitivity에 해당 행의 requirement key가 등록된 경우, 해당 sensitivity의 ID를 파랑(#4cafe8)으로 표시
-    3.3. 디자인의 trade-off에 해당 행의 requirement key가 등록된 경우, 해당 trade-off의 ID를 주황(#ff9a1e)으로 표시
+- 마크 색상: Risk = 빨강(#e83a1e), Sensitivity = 주황(#ff9a1e), Mitigation = 파랑(#4cafe8)
+    3.1. 디자인의 risk에 해당 행의 requirement key가 등록된 경우, 해당 risk의 ID를 빨강으로 표시
+    3.2. 디자인의 sensitivity에 해당 행의 requirement key가 등록된 경우, 해당 sensitivity의 ID를 주황으로 표시
+    3.3. 디자인의 trade-off에 해당 행의 requirement key가 등록된 경우, 해당 trade-off의 ID를 파랑으로 표시
     3.4. 같은 타입이 여러 개인 경우(예: R1, R2)에도 각각 개별 마크로 나누어 표시한다 (하나로 합치지 않음)
-    3.5. 둘 이상 중복 시 Risk > Sensitivity > Trade-off 우선순위로 위에서 아래로 세로 나열한다
+    3.5. 둘 이상 중복 시 Risk > Sensitivity > Mitigation 우선순위로 위에서 아래로 세로 나열한다
     3.6. requirement의 issueLink에 해당 design이 contains로 연결된 경우:
          - R/S/M이 없으면 검은색 원(10px)을 표시
          - R/S/M이 있으면 해당 마크에 3px 두께의 검은 테두리를 그린다
     3.7. 위의 모든 경우에 해당되지 않으면 빈칸으로 둔다
 - Counter Risk에서 체크된(mitigate된) risk의 ID는 전체 테이블에서 취소선(line-through)으로 표시한다
   (셀 마크 + 하단 Effects 테이블 ID 컬럼 모두 적용)
+- 마크가 있는 셀에 마우스를 올리면 해당 행/열에 연한 음영 하이라이트 표시
+  (행: row-hl/cell-hl, 열: colgroup col 하이라이트)
 
 ### 4. CommonBar
 - relation map과 동일한 방식으로 배치
-- 옵션 버튼: A(ASR 필터), R(Reserved 필터)
+- 네비게이션 탭: Issues / Relation Map / SATAM (현재 페이지 활성 표시, 클릭 시 전환)
+- 옵션 버튼:
+  - A: ASR 필터 (ASR 라벨 있는 Requirement만)
+  - F: FR 포함/제외 (기본 ON)
+  - S: 최종설계안만 (Decision 내용이 있는 ADSN만)
+  - D: Detailed Design(DDSN) 포함/제외 (기본 ON)
+  - R: Reserved 숨기기
 - Pull, 편집모드 토글
 
 ### 5. 편집모드
 
 편집모드가 되면 모든 교차 셀을 기본 버튼 형식(lightgray 배경, 흰색 안쪽 경계선)으로 배치한다.
 3.4에 해당하는 경우(중복 타입) 각각의 타입을 별도 버튼으로 표시한다.
+
+#### 5.0 이슈 추가 버튼
+편집모드 시 테이블 좌상단 코너 셀(1,1)에 이슈 추가 버튼을 배치한다.
+- 우상단: +ADSN, +DDSN 버튼 (디자인 이슈 추가)
+- 좌하단: +QA, +FR, +CNST 버튼 (요구사항 이슈 추가)
+- 중앙: Project 이름 유지
+- 이슈 생성은 RelationMap과 동일한 방식 (서브키 자동 채번, 비동기 JIRA 생성)
 
 #### 5.1 수정 팝업
 셀의 마크 버튼을 왼쪽 클릭하면 컨텍스트 메뉴(5.4)가 뜨고, "수정"을 선택하면 아래 팝업이 열린다.
@@ -81,7 +97,7 @@ Counter-Risk:
 
 Description
 -------------------------------------------------
-| risk, sensitivity, trade-off의 내용              |
+| risk, sensitivity, mitigation의 내용             |
 -------------------------------------------------
 ```
 
@@ -112,22 +128,32 @@ Description
 - 각 디자인 행이 해당 컬럼 위치부터 오른쪽 끝까지 colSpan으로 병합하여 [SubKey] Summary를 가로로 표시
 - 테두리: 각 라벨 셀에 ┌ 형태(border-left + border-top), 빈 셀에 세로선(border-right)만 표시
 - 디자인 컬럼 우측에 라벨 확장용 여분 컬럼 1개 배치
+- ADSN subkey 표시: decision이 있으면 파란색 배경+흰 글자+볼드, 없으면 lightgray 배경+검정 글자+노멀
+- DDSN subkey: 보라색(#7030a0) 배경
 
-### 7. 하단 표시
-- Effects Legend: Contains(검은 원), Sensitivity(파랑), Risk(빨강), Mitigation(주황) 범례
+### 7. 세로축 행 헤더
+- Requirement subkey 표시: 타입별 색상 (QA/FR/CNST = #e83a1e)
+- FR인데 ASR 라벨이 없는 경우: 연한 빨강(#ffb4b4) 배경 + 검정 글자 (RelationMap과 동일)
+- ASR 라벨 있으면 볼드 처리
+
+### 8. 하단 표시
+- Effects Legend: Contains(검은 원), Sensitivity(주황), Risk(빨강), Mitigation(파랑) 범례
 - Effects Table: 전체 디자인의 R/S/M 항목을 Counter Strategy / Type / Description 컬럼으로 표시
-  mitigate된 Risk 행의 ID에 취소선 적용
+  - 1, 2번째 컬럼: 내용에 맞춘 최소 폭, 가운데 정렬
+  - mitigate된 Risk 행의 ID에 취소선 적용
 
-### 8. 데이터 구조
+### 9. 데이터 구조
 - 디자인 이슈별 사전: `dicts.byDesign[designKey]` → { risks, sensitivities, mitigations }
 - QA별 사전: `dicts.byQA[reqKey]` → { risks, sensitivities, mitigations } (전체 디자인 대상)
 - 전역 resolved Risk ID: 모든 디자인의 mitigation counterRisk에서 수집
 - 모두 `useMemo`로 캐싱하여 성능 최적화
 
-### 9. 라우팅
+### 10. 라우팅 및 네비게이션
 - App.js에서 `page === 'satam'` 시 SATAM 컴포넌트 렌더링
 - ProjectMap의 컨텍스트 메뉴 "SATAM" 클릭으로 진입
 - `onSATAM` prop을 통해 프로젝트 정보 전달
+- CommonBar에 네비게이션 탭으로 Issues / Relation Map / SATAM 간 전환 가능
+- sessionStorage로 새로고침 시 현재 페이지 및 프로젝트 유지
 
 ![alt text](image-5.png)
 ![alt text](image-6.png)
