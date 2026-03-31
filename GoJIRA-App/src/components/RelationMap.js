@@ -136,7 +136,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
   const canvasRef = useRef(null);
   const cardElems = useRef({});
 
-  const projectCode = project.JiraCode || '';
+  const projectCode = project.jiraCode || '';
 
   /* fetch issues */
   const fetchIssues = useCallback(() => {
@@ -433,7 +433,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
 
   /* ---------- render ---------- */
 
-  const barTitle = `${project.Name} (${projectCode})`;
+  const barTitle = `${project.name} (${projectCode})`;
   const nav = onNavigate ? NAV_ITEMS.map((n) => ({
     ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
   })) : [];

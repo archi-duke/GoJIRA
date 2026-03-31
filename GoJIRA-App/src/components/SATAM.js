@@ -550,7 +550,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   const [hoverCell, setHoverCell] = useState(null); // { row: reqKey, col: designKey }
   const [detailIssue, setDetailIssue] = useState(null);
 
-  const projectCode = project.JiraCode || '';
+  const projectCode = project.jiraCode || '';
 
   /* fetch issues */
   const fetchIssues = useCallback(() => {
@@ -787,7 +787,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
 
   /* ---------- render ---------- */
 
-  const barTitle = `${project.Name} (${projectCode})`;
+  const barTitle = `${project.name} (${projectCode})`;
   const nav = onNavigate ? NAV_ITEMS.map((n) => ({
     ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
   })) : [];
@@ -858,7 +858,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                           <button className="satam-corner-btn" onClick={() => addIssue('DDSN')}>+DDSN</button>
                         </div>
                       )}
-                      <span className="satam-corner-label">Project : {project.Name}</span>
+                      <span className="satam-corner-label">Project : {project.name}</span>
                       {editMode && (
                         <div className="satam-corner-bottom-left">
                           <button className="satam-corner-btn" onClick={() => addIssue('QA')}>+QA</button>

@@ -19,7 +19,7 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "" || req.JiraCode == "" {
-		respondError(w, http.StatusBadRequest, "Name and JiraCode are required")
+		respondError(w, http.StatusBadRequest, "name and jiraCode are required")
 		return
 	}
 
@@ -27,21 +27,21 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	doc := bson.M{
-		"Name":      req.Name,
-		"JiraCode":  req.JiraCode,
-		"State":     req.State,
-		"DevTeam":   req.DevTeam,
-		"DevGroup":  req.DevGroup,
-		"Members":   req.Members,
-		"Feature":   req.Feature,
-		"Architect": req.Architect,
-		"PL":        req.PL,
-		"Schedules": req.Schedules,
-		"Filter":    req.Filter,
-		"PLMCode":   req.PLMCode,
-		"Diagrams":  req.Diagrams,
-		"Documents": req.Documents,
-		"createdAt": time.Now(),
+		"name":       req.Name,
+		"jiraCode":   req.JiraCode,
+		"status":     req.Status,
+		"devTeam":    req.DevTeam,
+		"devGroup":   req.DevGroup,
+		"members":    req.Members,
+		"feature":    req.Feature,
+		"architect":  req.Architect,
+		"PL":         req.PL,
+		"schedules":  req.Schedules,
+		"issueQuery": req.IssueQuery,
+		"PLMCode":    req.PLMCode,
+		"diagrams":   req.Diagrams,
+		"documents":  req.Documents,
+		"createdAt":  time.Now(),
 	}
 
 	if err := db.UpsertProject(ctx, req.JiraCode, doc); err != nil {
@@ -63,7 +63,7 @@ func ProjectGetHandler(w http.ResponseWriter, r *http.Request) {
 
 	var filter bson.M
 	if req.JiraCode != "" {
-		filter = bson.M{"JiraCode": req.JiraCode}
+		filter = bson.M{"jiraCode": req.JiraCode}
 	}
 
 	projects, err := db.FindAllProjects(ctx, filter)
@@ -82,7 +82,7 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.JiraCode == "" {
-		respondError(w, http.StatusBadRequest, "JiraCode is required")
+		respondError(w, http.StatusBadRequest, "jiraCode is required")
 		return
 	}
 
@@ -90,20 +90,20 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	doc := bson.M{
-		"Name":      req.Name,
-		"JiraCode":  req.JiraCode,
-		"State":     req.State,
-		"DevTeam":   req.DevTeam,
-		"DevGroup":  req.DevGroup,
-		"Members":   req.Members,
-		"Feature":   req.Feature,
-		"Architect": req.Architect,
-		"PL":        req.PL,
-		"Schedules": req.Schedules,
-		"Filter":    req.Filter,
-		"PLMCode":   req.PLMCode,
-		"Diagrams":  req.Diagrams,
-		"Documents": req.Documents,
+		"name":       req.Name,
+		"jiraCode":   req.JiraCode,
+		"status":     req.Status,
+		"devTeam":    req.DevTeam,
+		"devGroup":   req.DevGroup,
+		"members":    req.Members,
+		"feature":    req.Feature,
+		"architect":  req.Architect,
+		"PL":         req.PL,
+		"schedules":  req.Schedules,
+		"issueQuery": req.IssueQuery,
+		"PLMCode":    req.PLMCode,
+		"diagrams":   req.Diagrams,
+		"documents":  req.Documents,
 	}
 
 	if err := db.UpsertProject(ctx, req.JiraCode, doc); err != nil {

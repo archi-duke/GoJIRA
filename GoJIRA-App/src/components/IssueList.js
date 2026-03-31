@@ -6,6 +6,9 @@ import './IssueList.css';
 
 const API_BASE = config.API_BASE;
 
+const STATUS_OPTIONS = ['To Do', 'In Progress', 'Done'];
+const PRIORITY_OPTIONS = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];
+
 const NAV_ITEMS = [
   { key: 'issues', label: 'Issues' },
   { key: 'relationMap', label: 'Relation Map' },
@@ -36,7 +39,7 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
   const [showA, setShowA] = useState(true);
   const [showD, setShowD] = useState(true);
 
-  const projectCode = project.JiraCode || '';
+  const projectCode = project.jiraCode || '';
 
   const fetchIssues = useCallback(() => {
     setLoading(true);
@@ -135,6 +138,20 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
       .catch((err) => alert('수정 실패: ' + err.message));
   }
 
+  function handleSelectChange(issue, field, newName) {
+    const oldVal = issue[field];
+    const oldName = oldVal && typeof oldVal === 'object' ? oldVal.name : oldVal || '';
+    if (newName === oldName) return;
+    const newVal = { ...(typeof oldVal === 'object' ? oldVal : {}), name: newName };
+    fetch(`${API_BASE}/Issue`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: issue.key, data: { [field]: newVal } }),
+    })
+      .then(() => setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, [field]: newVal } : i))))
+      .catch((err) => alert('수정 실패: ' + err.message));
+  }
+
   const columns = [
     { key: 'key', label: 'Key', width: 120 },
     { key: 'subKey', label: 'SubKey', width: 100 },
@@ -153,7 +170,7 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
     return v || '';
   }
 
-  const barTitle = `${project.Name} (${projectCode})`;
+  const barTitle = `${project.name} (${projectCode})`;
   const nav = onNavigate ? NAV_ITEMS.map((n) => ({
     ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
   })) : [];
@@ -239,6 +256,36 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
                             >
                               {issue.summary || ''}
                             </div>
+                          </td>
+                        );
+                      }
+                      // Status 편집모드
+                      if (col.key === 'status' && editMode) {
+                        const cur = issue.status && typeof issue.status === 'object' ? issue.status.name : issue.status || '';
+                        return (
+                          <td key={col.key}>
+                            <select
+                              className="il-select"
+                              value={cur}
+                              onChange={(e) => handleSelectChange(issue, 'status', e.target.value)}
+                            >
+                              {STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </td>
+                        );
+                      }
+                      // Priority 편집모드
+                      if (col.key === 'priority' && editMode) {
+                        const cur = issue.priority && typeof issue.priority === 'object' ? issue.priority.name : issue.priority || '';
+                        return (
+                          <td key={col.key}>
+                            <select
+                              className="il-select"
+                              value={cur}
+                              onChange={(e) => handleSelectChange(issue, 'priority', e.target.value)}
+                            >
+                              {PRIORITY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
                           </td>
                         );
                       }

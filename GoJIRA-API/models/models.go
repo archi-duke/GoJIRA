@@ -91,20 +91,20 @@ type PageImagesRequest struct {
 }
 
 type ProjectRequest struct {
-	Name      string                 `json:"Name"`
-	JiraCode  string                 `json:"JiraCode"`
-	Schedules []map[string]string    `json:"Schedules,omitempty"`
-	Feature   string                 `json:"Feature,omitempty"`
-	Architect map[string]string      `json:"Architect,omitempty"`
-	PL        map[string]string      `json:"PL,omitempty"`
-	DevTeam   string                 `json:"DevTeam,omitempty"`
-	DevGroup  string                 `json:"DevGroup,omitempty"`
-	Members   []string               `json:"Members,omitempty"`
-	State     string                 `json:"State,omitempty"`
-	Filter    string                 `json:"Filter,omitempty"`
-	PLMCode   []string               `json:"PLMCode,omitempty"`
-	Diagrams  map[string]interface{} `json:"Diagrams,omitempty"`
-	Documents map[string]string      `json:"Documents,omitempty"`
+	Name       string                 `json:"name"`
+	JiraCode   string                 `json:"jiraCode"`
+	Schedules  []map[string]string    `json:"schedules,omitempty"`
+	Feature    string                 `json:"feature,omitempty"`
+	Architect  map[string]string      `json:"architect,omitempty"`
+	PL         map[string]string      `json:"PL,omitempty"`
+	DevTeam    string                 `json:"devTeam,omitempty"`
+	DevGroup   string                 `json:"devGroup,omitempty"`
+	Members    []string               `json:"members,omitempty"`
+	Status     string                 `json:"status,omitempty"`
+	IssueQuery string                 `json:"issueQuery,omitempty"`
+	PLMCode    []string               `json:"PLMCode,omitempty"`
+	Diagrams   map[string]interface{} `json:"diagrams,omitempty"`
+	Documents  map[string]string      `json:"documents,omitempty"`
 }
 
 type ProjectGetRequest struct {

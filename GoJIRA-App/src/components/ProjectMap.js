@@ -89,13 +89,13 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
         setDialog({ project, mode: 'edit' });
         break;
       case 'delete':
-        if (window.confirm(`"${project.Name}" 과제를 삭제하시겠습니까?`)) {
+        if (window.confirm(`"${project.name}" 과제를 삭제하시겠습니까?`)) {
           fetch(`${API_BASE}/Project`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...project, State: 'Deleted' }),
+            body: JSON.stringify({ ...project, status: 'Deleted' }),
           }).then(() => {
-            setProjects((prev) => prev.filter((p) => p.JiraCode !== project.JiraCode));
+            setProjects((prev) => prev.filter((p) => p.jiraCode !== project.jiraCode));
           });
         }
         break;
@@ -112,7 +112,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
 
   function handleDialogSave(updated) {
     // New project (POST) vs existing (PUT)
-    const isNew = !projects.some((p) => p.JiraCode === updated.JiraCode);
+    const isNew = !projects.some((p) => p.jiraCode === updated.jiraCode);
     fetch(`${API_BASE}/Project`, {
       method: isNew ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -138,16 +138,16 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
 
   function newProjectTemplate() {
     return {
-      Name: '',
-      JiraCode: '',
-      State: 'In Progress',
-      DevTeam: '',
-      DevGroup: '',
-      Feature: '',
-      Members: [],
-      Architect: { Name: '', KnoxID: '', Department: '' },
-      PL: { Name: '', KnoxID: '', Department: '' },
-      Schedules: [
+      name: '',
+      jiraCode: '',
+      status: 'In Progress',
+      devTeam: '',
+      devGroup: '',
+      feature: '',
+      members: [],
+      architect: { name: '', knoxID: '', department: '' },
+      PL: { name: '', knoxID: '', department: '' },
+      schedules: [
         { PA: '' }, { EA: '' }, { ER1: '' }, { ER2: '' }, { CA: '' },
       ],
       PLMCode: [],
@@ -163,11 +163,11 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
 
   // 21: Sort projects
   function getFirstDate(p) {
-    const s = (p.Schedules || [])[0];
+    const s = (p.schedules || [])[0];
     return s ? toDate(Object.values(s)[0]) : new Date(0);
   }
   function getLastDate(p) {
-    const arr = p.Schedules || [];
+    const arr = p.schedules || [];
     const s = arr[arr.length - 1];
     return s ? toDate(Object.values(s)[0]) : new Date(0);
   }
@@ -177,8 +177,8 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
     switch (sortKey) {
       case 'startDate': cmp = getFirstDate(a) - getFirstDate(b); break;
       case 'endDate': cmp = getLastDate(a) - getLastDate(b); break;
-      case 'name': cmp = (a.Name || '').localeCompare(b.Name || ''); break;
-      case 'dept': cmp = (a.DevTeam || '').localeCompare(b.DevTeam || ''); break;
+      case 'name': cmp = (a.name || '').localeCompare(b.name || ''); break;
+      case 'dept': cmp = (a.devTeam || '').localeCompare(b.devTeam || ''); break;
       default: cmp = 0;
     }
     return sortAsc ? cmp : -cmp;
@@ -186,7 +186,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
 
   const allDates = [];
   sortedProjects.forEach((p) => {
-    (p.Schedules || []).forEach((s) => {
+    (p.schedules || []).forEach((s) => {
       const val = Object.values(s)[0];
       if (val) allDates.push(toDate(val));
     });
@@ -217,7 +217,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
   // Estimate max project name width (~7px per char) + margin
   let leftPadding = 0;
   sortedProjects.forEach((p) => {
-    const nameWidth = (p.Name || '').length * 7 + 16;
+    const nameWidth = (p.name || '').length * 7 + 16;
     if (nameWidth > leftPadding) leftPadding = nameWidth;
   });
 
@@ -364,9 +364,9 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
               className="pm-sidebar-row pm-sidebar-clickable"
               style={{ height: ROW_HEIGHT }}
               onClick={() => onProjectClick && onProjectClick(p)}
-              title={`${p.Name} 이슈 보기`}
+              title={`${p.name} 이슈 보기`}
             >
-              {p.Name}
+              {p.name}
             </div>
           ))}
         </div>
@@ -421,9 +421,9 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
               {sortedProjects.map((p, rowIdx) => {
                 const now = new Date();
                 // 18: Status === "Done" -> completed
-                const isCompleted = (p.State || '').toLowerCase() === 'done';
+                const isCompleted = (p.status || '').toLowerCase() === 'done';
                 // 19: overdue = last milestone passed but not Done
-                const scheds = (p.Schedules || []);
+                const scheds = (p.schedules || []);
                 const lastDate = scheds.length > 0
                   ? scheds.reduce((max, s) => {
                       const d = toDate(Object.values(s)[0]);
@@ -582,7 +582,7 @@ function RangeSlider({ viewRange, onChange }) {
 
 // --- Project Row ---
 function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, onContextMenu, onProjectClick }) {
-  const schedules = project.Schedules || [];
+  const schedules = project.schedules || [];
   const allMilestones = schedules
     .map((s) => {
       const name = Object.keys(s)[0];
@@ -613,7 +613,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
           className="pm-offscreen-indicator"
         />
         <text x={14} y={y + 4} className="pm-prj-name-off">
-          {project.Name}
+          {project.name}
         </text>
       </g>
     );
@@ -626,7 +626,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
           className="pm-offscreen-indicator"
         />
         <text x={totalWidth - 14} y={y + 4} textAnchor="end" className="pm-prj-name-off">
-          {project.Name}
+          {project.name}
         </text>
       </g>
     );
@@ -702,7 +702,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
       {/* Project name (rendered last = on top) with white background */}
       {(() => {
         const nameX = firstX - MILESTONE_R - 10;
-        const nameW = (project.Name || '').length * 8 + 8;
+        const nameW = (project.name || '').length * 8 + 8;
         return (
           <>
             <rect
@@ -723,7 +723,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
               style={{ cursor: 'pointer' }}
               onClick={() => onProjectClick && onProjectClick(project)}
             >
-              {project.Name}
+              {project.name}
             </text>
           </>
         );

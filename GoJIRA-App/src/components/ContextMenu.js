@@ -25,7 +25,7 @@ export default function ContextMenu({ x, y, project, onClose, onAction }) {
 
   return (
     <div className="ctx-menu" style={{ left: x, top: y }} ref={ref}>
-      <div className="ctx-menu-header">{project.Name}</div>
+      <div className="ctx-menu-header">{project.name}</div>
       {menuItems.map((item, i) =>
         item.key === 'divider' ? (
           <div key={i} className="ctx-menu-divider" />

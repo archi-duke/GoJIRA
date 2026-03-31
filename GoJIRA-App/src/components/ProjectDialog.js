@@ -20,10 +20,10 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
   }
 
   function handleScheduleChange(idx, value) {
-    const schedules = [...(form.Schedules || [])];
+    const schedules = [...(form.schedules || [])];
     const key = Object.keys(schedules[idx])[0];
     schedules[idx] = { [key]: value };
-    setForm((prev) => ({ ...prev, Schedules: schedules }));
+    setForm((prev) => ({ ...prev, schedules: schedules }));
   }
 
   function handleSubmit() {
@@ -31,8 +31,8 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
     onClose();
   }
 
-  const schedules = form.Schedules || [];
-  const architect = form.Architect || {};
+  const schedules = form.schedules || [];
+  const architect = form.architect || {};
   const pl = form.PL || {};
 
   return (
@@ -47,27 +47,27 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
           {/* Basic Info */}
           <div className="dlg-section">기본 정보</div>
           <div className="dlg-grid">
-            <Field label="과제명" value={form.Name} editable={isEdit}
-              onChange={(v) => handleChange('Name', v)} />
-            <Field label="JIRA Code" value={form.JiraCode} editable={isEdit && !form._id}
-              onChange={(v) => handleChange('JiraCode', v)} />
-            <Field label="상태" value={form.State} editable={isEdit}
-              onChange={(v) => handleChange('State', v)} />
-            <Field label="Feature" value={form.Feature} editable={isEdit}
-              onChange={(v) => handleChange('Feature', v)} />
-            <Field label="개발팀" value={form.DevTeam} editable={isEdit}
-              onChange={(v) => handleChange('DevTeam', v)} />
-            <Field label="개발그룹" value={form.DevGroup} editable={isEdit}
-              onChange={(v) => handleChange('DevGroup', v)} />
+            <Field label="과제명" value={form.name} editable={isEdit}
+              onChange={(v) => handleChange('name', v)} />
+            <Field label="JIRA Code" value={form.jiraCode} editable={isEdit && !form._id}
+              onChange={(v) => handleChange('jiraCode', v)} />
+            <Field label="상태" value={form.status} editable={isEdit}
+              onChange={(v) => handleChange('status', v)} />
+            <Field label="Feature" value={form.feature} editable={isEdit}
+              onChange={(v) => handleChange('feature', v)} />
+            <Field label="개발팀" value={form.devTeam} editable={isEdit}
+              onChange={(v) => handleChange('devTeam', v)} />
+            <Field label="개발그룹" value={form.devGroup} editable={isEdit}
+              onChange={(v) => handleChange('devGroup', v)} />
           </div>
 
           {/* People */}
           <div className="dlg-section">담당자</div>
           <div className="dlg-grid">
-            <Field label="Architect" value={architect.Name || ''} editable={false} />
-            <Field label="PL" value={pl.Name || ''} editable={false} />
+            <Field label="Architect" value={architect.name || ''} editable={false} />
+            <Field label="PL" value={pl.name || ''} editable={false} />
             <Field label="Members"
-              value={(form.Members || []).join(', ')} editable={false} />
+              value={(form.members || []).join(', ')} editable={false} />
           </div>
 
           {/* Schedules */}

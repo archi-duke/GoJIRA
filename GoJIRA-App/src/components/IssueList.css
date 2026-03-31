@@ -74,6 +74,21 @@
   background: #f8fbff;
 }
 
+/* Status, Priority 드롭다운 */
+.il-select {
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 12px;
+  background: #fff;
+  cursor: pointer;
+}
+.il-select:focus {
+  border-color: #2980b9;
+  outline: none;
+}
+
 /* 삭제 버튼 */
 .il-delete-cell {
   text-align: center;
