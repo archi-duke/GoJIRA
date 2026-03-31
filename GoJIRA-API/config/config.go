@@ -1,11 +1,20 @@
 package config
 
-const (
-	ServerPort   = ":9000"
-	JiraMockURL  = "http://localhost:8000"
-	JiraAPIBase  = "/rest/api/2"
-	MongoURI     = "mongodb://localhost:27017"
-	MongoDB      = "gojira"
-	CacheDir     = "./cache"
-	ProjectsFile = "./cache/projects.json"
+import "os"
+
+var (
+	ServerPort   = envOrDefault("GOJIRA_SERVER_PORT", ":9000")
+	JiraMockURL  = envOrDefault("GOJIRA_JIRA_URL", "http://localhost:8000")
+	JiraAPIBase  = envOrDefault("GOJIRA_JIRA_API_BASE", "/rest/api/2")
+	MongoURI     = envOrDefault("GOJIRA_MONGO_URI", "mongodb://localhost:27017")
+	MongoDB      = envOrDefault("GOJIRA_MONGO_DB", "gojira")
+	CacheDir     = envOrDefault("GOJIRA_CACHE_DIR", "./cache")
+	ProjectsFile = envOrDefault("GOJIRA_PROJECTS_FILE", "./cache/projects.json")
 )
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
