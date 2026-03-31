@@ -2553,51 +2553,6 @@
                     }
                 },
                 {
-                    "id": "10027",
-                    "type": {
-                        "name": "Contains(WBSGantt)"
-                    },
-                    "outwardIssue": {
-                        "id": "10003",
-                        "key": "GOJIRA-16",
-                        "self": "https://dukekimm.atlassian.net/rest/api/3/issue/10003",
-                        "fields": {
-                            "summary": "통합 통신 프레임워크 제공",
-                            "status": {
-                                "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
-                                "description": "",
-                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/statuses/generic.png",
-                                "name": "To Do",
-                                "id": "10000",
-                                "statusCategory": {
-                                    "self": "https://dukekimm.atlassian.net/rest/api/3/statuscategory/2",
-                                    "id": 2,
-                                    "key": "new",
-                                    "colorName": "blue-gray",
-                                    "name": "To Do"
-                                }
-                            },
-                            "priority": {
-                                "self": "https://dukekimm.atlassian.net/rest/api/3/priority/3",
-                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/priorities/medium_new.svg",
-                                "name": "Medium",
-                                "id": "3"
-                            },
-                            "issuetype": {
-                                "self": "https://dukekimm.atlassian.net/rest/api/3/issuetype/10003",
-                                "id": "10003",
-                                "description": "Tasks track small, distinct pieces of work.",
-                                "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
-                                "name": "Requirement",
-                                "subtask": false,
-                                "avatarId": 10318,
-                                "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
-                                "hierarchyLevel": 0
-                            }
-                        }
-                    }
-                },
-                {
                     "id": "10028",
                     "type": {
                         "name": "Contains(WBSGantt)"
@@ -2686,10 +2641,55 @@
                             }
                         }
                     }
+                },
+                {
+                    "id": "10046",
+                    "type": {
+                        "name": "Contains(WBSGantt)"
+                    },
+                    "outwardIssue": {
+                        "id": "10003",
+                        "key": "GOJIRA-16",
+                        "self": "https://dukekimm.atlassian.net/rest/api/3/issue/10003",
+                        "fields": {
+                            "summary": "통합 통신 프레임워크 제공",
+                            "status": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
+                                "description": "",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/statuses/generic.png",
+                                "name": "To Do",
+                                "id": "10000",
+                                "statusCategory": {
+                                    "self": "https://dukekimm.atlassian.net/rest/api/3/statuscategory/2",
+                                    "id": 2,
+                                    "key": "new",
+                                    "colorName": "blue-gray",
+                                    "name": "To Do"
+                                }
+                            },
+                            "priority": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/priority/3",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/priorities/medium_new.svg",
+                                "name": "Medium",
+                                "id": "3"
+                            },
+                            "issuetype": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/issuetype/10003",
+                                "id": "10003",
+                                "description": "Tasks track small, distinct pieces of work.",
+                                "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+                                "name": "Requirement",
+                                "subtask": false,
+                                "avatarId": 10318,
+                                "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
+                                "hierarchyLevel": 0
+                            }
+                        }
+                    }
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:11:41.587+0900",
+            "updated": "2026-03-30T12:03:31.032+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",

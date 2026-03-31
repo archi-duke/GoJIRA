@@ -365,51 +365,6 @@
                     }
                 },
                 {
-                    "id": "10027",
-                    "type": {
-                        "name": "Contains(WBSGantt)"
-                    },
-                    "inwardIssue": {
-                        "id": "10003",
-                        "key": "GOJIRA-14",
-                        "self": "https://dukekimm.atlassian.net/rest/api/3/issue/10003",
-                        "fields": {
-                            "summary": "통합 통신 프레임워크 제공",
-                            "status": {
-                                "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
-                                "description": "",
-                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/statuses/generic.png",
-                                "name": "To Do",
-                                "id": "10000",
-                                "statusCategory": {
-                                    "self": "https://dukekimm.atlassian.net/rest/api/3/statuscategory/2",
-                                    "id": 2,
-                                    "key": "new",
-                                    "colorName": "blue-gray",
-                                    "name": "To Do"
-                                }
-                            },
-                            "priority": {
-                                "self": "https://dukekimm.atlassian.net/rest/api/3/priority/3",
-                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/priorities/medium_new.svg",
-                                "name": "Medium",
-                                "id": "3"
-                            },
-                            "issuetype": {
-                                "self": "https://dukekimm.atlassian.net/rest/api/3/issuetype/10003",
-                                "id": "10003",
-                                "description": "Tasks track small, distinct pieces of work.",
-                                "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
-                                "name": "Feature",
-                                "subtask": false,
-                                "avatarId": 10318,
-                                "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
-                                "hierarchyLevel": 0
-                            }
-                        }
-                    }
-                },
-                {
                     "id": "10036",
                     "type": {
                         "name": "Contains(WBSGantt)"
@@ -453,10 +408,55 @@
                             }
                         }
                     }
+                },
+                {
+                    "id": "10046",
+                    "type": {
+                        "name": "Contains(WBSGantt)"
+                    },
+                    "inwardIssue": {
+                        "id": "10003",
+                        "key": "GOJIRA-14",
+                        "self": "https://dukekimm.atlassian.net/rest/api/3/issue/10003",
+                        "fields": {
+                            "summary": "통합 통신 프레임워크 제공",
+                            "status": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
+                                "description": "",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/statuses/generic.png",
+                                "name": "To Do",
+                                "id": "10000",
+                                "statusCategory": {
+                                    "self": "https://dukekimm.atlassian.net/rest/api/3/statuscategory/2",
+                                    "id": 2,
+                                    "key": "new",
+                                    "colorName": "blue-gray",
+                                    "name": "To Do"
+                                }
+                            },
+                            "priority": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/priority/3",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/priorities/medium_new.svg",
+                                "name": "Medium",
+                                "id": "3"
+                            },
+                            "issuetype": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/issuetype/10003",
+                                "id": "10003",
+                                "description": "Tasks track small, distinct pieces of work.",
+                                "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+                                "name": "Feature",
+                                "subtask": false,
+                                "avatarId": 10318,
+                                "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
+                                "hierarchyLevel": 0
+                            }
+                        }
+                    }
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:12:41.877+0900",
+            "updated": "2026-03-30T12:03:31.067+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -593,7 +593,9 @@
                 "name": "Medium",
                 "id": "3"
             },
-            "labels": [],
+            "labels": [
+                "ASR"
+            ],
             "environment": null,
             "duedate": null,
             "issuelinks": [
@@ -734,7 +736,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T11:04:06.073+0900",
+            "updated": "2026-03-31T14:46:11.478+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -871,9 +873,7 @@
                 "name": "Medium",
                 "id": "3"
             },
-            "labels": [
-                "ASR"
-            ],
+            "labels": [],
             "environment": null,
             "duedate": null,
             "issuelinks": [
@@ -1059,7 +1059,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:12:41.925+0900",
+            "updated": "2026-03-31T14:46:11.505+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -1197,7 +1197,7 @@
                 "id": "3"
             },
             "labels": [
-                "ASR"
+                "Reserved"
             ],
             "environment": null,
             "duedate": null,
@@ -1294,7 +1294,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:55:42.341+0900",
+            "updated": "2026-03-31T14:56:59.954+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -1313,8 +1313,7 @@
             "customfield_15235": "Client",
             "customfield_15215": "Actor",
             "customfield_12555": {
-                "id": "123",
-                "name": "FR"
+                "value": "FR"
             },
             "customfield_18204": "Structure Diagram",
             "customfield_15216": "Pre Condition",
@@ -1349,7 +1348,10 @@
             "customfield_15249": "Requirements",
             "customfield_18202": "A-Design",
             "customfield_18203": "D-Design",
-            "customfield_18201": "Tests"
+            "customfield_18201": "Tests",
+            "fields": {
+                "updated": "2026-03-30T10:55:22.229+0900"
+            }
         }
     },
     {
@@ -1761,10 +1763,55 @@
                             }
                         }
                     }
+                },
+                {
+                    "id": "10047",
+                    "type": {
+                        "name": "Contains(WBSGantt)"
+                    },
+                    "outwardIssue": {
+                        "id": "10003",
+                        "key": "GOJIRA-2",
+                        "self": "https://dukekimm.atlassian.net/rest/api/3/issue/10003",
+                        "fields": {
+                            "summary": "구조설계 2",
+                            "status": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
+                                "description": "",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/statuses/generic.png",
+                                "name": "To Do",
+                                "id": "10000",
+                                "statusCategory": {
+                                    "self": "https://dukekimm.atlassian.net/rest/api/3/statuscategory/2",
+                                    "id": 2,
+                                    "key": "new",
+                                    "colorName": "blue-gray",
+                                    "name": "To Do"
+                                }
+                            },
+                            "priority": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/priority/3",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/priorities/medium_new.svg",
+                                "name": "Medium",
+                                "id": "3"
+                            },
+                            "issuetype": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/issuetype/10003",
+                                "id": "10003",
+                                "description": "Tasks track small, distinct pieces of work.",
+                                "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+                                "name": "Architectueral Design",
+                                "subtask": false,
+                                "avatarId": 10318,
+                                "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
+                                "hierarchyLevel": 0
+                            }
+                        }
+                    }
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:12:11.685+0900",
+            "updated": "2026-03-31T14:32:51.084+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",

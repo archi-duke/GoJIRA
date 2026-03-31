@@ -264,7 +264,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:13:11.995+0900",
+            "updated": "2026-03-31T14:56:29.848+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -282,7 +282,9 @@
             "customfield_15209": "ADSN_001",
             "customfield_15235": "Client",
             "customfield_15215": "Actor",
-            "customfield_12555": "requirement_type",
+            "customfield_12555": {
+                "value": "requirement_type"
+            },
             "customfield_18204": "Structure Diagram",
             "customfield_15216": "Pre Condition",
             "customfield_15210": "Source",
@@ -303,11 +305,11 @@
             "customfield_15207": "Response Scenario",
             "customfield_18211": "Decision",
             "customfield_15204": "QAI",
-            "customfield_18212": "Sensitivity",
+            "customfield_18212": "- ID : S1\n  QA : [GOJIRA-20]\n  Description : ssss",
             "customfield_15205": "QAD",
-            "customfield_18213": "TradeOff (S)",
+            "customfield_18213": "",
             "customfield_15206": "QAS",
-            "customfield_18216": "Risk (W)",
+            "customfield_18216": "- ID : R1\n  QA : [GOJIRA-20]\n  Description : rrr",
             "customfield_18217": "quality_attribute",
             "customfield_18214": "NonRisk (C)",
             "customfield_18215": "Architectural Diagram",
@@ -491,10 +493,55 @@
                             }
                         }
                     }
+                },
+                {
+                    "id": "10047",
+                    "type": {
+                        "name": "Contains(WBSGantt)"
+                    },
+                    "inwardIssue": {
+                        "id": "10003",
+                        "key": "GOJIRA-21",
+                        "self": "https://dukekimm.atlassian.net/rest/api/3/issue/10003",
+                        "fields": {
+                            "summary": "무중단 엣지 운영 지원",
+                            "status": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
+                                "description": "",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/statuses/generic.png",
+                                "name": "To Do",
+                                "id": "10000",
+                                "statusCategory": {
+                                    "self": "https://dukekimm.atlassian.net/rest/api/3/statuscategory/2",
+                                    "id": 2,
+                                    "key": "new",
+                                    "colorName": "blue-gray",
+                                    "name": "To Do"
+                                }
+                            },
+                            "priority": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/priority/3",
+                                "iconUrl": "https://dukekimm.atlassian.net/images/icons/priorities/medium_new.svg",
+                                "name": "Medium",
+                                "id": "3"
+                            },
+                            "issuetype": {
+                                "self": "https://dukekimm.atlassian.net/rest/api/3/issuetype/10003",
+                                "id": "10003",
+                                "description": "Tasks track small, distinct pieces of work.",
+                                "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+                                "name": "Requirement",
+                                "subtask": false,
+                                "avatarId": 10318,
+                                "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
+                                "hierarchyLevel": 0
+                            }
+                        }
+                    }
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:12:41.799+0900",
+            "updated": "2026-03-31T14:32:51.049+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -858,7 +905,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "상세설계 1",
+            "summary": "상세설계 111",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/issue/KAN-4/watchers",
                 "watchCount": 0,
@@ -954,7 +1001,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:12:41.833+0900",
+            "updated": "2026-03-31T14:56:59.908+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -972,7 +1019,9 @@
             "customfield_15209": "DDSN_001",
             "customfield_15235": "Client",
             "customfield_15215": "Actor",
-            "customfield_12555": "requirement_type",
+            "customfield_12555": {
+                "value": "requirement_type"
+            },
             "customfield_18204": "Structure Diagram",
             "customfield_15216": "Pre Condition",
             "customfield_15210": "Source",
@@ -1043,7 +1092,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "상세설계 2",
+            "summary": "상세설계 222",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/issue/KAN-4/watchers",
                 "watchCount": 0,
@@ -1184,7 +1233,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T10:13:12.044+0900",
+            "updated": "2026-03-31T14:56:59.935+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -1202,7 +1251,9 @@
             "customfield_15209": "DDSN_002",
             "customfield_15235": "Client",
             "customfield_15215": "Actor",
-            "customfield_12555": "requirement_type",
+            "customfield_12555": {
+                "value": "requirement_type"
+            },
             "customfield_18204": "Structure Diagram",
             "customfield_15216": "Pre Condition",
             "customfield_15210": "Source",
@@ -1223,11 +1274,11 @@
             "customfield_15207": "Response Scenario",
             "customfield_18211": "Decision",
             "customfield_15204": "QAI",
-            "customfield_18212": "Sensitivity",
+            "customfield_18212": "",
             "customfield_15205": "QAD",
-            "customfield_18213": "TradeOff (S)",
+            "customfield_18213": "- ID : M1\n  QA : [GOJIRA-20]\n  Counter Risk : [\"R1:GOJIRA-20\"]\n  Description : mmm1111",
             "customfield_15206": "QAS",
-            "customfield_18216": "Risk (W)",
+            "customfield_18216": "",
             "customfield_18217": "quality_attribute",
             "customfield_18214": "NonRisk (C)",
             "customfield_18215": "Architectural Diagram",
@@ -1237,6 +1288,132 @@
             "customfield_18202": "A-Design",
             "customfield_18203": "D-Design",
             "customfield_18201": "Tests"
+        }
+    },
+    {
+        "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+        "id": "10006",
+        "self": "https://dukekimm.atlassian.net/rest/api/2/issue/10006",
+        "key": "JAVIS-1",
+        "fields": {
+            "issuetype": {
+                "name": "Detaied Design"
+            },
+            "components": [],
+            "project": {
+                "key": "JAVIS"
+            },
+            "description": null,
+            "resolution": null,
+            "summary": "새 이슈",
+            "watches": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/issue/JAVIS-1/watchers",
+                "watchCount": 0,
+                "isWatching": false
+            },
+            "lastViewed": "2026-03-31T14:19:30.866+0900",
+            "creator": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "subtasks": [],
+            "created": "2026-03-31T14:19:30.866+0900",
+            "reporter": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "priority": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/priority/3",
+                "name": "Medium",
+                "id": "3"
+            },
+            "labels": [],
+            "environment": null,
+            "duedate": null,
+            "issuelinks": [],
+            "assignee": null,
+            "updated": "2026-03-31T14:19:30.866+0900",
+            "status": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/status/10000",
+                "description": "",
+                "name": "To Do",
+                "id": "10000",
+                "statusCategory": {
+                    "self": "https://dukekimm.atlassian.net/rest/api/2/statuscategory/2",
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                }
+            },
+            "customfield_15209": "DDSN_004"
+        }
+    },
+    {
+        "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+        "id": "10007",
+        "self": "https://dukekimm.atlassian.net/rest/api/2/issue/10007",
+        "key": "GOJIRA-38",
+        "fields": {
+            "issuetype": {
+                "name": "Detaied Design"
+            },
+            "components": [],
+            "project": {
+                "key": "GOJIRA"
+            },
+            "description": null,
+            "resolution": null,
+            "summary": "새 이슈",
+            "watches": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/issue/GOJIRA-38/watchers",
+                "watchCount": 0,
+                "isWatching": false
+            },
+            "lastViewed": "2026-03-31T14:57:23.375+0900",
+            "creator": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "subtasks": [],
+            "created": "2026-03-31T14:57:23.375+0900",
+            "reporter": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "priority": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/priority/3",
+                "name": "Medium",
+                "id": "3"
+            },
+            "labels": [],
+            "environment": null,
+            "duedate": null,
+            "issuelinks": [],
+            "assignee": null,
+            "updated": "2026-03-31T14:57:23.375+0900",
+            "status": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/status/10000",
+                "description": "",
+                "name": "To Do",
+                "id": "10000",
+                "statusCategory": {
+                    "self": "https://dukekimm.atlassian.net/rest/api/2/statuscategory/2",
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                }
+            },
+            "customfield_15209": "DDSN_003"
         }
     }
 ]
