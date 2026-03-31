@@ -56,7 +56,7 @@ func syncDirtyToJira() {
 			}
 		}
 
-		// Sync field changes to JIRA (summary, description, labels)
+		// Sync all field changes to JIRA (including custom fields)
 		if summary, ok := fieldsMap["summary"]; ok && summary != nil {
 			_, err := jiraclient.GetIssue(key)
 			if err != nil {
@@ -73,16 +73,8 @@ func syncDirtyToJira() {
 					log.Printf("sync: create %s failed: %v", key, err)
 				}
 			} else {
-				updateFields := make(map[string]interface{})
-				if s, ok := fieldsMap["summary"]; ok {
-					updateFields["summary"] = s
-				}
-				if d, ok := fieldsMap["description"]; ok {
-					updateFields["description"] = d
-				}
-				if l, ok := fieldsMap["labels"]; ok {
-					updateFields["labels"] = l
-				}
+				// Convert all cache fields to JIRA field IDs
+				updateFields := CacheToJiraFields(fieldsMap)
 				if len(updateFields) > 0 {
 					if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
 						log.Printf("sync: update %s failed: %v", key, err)
@@ -230,12 +222,14 @@ func toBsonM(v interface{}) bson.M {
 // PullFromJira fetches issues from JIRA and upserts into MongoDB.
 // Only updates issues that are newer in JIRA (based on fields.updated).
 func PullFromJira(ctx context.Context) (int, error) {
-	return PullFromJiraFiltered(ctx, "", nil)
+	count, _, err := PullFromJiraFiltered(ctx, "", nil)
+	return count, err
 }
 
 // PullFromJiraFiltered fetches issues from JIRA with optional project and issuetype filter,
 // transforms to cache_schema format, and upserts into MongoDB.
-func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []string) (int, error) {
+// PullFromJiraFiltered pulls issues from JIRA and returns (count, pulledKeys, error)
+func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []string) (int, []string, error) {
 	var result map[string]interface{}
 	var err error
 
@@ -258,11 +252,12 @@ func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []s
 		result, err = jiraclient.ListIssues(0, 10000)
 	}
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	issues, _ := result["issues"].([]interface{})
 	upserted := 0
+	var pulledKeys []string
 
 	for _, raw := range issues {
 		issue, ok := raw.(map[string]interface{})
@@ -271,6 +266,11 @@ func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []s
 		}
 		key, _ := issue["key"].(string)
 		if key == "" {
+			continue
+		}
+
+		// 프로젝트 키가 지정된 경우, 해당 프로젝트 이슈만 처리
+		if projectKey != "" && !strings.HasPrefix(key, projectKey+"-") {
 			continue
 		}
 
@@ -293,9 +293,10 @@ func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []s
 			continue
 		}
 		upserted++
+		pulledKeys = append(pulledKeys, key)
 	}
 
-	return upserted, nil
+	return upserted, pulledKeys, nil
 }
 
 func joinStrings(strs []string, sep string) string {
@@ -338,7 +339,7 @@ func PushToJira(ctx context.Context) (int, error) {
 			}
 		}
 
-		// Sync field changes to JIRA
+		// Sync all field changes to JIRA (including custom fields)
 		if summary, ok := fieldsMap["summary"]; ok && summary != nil {
 			_, getErr := jiraclient.GetIssue(key)
 			if getErr != nil {
@@ -352,16 +353,8 @@ func PushToJira(ctx context.Context) (int, error) {
 					log.Printf("push: create %s failed: %v", key, err)
 				}
 			} else {
-				updateFields := make(map[string]interface{})
-				if s, ok := fieldsMap["summary"]; ok {
-					updateFields["summary"] = s
-				}
-				if d, ok := fieldsMap["description"]; ok {
-					updateFields["description"] = d
-				}
-				if l, ok := fieldsMap["labels"]; ok {
-					updateFields["labels"] = l
-				}
+				// Convert all cache fields to JIRA field IDs
+				updateFields := CacheToJiraFields(fieldsMap)
 				if len(updateFields) > 0 {
 					if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
 						log.Printf("push: update %s failed: %v", key, err)

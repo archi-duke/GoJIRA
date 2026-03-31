@@ -8,8 +8,6 @@ var (
 	JiraAPIBase  = envOrDefault("GOJIRA_JIRA_API_BASE", "/rest/api/2")
 	MongoURI     = envOrDefault("GOJIRA_MONGO_URI", "mongodb://localhost:27017")
 	MongoDB      = envOrDefault("GOJIRA_MONGO_DB", "gojira")
-	CacheDir     = envOrDefault("GOJIRA_CACHE_DIR", "./cache")
-	ProjectsFile = envOrDefault("GOJIRA_PROJECTS_FILE", "./cache/projects.json")
 )
 
 func envOrDefault(key, fallback string) string {

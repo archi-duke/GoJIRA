@@ -153,6 +153,12 @@
   flex-shrink: 0;
 }
 
+.satam-subkey-reserved {
+  background: #f0f0f0 !important;
+  color: #666 !important;
+  font-weight: 600 !important;
+}
+
 .satam-subkey-click,
 .satam-mark-click {
   cursor: pointer;

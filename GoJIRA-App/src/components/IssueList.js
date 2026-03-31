@@ -106,6 +106,24 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
     }
   }
 
+  async function handleDeleteIssue(issue) {
+    const isOwn = issue.key.startsWith(projectCode + '-');
+    const msg = isOwn
+      ? `"${issue.key}" 이슈를 완전히 삭제하시겠습니까?`
+      : `"${issue.key}"는 타 과제 이슈입니다. 이 과제 목록에서만 제거하시겠습니까?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await fetch(`${API_BASE}/Issue`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: issue.key, prjID: projectCode }),
+      });
+      setIssues((prev) => prev.filter((i) => i.key !== issue.key));
+    } catch (err) {
+      alert('삭제 실패: ' + err.message);
+    }
+  }
+
   function handleSummaryBlur(issue, newSummary) {
     if (newSummary === issue.summary) return;
     fetch(`${API_BASE}/Issue`, {
@@ -164,6 +182,7 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
           <table className="il-table">
             <thead>
               <tr>
+                {editMode && <th style={{ width: 40 }} />}
                 {columns.map((col) => (
                   <th
                     key={col.key}
@@ -178,13 +197,22 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length} className="il-empty">
+                  <td colSpan={columns.length + (editMode ? 1 : 0)} className="il-empty">
                     이슈가 없습니다. Pull 버튼으로 가져오세요.
                   </td>
                 </tr>
               ) : (
                 sorted.map((issue, i) => (
                   <tr key={issue.key || i}>
+                    {editMode && (
+                      <td className="il-delete-cell">
+                        <button
+                          className="il-delete-btn"
+                          onClick={() => handleDeleteIssue(issue)}
+                          title="삭제"
+                        >X</button>
+                      </td>
+                    )}
                     {columns.map((col) => {
                       // Key, SubKey 클릭 → 상세 팝업
                       if (col.key === 'key' || col.key === 'subKey') {

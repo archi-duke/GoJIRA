@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -30,85 +31,71 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 		prjKey = req.PrjID
 	}
 
-	// Save to MongoDB first (with _dirty flag for JIRA sync)
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	// JIRA에 이슈 생성
+	fields := map[string]interface{}{
+		"summary":   req.Summary,
+		"issuetype": map[string]string{"name": req.IssueType},
+	}
+	if req.Desc != "" {
+		fields["description"] = req.Desc
+	}
+	if len(req.Labels) > 0 {
+		fields["labels"] = req.Labels
+	}
+	if req.ReqType != "" {
+		fields["customfield_12555"] = map[string]string{"value": req.ReqType}
+	}
+	if req.SubKey != "" {
+		fields["customfield_15209"] = req.SubKey
+	}
+	if prjKey != "" {
+		fields["project"] = map[string]string{"key": prjKey}
+	}
+
+	result, err := jiraclient.CreateIssue(fields)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "JIRA 이슈 생성 실패: "+err.Error())
+		return
+	}
+
+	jiraKey, _ := result["key"].(string)
+	if jiraKey == "" {
+		respondError(w, http.StatusBadGateway, "JIRA에서 키를 받지 못했습니다")
+		return
+	}
+
+	// JIRA에서 전체 이슈 정보 가져와서 MongoDB에 저장
 	doc := bson.M{
-		"key":       "",
+		"key":       jiraKey,
 		"issueType": req.IssueType,
 		"subKey":    req.SubKey,
 		"summary":   req.Summary,
 		"labels":    req.Labels,
 		"reqtype":   req.ReqType,
-		"_dirty":    true,
-		"_syncedAt": nil,
+		"_dirty":    false,
+		"_syncedAt": time.Now(),
 	}
 	if req.Desc != "" {
 		doc["description"] = req.Desc
 	}
 
-	// Use subKey as temporary key until JIRA assigns a real one
-	tempKey := prjKey + "-" + req.SubKey
-	doc["key"] = tempKey
-	db.UpsertIssue(ctx, tempKey, doc)
+	jiraIssue, err := jiraclient.GetIssue(jiraKey)
+	if err == nil {
+		doc = db.TransformToCache(jiraIssue)
+		doc["_dirty"] = false
+		doc["_syncedAt"] = time.Now()
+	}
 
-	// Create in JIRA asynchronously
-	go func() {
-		fields := map[string]interface{}{
-			"summary":   req.Summary,
-			"issuetype": map[string]string{"name": req.IssueType},
-		}
-		if req.Desc != "" {
-			fields["description"] = req.Desc
-		}
-		if len(req.Labels) > 0 {
-			fields["labels"] = req.Labels
-		}
-		if req.ReqType != "" {
-			fields["customfield_12555"] = map[string]string{"value": req.ReqType}
-		}
-		if req.SubKey != "" {
-			fields["customfield_15209"] = req.SubKey
-		}
-		if prjKey != "" {
-			fields["project"] = map[string]string{"key": prjKey}
-		}
+	db.UpsertIssue(ctx, jiraKey, doc)
 
-		result, err := jiraclient.CreateIssue(fields)
-		if err != nil {
-			log.Printf("async create JIRA issue failed: %v", err)
-			return
-		}
+	// 프로젝트 issues 배열에 키 추가
+	db.AddIssueToProject(ctx, prjKey, jiraKey)
 
-		jiraKey, _ := result["key"].(string)
-		if jiraKey == "" {
-			return
-		}
-
-		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// Remove temp doc and re-fetch from JIRA with real key
-		db.DeleteIssueByKey(bgCtx, tempKey)
-
-		jiraIssue, err := jiraclient.GetIssue(jiraKey)
-		if err != nil {
-			// Fallback: save with real key
-			doc["key"] = jiraKey
-			doc["_dirty"] = false
-			doc["_syncedAt"] = time.Now()
-			db.UpsertIssue(bgCtx, jiraKey, doc)
-		} else {
-			newDoc := db.TransformToCache(jiraIssue)
-			newDoc["_dirty"] = false
-			newDoc["_syncedAt"] = time.Now()
-			db.UpsertIssue(bgCtx, jiraKey, newDoc)
-		}
-		log.Printf("async: created JIRA issue %s (subKey: %s)", jiraKey, req.SubKey)
-	}()
-
-	respondJSON(w, http.StatusOK, map[string]string{"key": tempKey, "subKey": req.SubKey})
+	log.Printf("created JIRA issue %s (subKey: %s)", jiraKey, req.SubKey)
+	respondJSON(w, http.StatusOK, map[string]string{"key": jiraKey, "subKey": req.SubKey})
 }
 
 // GET /api/v{version}/Issue — read from MongoDB
@@ -137,13 +124,18 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 		filter = nil
 	}
 
-	// Filter by project if prjID is provided (match key prefix)
+	// Filter by project: lookup issues array from projects collection
 	if req.PrjID != "" {
-		prjFilter := bson.M{"key": bson.M{"$regex": "^" + req.PrjID + "-"}}
-		if filter != nil {
-			filter = bson.M{"$and": []bson.M{filter, prjFilter}}
-		} else {
-			filter = prjFilter
+		prjDoc := db.FindProjectByCode(ctx, req.PrjID)
+		if prjDoc != nil {
+			if issueKeys, ok := prjDoc["issues"]; ok {
+				prjFilter := bson.M{"key": bson.M{"$in": issueKeys}}
+				if filter != nil {
+					filter = bson.M{"$and": []bson.M{filter, prjFilter}}
+				} else {
+					filter = prjFilter
+				}
+			}
 		}
 	}
 
@@ -209,18 +201,33 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// Delete from MongoDB
-	if err := db.DeleteIssueByKey(ctx, req.Key); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	// 이슈 key의 prefix와 요청 프로젝트 코드 비교
+	isOwnIssue := req.PrjID != "" && strings.HasPrefix(req.Key, req.PrjID+"-")
 
-	// Async delete from JIRA
-	go func() {
-		if err := jiraclient.DeleteIssue(req.Key); err != nil {
-			log.Printf("async JIRA delete %s failed: %v", req.Key, err)
+	if isOwnIssue {
+		// 자기 과제 이슈: DB에서 삭제 + 모든 프로젝트 issues 배열에서 제거
+		if err := db.DeleteIssueByKey(ctx, req.Key); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
-	}()
+		projects, _ := db.FindAllProjects(ctx, nil)
+		for _, prj := range projects {
+			if code, ok := prj["JiraCode"].(string); ok {
+				db.RemoveIssueFromProject(ctx, code, req.Key)
+			}
+		}
+		// Async delete from JIRA
+		go func() {
+			if err := jiraclient.DeleteIssue(req.Key); err != nil {
+				log.Printf("async JIRA delete %s failed: %v", req.Key, err)
+			}
+		}()
+	} else {
+		// 타 과제 이슈: 프로젝트 목록에서만 제거 (DB/JIRA 삭제 안 함)
+		if req.PrjID != "" {
+			db.RemoveIssueFromProject(ctx, req.PrjID, req.Key)
+		}
+	}
 
 	respondJSON(w, http.StatusOK, "issue deleted")
 }

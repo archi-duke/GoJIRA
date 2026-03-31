@@ -67,11 +67,6 @@ type FetchRequest struct {
 	MergeType string `json:"mergeType,omitempty"`
 }
 
-type CachePushRequest struct {
-	PrjID     string `json:"prjID"`
-	Query     string `json:"query,omitempty"`
-	MergeType string `json:"mergeType,omitempty"`
-}
 
 type FieldUpdateRequest struct {
 	PrjID string      `json:"prjID"`

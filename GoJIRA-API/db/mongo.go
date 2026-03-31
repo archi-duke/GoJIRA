@@ -180,9 +180,53 @@ func FindAllProjects(ctx context.Context, filter bson.M) ([]bson.M, error) {
 	return results, nil
 }
 
+func FindProjectByCode(ctx context.Context, jiraCode string) bson.M {
+	var doc bson.M
+	err := Projects().FindOne(ctx, bson.M{"JiraCode": jiraCode}).Decode(&doc)
+	if err != nil {
+		return nil
+	}
+	return doc
+}
+
 func UpsertProject(ctx context.Context, jiraCode string, doc bson.M) error {
 	opts := options.UpdateOne().SetUpsert(true)
 	_, err := Projects().UpdateOne(ctx, bson.M{"JiraCode": jiraCode}, bson.M{"$set": doc}, opts)
+	return err
+}
+
+// AddIssueToProject adds an issue key to the project's issues array
+func AddIssueToProject(ctx context.Context, jiraCode string, issueKey string) error {
+	_, err := Projects().UpdateOne(ctx,
+		bson.M{"JiraCode": jiraCode},
+		bson.M{"$addToSet": bson.M{"issues": issueKey}},
+	)
+	return err
+}
+
+// RemoveIssueFromProject removes an issue key from the project's issues array
+func RemoveIssueFromProject(ctx context.Context, jiraCode string, issueKey string) error {
+	_, err := Projects().UpdateOne(ctx,
+		bson.M{"JiraCode": jiraCode},
+		bson.M{"$pull": bson.M{"issues": issueKey}},
+	)
+	return err
+}
+
+// ReplaceIssueKeyInProject replaces old key with new key in the project's issues array
+func ReplaceIssueKeyInProject(ctx context.Context, jiraCode string, oldKey, newKey string) error {
+	if err := RemoveIssueFromProject(ctx, jiraCode, oldKey); err != nil {
+		return err
+	}
+	return AddIssueToProject(ctx, jiraCode, newKey)
+}
+
+// UpdateProjectIssues replaces the entire issues array for a project
+func UpdateProjectIssues(ctx context.Context, jiraCode string, keys []string) error {
+	_, err := Projects().UpdateOne(ctx,
+		bson.M{"JiraCode": jiraCode},
+		bson.M{"$set": bson.M{"issues": keys}},
+	)
 	return err
 }
 

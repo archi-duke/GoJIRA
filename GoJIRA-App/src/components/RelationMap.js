@@ -286,7 +286,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
       await fetch(`${API_BASE}/Issue`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: issue.key }),
+        body: JSON.stringify({ key: issue.key, prjID: projectCode }),
       });
       setIssues((prev) => prev.filter((i) => i.key !== issue.key));
     } catch (err) {
@@ -353,19 +353,40 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
       default:        issueType = subtype;
     }
     const subKey = getNextSubKey(subtype);
-    try {
-      await fetch(`${API_BASE}/Issue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
-          labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
-          subKey,
-        }),
-      });
-      fetchIssues();
-    } catch (err) {
-      alert('이슈 생성 실패: ' + err.message);
+    const payload = {
+      projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
+      labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
+      subKey,
+    };
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(`${API_BASE}/Issue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          fetchIssues();
+          return;
+        }
+        const errData = await res.json().catch(() => ({}));
+        if (attempt === 3) {
+          const action = window.confirm(
+            `이슈 생성 실패 (${attempt}회 시도)\n${errData.error || res.statusText}\n\n확인: 재시도 / 취소: 삭제`
+          );
+          if (action) { attempt = 0; continue; } // 재시도
+          return; // 삭제 (서버에 저장 안 됨)
+        }
+      } catch (err) {
+        if (attempt === 3) {
+          const action = window.confirm(
+            `이슈 생성 실패 (${attempt}회 시도)\n${err.message}\n\n확인: 재시도 / 취소: 삭제`
+          );
+          if (action) { attempt = 0; continue; }
+          return;
+        }
+      }
     }
   }
 
@@ -428,7 +449,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
           nav={nav}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
-            { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
+            { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
             { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
           ]}
         />
@@ -447,7 +468,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
         nav={nav}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
-          { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
+          { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
           { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
         ]}
       />
@@ -511,8 +532,8 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
                       {/* card header: subkey badge + key or action buttons */}
                       <div className="rm-card-header">
                         <span
-                          className="rm-subkey"
-                          style={{ background: cardColor, color: subkeyTextColor, fontWeight: hasASR ? 700 : 'normal', cursor: 'pointer' }}
+                          className={`rm-subkey${hasReserved ? ' rm-subkey-reserved' : ''}`}
+                          style={hasReserved ? { cursor: 'pointer' } : { background: cardColor, color: subkeyTextColor, fontWeight: hasASR ? 700 : 'normal', cursor: 'pointer' }}
                           onClick={(e) => { e.stopPropagation(); setDetailIssue(issue); }}
                         >
                           {issue.subKey || subtype}

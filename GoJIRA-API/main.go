@@ -97,10 +97,8 @@ func main() {
 		r.Put("/Issue/comment", handlers.CommentUpdateHandler)
 		r.Delete("/Issue/comment", handlers.CommentDeleteHandler)
 
-		// Fetch (pull) / Push / Clear
+		// Fetch (pull from JIRA)
 		r.Get("/Issue/fetch", handlers.IssueFetchHandler)
-		r.Put("/Issue/cache", handlers.CachePushHandler)
-		r.Delete("/Issue/cache", handlers.CacheDeleteHandler)
 
 		// Field
 		r.Put("/Issue/field", handlers.FieldUpdateHandler)

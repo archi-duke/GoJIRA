@@ -103,6 +103,12 @@
   font-weight: 600;
 }
 
+.rm-subkey-reserved {
+  background: #f0f0f0 !important;
+  color: #666 !important;
+  font-weight: 600 !important;
+}
+
 .rm-card-summary {
   font-size: 12px;
   color: #555;

@@ -47,17 +47,17 @@ def _save_issues(issues: list[dict]) -> None:
                 json.dump([], f, ensure_ascii=False, indent=4)
 
 
-def _next_issue_key(issues: list[dict]) -> str:
+def _next_issue_key(issues: list[dict], project_key: str = PROJECT_KEY) -> str:
     max_num = 0
     for issue in issues:
         key = issue.get("key", "")
-        if key.startswith(f"{PROJECT_KEY}-"):
+        if key.startswith(f"{project_key}-"):
             try:
                 num = int(key.split("-")[1])
                 max_num = max(max_num, num)
             except ValueError:
                 pass
-    return f"{PROJECT_KEY}-{max_num + 1}"
+    return f"{project_key}-{max_num + 1}"
 
 
 def _next_issue_id(issues: list[dict]) -> str:
@@ -153,7 +153,8 @@ def create_issue(payload: dict) -> dict:
     issues = _load_all_issues()
     fields = payload.get("fields", {})
 
-    new_key = _next_issue_key(issues)
+    prj_key = fields.get("project", {}).get("key", PROJECT_KEY)
+    new_key = _next_issue_key(issues, prj_key)
     new_id = _next_issue_id(issues)
     now = _now_str()
 

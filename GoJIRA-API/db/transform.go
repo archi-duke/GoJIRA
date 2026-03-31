@@ -144,6 +144,51 @@ func extractNames(v interface{}) []string {
 	return names
 }
 
+// reverseCustomFieldMap returns a map from cache field names to JIRA custom field IDs.
+var reverseCustomFieldMap map[string]string
+
+func init() {
+	reverseCustomFieldMap = make(map[string]string, len(customFieldMap))
+	for cfID, cacheName := range customFieldMap {
+		reverseCustomFieldMap[cacheName] = cfID
+	}
+}
+
+// CacheToJiraFields converts cache-schema field names back to JIRA custom field IDs.
+// Standard fields (summary, description, labels, etc.) are passed through as-is.
+// Returns a map suitable for JIRA REST API PUT /issue/{key}.
+func CacheToJiraFields(cacheFields map[string]interface{}) map[string]interface{} {
+	jiraFields := make(map[string]interface{})
+	// Internal/meta fields to skip
+	skipFields := map[string]bool{
+		"_id": true, "_dirty": true, "_syncedAt": true, "_deletedLinks": true,
+		"issueLinks": true, "key": true, "id": true,
+		// Complex fields that need special handling
+		"issueType": true, "status": true, "resolution": true, "reporter": true,
+		"priority": true, "components": true, "attachment": true,
+	}
+	for k, v := range cacheFields {
+		if skipFields[k] {
+			continue
+		}
+		// Check if it's a custom field (has reverse mapping)
+		if cfID, ok := reverseCustomFieldMap[k]; ok {
+			// Special handling for reqtype: wrap in {value: ...}
+			if k == "reqtype" {
+				if s, ok := v.(string); ok && s != "" {
+					jiraFields[cfID] = map[string]interface{}{"value": s}
+				}
+			} else {
+				jiraFields[cfID] = v
+			}
+		} else {
+			// Standard fields (summary, description, labels, duedate, environment)
+			jiraFields[k] = v
+		}
+	}
+	return jiraFields
+}
+
 func transformLinks(v interface{}) []interface{} {
 	arr, ok := v.([]interface{})
 	if !ok {

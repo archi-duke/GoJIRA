@@ -653,19 +653,40 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
       default: issueType = subtype;
     }
     const subKey = getNextSubKey(subtype);
-    try {
-      await fetch(`${API_BASE}/Issue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
-          labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
-          subKey,
-        }),
-      });
-      fetchIssues();
-    } catch (err) {
-      alert('이슈 생성 실패: ' + err.message);
+    const payload = {
+      projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
+      labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
+      subKey,
+    };
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(`${API_BASE}/Issue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          fetchIssues();
+          return;
+        }
+        const errData = await res.json().catch(() => ({}));
+        if (attempt === 3) {
+          const action = window.confirm(
+            `이슈 생성 실패 (${attempt}회 시도)\n${errData.error || res.statusText}\n\n확인: 재시도 / 취소: 삭제`
+          );
+          if (action) { attempt = 0; continue; }
+          return;
+        }
+      } catch (err) {
+        if (attempt === 3) {
+          const action = window.confirm(
+            `이슈 생성 실패 (${attempt}회 시도)\n${err.message}\n\n확인: 재시도 / 취소: 삭제`
+          );
+          if (action) { attempt = 0; continue; }
+          return;
+        }
+      }
     }
   }
 
@@ -785,7 +806,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
             { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
             { label: 'S', active: onlyDecision, handler: () => setOnlyDecision((v) => !v) },
             { label: 'D', active: showDDSN, handler: () => setShowDDSN((v) => !v) },
-            { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
+            { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
           ]}
         />
         <div className="satam-loading">로딩 중...</div>
@@ -806,7 +827,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
           { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
           { label: 'S', active: onlyDecision, handler: () => setOnlyDecision((v) => !v) },
           { label: 'D', active: showDDSN, handler: () => setShowDDSN((v) => !v) },
-          { label: 'R', active: !showReserved, handler: () => setShowReserved((v) => !v) },
+          { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
         ]}
       />
 
@@ -859,7 +880,18 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                       <div className="satam-stair-label">
                         {(() => {
                           const sub = getSubtype(d);
+                          const isReserved = (d.labels || []).includes('Reserved');
                           const isADSNnoDecision = sub === 'ADSN' && (!d.decision || d.decision === '');
+                          if (isReserved) {
+                            return (
+                              <span
+                                className="satam-stair-subkey satam-subkey-click satam-subkey-reserved"
+                                onClick={() => setDetailIssue(d)}
+                              >
+                                {d.subKey}
+                              </span>
+                            );
+                          }
                           const bg = isADSNnoDecision ? 'lightgray' : (SUBTYPE_COLORS[sub] || SUBTYPE_COLORS.ADSN);
                           const clr = isADSNnoDecision ? '#000' : '#fff';
                           return (
@@ -883,6 +915,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
               {reqIssues.map((req) => {
                 const subtype = getSubtype(req);
                 const hasASR = (req.labels || []).includes('ASR');
+                const isReserved = (req.labels || []).includes('Reserved');
                 const isFRnoASR = subtype === 'FR' && !hasASR;
                 const bgColor = isFRnoASR ? '#ffb4b4' : (SUBTYPE_COLORS[subtype] || '#999');
                 const textColor = isFRnoASR ? '#000' : '#fff';
@@ -890,13 +923,22 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                   <tr key={req.key}>
                     {/* 요구사항 행 헤더 */}
                     <td className={`satam-row-header ${hoverCell && hoverCell.row === req.key ? 'satam-row-hl' : ''}`}>
-                      <span
-                        className="satam-row-subkey satam-subkey-click"
-                        style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}
-                        onClick={() => setDetailIssue(req)}
-                      >
-                        {req.subKey}
-                      </span>
+                      {isReserved ? (
+                        <span
+                          className="satam-row-subkey satam-subkey-click satam-subkey-reserved"
+                          onClick={() => setDetailIssue(req)}
+                        >
+                          {req.subKey}
+                        </span>
+                      ) : (
+                        <span
+                          className="satam-row-subkey satam-subkey-click"
+                          style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}
+                          onClick={() => setDetailIssue(req)}
+                        >
+                          {req.subKey}
+                        </span>
+                      )}
                       <span className="satam-row-summary">{req.summary}</span>
                     </td>
                     {/* 교차 셀 */}
