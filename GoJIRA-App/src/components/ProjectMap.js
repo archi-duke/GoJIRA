@@ -2,6 +2,9 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import './ProjectMap.css';
 import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
+import config from '../config';
+
+const API_BASE = config.API_BASE;
 
 const MIN_MONTH_WIDTH = 30;
 const ROW_HEIGHT = 48;
@@ -62,7 +65,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
-    fetch('http://localhost:9000/api/v2/Project', {
+    fetch(`${API_BASE}/Project`, {
       headers: { XBody: JSON.stringify({}) },
     })
       .then((res) => res.json())
@@ -87,7 +90,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
         break;
       case 'delete':
         if (window.confirm(`"${project.Name}" 과제를 삭제하시겠습니까?`)) {
-          fetch('http://localhost:9000/api/v2/Project', {
+          fetch(`${API_BASE}/Project`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...project, State: 'Deleted' }),
@@ -110,7 +113,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
   function handleDialogSave(updated) {
     // New project (POST) vs existing (PUT)
     const isNew = !projects.some((p) => p.JiraCode === updated.JiraCode);
-    fetch('http://localhost:9000/api/v2/Project', {
+    fetch(`${API_BASE}/Project`, {
       method: isNew ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),

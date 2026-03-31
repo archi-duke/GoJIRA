@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import CommonBar from './CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
+import config from '../config';
 import './SATAM.css';
 
-const API_BASE = 'http://localhost:9000/api/v2';
+const API_BASE = config.API_BASE;
 
 const SUBTYPE_COLORS = {
   VOS: '#70ad47', UC: '#ff9a1e', Feature: '#ff9a1e',

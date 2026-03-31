@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import CommonBar from './CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
+import config from '../config';
 import './IssueList.css';
 
-const API_BASE = 'http://localhost:9000/api/v2';
+const API_BASE = config.API_BASE;
 
 const NAV_ITEMS = [
   { key: 'issues', label: 'Issues' },
