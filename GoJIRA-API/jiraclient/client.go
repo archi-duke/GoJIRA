@@ -17,9 +17,34 @@ func baseURL() string {
 	return config.JiraMockURL + config.JiraAPIBase
 }
 
+// doRequest executes an HTTP request with Basic Auth.
+func doRequest(req *http.Request) (*http.Response, error) {
+	req.SetBasicAuth(config.JiraUser, config.JiraPass)
+	return httpClient.Do(req)
+}
+
+// doGet is a convenience wrapper for authenticated GET requests.
+func doGet(url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return doRequest(req)
+}
+
+// doPost is a convenience wrapper for authenticated POST requests.
+func doPost(url string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return doRequest(req)
+}
+
 // GetIssue fetches a single issue by key or ID.
 func GetIssue(issueKeyOrID string) (map[string]interface{}, error) {
-	resp, err := httpClient.Get(baseURL() + "/issue/" + url.PathEscape(issueKeyOrID))
+	resp, err := doGet(baseURL() + "/issue/" + url.PathEscape(issueKeyOrID))
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +64,7 @@ func GetIssue(issueKeyOrID string) (map[string]interface{}, error) {
 // ListIssues fetches issue list with pagination.
 func ListIssues(startAt, maxResults int) (map[string]interface{}, error) {
 	u := fmt.Sprintf("%s/issue?startAt=%d&maxResults=%d", baseURL(), startAt, maxResults)
-	resp, err := httpClient.Get(u)
+	resp, err := doGet(u)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +81,7 @@ func ListIssues(startAt, maxResults int) (map[string]interface{}, error) {
 func SearchIssues(jql string, startAt, maxResults int) (map[string]interface{}, error) {
 	u := fmt.Sprintf("%s/search?jql=%s&startAt=%d&maxResults=%d",
 		baseURL(), url.QueryEscape(jql), startAt, maxResults)
-	resp, err := httpClient.Get(u)
+	resp, err := doGet(u)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +99,7 @@ func CreateIssue(fields map[string]interface{}) (map[string]interface{}, error) 
 	payload := map[string]interface{}{"fields": fields}
 	body, _ := json.Marshal(payload)
 
-	resp, err := httpClient.Post(baseURL()+"/issue", "application/json", bytes.NewReader(body))
+	resp, err := doPost(baseURL()+"/issue", body)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +125,7 @@ func UpdateIssue(issueKey string, fields map[string]interface{}) error {
 	req, _ := http.NewRequest(http.MethodPut, baseURL()+"/issue/"+url.PathEscape(issueKey), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -121,7 +146,7 @@ func UpdateIssueWithOps(issueKey string, update map[string]interface{}) error {
 	req, _ := http.NewRequest(http.MethodPut, baseURL()+"/issue/"+url.PathEscape(issueKey), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -138,7 +163,7 @@ func UpdateIssueWithOps(issueKey string, update map[string]interface{}) error {
 func DeleteIssue(issueKey string) error {
 	req, _ := http.NewRequest(http.MethodDelete, baseURL()+"/issue/"+url.PathEscape(issueKey), nil)
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -180,7 +205,7 @@ func CreateIssueLink(inwardKey, outwardKey string) error {
 	}
 	body, _ := json.Marshal(payload)
 
-	resp, err := httpClient.Post(baseURL()+"/issueLink", "application/json", bytes.NewReader(body))
+	resp, err := doPost(baseURL()+"/issueLink", body)
 	if err != nil {
 		return err
 	}
@@ -197,7 +222,7 @@ func CreateIssueLink(inwardKey, outwardKey string) error {
 func DeleteIssueLink(linkID string) error {
 	req, _ := http.NewRequest(http.MethodDelete, baseURL()+"/issueLink/"+url.PathEscape(linkID), nil)
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}
