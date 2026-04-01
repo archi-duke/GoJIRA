@@ -2413,7 +2413,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "통합 통신 프레임워크 제공",
+            "summary": "통합 통신 프레임워크 제공 (수정됨)",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/issue/KAN-4/watchers",
                 "watchCount": 0,
@@ -2689,7 +2689,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-30T12:03:31.032+0900",
+            "updated": "2026-04-01T13:22:27.749+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -2742,6 +2742,69 @@
             "customfield_18202": "A-Design",
             "customfield_18203": "D-Design",
             "customfield_18201": "Tests"
+        }
+    },
+    {
+        "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+        "id": "10008",
+        "self": "https://dukekimm.atlassian.net/rest/api/2/issue/10008",
+        "key": "GOJIRA-39",
+        "fields": {
+            "issuetype": {
+                "name": "Feature"
+            },
+            "components": [],
+            "project": {
+                "key": "GOJIRA"
+            },
+            "description": null,
+            "resolution": null,
+            "summary": "테스트입니다",
+            "watches": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/issue/GOJIRA-39/watchers",
+                "watchCount": 0,
+                "isWatching": false
+            },
+            "lastViewed": "2026-04-01T14:52:46.947+0900",
+            "creator": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "subtasks": [],
+            "created": "2026-04-01T14:52:46.947+0900",
+            "reporter": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "priority": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/priority/3",
+                "name": "Medium",
+                "id": "3"
+            },
+            "labels": [],
+            "environment": null,
+            "duedate": null,
+            "issuelinks": [],
+            "assignee": null,
+            "updated": "2026-04-01T14:52:46.947+0900",
+            "status": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/status/10000",
+                "description": "",
+                "name": "To Do",
+                "id": "10000",
+                "statusCategory": {
+                    "self": "https://dukekimm.atlassian.net/rest/api/2/statuscategory/2",
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                }
+            },
+            "customfield_15209": "UC_010"
         }
     }
 ]
