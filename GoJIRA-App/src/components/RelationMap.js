@@ -28,7 +28,7 @@ const SUBTYPE_COLORS = {
 /* ---------- helpers ---------- */
 
 function getSubtype(issue) {
-  const prefix = (issue.subKey || '').split('_')[0];
+  const prefix = (issue.subkey || '').split('_')[0];
   if (SUBTYPE_COLORS[prefix]) return prefix;
   switch (issue.issueType) {
     case 'VOS': return 'VOS';
@@ -202,7 +202,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
         if (aASR !== bASR) return aASR - bASR;
 
         // 3순위: 서브키 오름차순
-        return (a.subKey || '').localeCompare(b.subKey || '', undefined, { numeric: true });
+        return (a.subkey || '').localeCompare(b.subkey || '', undefined, { numeric: true });
       }),
   }));
 
@@ -332,7 +332,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
     const prefix = (SUBKEY_PREFIX[subtype] || subtype) + '_';
     let maxNum = 0;
     issues.forEach((i) => {
-      const sk = i.subKey || '';
+      const sk = i.subkey || '';
       if (sk.startsWith(prefix)) {
         const num = parseInt(sk.substring(prefix.length), 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
@@ -352,11 +352,11 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
       case 'DDSN':    issueType = 'Detaied Design'; break;
       default:        issueType = subtype;
     }
-    const subKey = getNextSubKey(subtype);
+    const subkey = getNextSubKey(subtype);
     const payload = {
       projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
       labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
-      subKey,
+      subkey,
     };
 
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -536,7 +536,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
                           style={hasReserved ? { cursor: 'pointer' } : { background: cardColor, color: subkeyTextColor, fontWeight: hasASR ? 700 : 'normal', cursor: 'pointer' }}
                           onClick={(e) => { e.stopPropagation(); setDetailIssue(issue); }}
                         >
-                          {issue.subKey || subtype}
+                          {issue.subkey || subtype}
                         </span>
                         {editMode ? (
                           <span className="rm-card-actions">

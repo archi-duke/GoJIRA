@@ -71,7 +71,7 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	doc := bson.M{
 		"key":       jiraKey,
 		"issueType": req.IssueType,
-		"subKey":    req.SubKey,
+		"subkey":    req.SubKey,
 		"summary":   req.Summary,
 		"labels":    req.Labels,
 		"reqtype":   req.ReqType,
@@ -94,8 +94,8 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	// 프로젝트 issues 배열에 키 추가
 	db.AddIssueToProject(ctx, prjKey, jiraKey)
 
-	log.Printf("created JIRA issue %s (subKey: %s)", jiraKey, req.SubKey)
-	respondJSON(w, http.StatusOK, map[string]string{"key": jiraKey, "subKey": req.SubKey})
+	log.Printf("created JIRA issue %s (subkey: %s)", jiraKey, req.SubKey)
+	respondJSON(w, http.StatusOK, map[string]string{"key": jiraKey, "subkey": req.SubKey})
 }
 
 // GET /api/v{version}/Issue — read from MongoDB

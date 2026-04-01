@@ -158,7 +158,7 @@ function getCellInfo(designIssue, reqIssue, dicts) {
 /* ---------- subtype / sorting helpers (공통) ---------- */
 
 function getSubtype(issue) {
-  const prefix = (issue.subKey || '').split('_')[0];
+  const prefix = (issue.subkey || '').split('_')[0];
   if (SUBTYPE_COLORS[prefix]) return prefix;
   switch (issue.issueType) {
     case 'VOS': return 'VOS';
@@ -178,7 +178,7 @@ function sortIssues(issues) {
     const aASR = (a.labels || []).includes('ASR') ? 0 : 1;
     const bASR = (b.labels || []).includes('ASR') ? 0 : 1;
     if (aASR !== bASR) return aASR - bASR;
-    return (a.subKey || '').localeCompare(b.subKey || '', undefined, { numeric: true });
+    return (a.subkey || '').localeCompare(b.subkey || '', undefined, { numeric: true });
   });
 }
 
@@ -334,7 +334,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
         {/* Design 정보 */}
         <div className="satam-popup-issue-box">
           <span className="satam-popup-subkey" style={{ background: SUBTYPE_COLORS[getSubtype(designIssue)] || SUBTYPE_COLORS.ADSN }}>
-            {designIssue.subKey}
+            {designIssue.subkey}
           </span>
           <span className="satam-popup-summary">{designIssue.summary}</span>
         </div>
@@ -371,7 +371,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
         {/* Requirement 정보 */}
         <div className="satam-popup-issue-box">
           <span className="satam-popup-subkey" style={{ background: SUBTYPE_COLORS[getSubtype(reqIssue)] }}>
-            {reqIssue.subKey}
+            {reqIssue.subkey}
           </span>
           <span className="satam-popup-summary">{reqIssue.summary}</span>
         </div>
@@ -489,16 +489,16 @@ function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
     if (!data) return;
 
     data.risks.forEach((r) => {
-      rows.push({ designKey: d.subKey, id: r.id, type: 'Risk', description: r.description, resolved: resolvedRiskIds.has(r.id) });
+      rows.push({ designKey: d.subkey, id: r.id, type: 'Risk', description: r.description, resolved: resolvedRiskIds.has(r.id) });
     });
     data.sensitivities.forEach((s) => {
-      rows.push({ designKey: d.subKey, id: s.id, type: 'Sensitivity', description: s.description, resolved: false });
+      rows.push({ designKey: d.subkey, id: s.id, type: 'Sensitivity', description: s.description, resolved: false });
     });
     data.mitigations.forEach((m) => {
       const crText = m.counterRisk.length > 0
         ? ` [Counter: ${m.counterRisk.join(', ')}]`
         : '';
-      rows.push({ designKey: d.subKey, id: m.id, type: 'Mitigation', description: m.description + crText, resolved: false });
+      rows.push({ designKey: d.subkey, id: m.id, type: 'Mitigation', description: m.description + crText, resolved: false });
     });
   });
 
@@ -634,7 +634,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
     const prefix = (SUBKEY_PREFIX[subtype] || subtype) + '_';
     let maxNum = 0;
     issues.forEach((i) => {
-      const sk = i.subKey || '';
+      const sk = i.subkey || '';
       if (sk.startsWith(prefix)) {
         const num = parseInt(sk.substring(prefix.length), 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
@@ -652,11 +652,11 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
       case 'DDSN': issueType = 'Detaied Design'; break;
       default: issueType = subtype;
     }
-    const subKey = getNextSubKey(subtype);
+    const subkey = getNextSubKey(subtype);
     const payload = {
       projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
       labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
-      subKey,
+      subkey,
     };
 
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -888,7 +888,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                                 className="satam-stair-subkey satam-subkey-click satam-subkey-reserved"
                                 onClick={() => setDetailIssue(d)}
                               >
-                                {d.subKey}
+                                {d.subkey}
                               </span>
                             );
                           }
@@ -900,7 +900,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                               style={{ background: bg, color: clr, fontWeight: isADSNnoDecision ? 'normal' : 700 }}
                               onClick={() => setDetailIssue(d)}
                             >
-                              {d.subKey}
+                              {d.subkey}
                             </span>
                           );
                         })()}
@@ -928,7 +928,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                           className="satam-row-subkey satam-subkey-click satam-subkey-reserved"
                           onClick={() => setDetailIssue(req)}
                         >
-                          {req.subKey}
+                          {req.subkey}
                         </span>
                       ) : (
                         <span
@@ -936,7 +936,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                           style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}
                           onClick={() => setDetailIssue(req)}
                         >
-                          {req.subKey}
+                          {req.subkey}
                         </span>
                       )}
                       <span className="satam-row-summary">{req.summary}</span>

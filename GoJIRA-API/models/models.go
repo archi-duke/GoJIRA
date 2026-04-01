@@ -10,7 +10,7 @@ type IssueCreateRequest struct {
 	Summary    string   `json:"summary"`
 	Desc       string   `json:"desc,omitempty"`
 	Labels     []string `json:"labels,omitempty"`
-	SubKey     string   `json:"subKey,omitempty"`
+	SubKey     string   `json:"subkey,omitempty"`
 }
 
 type IssueGetRequest struct {

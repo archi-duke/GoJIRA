@@ -4,7 +4,7 @@ import "go.mongodb.org/mongo-driver/v2/bson"
 
 // customFieldMap maps JIRA custom field IDs to cache_schema friendly names.
 var customFieldMap = map[string]string{
-	"customfield_15209": "subKey",
+	"customfield_15209": "subkey",
 	"customfield_15235": "client",
 	"customfield_15248": "Features",
 	"customfield_15249": "Requirements",

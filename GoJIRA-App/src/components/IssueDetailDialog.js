@@ -193,7 +193,7 @@ export default function IssueDetailDialog({ issue, editMode, onClose, onSave }) 
     <div className="idd-overlay" onClick={onClose}>
       <div className="idd-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="idd-header">
-          <span className="idd-title">{issue.subKey || issue.key} — {issue.issueType}</span>
+          <span className="idd-title">{issue.subkey || issue.key} — {issue.issueType}</span>
           <button className="idd-close" onClick={onClose}>&times;</button>
         </div>
 

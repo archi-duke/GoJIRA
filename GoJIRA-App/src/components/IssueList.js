@@ -154,7 +154,7 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
 
   const columns = [
     { key: 'key', label: 'Key', width: 120 },
-    { key: 'subKey', label: 'SubKey', width: 100 },
+    { key: 'subkey', label: 'SubKey', width: 100 },
     { key: 'issueType', label: 'Type', width: 140 },
     { key: 'summary', label: 'Summary', width: 0 },
     { key: 'status', label: 'Status', width: 100 },
@@ -232,7 +232,7 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
                     )}
                     {columns.map((col) => {
                       // Key, SubKey 클릭 → 상세 팝업
-                      if (col.key === 'key' || col.key === 'subKey') {
+                      if (col.key === 'key' || col.key === 'subkey') {
                         return (
                           <td key={col.key}>
                             <span
