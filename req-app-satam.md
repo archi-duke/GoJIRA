@@ -59,7 +59,7 @@ relation map과 공통된 기능들이 있으니 참조하자. (공통기능을 
   - F: FR 포함/제외 (기본 ON)
   - S: 최종설계안만 (Decision 내용이 있는 ADSN만)
   - D: Detailed Design(DDSN) 포함/제외 (기본 ON)
-  - R: Reserved 숨기기
+  - R: Reserved 표시 (ON이면 Reserved 이슈 표시, OFF이면 숨김)
 - Pull, 편집모드 토글
 
 ### 5. 편집모드
@@ -148,7 +148,11 @@ Description
 - 전역 resolved Risk ID: 모든 디자인의 mitigation counterRisk에서 수집
 - 모두 `useMemo`로 캐싱하여 성능 최적화
 
-### 10. 라우팅 및 네비게이션
+### 10. Reserved 라벨 이슈 스타일
+- labels에 "Reserved"가 포함된 이슈의 subkey는 회색 스타일로 표시
+- 스타일: background #f0f0f0, color #666 (satam-subkey-reserved 클래스)
+
+### 11. 라우팅 및 네비게이션
 - App.js에서 `page === 'satam'` 시 SATAM 컴포넌트 렌더링
 - ProjectMap의 컨텍스트 메뉴 "SATAM" 클릭으로 진입
 - `onSATAM` prop을 통해 프로젝트 정보 전달

@@ -555,8 +555,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   /* fetch issues */
   const fetchIssues = useCallback(() => {
     setLoading(true);
-    const xbody = JSON.stringify({ prjID: projectCode, infoType: '' });
-    fetch(`${API_BASE}/Issue`, { headers: { XBody: xbody } })
+    return fetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
       .then((r) => r.json())
       .then((data) => setIssues(Array.isArray(data) ? data : []))
       .catch(() => setIssues([]))
@@ -570,7 +569,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
       await fetch(`${API_BASE}/Issue/fetch`, {
         headers: { XBody: JSON.stringify({ prjID: projectCode }) },
       });
-      fetchIssues();
+      await fetchIssues();
     } catch (err) {
       alert('Pull 실패: ' + err.message);
     }

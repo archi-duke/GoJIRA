@@ -46,8 +46,12 @@
 
 11. relation map이 제공하는 옵션은 아래와 같다
     A : ASR 라벨을 가진 이슈만 표시
-    R : Reserved 라벨을 가진 이슈도 표시 (오프되면 Reserved 라벨을 가진 이슈는 표시하지 않음)
+    R : Reserved 라벨을 가진 이슈도 표시 (ON이면 Reserved 이슈 표시, OFF이면 숨김)
     T : 마지막 커럼을 Test 타입 이슈로 변경 (오프되면 기본값인 Design 타입으로 변경)
+
+11.1. Reserved 라벨 이슈의 subkey 표시
+    - labels에 "Reserved"가 포함된 이슈의 subkey는 회색 스타일로 표시
+    - 스타일: background #f0f0f0, color #666 (rm-subkey-reserved 클래스)
     
 
 12. 이슈별 상세 내용은 아래와 같다

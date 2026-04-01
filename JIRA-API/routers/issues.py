@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, HTTPException, Response
 
 from services.issue_service import (
@@ -12,6 +14,9 @@ from services.issue_service import (
 )
 
 router = APIRouter()
+
+# 실제 JIRA 환경의 응답 지연을 시뮬레이션 (초)
+SEARCH_DELAY_SEC = 5
 
 
 # --- Issue CRUD ---
@@ -52,11 +57,13 @@ def api_delete_issue(issue_id_or_key: str):
 
 @router.get("/rest/api/2/issue")
 def api_list_issues(startAt: int = 0, maxResults: int = 50):
+    time.sleep(SEARCH_DELAY_SEC)
     return list_issues(start_at=startAt, max_results=maxResults)
 
 
 @router.get("/rest/api/2/search")
 def api_search_issues(jql: str = "", startAt: int = 0, maxResults: int = 50):
+    time.sleep(SEARCH_DELAY_SEC)
     return search_issues(jql=jql, start_at=startAt, max_results=maxResults)
 
 

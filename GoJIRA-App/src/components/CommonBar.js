@@ -3,11 +3,22 @@ import './CommonBar.css';
 
 export default function CommonBar({ title, onBack, onPull, onEditChange, options, nav }) {
   const [editMode, setEditMode] = useState(false);
+  const [pulling, setPulling] = useState(false);
 
   function handleEditToggle() {
     const next = !editMode;
     setEditMode(next);
     if (onEditChange) onEditChange(next);
+  }
+
+  async function handlePull() {
+    if (pulling) return;
+    setPulling(true);
+    try {
+      await onPull();
+    } finally {
+      setPulling(false);
+    }
   }
 
   return (
@@ -48,13 +59,17 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       )}
 
       <span className="cb-divider" />
-      <button className="cb-btn" onClick={onPull}>Pull</button>
+      <button className="cb-btn" onClick={handlePull} disabled={pulling}>
+        {pulling ? 'Pulling...' : 'Pull'}
+      </button>
       <button
         className={`cb-edit-toggle ${editMode ? 'cb-edit-active' : ''}`}
         onClick={handleEditToggle}
       >
         {editMode ? '편집모드 ON' : '편집모드'}
       </button>
+
+      {pulling && <div className="cb-overlay"><div className="cb-spinner" /></div>}
     </div>
   );
 }
