@@ -4,6 +4,10 @@ GoJIRA-App/build/
 
 # Go binary
 GoJIRA-API/gojira-api
+GoJIRA-API/server
+
+# Env
+.env
 
 # Python
 __pycache__/
