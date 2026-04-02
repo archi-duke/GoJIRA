@@ -8,8 +8,8 @@
 - V: VOS 이슈 표시/숨김
 - F: Feature 이슈 표시/숨김
 - R: Requirement 이슈 표시/숨김
-- A: Architectueral Design 이슈 표시/숨김
-- D: Detaied Design 이슈 표시/숨김
+- A: Architectural Design 이슈 표시/숨김
+- D: Detailed Design 이슈 표시/숨김
 
 ### 3. 정렬
 - 컬럼 헤더 클릭으로 오름/내림차순 정렬 토글

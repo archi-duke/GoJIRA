@@ -34,6 +34,11 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	if req.IssueType == "" {
+		respondError(w, http.StatusBadRequest, "issueType is required")
+		return
+	}
+
 	// JIRA에 이슈 생성
 	fields := map[string]interface{}{
 		"summary":   req.Summary,
@@ -45,7 +50,7 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	if len(req.Labels) > 0 {
 		fields["labels"] = req.Labels
 	}
-	if req.ReqType != "" {
+	if req.ReqType != "" && req.ReqType != "null" {
 		fields["customfield_12555"] = map[string]string{"value": req.ReqType}
 	}
 	if req.SubKey != "" {
@@ -54,6 +59,8 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	if prjKey != "" {
 		fields["project"] = map[string]string{"key": prjKey}
 	}
+
+	log.Printf("create issue: project=%s, issueType=%s, reqtype=%s, subkey=%s", prjKey, req.IssueType, req.ReqType, req.SubKey)
 
 	result, err := jiraclient.CreateIssue(fields)
 	if err != nil {
@@ -113,7 +120,7 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 	switch req.InfoType {
 	case "designs":
 		filter = bson.M{"issueType": bson.M{
-			"$in": []string{"Architectueral Design", "Detaied Design"},
+			"$in": []string{"Architectural Design", "Detailed Design"},
 		}}
 	case "nonTestIssues":
 		filter = bson.M{"issueType": bson.M{"$ne": "Test"}}

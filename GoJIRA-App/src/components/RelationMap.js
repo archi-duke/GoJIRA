@@ -11,7 +11,7 @@ const COLUMN_DEFS_BASE = [
   { id: 'feature', label: 'Feature', types: ['Feature'], addBtns: ['Feature'] },
   { id: 'requirement', label: 'Requirement', types: ['Requirement'], addBtns: ['QA', 'FR', 'CNST'] },
 ];
-const COLUMN_DESIGN = { id: 'design', label: 'Design', types: ['Architectueral Design', 'Detaied Design'], addBtns: ['ADSN', 'DDSN'] };
+const COLUMN_DESIGN = { id: 'design', label: 'Design', types: ['Architectural Design', 'Detailed Design'], addBtns: ['ADSN', 'DDSN'] };
 const COLUMN_TEST = { id: 'test', label: 'Test', types: ['Test'], addBtns: ['Test'] };
 
 const SUBTYPE_COLORS = {
@@ -34,8 +34,8 @@ function getSubtype(issue) {
     case 'VOS': return 'VOS';
     case 'Feature': return 'UC';
     case 'Requirement': return issue.reqtype || 'FR';
-    case 'Architectueral Design': return 'ADSN';
-    case 'Detaied Design': return 'DDSN';
+    case 'Architectural Design': return 'ADSN';
+    case 'Detailed Design': return 'DDSN';
     default: return 'VOS';
   }
 }
@@ -346,9 +346,9 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
       case 'VOS':     issueType = 'VOS'; break;
       case 'Feature': issueType = 'Feature'; break;
       case 'FR': case 'QA': case 'CNST':
-        issueType = 'Requirement'; reqtype = subtype; break;
-      case 'ADSN':    issueType = 'Architectueral Design'; break;
-      case 'DDSN':    issueType = 'Detaied Design'; break;
+        issueType = 'Requirement'; reqtype = subtype === 'QA' ? 'NFR' : subtype; break;
+      case 'ADSN':    issueType = 'Architectural Design'; break;
+      case 'DDSN':    issueType = 'Detailed Design'; break;
       default:        issueType = subtype;
     }
     const subkey = getNextSubKey(subtype);

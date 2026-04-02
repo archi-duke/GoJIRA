@@ -161,8 +161,8 @@ def create_issue(payload: dict) -> dict:
     # Determine which file to store in based on issuetype
     issue_type_name = fields.get("issuetype", {}).get("name", "Task")
     type_to_file = {
-        "Architectueral Design": "designs.json",
-        "Detaied Design": "designs.json",
+        "Architectural Design": "designs.json",
+        "Detailed Design": "designs.json",
         "Feature": "feature.json",
         "Requirement": "requirement.json",
         "VOS": "vos.json",

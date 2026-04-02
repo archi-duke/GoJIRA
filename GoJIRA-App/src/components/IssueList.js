@@ -20,8 +20,8 @@ const TYPE_FILTER = {
   V: ['VOS'],
   F: ['Feature'],
   R: ['Requirement'],
-  A: ['Architectueral Design'],
-  D: ['Detaied Design'],
+  A: ['Architectural Design'],
+  D: ['Detailed Design'],
 };
 
 export default function IssueList({ project, onBack, currentPage, onNavigate }) {

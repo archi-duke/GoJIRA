@@ -42,7 +42,7 @@
     - VOS : VOS
     - Feature : UC
     - Requirement : QA(ReqType이 QA 또는 NFR), CNST(ReqType이 CNST), FR(ReqType이 FR)
-    -Design : ADSN(IssueType이 Architectueral Design), DDSN(IssueType이 Detailed Design)
+    -Design : ADSN(IssueType이 Architectural Design), DDSN(IssueType이 Detailed Design)
 
 11. relation map이 제공하는 옵션은 아래와 같다
     A : ASR 라벨을 가진 이슈만 표시

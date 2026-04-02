@@ -58,7 +58,7 @@ const TAB_DEFS = {
       { key: 'qas', label: 'QAS', multiline: true },
     ]},
   ],
-  'Architectueral Design': [
+  'Architectural Design': [
     { name: 'Basic', fields: [
       { key: 'summary', label: 'Summary' },
       { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS, path: 'name' },
@@ -83,7 +83,7 @@ const TAB_DEFS = {
       { key: 'sensitivity', label: 'Sensitivities', multiline: true },
     ]},
   ],
-  'Detaied Design': [
+  'Detailed Design': [
     { name: 'Basic', fields: [
       { key: 'summary', label: 'Summary' },
       { key: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS, path: 'name' },

@@ -164,8 +164,8 @@ function getSubtype(issue) {
     case 'VOS': return 'VOS';
     case 'Feature': return 'UC';
     case 'Requirement': return issue.reqtype || 'FR';
-    case 'Architectueral Design': return 'ADSN';
-    case 'Detaied Design': return 'DDSN';
+    case 'Architectural Design': return 'ADSN';
+    case 'Detailed Design': return 'DDSN';
     default: return 'VOS';
   }
 }
@@ -578,12 +578,12 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   /* 디자인/요구사항 분리, 필터링, 정렬 */
   const designIssues = useMemo(() =>
     sortIssues(issues.filter((i) => {
-      if (i.issueType === 'Architectueral Design') {
+      if (i.issueType === 'Architectural Design') {
         if (!showReserved && (i.labels || []).includes('Reserved')) return false;
         if (onlyDecision && (!i.decision || i.decision === '')) return false;
         return true;
       }
-      if (i.issueType === 'Detaied Design') {
+      if (i.issueType === 'Detailed Design') {
         if (!showDDSN) return false;
         if (!showReserved && (i.labels || []).includes('Reserved')) return false;
         return true;
@@ -646,9 +646,9 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
     let issueType, reqtype = '';
     switch (subtype) {
       case 'FR': case 'QA': case 'CNST':
-        issueType = 'Requirement'; reqtype = subtype; break;
-      case 'ADSN': issueType = 'Architectueral Design'; break;
-      case 'DDSN': issueType = 'Detaied Design'; break;
+        issueType = 'Requirement'; reqtype = subtype === 'QA' ? 'NFR' : subtype; break;
+      case 'ADSN': issueType = 'Architectural Design'; break;
+      case 'DDSN': issueType = 'Detailed Design'; break;
       default: issueType = subtype;
     }
     const subkey = getNextSubKey(subtype);

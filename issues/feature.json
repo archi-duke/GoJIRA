@@ -2759,7 +2759,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "테스트입니다",
+            "summary": "테스트입니다1234567",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/2/issue/GOJIRA-39/watchers",
                 "watchCount": 0,
@@ -2790,7 +2790,7 @@
             "duedate": null,
             "issuelinks": [],
             "assignee": null,
-            "updated": "2026-04-01T14:52:46.947+0900",
+            "updated": "2026-04-02T13:51:33.111+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/2/status/10000",
                 "description": "",

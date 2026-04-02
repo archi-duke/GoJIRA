@@ -10,7 +10,7 @@
                 "id": "10003",
                 "description": "Tasks track small, distinct pieces of work.",
                 "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
-                "name": "Architectueral Design",
+                "name": "Architectural Design",
                 "subtask": false,
                 "avatarId": 10318,
                 "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
@@ -332,7 +332,7 @@
                 "id": "10003",
                 "description": "Tasks track small, distinct pieces of work.",
                 "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
-                "name": "Architectueral Design",
+                "name": "Architectural Design",
                 "subtask": false,
                 "avatarId": 10318,
                 "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
@@ -607,7 +607,7 @@
                 "id": "10003",
                 "description": "Tasks track small, distinct pieces of work.",
                 "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
-                "name": "Architectueral Design",
+                "name": "Architectural Design",
                 "subtask": false,
                 "avatarId": 10318,
                 "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
@@ -882,7 +882,7 @@
                 "id": "10003",
                 "description": "Tasks track small, distinct pieces of work.",
                 "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
-                "name": "Detaied Design",
+                "name": "Detailed Design",
                 "subtask": false,
                 "avatarId": 10318,
                 "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
@@ -1069,7 +1069,7 @@
                 "id": "10003",
                 "description": "Tasks track small, distinct pieces of work.",
                 "iconUrl": "https://dukekimm.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
-                "name": "Detaied Design",
+                "name": "Detailed Design",
                 "subtask": false,
                 "avatarId": 10318,
                 "entityId": "83d6ccbc-e4cf-45a1-8ce5-4616db080e9a",
@@ -1297,7 +1297,7 @@
         "key": "JAVIS-1",
         "fields": {
             "issuetype": {
-                "name": "Detaied Design"
+                "name": "Detailed Design"
             },
             "components": [],
             "project": {
@@ -1360,7 +1360,7 @@
         "key": "GOJIRA-38",
         "fields": {
             "issuetype": {
-                "name": "Detaied Design"
+                "name": "Detailed Design"
             },
             "components": [],
             "project": {
@@ -1414,6 +1414,69 @@
                 }
             },
             "customfield_15209": "DDSN_003"
+        }
+    },
+    {
+        "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+        "id": "10009",
+        "self": "https://dukekimm.atlassian.net/rest/api/2/issue/10009",
+        "key": "GOJIRA-40",
+        "fields": {
+            "issuetype": {
+                "name": "Architectural Design"
+            },
+            "components": [],
+            "project": {
+                "key": "GOJIRA"
+            },
+            "description": null,
+            "resolution": null,
+            "summary": "테스트 ADSN",
+            "watches": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/issue/GOJIRA-40/watchers",
+                "watchCount": 0,
+                "isWatching": false
+            },
+            "lastViewed": "2026-04-02T14:15:54.157+0900",
+            "creator": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "subtasks": [],
+            "created": "2026-04-02T14:15:54.157+0900",
+            "reporter": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/user?accountId=anonymous",
+                "accountId": "anonymous",
+                "displayName": "Anonymous",
+                "active": true
+            },
+            "priority": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/priority/3",
+                "name": "Medium",
+                "id": "3"
+            },
+            "labels": [],
+            "environment": null,
+            "duedate": null,
+            "issuelinks": [],
+            "assignee": null,
+            "updated": "2026-04-02T14:15:54.157+0900",
+            "status": {
+                "self": "https://dukekimm.atlassian.net/rest/api/2/status/10000",
+                "description": "",
+                "name": "To Do",
+                "id": "10000",
+                "statusCategory": {
+                    "self": "https://dukekimm.atlassian.net/rest/api/2/statuscategory/2",
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                }
+            },
+            "customfield_15209": "ADSN_999"
         }
     }
 ]

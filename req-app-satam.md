@@ -28,7 +28,7 @@ relation map과 공통된 기능들이 있으니 참조하자. (공통기능을 
 ## 구현 사양
 
 ### 1. 테이블 축 구성
-- 가로축(컬럼): Design 이슈 (Architectueral Design = ADSN, Detaied Design = DDSN)
+- 가로축(컬럼): Design 이슈 (Architectural Design = ADSN, Detailed Design = DDSN)
 - 세로축(행): Requirement 이슈 (QA, FR, CNST)
 
 ### 2. 정렬
