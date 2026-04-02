@@ -11,55 +11,32 @@ import (
 	"gojira-api/jiraclient"
 )
 
-// StartAsyncSync starts a background goroutine that periodically pushes
-// dirty issues to JIRA.
-func StartAsyncSync(interval time.Duration) {
+// SyncIssueToJira syncs a single issue to JIRA asynchronously.
+// Called by handlers after DB changes (create, update, label, link, etc.)
+func SyncIssueToJira(key string) {
 	go func() {
-		for {
-			time.Sleep(interval)
-			syncDirtyToJira()
-		}
-	}()
-	log.Printf("Async JIRA sync started (interval: %s)", interval)
-}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-func syncDirtyToJira() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	dirtyIssues, err := FindDirtyIssues(ctx)
-	if err != nil {
-		log.Printf("sync: error finding dirty issues: %v", err)
-		return
-	}
-
-	for _, issue := range dirtyIssues {
-		key, _ := issue["key"].(string)
-		if key == "" {
-			continue
+		issue, err := FindIssueByKey(ctx, key)
+		if err != nil || issue == nil {
+			log.Printf("sync: issue %s not found for sync", key)
+			return
 		}
 
-		// Cache schema stores fields at top level (no "fields" wrapper).
-		// Build fieldsMap from top-level keys for JIRA sync.
+		// Build fieldsMap from top-level keys
 		fieldsMap := make(map[string]interface{})
-		if fields, ok := issue["fields"].(bson.M); ok {
-			for k, v := range fields {
-				fieldsMap[k] = v
+		for k, v := range issue {
+			if k == "_id" || k == "_dirty" || k == "_syncedAt" || k == "issueLinks" || k == "_deletedLinks" {
+				continue
 			}
-		} else {
-			// Flat cache schema — use top-level fields directly
-			for k, v := range issue {
-				if k == "_id" || k == "_dirty" || k == "_syncedAt" || k == "issueLinks" {
-					continue
-				}
-				fieldsMap[k] = v
-			}
+			fieldsMap[k] = v
 		}
 
-		// Sync all field changes to JIRA (including custom fields)
+		// Sync field changes to JIRA
 		if summary, ok := fieldsMap["summary"]; ok && summary != nil {
-			_, err := jiraclient.GetIssue(key)
-			if err != nil {
+			_, getErr := jiraclient.GetIssue(key)
+			if getErr != nil {
 				createFields := map[string]interface{}{
 					"summary": fieldsMap["summary"],
 				}
@@ -73,7 +50,6 @@ func syncDirtyToJira() {
 					log.Printf("sync: create %s failed: %v", key, err)
 				}
 			} else {
-				// Convert all cache fields to JIRA field IDs
 				updateFields := CacheToJiraFields(fieldsMap)
 				if len(updateFields) > 0 {
 					if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
@@ -83,15 +59,15 @@ func syncDirtyToJira() {
 			}
 		}
 
-		// Sync new links (tmp_ prefixed) to JIRA
+		// Sync new links (tmp_ prefixed)
 		syncNewLinks(ctx, issue)
 
-		// Sync deleted links to JIRA
+		// Sync deleted links
 		syncDeletedLinks(ctx, key, issue)
 
 		ClearDirtyFlag(ctx, key)
 		log.Printf("sync: synced %s to JIRA", key)
-	}
+	}()
 }
 
 // syncDeletedLinks processes _deletedLinks and deletes them from JIRA.
@@ -301,68 +277,3 @@ func joinStrings(strs []string, sep string) string {
 	return result
 }
 
-// PushToJira pushes only dirty (changed/added) issues from MongoDB to JIRA.
-func PushToJira(ctx context.Context) (int, error) {
-	dirtyIssues, err := FindDirtyIssues(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	pushed := 0
-	for _, issue := range dirtyIssues {
-		key, _ := issue["key"].(string)
-		if key == "" {
-			continue
-		}
-
-		// Cache schema stores fields at top level (no "fields" wrapper).
-		fieldsMap := make(map[string]interface{})
-		if fields, ok := issue["fields"].(bson.M); ok {
-			for k, v := range fields {
-				fieldsMap[k] = v
-			}
-		} else {
-			for k, v := range issue {
-				if k == "_id" || k == "_dirty" || k == "_syncedAt" || k == "issueLinks" {
-					continue
-				}
-				fieldsMap[k] = v
-			}
-		}
-
-		// Sync all field changes to JIRA (including custom fields)
-		if summary, ok := fieldsMap["summary"]; ok && summary != nil {
-			_, getErr := jiraclient.GetIssue(key)
-			if getErr != nil {
-				createFields := map[string]interface{}{
-					"summary": fieldsMap["summary"],
-				}
-				if it, ok := fieldsMap["issueType"]; ok {
-					createFields["issuetype"] = map[string]interface{}{"name": it}
-				}
-				if _, err := jiraclient.CreateIssue(createFields); err != nil {
-					log.Printf("push: create %s failed: %v", key, err)
-				}
-			} else {
-				// Convert all cache fields to JIRA field IDs
-				updateFields := CacheToJiraFields(fieldsMap)
-				if len(updateFields) > 0 {
-					if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
-						log.Printf("push: update %s failed: %v", key, err)
-					}
-				}
-			}
-		}
-
-		// Sync new links (tmp_ prefixed) via POST /rest/api/2/issueLink
-		syncNewLinks(ctx, issue)
-
-		// Sync deleted links to JIRA
-		syncDeletedLinks(ctx, key, issue)
-
-		ClearDirtyFlag(ctx, key)
-		pushed++
-	}
-
-	return pushed, nil
-}

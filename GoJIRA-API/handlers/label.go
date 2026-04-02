@@ -38,6 +38,7 @@ func LabelCreateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	db.SyncIssueToJira(req.Key)
 	respondJSON(w, http.StatusOK, "label added")
 }
 
@@ -67,5 +68,6 @@ func LabelDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	db.SyncIssueToJira(req.Key)
 	respondJSON(w, http.StatusOK, "label removed")
 }

@@ -119,8 +119,25 @@ func AddIssueLink(ctx context.Context, key string, link bson.M) error {
 
 // RemoveIssueLink removes a link by linkID from all issues' issueLinks arrays,
 // records the linkID in _deletedLinks for JIRA sync, and marks them dirty.
-func RemoveIssueLink(ctx context.Context, linkID string) error {
-	_, err := Issues().UpdateMany(ctx,
+// Returns the keys of affected issues.
+func RemoveIssueLink(ctx context.Context, linkID string) ([]string, error) {
+	// Find affected issues first
+	cursor, err := Issues().Find(ctx, bson.M{"issueLinks.id": linkID})
+	if err != nil {
+		return nil, err
+	}
+	var affected []bson.M
+	if err := cursor.All(ctx, &affected); err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, doc := range affected {
+		if k, ok := doc["key"].(string); ok {
+			keys = append(keys, k)
+		}
+	}
+
+	_, err = Issues().UpdateMany(ctx,
 		bson.M{"issueLinks.id": linkID},
 		bson.M{
 			"$pull": bson.M{"issueLinks": bson.M{"id": linkID}},
@@ -128,7 +145,7 @@ func RemoveIssueLink(ctx context.Context, linkID string) error {
 			"$set":  bson.M{"_dirty": true},
 		},
 	)
-	return err
+	return keys, err
 }
 
 // --- Comments ---

@@ -203,6 +203,7 @@ func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	db.SyncIssueToJira(req.Key)
 	respondJSON(w, http.StatusOK, "issue updated")
 }
 

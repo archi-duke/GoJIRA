@@ -53,6 +53,7 @@ func LinkCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	db.SyncIssueToJira(req.InwardKey)
 	respondJSON(w, http.StatusOK, "link created")
 }
 
@@ -71,9 +72,13 @@ func LinkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := db.RemoveIssueLink(ctx, req.LinkID); err != nil {
+	keys, err := db.RemoveIssueLink(ctx, req.LinkID)
+	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	for _, k := range keys {
+		db.SyncIssueToJira(k)
 	}
 	respondJSON(w, http.StatusOK, "link deleted")
 }
@@ -89,9 +94,13 @@ func LinkDeleteByKeyHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := db.RemoveIssueLink(ctx, linkID); err != nil {
+	keys, err := db.RemoveIssueLink(ctx, linkID)
+	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	for _, k := range keys {
+		db.SyncIssueToJira(k)
 	}
 	respondJSON(w, http.StatusOK, "link deleted")
 }

@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -58,8 +57,6 @@ func main() {
 	// Initialize MongoDB
 	db.Init()
 
-	// Start async dirty-issue sync (every 30 seconds)
-	db.StartAsyncSync(30 * time.Second)
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
