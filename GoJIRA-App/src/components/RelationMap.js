@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import CommonBar from './CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
+import { exportContent } from '../utils/exportUtils';
 import config from '../config';
 import './RelationMap.css';
 
@@ -122,9 +123,12 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [filterASR, setFilterASR] = useState(false);
-  const [showReserved, setShowReserved] = useState(true);
-  const [showTest, setShowTest] = useState(false);
+  const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_rm_A') === 'true');
+  const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_rm_R') !== 'false');
+  const [showTest, setShowTest] = useState(() => sessionStorage.getItem('gojira_rm_T') === 'true');
+  useEffect(() => { sessionStorage.setItem('gojira_rm_A', String(filterASR)); }, [filterASR]);
+  useEffect(() => { sessionStorage.setItem('gojira_rm_R', String(showReserved)); }, [showReserved]);
+  useEffect(() => { sessionStorage.setItem('gojira_rm_T', String(showTest)); }, [showTest]);
   const [selectedKey, setSelectedKey] = useState(null);
   const [sortByHighlight, setSortByHighlight] = useState(false);
   const [positions, setPositions] = useState({});
@@ -134,6 +138,8 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
   const [detailIssue, setDetailIssue] = useState(null);
 
   const canvasRef = useRef(null);
+  const contentRef = useRef(null);
+  const handleExport = useCallback((type) => exportContent(contentRef.current, type, `RelationMap_${projectCode}`), [projectCode]);
   const cardElems = useRef({});
 
   const projectCode = project.jiraCodes?.main?.jiraCode || '';
@@ -470,10 +476,12 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
           { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
         ]}
+        onExport={handleExport}
       />
 
       {/* content area */}
       <div
+        ref={contentRef}
         className={`rm-content ${linking ? 'rm-linking' : ''}`}
         onMouseMove={handleCanvasMouseMove}
         onClick={handleCanvasClick}
@@ -532,7 +540,7 @@ export default function RelationMap({ project, onBack, currentPage, onNavigate }
                       <div className="rm-card-header">
                         <span
                           className={`rm-subkey${hasReserved ? ' rm-subkey-reserved' : ''}`}
-                          style={hasReserved ? { cursor: 'pointer' } : { background: cardColor, color: subkeyTextColor, fontWeight: hasASR ? 700 : 'normal', cursor: 'pointer' }}
+                          style={hasReserved ? { cursor: 'pointer' } : { background: cardColor, color: subkeyTextColor, cursor: 'pointer' }}
                           onClick={(e) => { e.stopPropagation(); setDetailIssue(issue); }}
                         >
                           {issue.subkey || subtype}

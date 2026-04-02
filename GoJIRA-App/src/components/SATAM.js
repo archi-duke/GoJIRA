@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import CommonBar from './CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
+import { exportContent } from '../utils/exportUtils';
 import config from '../config';
 import './SATAM.css';
 
@@ -540,17 +541,24 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [filterASR, setFilterASR] = useState(false);
-  const [showReserved, setShowReserved] = useState(true);
-  const [showFR, setShowFR] = useState(true);            // F: FR 포함 (기본 ON)
-  const [onlyDecision, setOnlyDecision] = useState(false); // S: Decision 있는 디자인만
-  const [showDDSN, setShowDDSN] = useState(true);       // D: Detailed Design 포함 (기본 ON)
+  const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_sa_A') === 'true');
+  const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_sa_R') !== 'false');
+  const [showFR, setShowFR] = useState(() => sessionStorage.getItem('gojira_sa_F') !== 'false');
+  const [onlyDecision, setOnlyDecision] = useState(() => sessionStorage.getItem('gojira_sa_S') === 'true');
+  const [showDDSN, setShowDDSN] = useState(() => sessionStorage.getItem('gojira_sa_D') !== 'false');
+  useEffect(() => { sessionStorage.setItem('gojira_sa_A', String(filterASR)); }, [filterASR]);
+  useEffect(() => { sessionStorage.setItem('gojira_sa_R', String(showReserved)); }, [showReserved]);
+  useEffect(() => { sessionStorage.setItem('gojira_sa_F', String(showFR)); }, [showFR]);
+  useEffect(() => { sessionStorage.setItem('gojira_sa_S', String(onlyDecision)); }, [onlyDecision]);
+  useEffect(() => { sessionStorage.setItem('gojira_sa_D', String(showDDSN)); }, [showDDSN]);
   const [editCell, setEditCell] = useState(null); // { design, req, editItem, mode }
   const [cellMenu, setCellMenu] = useState(null); // { x, y, design, req, editItem }
   const [hoverCell, setHoverCell] = useState(null); // { row: reqKey, col: designKey }
   const [detailIssue, setDetailIssue] = useState(null);
 
   const projectCode = project.jiraCodes?.main?.jiraCode || '';
+  const contentRef = useRef(null);
+  const handleExport = useCallback((type) => exportContent(contentRef.current, type, `SATAM_${projectCode}`), [projectCode]);
 
   /* fetch issues */
   const fetchIssues = useCallback(() => {
@@ -828,9 +836,10 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
           { label: 'D', active: showDDSN, handler: () => setShowDDSN((v) => !v) },
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
         ]}
+        onExport={handleExport}
       />
 
-      <div className="satam-content">
+      <div className="satam-content" ref={contentRef}>
         {/* 프로젝트 라벨 */}
         <div className="satam-table-wrap">
           <table className="satam-table">
@@ -932,7 +941,7 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
                       ) : (
                         <span
                           className="satam-row-subkey satam-subkey-click"
-                          style={{ background: bgColor, color: textColor, fontWeight: hasASR ? 700 : 'normal' }}
+                          style={{ background: bgColor, color: textColor }}
                           onClick={() => setDetailIssue(req)}
                         >
                           {req.subkey}

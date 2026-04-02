@@ -32,12 +32,17 @@ export default function IssueList({ project, onBack, currentPage, onNavigate }) 
   const [sortAsc, setSortAsc] = useState(true);
   const [detailIssue, setDetailIssue] = useState(null);
 
-  // 필터 옵션 (기본 모두 ON)
-  const [showV, setShowV] = useState(true);
-  const [showF, setShowF] = useState(true);
-  const [showR, setShowR] = useState(true);
-  const [showA, setShowA] = useState(true);
-  const [showD, setShowD] = useState(true);
+  // 필터 옵션 (sessionStorage에서 복원, 기본 모두 ON)
+  const [showV, setShowV] = useState(() => sessionStorage.getItem('gojira_il_V') !== 'false');
+  const [showF, setShowF] = useState(() => sessionStorage.getItem('gojira_il_F') !== 'false');
+  const [showR, setShowR] = useState(() => sessionStorage.getItem('gojira_il_R') !== 'false');
+  const [showA, setShowA] = useState(() => sessionStorage.getItem('gojira_il_A') !== 'false');
+  const [showD, setShowD] = useState(() => sessionStorage.getItem('gojira_il_D') !== 'false');
+  useEffect(() => { sessionStorage.setItem('gojira_il_V', String(showV)); }, [showV]);
+  useEffect(() => { sessionStorage.setItem('gojira_il_F', String(showF)); }, [showF]);
+  useEffect(() => { sessionStorage.setItem('gojira_il_R', String(showR)); }, [showR]);
+  useEffect(() => { sessionStorage.setItem('gojira_il_A', String(showA)); }, [showA]);
+  useEffect(() => { sessionStorage.setItem('gojira_il_D', String(showD)); }, [showD]);
 
   const projectCode = project.jiraCodes?.main?.jiraCode || '';
 

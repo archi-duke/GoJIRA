@@ -58,11 +58,21 @@ function getDefaultView() {
 export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
   const [projects, setProjects] = useState([]);
   const [graphWidth, setGraphWidth] = useState(0);
-  const [viewRange, setViewRange] = useState(getDefaultView);
+  const [viewRange, setViewRange] = useState(() => {
+    try {
+      const s = JSON.parse(sessionStorage.getItem('gojira_pm_viewRange'));
+      if (s) return { start: new Date(s.start), end: new Date(s.end) };
+    } catch {}
+    return getDefaultView();
+  });
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, project }
   const [dialog, setDialog] = useState(null);   // { project, mode: 'detail'|'edit' }
-  const [sortKey, setSortKey] = useState('startDate'); // startDate|endDate|name|dept
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortKey, setSortKey] = useState(() => sessionStorage.getItem('gojira_pm_sortKey') || 'startDate');
+  const [sortAsc, setSortAsc] = useState(() => sessionStorage.getItem('gojira_pm_sortAsc') !== 'false');
+  useEffect(() => { sessionStorage.setItem('gojira_pm_sortKey', sortKey); }, [sortKey]);
+  useEffect(() => { sessionStorage.setItem('gojira_pm_sortAsc', String(sortAsc)); }, [sortAsc]);
+  useEffect(() => { sessionStorage.setItem('gojira_pm_viewRange', JSON.stringify(viewRange)); }, [viewRange]);
+
   const graphRef = useRef(null);
   const headerRef = useRef(null);
   const sidebarRef = useRef(null);

@@ -109,6 +109,7 @@ func main() {
 		// Page
 		r.Post("/Page/images", handlers.PageImagesPostHandler)
 		r.Put("/Page/images", handlers.PageImagesPutHandler)
+		r.Post("/Page/confluence", handlers.ConfluenceExportHandler)
 
 		// Project
 		r.Post("/Project", handlers.ProjectCreateHandler)

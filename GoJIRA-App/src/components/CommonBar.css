@@ -122,6 +122,37 @@
   opacity: 0.9;
 }
 
+/* Export 드롭다운 */
+.cb-export-wrap {
+  position: relative;
+}
+.cb-export-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  z-index: 100;
+  min-width: 140px;
+}
+.cb-export-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+}
+.cb-export-item:hover {
+  background: #f0f0f0;
+}
+
 /* Pull 로딩 오버레이 */
 .cb-overlay {
   position: fixed;
