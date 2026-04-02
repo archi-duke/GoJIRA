@@ -35,6 +35,6 @@ func FieldUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	db.SyncIssueToJira(req.Key)
+	db.SyncIssueToJira(req.Key, map[string]interface{}{req.Field: req.Value})
 	respondJSON(w, http.StatusOK, true)
 }

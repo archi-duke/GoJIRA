@@ -42,6 +42,7 @@ var customFieldMap = map[string]string{
 	"customfield_18211": "decision",
 	"customfield_18204": "adiagram",
 	"customfield_18205": "bdiagram",
+	"customfield_18215": "archdiagram",
 }
 
 // TransformToCache converts a raw JIRA issue (key, id, fields...) to cache_schema format.
@@ -154,26 +155,23 @@ func init() {
 	}
 }
 
+// standardJiraFields is a whitelist of standard JIRA fields that can be set via REST API.
+var standardJiraFields = map[string]bool{
+	"summary":     true,
+	"description": true,
+	"labels":      true,
+	"duedate":     true,
+	"environment": true,
+}
+
 // CacheToJiraFields converts cache-schema field names back to JIRA custom field IDs.
-// Standard fields (summary, description, labels, etc.) are passed through as-is.
+// Only whitelisted standard fields and mapped custom fields are included.
 // Returns a map suitable for JIRA REST API PUT /issue/{key}.
 func CacheToJiraFields(cacheFields map[string]interface{}) map[string]interface{} {
 	jiraFields := make(map[string]interface{})
-	// Internal/meta fields to skip
-	skipFields := map[string]bool{
-		"_id": true, "_dirty": true, "_syncedAt": true, "_deletedLinks": true,
-		"issueLinks": true, "key": true, "id": true,
-		// Complex fields that need special handling
-		"issueType": true, "status": true, "resolution": true, "reporter": true,
-		"priority": true, "components": true, "attachment": true,
-	}
 	for k, v := range cacheFields {
-		if skipFields[k] {
-			continue
-		}
-		// Check if it's a custom field (has reverse mapping)
+		// Check if it's a mapped custom field
 		if cfID, ok := reverseCustomFieldMap[k]; ok {
-			// Special handling for reqtype: wrap in {value: ...}
 			if k == "reqtype" {
 				if s, ok := v.(string); ok && s != "" {
 					jiraFields[cfID] = map[string]interface{}{"value": s}
@@ -181,10 +179,11 @@ func CacheToJiraFields(cacheFields map[string]interface{}) map[string]interface{
 			} else {
 				jiraFields[cfID] = v
 			}
-		} else {
-			// Standard fields (summary, description, labels, duedate, environment)
+		} else if standardJiraFields[k] {
+			// Whitelisted standard JIRA field
 			jiraFields[k] = v
 		}
+		// Everything else is silently skipped
 	}
 	return jiraFields
 }

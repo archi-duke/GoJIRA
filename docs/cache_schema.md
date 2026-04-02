@@ -3,7 +3,7 @@
     "id" : "" //issue id
     "duedate" : "" //issue duedate
     "issueType" : "" //issue type
-    "subKey" : "" //customfield_15209
+    "subkey" : "" //customfield_15209
     "components" : [] //Issue components의 name을 list로
     "summary" : "" //issue summary
     "description" : "" //issue description
@@ -17,9 +17,7 @@
     "attachment":[] //attachment
     "priority" : {"id":"", "name":""} //priority
     "client" : "" //customfield_15235
-    "watcher" : [{"id":"", "name":""}] //watcher
-    "comment" : ["id":""] //comment
-    "Features" : "" // customfield_15248
+    "Features" : "" //customfield_15248
     "Requirements" : "" //customfield_15249
     "actor" : "" //customfield_15215
     "precondition" : "" //customfield_15216
@@ -33,7 +31,7 @@
     "qa" : [] //customfield_18217
     "source" : "" //customfield_15210
     "stimulus" : "" //customfield_15211
-    "environment" : "" //issue environment
+    "environment" : "" //issue environment (standard field)
     "artifact" :"" //customfield_15208
     "response" : "" //customfield_15212
     "measure" : "" //customfield_15213
@@ -45,6 +43,7 @@
     "D-Design" : "" //customfield_18203
 
     "dmodel" : "" //customfield_18218
+    "archdiagram" : "" //customfield_18215
 
     "objectives" : "" //customfield_18206
     "pros" : "" //customfield_18207

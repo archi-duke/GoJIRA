@@ -12,61 +12,37 @@ import (
 )
 
 // SyncIssueToJira syncs a single issue to JIRA asynchronously.
-// Called by handlers after DB changes (create, update, label, link, etc.)
-func SyncIssueToJira(key string) {
+// changedFields contains only the fields that were actually modified.
+// If nil, syncs links only (for link create/delete operations).
+func SyncIssueToJira(key string, changedFields ...map[string]interface{}) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
+		log.Printf("sync: starting sync for %s", key)
+
+		// Sync changed fields to JIRA
+		if len(changedFields) > 0 && changedFields[0] != nil {
+			fields := changedFields[0]
+			jiraFields := CacheToJiraFields(fields)
+			if len(jiraFields) > 0 {
+				if err := jiraclient.UpdateIssue(key, jiraFields); err != nil {
+					log.Printf("sync: update %s failed: %v", key, err)
+				} else {
+					log.Printf("sync: updated %s (%d fields)", key, len(jiraFields))
+				}
+			}
+		}
+
+		// Sync links if issue exists in DB
 		issue, err := FindIssueByKey(ctx, key)
-		if err != nil || issue == nil {
-			log.Printf("sync: issue %s not found for sync", key)
-			return
+		if err == nil && issue != nil {
+			syncNewLinks(ctx, issue)
+			syncDeletedLinks(ctx, key, issue)
 		}
-
-		// Build fieldsMap from top-level keys
-		fieldsMap := make(map[string]interface{})
-		for k, v := range issue {
-			if k == "_id" || k == "_dirty" || k == "_syncedAt" || k == "issueLinks" || k == "_deletedLinks" {
-				continue
-			}
-			fieldsMap[k] = v
-		}
-
-		// Sync field changes to JIRA
-		if summary, ok := fieldsMap["summary"]; ok && summary != nil {
-			_, getErr := jiraclient.GetIssue(key)
-			if getErr != nil {
-				createFields := map[string]interface{}{
-					"summary": fieldsMap["summary"],
-				}
-				if it, ok := fieldsMap["issueType"]; ok {
-					createFields["issuetype"] = map[string]interface{}{"name": it}
-				}
-				if desc, ok := fieldsMap["description"]; ok {
-					createFields["description"] = desc
-				}
-				if _, err := jiraclient.CreateIssue(createFields); err != nil {
-					log.Printf("sync: create %s failed: %v", key, err)
-				}
-			} else {
-				updateFields := CacheToJiraFields(fieldsMap)
-				if len(updateFields) > 0 {
-					if err := jiraclient.UpdateIssue(key, updateFields); err != nil {
-						log.Printf("sync: update %s failed: %v", key, err)
-					}
-				}
-			}
-		}
-
-		// Sync new links (tmp_ prefixed)
-		syncNewLinks(ctx, issue)
-
-		// Sync deleted links
-		syncDeletedLinks(ctx, key, issue)
 
 		ClearDirtyFlag(ctx, key)
-		log.Printf("sync: synced %s to JIRA", key)
+		log.Printf("sync: completed sync for %s", key)
 	}()
 }
 

@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"gojira-api/db"
+	"gojira-api/jiraclient"
 	"gojira-api/models"
 )
 
@@ -38,7 +40,12 @@ func LabelCreateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	db.SyncIssueToJira(req.Key)
+	go func() {
+		if err := jiraclient.AddLabel(req.Key, req.LabelContent); err != nil {
+			log.Printf("sync: add label %s to %s failed: %v", req.LabelContent, req.Key, err)
+		}
+		db.ClearDirtyFlag(context.Background(), req.Key)
+	}()
 	respondJSON(w, http.StatusOK, "label added")
 }
 
@@ -68,6 +75,11 @@ func LabelDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	db.SyncIssueToJira(req.Key)
+	go func() {
+		if err := jiraclient.RemoveLabel(req.Key, req.LabelContent); err != nil {
+			log.Printf("sync: remove label %s from %s failed: %v", req.LabelContent, req.Key, err)
+		}
+		db.ClearDirtyFlag(context.Background(), req.Key)
+	}()
 	respondJSON(w, http.StatusOK, "label removed")
 }
