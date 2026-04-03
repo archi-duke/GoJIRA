@@ -46,10 +46,12 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// docRepoId: 요청에 없으면 프로젝트에서 가져오기
+	// documents.repo에서 docRepoId 가져오기
 	if req.DocRepoID == "" {
-		if id, ok := prjDoc["docRepoId"].(string); ok {
-			req.DocRepoID = id
+		if docs, ok := prjDoc["documents"].(bson.M); ok {
+			if id, ok := docs["repo"].(string); ok {
+				req.DocRepoID = id
+			}
 		}
 	}
 
@@ -87,9 +89,9 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// 프로젝트에 docRepoId 연결
+		// 프로젝트에 documents.repo 연결
 		if req.DocRepoID != "" {
-			db.UpdateProjectField(ctx, req.PrjID, "docRepoId", req.DocRepoID)
+			db.UpdateProjectField(ctx, req.PrjID, "documents.repo", req.DocRepoID)
 		}
 
 		if req.DocRepoID == "" {

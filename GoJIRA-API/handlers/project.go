@@ -125,10 +125,12 @@ func ensureDocRepo(jiraCode, projectName string) {
 		return
 	}
 
-	// 이미 docRepoId가 있으면 skip
-	if id, ok := prj["docRepoId"].(string); ok && id != "" {
-		log.Printf("ensureDocRepo: %s already has docRepoId=%s", jiraCode, id)
-		return
+	// documents.repo 확인 — 이미 있으면 skip
+	if docs, ok := prj["documents"].(bson.M); ok {
+		if id, ok := docs["repo"].(string); ok && id != "" {
+			log.Printf("ensureDocRepo: %s already has documents.repo=%s", jiraCode, id)
+			return
+		}
 	}
 	log.Printf("ensureDocRepo: creating repo for %s (%s)", jiraCode, projectName)
 
@@ -152,7 +154,7 @@ func ensureDocRepo(jiraCode, projectName string) {
 	if m, ok := result.(map[string]interface{}); ok {
 		if id, ok := m["_id"]; ok {
 			docRepoID := fmt.Sprintf("%v", id)
-			db.UpdateProjectField(ctx, jiraCode, "docRepoId", docRepoID)
+			db.UpdateProjectField(ctx, jiraCode, "documents.repo", docRepoID)
 			log.Printf("ensureDocRepo: %s → repo %s (id=%s)", jiraCode, repoName, docRepoID)
 		}
 	}

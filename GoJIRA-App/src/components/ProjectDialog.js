@@ -113,7 +113,7 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
           {/* 설계문서 저장소 */}
           <div className="dlg-section">설계문서</div>
           <div className="dlg-grid">
-            <Field label="Doc Repo ID" value={form.docRepoId || '(자동 생성)'} editable={false} />
+            <Field label="Doc Repo ID" value={form.documents?.repo || '(자동 생성)'} editable={false} />
           </div>
         </div>
 

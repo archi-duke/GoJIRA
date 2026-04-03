@@ -129,7 +129,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
 
   async function handleDocGen(project) {
     const prjCode = getJiraCode(project);
-    const hasRepo = !!project.docRepoId;
+    const hasRepo = !!project.documents?.repo;
     const msg = hasRepo
       ? `${prjCode} 프로젝트의 설계문서를 생성/갱신하시겠습니까?`
       : `${prjCode} 프로젝트에 설계문서 저장소가 없습니다.\n자동으로 저장소를 생성하고 설계문서를 생성하시겠습니까?`;
