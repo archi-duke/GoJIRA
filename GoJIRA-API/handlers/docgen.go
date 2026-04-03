@@ -47,14 +47,18 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var issueKeys []interface{}
+	issueKeys := bson.A{}
 	if arr, ok := prjDoc["issues"]; ok {
 		switch v := arr.(type) {
 		case bson.A:
-			issueKeys = []interface{}(v)
-		case []interface{}:
 			issueKeys = v
+		case []interface{}:
+			issueKeys = bson.A(v)
 		}
+	}
+	if len(issueKeys) == 0 {
+		respondError(w, http.StatusBadRequest, "프로젝트에 등록된 이슈가 없습니다")
+		return
 	}
 
 	issues, err := db.FindAllIssues(ctx, bson.M{"key": bson.M{"$in": issueKeys}})
@@ -122,10 +126,16 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 브랜치 생성
 	branchName := fmt.Sprintf("docs/%s-%s", req.PrjID, time.Now().Format("20060102-150405"))
-	_, statusCode := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/branch", req.DocRepoID),
+	branchResult, statusCode := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/branch", req.DocRepoID),
 		map[string]string{"name": branchName, "from": "main"})
 	if statusCode >= 400 {
-		respondError(w, http.StatusBadGateway, "브랜치 생성 실패")
+		errMsg := "브랜치 생성 실패"
+		if m, ok := branchResult.(map[string]interface{}); ok {
+			if e, ok := m["error"].(string); ok {
+				errMsg += ": " + e
+			}
+		}
+		respondError(w, http.StatusBadGateway, fmt.Sprintf("%s (status=%d, docRepoId=%s)", errMsg, statusCode, req.DocRepoID))
 		return
 	}
 
@@ -168,7 +178,13 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 	prResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/pr", req.DocRepoID),
 		map[string]string{"title": prTitle, "body": prBody, "head": branchName, "base": "main"})
 	if sc >= 400 {
-		respondError(w, http.StatusBadGateway, "PR 생성 실패")
+		errMsg := "PR 생성 실패"
+		if m, ok := prResult.(map[string]interface{}); ok {
+			if e, ok := m["error"].(string); ok {
+				errMsg += ": " + e
+			}
+		}
+		respondError(w, http.StatusBadGateway, errMsg)
 		return
 	}
 

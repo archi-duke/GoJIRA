@@ -490,6 +490,14 @@ func DocLinkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 func toStringSlice(v interface{}) []string {
 	switch t := v.(type) {
+	case bson.A:
+		s := make([]string, 0, len(t))
+		for _, item := range t {
+			if str, ok := item.(string); ok {
+				s = append(s, str)
+			}
+		}
+		return s
 	case []interface{}:
 		s := make([]string, 0, len(t))
 		for _, item := range t {
