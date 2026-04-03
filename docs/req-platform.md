@@ -261,6 +261,104 @@ draft(게시전) → active(게시중) → expired(게시종료)
 | 3 | 앱 폴더 내 컴포넌트 추가, 앱 내부 라우팅 등록 | 프론트 |
 | 4 | 필요 시 기존 권한 코드 내 비트마스크로 접근 제어 | 공통 |
 
+### 4.4 소스코드 구조
+
+#### 현재 구조 (1단계: 코드 레벨 분리)
+
+플랫폼과 앱이 동일 프로젝트 내에 혼재. 패키지로 논리적 분리만 되어 있음.
+
+```
+GoJIRA/
+├── GoJIRA-API/                ← 단일 서버 (플랫폼 + 앱 혼재)
+│   ├── handlers/
+│   │   ├── account_mgmt.go   ← [플랫폼] 계정/권한
+│   │   ├── notice.go         ← [플랫폼] 공지
+│   │   ├── sse.go            ← [플랫폼] 실시간 푸시
+│   │   ├── issue.go          ← [앱] GoJIRA 이슈
+│   │   ├── project.go        ← [앱] GoJIRA 프로젝트
+│   │   └── ...
+│   ├── db/
+│   │   ├── account.go        ← [플랫폼]
+│   │   ├── notice.go         ← [플랫폼]
+│   │   ├── mongo.go          ← [공통]
+│   │   ├── sync.go           ← [앱]
+│   │   └── transform.go      ← [앱]
+│   ├── models/
+│   │   ├── account.go        ← [플랫폼]
+│   │   ├── notice.go         ← [플랫폼]
+│   │   └── models.go         ← [앱]
+│   └── config/, jiraclient/, confluence/
+│
+├── GoJIRA-App/                ← 단일 SPA (Shell + 앱 혼재)
+│   └── src/
+│       ├── App.js             ← [플랫폼] Shell, 인증, 네비게이션
+│       ├── utils/auth.js      ← [플랫폼] 인증 유틸
+│       └── components/
+│           ├── CommonBar.js       ← [공통]
+│           ├── AccountManager.js  ← [플랫폼]
+│           ├── NoticeManager.js   ← [플랫폼]
+│           ├── NoticePopup.js     ← [플랫폼]
+│           ├── ProjectMap.js      ← [앱] GoJIRA
+│           ├── IssueList.js       ← [앱] GoJIRA
+│           ├── RelationMap.js     ← [앱] GoJIRA
+│           └── SATAM.js           ← [앱] GoJIRA
+│
+└── docs/
+```
+
+#### 목표 구조 (2단계: 프로세스 분리)
+
+플랫폼과 앱을 독립 프로젝트로 분리. 각각 독립 빌드/배포 가능.
+
+```
+GoJIRA/
+├── Platform-API/              ← 공통 플랫폼 API 서버 (:9000)
+│   ├── handlers/              (account_mgmt, notice, sse)
+│   ├── db/                    (account, notice, 공통 mongo)
+│   ├── models/                (account, notice)
+│   ├── config/                (config, crypto)
+│   └── main.go
+│
+├── Platform-App/              ← 공통 Shell + 플랫폼 UI
+│   └── src/
+│       ├── App.js             (Shell, 인증, 네비게이션, 앱 레지스트리)
+│       ├── utils/             (auth, exportUtils)
+│       ├── components/        (CommonBar, AccountManager, NoticeManager, NoticePopup)
+│       └── apps/              (앱 레지스트리 진입점)
+│
+├── GoJIRA-API/                ← GoJIRA 앱 서비스 (:9001)
+│   ├── handlers/              (issue, project, fetch, label, link, comment, field)
+│   ├── db/                    (sync, transform, 앱 전용 mongo)
+│   ├── models/                (models)
+│   ├── jiraclient/
+│   ├── confluence/
+│   └── main.go
+│
+├── GoJIRA-App/                ← GoJIRA 앱 프론트 (Platform-App에 등록)
+│   └── src/components/        (ProjectMap, IssueList, RelationMap, SATAM, IssueDetailDialog, ProjectDialog)
+│
+├── {NewApp}-API/              ← 향후 신규 앱 서비스 (:9002)
+├── {NewApp}-App/              ← 향후 신규 앱 프론트
+│
+├── JIRA-API/                  ← JIRA Mock 서버 (개발용)
+├── Conf-Mock/                 ← Confluence Mock 서버 (개발용)
+└── docs/
+```
+
+#### 전환 시 고려사항
+
+| 항목 | 내용 |
+|------|------|
+| 전환 시점 | 두 번째 앱 서비스가 추가되는 시점에 분리 착수 |
+| DB 분리 | 공통 컬렉션(users, authGroups, orgUnits, notices)은 플랫폼 DB에 유지, 앱 데이터는 앱별 DB |
+| 공유 코드 | config, crypto 등 공통 유틸은 Go 모듈로 분리하거나 각 서비스에 복사 |
+| 프론트 통합 | Platform-App이 Shell 역할, GoJIRA-App은 앱 레지스트리를 통해 동적 import |
+| CORS | 서비스별 독립 포트이므로 CORS 설정 필요 |
+
+> **결정 사유:** 현재는 단일 서비스 규모이므로 코드 레벨 분리로 충분.
+> 물리적 분리는 두 번째 앱 서비스 추가 시점에 진행하여 불필요한 복잡도 증가를 방지.
+> 현 단계에서는 플랫폼/앱 경계를 코드 내 주석과 패키지 구조로 명확히 해두어 향후 분리를 용이하게 한다.
+
 ---
 
 ## 5. 프론트엔드 마이크로 앱 전략
