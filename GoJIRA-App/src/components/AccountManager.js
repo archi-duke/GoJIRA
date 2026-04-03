@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
 import './AccountManager.css';
 
-const API = config.API_BASE + '/Account';
+const API = config.PLATFORM_API + '/Account';
 
 const TABS = [
   { key: 'users', label: 'Users' },

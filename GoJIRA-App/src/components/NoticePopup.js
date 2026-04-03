@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
 import './NoticePopup.css';
 
-const API = config.API_BASE + '/Notice';
+const API = config.PLATFORM_API + '/Notice';
 const HIDE_KEY = 'gojira_notice_hide_until';
 
 export default function NoticePopup() {

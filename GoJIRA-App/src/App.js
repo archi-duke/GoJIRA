@@ -10,7 +10,7 @@ import { getAuthUser } from './utils/auth';
 import config from './config';
 import './App.css';
 
-const API_BASE = config.API_BASE;
+const PLATFORM_API = config.PLATFORM_API;
 
 function App() {
   const [user] = useState(() => getAuthUser());
@@ -24,7 +24,7 @@ function App() {
   // 로그인 시 권한 조회
   useEffect(() => {
     if (!user) return;
-    fetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}`)
+    fetch(`${PLATFORM_API}/Account/me?knoxId=${encodeURIComponent(user)}`)
       .then(r => r.json())
       .then(data => setAuthority(data.authority || {}))
       .catch(() => setAuthority({}));

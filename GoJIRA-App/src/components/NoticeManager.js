@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
 import './NoticeManager.css';
 
-const API = config.API_BASE + '/Notice';
+const API = config.PLATFORM_API + '/Notice';
 
 const STATUS_LABEL = { draft: '게시전', active: '게시중', expired: '게시종료' };
 const STATUS_COLOR = { draft: '#888', active: '#2ecc71', expired: '#e74c3c' };
