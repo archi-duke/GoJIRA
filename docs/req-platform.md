@@ -196,7 +196,105 @@ SSE는 단방향(서버→클라이언트) 통신에 적합하며, 브라우저 
 4. **프론트 등록**: App.js 네비게이션에 메뉴 추가, 권한 체크 적용
 5. **Gateway 등록**: 라우팅 규칙 추가 (3단계 시)
 
-## 10. 향후 확장 포인트
+## 10. 프론트엔드 마이크로 앱 전략
+
+### 10.1 개념
+
+프론트엔드도 백엔드와 동일하게 앱 단위로 확장 가능한 구조를 적용한다.
+공통 Shell(타이틀바, 네비게이션, 인증, 권한)은 고정하고, 앱 컴포넌트만 추가하는 방식.
+
+```
+[공통 Shell (App.js)]
+ ├── 타이틀바 (앱 로고 + 동적 메뉴 + 사용자 정보)
+ ├── 인증 / 권한 체크
+ └── 앱 영역 ← 앱 레지스트리 기반 동적 로딩
+```
+
+### 10.2 앱 레지스트리
+
+앱 등록 정보를 설정 파일(apps.js)로 관리한다. 새 앱 추가 시 이 파일에 한 줄 등록하면 메뉴와 라우팅이 자동 구성된다.
+
+```javascript
+// apps.js — 앱 레지스트리
+export default [
+  {
+    key: 'map',                                    // 라우팅 키
+    label: 'Project',                              // 메뉴 표시명
+    component: () => import('./apps/GoJIRA'),      // 동적 import
+    authCode: null,                                // 권한 불필요 (전체 접근)
+    subPages: ['issues', 'relationMap', 'satam'],  // 하위 페이지 (메뉴 활성 판별용)
+  },
+  {
+    key: 'account',
+    label: 'Account',
+    component: () => import('./apps/AccountManager'),
+    authCode: 'USR',                               // USR >= 15 필요
+    authLevel: 15,
+  },
+  {
+    key: 'notice',
+    label: 'Notice',
+    component: () => import('./apps/NoticeManager'),
+    authCode: 'NOTMGR',
+    authLevel: 15,
+  },
+  // 신규 앱 추가 예시
+  // {
+  //   key: 'dashboard',
+  //   label: 'Dashboard',
+  //   component: () => import('./apps/Dashboard'),
+  //   authCode: 'DASH',
+  //   authLevel: 4,
+  // },
+];
+```
+
+### 10.3 Shell 동작 방식
+
+1. **메뉴 생성**: 앱 레지스트리를 순회하며 사용자 권한에 따라 메뉴 동적 구성
+2. **라우팅**: `page` 상태와 레지스트리 `key`를 매칭하여 해당 앱 컴포넌트 렌더링
+3. **동적 로딩**: `React.lazy()` + `Suspense`로 앱 컴포넌트를 필요 시점에 로딩 (초기 번들 크기 최소화)
+4. **권한 체크**: `authority[app.authCode] >= app.authLevel` 조건으로 접근 제어
+
+```
+[사용자 접속]
+  → getAuthUser() 인증
+  → /Account/me 권한 조회
+  → 앱 레지스트리 순회 → 권한 충족 앱만 메뉴 표시
+  → 메뉴 클릭 → React.lazy()로 앱 컴포넌트 로딩 → 렌더링
+```
+
+### 10.4 앱 컴포넌트 규약
+
+각 앱 컴포넌트는 다음 props를 받는다:
+```javascript
+{
+  user: string,        // 현재 사용자 ID
+  authority: object,   // 권한 객체
+  navigate: function,  // 페이지 전환 함수
+}
+```
+
+앱 내부의 하위 페이지 라우팅은 앱 컴포넌트 자체에서 관리한다.
+
+### 10.5 신규 앱 추가 절차 (프론트엔드)
+
+1. `src/apps/{AppName}/` 폴더에 앱 컴포넌트 개발
+2. `apps.js` 레지스트리에 한 줄 등록 (key, label, component, authCode)
+3. 백엔드 authGroups에 해당 권한 코드 추가
+4. 끝 — Shell이 자동으로 메뉴 생성, 라우팅, 권한 체크 처리
+
+### 10.6 향후 고도화
+
+| 단계 | 방식 | 특징 |
+|------|------|------|
+| 현재 | 단일 SPA + 동적 import | 간단, 빌드 통합 |
+| 2단계 | Module Federation (Webpack 5) | 앱별 독립 빌드/배포, 런타임 원격 모듈 로딩 |
+| 3단계 | 독립 SPA + iframe/Web Component | 완전 독립, 기술 스택 혼합 가능 |
+
+현재 단계에서는 동적 import 방식으로 충분하며, 앱 수가 늘어나고 독립 배포가 필요해지면 Module Federation으로 전환한다.
+
+## 11. 향후 확장 포인트
 
 - **SignalR Hub**: 양방향 실시간 통신 (채팅, 협업 알림 등)
 - **RBAC 확장**: 리소스별 세분화된 권한 (프로젝트별 역할 등)
