@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -24,31 +26,19 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	doc := bson.M{
-		"name":       req.Name,
-		"jiraCodes":  bson.M{"main": bson.M{"jiraCode": code}},
-		"status":     req.Status,
-		"devTeam":    req.DevTeam,
-		"devGroup":   req.DevGroup,
-		"members":    req.Members,
-		"feature":    req.Feature,
-		"architect":  req.Architect,
-		"PL":         req.PL,
-		"schedules":  req.Schedules,
-		"issueQuery": req.IssueQuery,
-		"PLMCode":    req.PLMCode,
-		"diagrams":   req.Diagrams,
-		"documents":  req.Documents,
-		"createdAt":  time.Now(),
-	}
+	doc := buildProjectDoc(req)
+	doc["createdAt"] = time.Now()
 
 	if err := db.UpsertProject(ctx, code, doc); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// 설계문서 저장소 자동 생성
+	go ensureDocRepo(code, req.Name)
 
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
@@ -88,10 +78,26 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	doc := bson.M{
+	doc := buildProjectDoc(req)
+
+	if err := db.UpsertProject(ctx, code, doc); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// 설계문서 저장소 자동 생성 (없으면)
+	go ensureDocRepo(code, req.Name)
+
+	projects, _ := db.FindAllProjects(ctx, nil)
+	respondJSON(w, http.StatusOK, projects)
+}
+
+func buildProjectDoc(req models.ProjectRequest) bson.M {
+	code := req.MainJiraCode()
+	return bson.M{
 		"name":       req.Name,
 		"jiraCodes":  bson.M{"main": bson.M{"jiraCode": code}},
 		"status":     req.Status,
@@ -107,12 +113,44 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		"diagrams":   req.Diagrams,
 		"documents":  req.Documents,
 	}
+}
 
-	if err := db.UpsertProject(ctx, code, doc); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+// ensureDocRepo 프로젝트에 docRepoId가 없으면 자동 생성
+func ensureDocRepo(jiraCode, projectName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	prj := db.FindProjectByCode(ctx, jiraCode)
+	if prj == nil {
 		return
 	}
 
-	projects, _ := db.FindAllProjects(ctx, nil)
-	respondJSON(w, http.StatusOK, projects)
+	// 이미 docRepoId가 있으면 skip
+	if id, ok := prj["docRepoId"].(string); ok && id != "" {
+		return
+	}
+
+	repoName := fmt.Sprintf("%s_%s", jiraCode, time.Now().Format("20060102150405"))
+	description := fmt.Sprintf("%s의 설계 문서", projectName)
+
+	result, sc := callPlatform("POST", "/DocRepo", map[string]interface{}{
+		"repoName":    repoName,
+		"projectId":   jiraCode,
+		"description": description,
+		"createdBy":   "system",
+		"auditors":    []string{},
+	})
+	if sc >= 400 {
+		log.Printf("ensureDocRepo: repo 생성 실패 for %s (status=%d)", jiraCode, sc)
+		return
+	}
+
+	// docRepoId 추출 및 프로젝트에 연결
+	if m, ok := result.(map[string]interface{}); ok {
+		if id, ok := m["_id"]; ok {
+			docRepoID := fmt.Sprintf("%v", id)
+			db.UpdateProjectField(ctx, jiraCode, "docRepoId", docRepoID)
+			log.Printf("ensureDocRepo: %s → repo %s (id=%s)", jiraCode, repoName, docRepoID)
+		}
+	}
 }
