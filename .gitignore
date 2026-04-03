@@ -27,3 +27,9 @@ GoJIRA-API/cache/
 .claude/
 Platform-API/server
 Platform-App/build/
+node_modules/
+repos/
+screenshot*.png
+scripts/
+package.json
+package-lock.json

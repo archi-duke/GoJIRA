@@ -113,6 +113,7 @@ type ProjectRequest struct {
 	PLMCode    []string               `json:"PLMCode,omitempty"`
 	Diagrams   map[string]interface{} `json:"diagrams,omitempty"`
 	Documents  map[string]string      `json:"documents,omitempty"`
+	Auditors   []string               `json:"auditors,omitempty"`
 }
 
 // MainJiraCode returns the main jira code string for convenience.

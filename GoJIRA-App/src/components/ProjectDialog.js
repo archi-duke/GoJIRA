@@ -69,6 +69,38 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
             <Field label="Members"
               value={(form.members || []).join(', ')} editable={false} />
           </div>
+          {isEdit && (
+            <>
+              <label className="dlg-label" style={{marginTop:8}}>Auditors</label>
+              <div className="dlg-auditor-list">
+                {(form.auditors || []).map((a, i) => (
+                  <span key={i} className="dlg-auditor-tag">
+                    {a}
+                    <button className="dlg-auditor-remove" onClick={() => {
+                      setForm(prev => ({ ...prev, auditors: (prev.auditors || []).filter((_, idx) => idx !== i) }));
+                    }}>x</button>
+                  </span>
+                ))}
+                <input
+                  className="dlg-auditor-input"
+                  placeholder="추가할 ID 입력 후 Enter"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.target.value.trim()) {
+                      const val = e.target.value.trim();
+                      setForm(prev => ({ ...prev, auditors: [...(prev.auditors || []), val] }));
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </div>
+            </>
+          )}
+          {!isEdit && (form.auditors || []).length > 0 && (
+            <div className="dlg-field" style={{marginTop:8}}>
+              <label className="dlg-label">Auditors</label>
+              <span className="dlg-value">{(form.auditors || []).join(', ')}</span>
+            </div>
+          )}
 
           {/* Schedules */}
           <div className="dlg-section">마일스톤</div>

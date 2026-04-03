@@ -13,8 +13,10 @@ var (
 	GitHubToken = envOrDefault("PLATFORM_GITHUB_TOKEN", "")
 	GitHubOrg   = envOrDefault("PLATFORM_GITHUB_ORG", "")
 	GitHubURL   = envOrDefault("GITHUB_URL", "https://github.com/")
-	GitHubAPI   string
-	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
+	GitHubAPI      string
+	RepoBaseDir    = envOrDefault("PLATFORM_REPO_DIR", "./repos")
+	WebhookURL     = envOrDefault("PLATFORM_WEBHOOK_URL", "")
+	WebhookSecret  = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
 )
 
 func init() {
@@ -28,6 +30,8 @@ func init() {
 	GitHubOrg = envOrDefault("PLATFORM_GITHUB_ORG", "")
 	GitHubURL = envOrDefault("GITHUB_URL", "https://github.com/")
 	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
+	WebhookURL = envOrDefault("PLATFORM_WEBHOOK_URL", "")
+	WebhookSecret = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
 
 	// GitHubURL → GitHubAPI 변환
 	base := strings.TrimRight(GitHubURL, "/")

@@ -106,6 +106,58 @@ func GetRepo(owner, repo string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// ListOrgRepos 조직 또는 사용자의 repo 목록 조회
+func ListOrgRepos() ([]map[string]interface{}, error) {
+	path := "/user/repos?per_page=100&sort=updated"
+	if config.GitHubOrg != "" {
+		path = "/orgs/" + config.GitHubOrg + "/repos?per_page=100&sort=updated"
+	}
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	// org가 없으면 user로 fallback
+	if status >= 400 && config.GitHubOrg != "" {
+		data, status, err = doRequest("GET", "/user/repos?per_page=100&sort=updated", nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("list repos failed (%d)", status)
+	}
+	var repos []map[string]interface{}
+	json.Unmarshal(data, &repos)
+	return repos, nil
+}
+
+// --- Webhook ---
+
+// CreateWebhook 레포지토리에 webhook을 등록한다.
+func CreateWebhook(owner, repo, webhookURL, secret string, events []string) error {
+	if webhookURL == "" {
+		return nil // URL이 없으면 skip
+	}
+	path := fmt.Sprintf("/repos/%s/%s/hooks", owner, repo)
+	body := map[string]interface{}{
+		"config": map[string]string{
+			"url":          webhookURL,
+			"content_type": "json",
+			"secret":       secret,
+		},
+		"events": events,
+		"active": true,
+	}
+	data, status, err := doRequest("POST", path, body)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("create webhook failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
 // --- File CRUD (Contents API) ---
 
 // CreateOrUpdateFile creates or updates a file in a repo.

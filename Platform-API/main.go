@@ -53,6 +53,9 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	// Webhook (버전 없이)
+	r.Post("/webhook/github", handlers.GitHubWebhookHandler)
+
 	r.Route("/api/v{version}", func(r chi.Router) {
 		// Account 관리
 		r.Route("/Account", func(r chi.Router) {
@@ -101,6 +104,7 @@ func main() {
 		r.Put("/DocRepo/{id}", handlers.DocRepoUpdateHandler)
 		r.Delete("/DocRepo/{id}", handlers.DocRepoDeleteHandler)
 		r.Delete("/DocRepo/{id}/purge", handlers.DocRepoPurgeHandler)
+		r.Delete("/DocRepo/{id}/github", handlers.DocRepoGHDeleteHandler)
 		r.Get("/DocRepo/{id}/tree", handlers.DocRepoTreeHandler)
 		r.Get("/DocRepo/{id}/file", handlers.DocRepoFileHandler)
 		r.Get("/DocRepo/{id}/commits", handlers.DocRepoCommitsHandler)

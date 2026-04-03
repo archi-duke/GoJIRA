@@ -91,6 +91,11 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	// 설계문서 저장소 자동 생성 (없으면)
 	ensureDocRepo(code, req.Name)
 
+	// auditors → docRepo에도 동기화
+	if req.Auditors != nil {
+		syncAuditorsToDocRepo(code, req.Auditors)
+	}
+
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
 }
@@ -124,6 +129,9 @@ func buildProjectDoc(req models.ProjectRequest) bson.M {
 	if req.Documents != nil {
 		doc["documents"] = req.Documents
 	}
+	if req.Auditors != nil {
+		doc["auditors"] = req.Auditors
+	}
 	return doc
 }
 
@@ -134,7 +142,23 @@ func nilToEmpty(v interface{}) interface{} {
 	return v
 }
 
+func syncAuditorsToDocRepo(jiraCode string, auditors []string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	prj := db.FindProjectByCode(ctx, jiraCode)
+	if prj == nil {
+		return
+	}
+	repoID := getDocRepoID(prj)
+	if repoID == "" {
+		return
+	}
+	callPlatform("PUT", fmt.Sprintf("/DocRepo/%s", repoID), map[string]interface{}{"auditors": auditors})
+	log.Printf("syncAuditors: %s → docRepo %s auditors=%v", jiraCode, repoID, auditors)
+}
+
 func getDocRepoID(prj bson.M) string {
+	log.Printf("getDocRepoID: documents type=%T value=%v", prj["documents"], prj["documents"])
 	switch docs := prj["documents"].(type) {
 	case bson.M:
 		if id, ok := docs["repo"].(string); ok {
@@ -147,6 +171,10 @@ func getDocRepoID(prj bson.M) string {
 					return s
 				}
 			}
+		}
+	case map[string]interface{}:
+		if id, ok := docs["repo"].(string); ok {
+			return id
 		}
 	}
 	return ""

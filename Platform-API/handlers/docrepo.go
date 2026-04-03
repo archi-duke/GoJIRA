@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -63,6 +64,17 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Webhook 자동 등록 (WebhookURL이 설정된 경우에만)
+	if config.WebhookURL != "" {
+		if err := github.CreateWebhook(owner, repoName, config.WebhookURL, config.WebhookSecret,
+			[]string{"pull_request", "push"}); err != nil {
+			log.Printf("webhook 등록 실패 %s/%s: %v", owner, repoName, err)
+		} else {
+			log.Printf("webhook 등록: %s/%s → %s", owner, repoName, config.WebhookURL)
+		}
+	}
+
 	respondJSON(w, http.StatusOK, doc)
 }
 
@@ -111,44 +123,166 @@ func DocRepoUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, "docRepo updated")
 }
 
-// POST /DocRepo/sync — 모든 repo를 GitHub에서 검증하여 상태 반환
+// POST /DocRepo/sync — GitHub + 프로젝트 기반으로 docRepos 컬렉션 재구성
 func DocRepoSyncHandler(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	repos, err := db.FindAllDocRepos(ctx, nil)
+	// 1. GitHub repo 목록 조회
+	ghRepos, err := github.ListOrgRepos()
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondError(w, http.StatusBadGateway, "GitHub repo 목록 조회 실패: "+err.Error())
 		return
+	}
+	ghRepoMap := map[string]map[string]interface{}{} // repoName → ghRepo
+	for _, gr := range ghRepos {
+		name, _ := gr["name"].(string)
+		ghRepoMap[name] = gr
+	}
+
+	// 2. 프로젝트에서 연결된 repo 정보 수집
+	projects, _ := db.FindAllProjects(ctx)
+	type prjRepo struct {
+		JiraCode string
+		RepoID   string
+		RepoName string
+	}
+	prjRepos := []prjRepo{}
+	prjRepoIDs := map[string]string{} // repoID → jiraCode
+	for _, prj := range projects {
+		docs := bsonGetDoc(prj, "documents")
+		repoID := bsonGetStr(docs, "repo")
+		repoName := bsonGetStr(docs, "repoName")
+		jc := bsonGetStr(bsonGetDoc(bsonGetDoc(prj, "jiraCodes"), "main"), "jiraCode")
+		if repoID == "" && repoName == "" {
+			continue
+		}
+		prjRepos = append(prjRepos, prjRepo{JiraCode: jc, RepoID: repoID, RepoName: repoName})
+		if repoID != "" {
+			prjRepoIDs[repoID] = jc
+		}
+	}
+
+	// 3. 기존 docRepos 컬렉션 조회
+	existingRepos, _ := db.FindAllDocRepos(ctx, nil)
+	existingMap := map[string]bson.M{} // repoName → doc
+	for _, dr := range existingRepos {
+		name, _ := dr["repoName"].(string)
+		existingMap[name] = dr
 	}
 
 	type repoStatus struct {
-		ID       interface{} `json:"_id"`
-		RepoName string      `json:"repoName"`
-		Owner    string      `json:"repoOwner"`
-		Exists   bool        `json:"exists"`
-		ProjectID string     `json:"projectId"`
+		ID        interface{} `json:"_id"`
+		RepoName  string      `json:"repoName"`
+		Owner     string      `json:"repoOwner"`
+		GHExists  bool        `json:"ghExists"`
+		Linked    bool        `json:"linked"`
+		ProjectID string      `json:"projectId"`
+		Status    string      `json:"status"`
 	}
-
 	results := []repoStatus{}
-	for _, repo := range repos {
-		owner, _ := repo["repoOwner"].(string)
-		name, _ := repo["repoName"].(string)
-		pid, _ := repo["projectId"].(string)
 
-		_, err := github.GetRepo(owner, name)
-		exists := err == nil
+	// 4. 프로젝트에 연결된 repo 처리 (컬렉션에 없으면 재생성)
+	processedNames := map[string]bool{}
+	for _, pr := range prjRepos {
+		ghRepo := ghRepoMap[pr.RepoName]
+		ghExists := ghRepo != nil
+
+		// docRepos 컬렉션에 없으면 재생성
+		existing := existingMap[pr.RepoName]
+		var docID interface{}
+		if existing == nil && ghExists {
+			owner := config.GitHubOrg
+			if owner == "" {
+				if o, ok := ghRepo["owner"].(map[string]interface{}); ok {
+					owner, _ = o["login"].(string)
+				}
+			}
+			repoURL, _ := ghRepo["html_url"].(string)
+			defaultBranch, _ := ghRepo["default_branch"].(string)
+			newDoc := bson.M{
+				"repoName": pr.RepoName, "repoOwner": owner, "repoUrl": repoURL,
+				"defaultBranch": defaultBranch, "projectId": pr.JiraCode, "auditors": []string{},
+			}
+			db.InsertDocRepo(ctx, newDoc)
+			docID = newDoc["_id"]
+			// 프로젝트의 documents.repo도 갱신
+			if docID != nil {
+				idStr := fmt.Sprintf("%v", docID)
+				if oid, ok := docID.(bson.ObjectID); ok {
+					idStr = oid.Hex()
+				}
+				db.UpdateProjectDocRepo(ctx, pr.JiraCode, idStr, pr.RepoName)
+			}
+		} else if existing != nil {
+			docID = existing["_id"]
+		}
+
+		status := "ok"
+		if !ghExists {
+			status = "missing"
+		}
+
+		owner := ""
+		if ghRepo != nil {
+			if o, ok := ghRepo["owner"].(map[string]interface{}); ok {
+				owner, _ = o["login"].(string)
+			}
+		}
 
 		results = append(results, repoStatus{
-			ID:        repo["_id"],
-			RepoName:  name,
-			Owner:     owner,
-			Exists:    exists,
-			ProjectID: pid,
+			ID: docID, RepoName: pr.RepoName, Owner: owner,
+			GHExists: ghExists, Linked: true, ProjectID: pr.JiraCode, Status: status,
+		})
+		processedNames[pr.RepoName] = true
+	}
+
+	// 5. docRepos에 있지만 프로젝트에 연결 안 된 repo
+	for _, dr := range existingRepos {
+		name, _ := dr["repoName"].(string)
+		if processedNames[name] {
+			continue
+		}
+		ghRepo := ghRepoMap[name]
+		ghExists := ghRepo != nil
+		owner, _ := dr["repoOwner"].(string)
+		pid, _ := dr["projectId"].(string)
+
+		status := "orphan"
+		if !ghExists {
+			status = "missing"
+		}
+
+		results = append(results, repoStatus{
+			ID: dr["_id"], RepoName: name, Owner: owner,
+			GHExists: ghExists, Linked: false, ProjectID: pid, Status: status,
 		})
 	}
 
 	respondJSON(w, http.StatusOK, results)
+}
+
+// DELETE /DocRepo/{id}/github — GitHub에서 repo 삭제
+func DocRepoGHDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	owner, name, err := getRepoInfo(ctx, id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "docRepo not found")
+		return
+	}
+
+	if err := github.DeleteRepo(owner, name); err != nil {
+		respondError(w, http.StatusBadGateway, "GitHub repo 삭제 실패: "+err.Error())
+		return
+	}
+
+	// DB에서도 삭제
+	db.SoftDeleteDocRepo(ctx, id, "system")
+
+	respondJSON(w, http.StatusOK, "GitHub repo deleted")
 }
 
 // DELETE /DocRepo/{id}/purge — repo 정보 완전 삭제 + 프로젝트 documents 비우기
@@ -552,6 +686,28 @@ func DocLinkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- helpers ---
+
+func bsonGetDoc(doc bson.M, key string) bson.M {
+	switch v := doc[key].(type) {
+	case bson.M:
+		return v
+	case bson.D:
+		m := bson.M{}
+		for _, e := range v {
+			m[e.Key] = e.Value
+		}
+		return m
+	}
+	return nil
+}
+
+func bsonGetStr(doc bson.M, key string) string {
+	if doc == nil {
+		return ""
+	}
+	s, _ := doc[key].(string)
+	return s
+}
 
 func toStringSlice(v interface{}) []string {
 	switch t := v.(type) {

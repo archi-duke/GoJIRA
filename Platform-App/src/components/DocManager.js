@@ -38,24 +38,32 @@ export default function DocManager({ user }) {
     try {
       const res = await fetch(`${API}/sync`, { method: 'POST' });
       const data = await res.json();
-      if (Array.isArray(data)) {
-        const statusMap = {};
-        const missing = [];
-        data.forEach(r => {
-          statusMap[r._id] = r;
-          if (!r.exists) missing.push(r);
-        });
-        setRepoStatus(statusMap);
-        fetchRepos();
+      if (!Array.isArray(data)) return;
 
-        // GitHub에 없는 repo 처리
-        for (const r of missing) {
-          if (window.confirm(`"${r.repoName}" 레포지토리가 GitHub에 존재하지 않습니다.\n삭제하시겠습니까?`)) {
-            await fetch(`${API}/${r._id}/purge`, { method: 'DELETE' });
-          }
+      const statusMap = {};
+      data.forEach(r => { statusMap[r._id] = r; });
+      setRepoStatus(statusMap);
+      fetchRepos();
+
+      let cleaned = false;
+
+      // 주황: GitHub에 있지만 프로젝트 연결 없음 (orphan) → GitHub repo 삭제 여부
+      for (const r of data.filter(r => r.status === 'orphan')) {
+        if (window.confirm(`"${r.repoName}" — GitHub에 존재하지만 연결된 프로젝트가 없습니다.\nGitHub 레포지토리를 삭제하시겠습니까?`)) {
+          await fetch(`${API}/${r._id}/github`, { method: 'DELETE' });
+          cleaned = true;
         }
-        if (missing.length > 0) fetchRepos();
       }
+
+      // 빨강: GitHub에 없지만 프로젝트에 연결됨 (missing) → DB 정리
+      for (const r of data.filter(r => r.status === 'missing')) {
+        if (window.confirm(`"${r.repoName}" — GitHub에 존재하지 않습니다.\nDB 정보를 삭제하시겠습니까?`)) {
+          await fetch(`${API}/${r._id}/purge`, { method: 'DELETE' });
+          cleaned = true;
+        }
+      }
+
+      if (cleaned) fetchRepos();
     } catch (err) {
       alert('동기화 실패: ' + err.message);
     } finally {
@@ -76,14 +84,15 @@ export default function DocManager({ user }) {
           </div>
         </div>
         {repos.map(r => {
-          const status = repoStatus[r._id];
-          const isMissing = status && !status.exists;
+          const st = repoStatus[r._id];
+          const cls = st?.status === 'orphan' ? 'dm-repo-orphan' : st?.status === 'missing' ? 'dm-repo-missing' : '';
           return (
             <div key={r._id}
-              className={`dm-repo-item ${selectedRepo?._id === r._id ? 'dm-repo-active' : ''} ${isMissing ? 'dm-repo-missing' : ''}`}
+              className={`dm-repo-item ${selectedRepo?._id === r._id ? 'dm-repo-active' : ''} ${cls}`}
               onClick={() => { setSelectedRepo(r); setView('tree'); }}>
               <span className="dm-repo-name">{r.repoName}</span>
-              <span className="dm-repo-owner">{r.repoOwner}</span>
+              <span className="dm-repo-sub">{r.projectId}</span>
+              <span className="dm-repo-sub">{r.repoOwner}</span>
             </div>
           );
         })}
@@ -136,7 +145,8 @@ function DocTree({ repo }) {
       .then(r => r.json())
       .then(d => {
         if (d.content && d.encoding === 'base64') {
-          setContent(atob(d.content));
+          const bytes = Uint8Array.from(atob(d.content), c => c.charCodeAt(0));
+          setContent(new TextDecoder('utf-8').decode(bytes));
         } else {
           setContent(d.content || '');
         }
@@ -230,6 +240,13 @@ function PRList({ repo, user }) {
   }, [repo, filter]);
 
   useEffect(() => { fetchPRs(); }, [fetchPRs]);
+
+  // SSE: doc_update 이벤트 수신 시 PR 목록 갱신
+  useEffect(() => {
+    const es = new EventSource(`${API.replace('/DocRepo', '/Notice/stream')}`);
+    es.addEventListener('doc_update', () => { fetchPRs(); });
+    return () => es.close();
+  }, [fetchPRs]);
 
   async function handleReview(prNum, event) {
     const body = event === 'REQUEST_CHANGES' ? prompt('반려 사유') : '';

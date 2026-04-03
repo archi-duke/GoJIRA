@@ -55,7 +55,7 @@ function getDefaultView() {
   };
 }
 
-export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
+export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, user }) {
   const [projects, setProjects] = useState([]);
   const [graphWidth, setGraphWidth] = useState(0);
   const [viewRange, setViewRange] = useState(() => {
@@ -139,7 +139,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
       const res = await fetch(`${API_BASE}/Issue/docgen`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prjID: prjCode }),
+        body: JSON.stringify({ prjID: prjCode, userId: user }),
       });
       const data = await res.json();
       if (res.ok) {

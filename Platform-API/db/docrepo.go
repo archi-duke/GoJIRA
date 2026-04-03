@@ -82,6 +82,27 @@ func FindDocLinks(ctx context.Context, filter bson.M) ([]bson.M, error) {
 	return results, nil
 }
 
+// FindAllProjects projects 컬렉션 조회 (공유 DB)
+func FindAllProjects(ctx context.Context) ([]bson.M, error) {
+	cursor, err := database.Collection("projects").Find(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	var results []bson.M
+	if err := cursor.All(ctx, &results); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// UpdateProjectDocRepo 프로젝트의 documents.repo, documents.repoName을 설정
+func UpdateProjectDocRepo(ctx context.Context, projectID, repoID, repoName string) {
+	database.Collection("projects").UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": projectID},
+		bson.M{"$set": bson.M{"documents.repo": repoID, "documents.repoName": repoName}},
+	)
+}
+
 // ClearProjectDocRepo 프로젝트의 documents.repo, documents.repoName을 비움
 func ClearProjectDocRepo(ctx context.Context, projectID string) {
 	// projects 컬렉션에서 projectId로 검색하여 documents 초기화

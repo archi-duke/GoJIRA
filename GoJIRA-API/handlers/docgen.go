@@ -30,6 +30,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		PrjID     string `json:"prjID"`
 		DocRepoID string `json:"docRepoId"`
 		Message   string `json:"message"`
+		UserID    string `json:"userId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
@@ -48,11 +49,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 
 	// documents.repo에서 docRepoId 가져오기
 	if req.DocRepoID == "" {
-		if docs, ok := prjDoc["documents"].(bson.M); ok {
-			if id, ok := docs["repo"].(string); ok {
-				req.DocRepoID = id
-			}
-		}
+		req.DocRepoID = getDocRepoID(prjDoc)
 	}
 
 	// docRepoId가 없으면 자동 생성
@@ -96,6 +93,30 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 
 		if req.DocRepoID == "" {
 			respondError(w, http.StatusInternalServerError, "설계문서 저장소 생성 후 ID를 가져올 수 없습니다")
+			return
+		}
+	}
+
+	// 프로젝트 auditors → docRepo 동기화
+	if auditors := toStrSlice(prjDoc["auditors"]); len(auditors) > 0 {
+		callPlatform("PUT", fmt.Sprintf("/DocRepo/%s", req.DocRepoID), map[string]interface{}{"auditors": auditors})
+	}
+
+	// 열린 PR 확인 — 있으면 먼저 처리하도록 안내
+	openPRs, sc := callPlatform("GET", fmt.Sprintf("/DocRepo/%s/prs?state=open", req.DocRepoID), nil)
+	if sc == 200 {
+		if prList, ok := openPRs.([]interface{}); ok && len(prList) > 0 {
+			titles := []string{}
+			for _, pr := range prList {
+				if m, ok := pr.(map[string]interface{}); ok {
+					title, _ := m["title"].(string)
+					num := m["number"]
+					titles = append(titles, fmt.Sprintf("#%v %s", num, title))
+				}
+			}
+			respondError(w, http.StatusConflict,
+				fmt.Sprintf("미완료된 PR이 %d건 있습니다.\n승인/머지를 완료하거나, 승인 진행 중이면 잠시 후 다시 시도하세요.\n\n%s",
+					len(titles), strings.Join(titles, "\n")))
 			return
 		}
 	}
@@ -178,7 +199,11 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 로컬 git 방식: 브랜치 생성 + 파일 쓰기 + commit/push + PR 생성
-	branchName := fmt.Sprintf("docs/%s-%s", req.PrjID, time.Now().Format("20060102-150405"))
+	userId := req.UserID
+	if userId == "" {
+		userId = "system"
+	}
+	branchName := fmt.Sprintf("docs/%s", userId)
 	prTitle := fmt.Sprintf("[%s] 설계문서 갱신 %s", req.PrjID, time.Now().Format("2006-01-02"))
 	prBody := fmt.Sprintf("프로젝트 %s의 설계문서를 갱신합니다.\n\n변경 파일:\n", req.PrjID)
 	for path := range files {
@@ -215,6 +240,30 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		"files":   len(files),
 		"result":  publishResult,
 	})
+}
+
+func toStrSlice(v interface{}) []string {
+	switch t := v.(type) {
+	case bson.A:
+		s := make([]string, 0, len(t))
+		for _, item := range t {
+			if str, ok := item.(string); ok {
+				s = append(s, str)
+			}
+		}
+		return s
+	case []interface{}:
+		s := make([]string, 0, len(t))
+		for _, item := range t {
+			if str, ok := item.(string); ok {
+				s = append(s, str)
+			}
+		}
+		return s
+	case []string:
+		return t
+	}
+	return nil
 }
 
 func callPlatform(method, path string, body interface{}) (interface{}, int) {

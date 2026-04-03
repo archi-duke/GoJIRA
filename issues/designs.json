@@ -33,7 +33,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "구조설계 1!!!",
+            "summary": "구조설계 1",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/issue/KAN-4/watchers",
                 "watchCount": 0,
@@ -264,7 +264,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-31T14:56:29.848+0900",
+            "updated": "2026-04-03T16:54:26.685+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",

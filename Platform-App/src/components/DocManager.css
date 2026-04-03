@@ -7,13 +7,15 @@
 .dm-sync-btn { width: 26px; height: 26px; border: none; border-radius: 4px; background: lightgray; color: #000; font-size: 14px; cursor: pointer; }
 .dm-sync-btn:hover { opacity: 0.7; }
 .dm-add-btn { width: 26px; height: 26px; border: none; border-radius: 4px; background: #2c3e50; color: #fff; font-size: 16px; cursor: pointer; }
+.dm-repo-orphan { background: #fff3e0 !important; }
+.dm-repo-orphan .dm-repo-name { color: #e67e22; }
 .dm-repo-missing { background: #ffe0e0 !important; }
 .dm-repo-missing .dm-repo-name { color: #e74c3c; }
 .dm-repo-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #eee; }
 .dm-repo-item:hover { background: #eee; }
 .dm-repo-active { background: #e3ecf5; }
 .dm-repo-name { display: block; font-size: 13px; font-weight: 600; color: #2c3e50; }
-.dm-repo-owner { font-size: 11px; color: #888; }
+.dm-repo-sub { display: block; font-size: 11px; color: #888; }
 
 /* Main */
 .dm-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
