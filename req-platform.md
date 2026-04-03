@@ -1,0 +1,137 @@
+# GoJIRA 공통 플랫폼 운영전략
+
+## 1. 플랫폼 개요
+
+GoJIRA의 네비게이션, 사용자 인증, 계정/권한 관리, 공지 관리는 웹 시스템 개발의 **공통 플랫폼**으로 운영한다.
+새로운 웹 서비스를 구축할 때 이 플랫폼을 기반으로 비즈니스 로직만 추가하여 빠르게 개발할 수 있도록 한다.
+
+## 2. 플랫폼 구성요소
+
+### 2.1 사용자 인증
+- **SSO 연동**: ADSSO 쿠키 기반 인증, `{SSO_URL}/Account/ADFSLogin?client={origin}` 리다이렉트
+- **개발 모드**: `USE_SSO=false` 시 고정 사용자 ID로 동작 (별도 인증 서버 불필요)
+- **인증 확인**: `getAuthUser()` → 쿠키 확인 또는 개발용 ID 반환
+- **설정**: `config.js`의 `USE_SSO`, `SSO_URL`, `DEV_USER`
+
+### 2.2 네비게이션
+- **앱 타이틀바**: 좌측 앱 로고, 중앙 메뉴 탭, 우측 사용자 정보
+- **메뉴 동적 구성**: 사용자 권한에 따라 메뉴 노출/숨김
+- **페이지 상태 유지**: sessionStorage로 현재 페이지/선택 항목 유지
+
+### 2.3 계정/권한 관리
+- **컬렉션**: users, authGroups, orgUnits, userProjects, userConnections
+- **권한 모델**: CRUD 비트마스크 (C=8, R=4, U=2, D=1)
+  - 권한코드별 비트마스크: `{ "USR": 15, "NOTMGR": 15, "PRJ": 6 }`
+  - 사용자 최종 권한 = 소속 authGroups의 authority를 OR 연산
+  - users에 authority 직접 저장 금지 (항상 계산)
+- **조직 구조**: Company > Division > Team > Group 계층
+- **soft delete**: isActive=false 기반, 물리 삭제 금지
+- **감사 필드**: createdAt, updatedAt, createdBy, updatedBy
+
+### 2.4 공지 관리
+- **공지 CRUD**: 제목, 본문(마크다운/HTML), 게시 기간, 상태 관리
+- **상태 자동 전환**: draft → active → expired (게시 기간 기반)
+- **접속 시 팝업**: 게시중 공지를 작성일 오름차순으로 표시
+- **3일 보지 않기**: localStorage 기반
+- **비상 공지**: SSE 실시간 푸시로 즉시 전체 클라이언트 게시
+
+## 3. 기술 스택
+
+| 계층 | 기술 | 비고 |
+|------|------|------|
+| 프론트엔드 | React (SPA) | sessionStorage/localStorage 상태 유지 |
+| 백엔드 API | Go (chi) | REST API, SSE |
+| 데이터베이스 | MongoDB | bson.M 기반, soft delete |
+| 인증 | SSO (ADFS) + 쿠키 | 개발 모드 지원 |
+| 실시간 통신 | SSE (Server-Sent Events) | 비상 공지 푸시 |
+| 암호화 | AES-256-GCM | .env 인증 정보 암호화 |
+
+## 4. 새 서비스 추가 절차
+
+### 4.1 백엔드
+1. `models/`에 도메인 모델 추가
+2. `db/`에 컬렉션 접근 함수, 인덱스 추가
+3. `handlers/`에 REST API 핸들러 추가
+4. `main.go`에 라우트 등록 + caseInsensitiveRouting 매핑
+5. 필요 시 권한 코드 추가 (authGroups.authority에 새 코드)
+
+### 4.2 프론트엔드
+1. `components/`에 페이지 컴포넌트 추가
+2. `App.js`에 페이지 라우팅 + 네비게이션 메뉴 등록
+3. 권한 체크: `authority.{권한코드} >= {필요 비트값}` 조건으로 메뉴 표시/접근 제어
+
+### 4.3 권한 등록
+1. 새 권한 코드 정의 (예: `NEWMGR`)
+2. 필요한 authGroup에 해당 코드와 비트마스크 추가
+3. 프론트에서 `authority.NEWMGR >= 15` 등으로 접근 제어
+
+## 5. 권한 코드 체계
+
+| 코드 | 대상 | 설명 |
+|------|------|------|
+| USR | 사용자 관리 | Account 메뉴 접근 |
+| ORG | 조직 관리 | 조직 CRUD |
+| PRJ | 프로젝트 관리 | 프로젝트 CRUD |
+| ALLPRJ | 전체 프로젝트 | 모든 프로젝트 접근 |
+| NOTMGR | 공지 관리 | Notice 메뉴 접근 |
+
+**비트마스크 값:**
+- 15 (CRUD): 전체 권한
+- 6 (RU): 조회 + 수정
+- 4 (R): 조회 전용
+
+새 서비스 추가 시 권한 코드를 추가하고, 해당 코드의 비트마스크를 authGroup에 설정한다.
+
+## 6. API 엔드포인트 규칙
+
+- 기본 경로: `/api/v{version}/{Resource}`
+- 대소문자 무관 라우팅 (caseInsensitiveRouting 미들웨어)
+- 인증: Basic Auth (JIRA/Confluence), SSO 쿠키 (사용자)
+- 응답: JSON, ObjectId는 문자열로 반환
+- 삭제: soft delete (isActive=false)
+
+## 7. 설정 관리
+
+### 환경변수 (.env)
+```
+GOJIRA_SERVER_PORT=:9000
+GOJIRA_JIRA_URL=http://localhost:8000
+GOJIRA_JIRA_API_BASE=/rest/api/2
+GOJIRA_JIRA_USER=ENC:...          # AES-256-GCM 암호화
+GOJIRA_JIRA_PASS=ENC:...
+GOJIRA_CONFLUENCE_URL=http://localhost:8090
+GOJIRA_CONFLUENCE_USER=...
+GOJIRA_CONFLUENCE_PASS=...
+GOJIRA_MONGO_URI=mongodb://localhost:27017
+GOJIRA_MONGO_DB=gojira
+GOJIRA_ENC_KEY=...                 # AES 암호화 키 (32 bytes)
+```
+
+### 프론트엔드 설정 (config.js)
+```javascript
+{
+  API_BASE: 'http://localhost:9000/api/v2',
+  SSO_URL: 'https://sso.example.com',
+  USE_SSO: false,       // 운영: true
+  DEV_USER: 'duke.kimm' // 개발 전용
+}
+```
+
+## 8. 실시간 통신 전략
+
+| 용도 | 기술 | 엔드포인트 |
+|------|------|-----------|
+| 비상 공지 푸시 | SSE | GET /Notice/stream |
+| 접속 상태 관리 | userConnections 컬렉션 | (향후 SignalR/WebSocket) |
+
+SSE는 단방향(서버→클라이언트) 통신에 적합하며, 브라우저 네이티브 지원(EventSource)으로 별도 라이브러리 불필요.
+양방향 통신이 필요한 경우 WebSocket/SignalR로 확장 가능.
+
+## 9. 향후 확장 포인트
+
+- **SignalR Hub**: 양방향 실시간 통신 (채팅, 협업 알림 등)
+- **RBAC 확장**: 리소스별 세분화된 권한 (프로젝트별 역할 등)
+- **감사 로그**: 사용자 행동 추적 컬렉션
+- **다국어 지원**: i18n 프레임워크 적용
+- **테마/브랜딩**: 서비스별 타이틀바 로고/색상 커스터마이징
+- **마이크로서비스**: 플랫폼(인증/권한/공지)과 비즈니스 로직 분리 배포
