@@ -306,7 +306,7 @@ function EditDialog({ item, authGroups, orgUnits, onClose, onSave }) {
               <label>권한 <button className="am-small-btn" onClick={addAuthCode}>+ 코드 추가</button></label>
               <table className="am-auth-table">
                 <thead>
-                  <tr><th>코드</th><th>C</th><th>R</th><th>U</th><th>D</th></tr>
+                  <tr><th>코드</th><th>C</th><th>R</th><th>U</th><th>D</th><th></th></tr>
                 </thead>
                 <tbody>
                   {Object.entries(form.authority || {}).map(([code, bits]) => (
@@ -317,6 +317,13 @@ function EditDialog({ item, authGroups, orgUnits, onClose, onSave }) {
                           <input type="checkbox" checked={!!(bits & b)} onChange={() => toggleAuthBit(code, b)} />
                         </td>
                       ))}
+                      <td><button className="am-small-btn" onClick={() => {
+                        setForm(prev => {
+                          const auth = { ...(prev.authority || {}) };
+                          delete auth[code];
+                          return { ...prev, authority: auth };
+                        });
+                      }}>x</button></td>
                     </tr>
                   ))}
                 </tbody>

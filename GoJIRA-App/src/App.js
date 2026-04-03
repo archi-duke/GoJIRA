@@ -1,25 +1,32 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import ProjectMap from './components/ProjectMap';
 import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import AccountManager from './components/AccountManager';
 import { getAuthUser } from './utils/auth';
+import config from './config';
 import './App.css';
 
-const TOP_NAV = [
-  { key: 'map', label: 'Project' },
-  { key: 'account', label: 'Account' },
-  { key: 'notice', label: 'Notice' },
-];
+const API_BASE = config.API_BASE;
 
 function App() {
   const [user] = useState(() => getAuthUser());
+  const [authority, setAuthority] = useState(null);
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [selectedProject, setSelectedProject] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('gojira_project')); }
     catch { return null; }
   });
+
+  // 로그인 시 권한 조회
+  useEffect(() => {
+    if (!user) return;
+    fetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}`)
+      .then(r => r.json())
+      .then(data => setAuthority(data.authority || {}))
+      .catch(() => setAuthority({}));
+  }, [user]);
 
   const navigate = useCallback((p, project) => {
     setPage(p);
@@ -33,10 +40,23 @@ function App() {
     navigate(target, selectedProject);
   }, [navigate, selectedProject]);
 
-  // 상단 메뉴에서 현재 활성 탭 판별 (프로젝트 하위 페이지도 map으로 표시)
   const activeNav = ['map', 'issues', 'relationMap', 'satam'].includes(page) ? 'map' : page;
 
+  // USR 권한 15 = CRUD 전체 → Account/Notice 메뉴 접근 허용
+  const hasAdmin = authority && (authority.USR || 0) >= 15;
+
   if (!user) return null;
+
+  // 권한 없이 account/notice 접근 시도 시 map으로 리다이렉트
+  if ((page === 'account' || page === 'notice') && authority !== null && !hasAdmin) {
+    navigate('map');
+  }
+
+  const navItems = [
+    { key: 'map', label: 'Project' },
+    ...(hasAdmin ? [{ key: 'account', label: 'Account' }] : []),
+    ...(hasAdmin ? [{ key: 'notice', label: 'Notice' }] : []),
+  ];
 
   let content;
   if (page === 'issues' && selectedProject) {
@@ -45,9 +65,9 @@ function App() {
     content = <RelationMap project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
   } else if (page === 'satam' && selectedProject) {
     content = <SATAM project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
-  } else if (page === 'account') {
+  } else if (page === 'account' && hasAdmin) {
     content = <AccountManager user={user} />;
-  } else if (page === 'notice') {
+  } else if (page === 'notice' && hasAdmin) {
     content = <div className="app-placeholder">Notice 관리 (준비 중)</div>;
   } else {
     content = <ProjectMap onProjectClick={(p) => navigate('issues', p)} onRelationMap={(p) => navigate('relationMap', p)} onSATAM={(p) => navigate('satam', p)} user={user} />;
@@ -58,7 +78,7 @@ function App() {
       <div className="app-titlebar">
         <span className="app-logo">GoJIRA</span>
         <nav className="app-nav">
-          {TOP_NAV.map((n) => (
+          {navItems.map((n) => (
             <button
               key={n.key}
               className={`app-nav-btn ${activeNav === n.key ? 'app-nav-active' : ''}`}
