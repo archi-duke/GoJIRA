@@ -134,6 +134,24 @@ func nilToEmpty(v interface{}) interface{} {
 	return v
 }
 
+func getDocRepoID(prj bson.M) string {
+	switch docs := prj["documents"].(type) {
+	case bson.M:
+		if id, ok := docs["repo"].(string); ok {
+			return id
+		}
+	case bson.D:
+		for _, e := range docs {
+			if e.Key == "repo" {
+				if s, ok := e.Value.(string); ok {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // ensureDocRepo 프로젝트에 docRepoId가 없으면 자동 생성
 func ensureDocRepo(jiraCode, projectName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -145,11 +163,10 @@ func ensureDocRepo(jiraCode, projectName string) {
 	}
 
 	// documents.repo 확인 — 이미 있으면 skip
-	if docs, ok := prj["documents"].(bson.M); ok {
-		if id, ok := docs["repo"].(string); ok && id != "" {
-			log.Printf("ensureDocRepo: %s already has documents.repo=%s", jiraCode, id)
-			return
-		}
+	repoID := getDocRepoID(prj)
+	if repoID != "" {
+		log.Printf("ensureDocRepo: %s already has documents.repo=%s", jiraCode, repoID)
+		return
 	}
 	log.Printf("ensureDocRepo: creating repo for %s (%s)", jiraCode, projectName)
 
@@ -169,11 +186,12 @@ func ensureDocRepo(jiraCode, projectName string) {
 		return
 	}
 
-	// docRepoId 추출 및 프로젝트에 연결
+	// docRepoId + repoName 추출 및 프로젝트에 연결
 	if m, ok := result.(map[string]interface{}); ok {
 		if id, ok := m["_id"]; ok {
 			docRepoID := fmt.Sprintf("%v", id)
 			db.UpdateProjectField(ctx, jiraCode, "documents.repo", docRepoID)
+			db.UpdateProjectField(ctx, jiraCode, "documents.repoName", repoName)
 			log.Printf("ensureDocRepo: %s → repo %s (id=%s)", jiraCode, repoName, docRepoID)
 		}
 	}

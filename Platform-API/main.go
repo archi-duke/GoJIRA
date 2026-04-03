@@ -97,8 +97,10 @@ func main() {
 		// DocRepo — 문서 이력관리
 		r.Post("/DocRepo", handlers.DocRepoCreateHandler)
 		r.Get("/DocRepo", handlers.DocRepoListHandler)
+		r.Post("/DocRepo/sync", handlers.DocRepoSyncHandler)
 		r.Put("/DocRepo/{id}", handlers.DocRepoUpdateHandler)
 		r.Delete("/DocRepo/{id}", handlers.DocRepoDeleteHandler)
+		r.Delete("/DocRepo/{id}/purge", handlers.DocRepoPurgeHandler)
 		r.Get("/DocRepo/{id}/tree", handlers.DocRepoTreeHandler)
 		r.Get("/DocRepo/{id}/file", handlers.DocRepoFileHandler)
 		r.Get("/DocRepo/{id}/commits", handlers.DocRepoCommitsHandler)

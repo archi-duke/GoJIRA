@@ -111,6 +111,71 @@ func DocRepoUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, "docRepo updated")
 }
 
+// POST /DocRepo/sync — 모든 repo를 GitHub에서 검증하여 상태 반환
+func DocRepoSyncHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	repos, err := db.FindAllDocRepos(ctx, nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	type repoStatus struct {
+		ID       interface{} `json:"_id"`
+		RepoName string      `json:"repoName"`
+		Owner    string      `json:"repoOwner"`
+		Exists   bool        `json:"exists"`
+		ProjectID string     `json:"projectId"`
+	}
+
+	results := []repoStatus{}
+	for _, repo := range repos {
+		owner, _ := repo["repoOwner"].(string)
+		name, _ := repo["repoName"].(string)
+		pid, _ := repo["projectId"].(string)
+
+		_, err := github.GetRepo(owner, name)
+		exists := err == nil
+
+		results = append(results, repoStatus{
+			ID:        repo["_id"],
+			RepoName:  name,
+			Owner:     owner,
+			Exists:    exists,
+			ProjectID: pid,
+		})
+	}
+
+	respondJSON(w, http.StatusOK, results)
+}
+
+// DELETE /DocRepo/{id}/purge — repo 정보 완전 삭제 + 프로젝트 documents 비우기
+func DocRepoPurgeHandler(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	// docRepo 조회
+	doc, err := db.FindDocRepoByID(ctx, id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "docRepo not found")
+		return
+	}
+
+	// soft delete
+	db.SoftDeleteDocRepo(ctx, id, "system")
+
+	// 프로젝트의 documents.repo, documents.repoName 비우기
+	projectID, _ := doc["projectId"].(string)
+	if projectID != "" {
+		db.ClearProjectDocRepo(ctx, projectID)
+	}
+
+	respondJSON(w, http.StatusOK, "purged")
+}
+
 // --- GitHub 프록시 API ---
 
 func getRepoInfo(ctx context.Context, id string) (string, string, error) {

@@ -18,6 +18,9 @@ export default function DocManager({ user }) {
 
   useEffect(() => { fetchRepos(); }, [fetchRepos]);
 
+  const [syncing, setSyncing] = useState(false);
+  const [repoStatus, setRepoStatus] = useState({}); // _id → { exists }
+
   async function handleCreateRepo() {
     const name = prompt('Repo 이름 (예: GOJIRA-docs)');
     if (!name) return;
@@ -30,20 +33,60 @@ export default function DocManager({ user }) {
     fetchRepos();
   }
 
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      const res = await fetch(`${API}/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        const statusMap = {};
+        const missing = [];
+        data.forEach(r => {
+          statusMap[r._id] = r;
+          if (!r.exists) missing.push(r);
+        });
+        setRepoStatus(statusMap);
+        fetchRepos();
+
+        // GitHub에 없는 repo 처리
+        for (const r of missing) {
+          if (window.confirm(`"${r.repoName}" 레포지토리가 GitHub에 존재하지 않습니다.\n삭제하시겠습니까?`)) {
+            await fetch(`${API}/${r._id}/purge`, { method: 'DELETE' });
+          }
+        }
+        if (missing.length > 0) fetchRepos();
+      }
+    } catch (err) {
+      alert('동기화 실패: ' + err.message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <div className="dm-wrapper">
       <div className="dm-sidebar">
         <div className="dm-sidebar-header">
           <span>Repositories</span>
-          <button className="dm-add-btn" onClick={handleCreateRepo}>+</button>
-        </div>
-        {repos.map(r => (
-          <div key={r._id} className={`dm-repo-item ${selectedRepo?._id === r._id ? 'dm-repo-active' : ''}`}
-            onClick={() => { setSelectedRepo(r); setView('tree'); }}>
-            <span className="dm-repo-name">{r.repoName}</span>
-            <span className="dm-repo-owner">{r.repoOwner}</span>
+          <div className="dm-sidebar-btns">
+            <button className="dm-sync-btn" onClick={handleSync} disabled={syncing} title="GitHub 동기화">
+              {syncing ? '...' : '↻'}
+            </button>
+            <button className="dm-add-btn" onClick={handleCreateRepo}>+</button>
           </div>
-        ))}
+        </div>
+        {repos.map(r => {
+          const status = repoStatus[r._id];
+          const isMissing = status && !status.exists;
+          return (
+            <div key={r._id}
+              className={`dm-repo-item ${selectedRepo?._id === r._id ? 'dm-repo-active' : ''} ${isMissing ? 'dm-repo-missing' : ''}`}
+              onClick={() => { setSelectedRepo(r); setView('tree'); }}>
+              <span className="dm-repo-name">{r.repoName}</span>
+              <span className="dm-repo-owner">{r.repoOwner}</span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="dm-main">

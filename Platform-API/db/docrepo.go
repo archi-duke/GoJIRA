@@ -82,6 +82,18 @@ func FindDocLinks(ctx context.Context, filter bson.M) ([]bson.M, error) {
 	return results, nil
 }
 
+// ClearProjectDocRepo 프로젝트의 documents.repo, documents.repoName을 비움
+func ClearProjectDocRepo(ctx context.Context, projectID string) {
+	// projects 컬렉션에서 projectId로 검색하여 documents 초기화
+	database.Collection("projects").UpdateMany(ctx,
+		bson.M{"$or": []bson.M{
+			{"jiraCodes.main.jiraCode": projectID},
+			{"projectId": projectID},
+		}},
+		bson.M{"$set": bson.M{"documents": bson.M{}}},
+	)
+}
+
 func InsertDocLink(ctx context.Context, doc bson.M) error {
 	return insertDoc(ctx, DocLinks(), doc)
 }
