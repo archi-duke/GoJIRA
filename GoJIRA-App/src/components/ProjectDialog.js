@@ -146,9 +146,9 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
           <div className="dlg-section">설계문서</div>
           <div className="dlg-grid">
             <Field label="Doc Repo" value={
-              form.documents?.repo
-                ? `${form.documents.repoName || ''} (${form.documents.repo})`
-                : '(자동 생성)'
+              form.documents?.repoName
+                ? `${form.documents.repoOwner || ''}/${form.documents.repoName}`
+                : isEdit ? '(설계문서 생성 시 자동 등록)' : '(미등록)'
             } editable={false} />
           </div>
         </div>

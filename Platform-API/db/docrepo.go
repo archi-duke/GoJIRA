@@ -6,83 +6,11 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-func DocRepos() *mongo.Collection { return database.Collection("docRepos") }
-func DocLinks() *mongo.Collection { return database.Collection("docLinks") }
+// --- project.documents 기반 repo 관리 (docRepos 컬렉션 미사용) ---
 
-func InitDocRepoIndexes() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	DocRepos().Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "projectId", Value: 1}},
-	})
-	DocLinks().Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "taskId", Value: 1}},
-	})
-	DocLinks().Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "docRepoId", Value: 1}},
-	})
-	log.Println("docRepo indexes initialized")
-}
-
-// --- DocRepos ---
-
-func FindAllDocRepos(ctx context.Context, filter bson.M) ([]bson.M, error) {
-	if filter == nil {
-		filter = bson.M{}
-	}
-	filter["isActive"] = true
-	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}})
-	cursor, err := DocRepos().Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	var results []bson.M
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
-func FindDocRepoByID(ctx context.Context, id string) (bson.M, error) {
-	return findByID(ctx, DocRepos(), id)
-}
-
-func InsertDocRepo(ctx context.Context, doc bson.M) error {
-	return insertDoc(ctx, DocRepos(), doc)
-}
-
-func UpdateDocRepo(ctx context.Context, id string, updates bson.M) error {
-	return updateDoc(ctx, DocRepos(), id, updates)
-}
-
-func SoftDeleteDocRepo(ctx context.Context, id, by string) error {
-	return softDelete(ctx, DocRepos(), id, by)
-}
-
-// --- DocLinks ---
-
-func FindDocLinks(ctx context.Context, filter bson.M) ([]bson.M, error) {
-	if filter == nil {
-		filter = bson.M{}
-	}
-	filter["isActive"] = true
-	cursor, err := DocLinks().Find(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	var results []bson.M
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
-// FindAllProjects projects 컬렉션 조회 (공유 DB)
+// FindAllProjects projects 컬렉션 전체 조회
 func FindAllProjects(ctx context.Context) ([]bson.M, error) {
 	cursor, err := database.Collection("projects").Find(ctx, bson.M{})
 	if err != nil {
@@ -95,30 +23,96 @@ func FindAllProjects(ctx context.Context) ([]bson.M, error) {
 	return results, nil
 }
 
-// UpdateProjectDocRepo 프로젝트의 documents.repo, documents.repoName을 설정
-func UpdateProjectDocRepo(ctx context.Context, projectID, repoID, repoName string) {
-	database.Collection("projects").UpdateOne(ctx,
-		bson.M{"jiraCodes.main.jiraCode": projectID},
-		bson.M{"$set": bson.M{"documents.repo": repoID, "documents.repoName": repoName}},
-	)
+// FindProjectByCode jiraCode로 프로젝트 조회
+func FindProjectByCode(ctx context.Context, jiraCode string) (bson.M, error) {
+	var doc bson.M
+	err := database.Collection("projects").FindOne(ctx, bson.M{"jiraCodes.main.jiraCode": jiraCode}).Decode(&doc)
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
 }
 
-// ClearProjectDocRepo 프로젝트의 documents.repo, documents.repoName을 비움
-func ClearProjectDocRepo(ctx context.Context, projectID string) {
-	// projects 컬렉션에서 projectId로 검색하여 documents 초기화
-	database.Collection("projects").UpdateMany(ctx,
-		bson.M{"$or": []bson.M{
-			{"jiraCodes.main.jiraCode": projectID},
-			{"projectId": projectID},
-		}},
+// UpdateProjectDocuments project.documents 필드 업데이트
+func UpdateProjectDocuments(ctx context.Context, jiraCode string, docs bson.M) error {
+	_, err := database.Collection("projects").UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+		bson.M{"$set": bson.M{"documents": docs}},
+	)
+	return err
+}
+
+// ClearProjectDocRepo project.documents를 빈 객체로 초기화
+func ClearProjectDocRepo(ctx context.Context, jiraCode string) {
+	database.Collection("projects").UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
 		bson.M{"$set": bson.M{"documents": bson.M{}}},
 	)
 }
 
-func InsertDocLink(ctx context.Context, doc bson.M) error {
-	return insertDoc(ctx, DocLinks(), doc)
+// GetProjectDocInfo project.documents에서 repo 정보 추출
+func GetProjectDocInfo(ctx context.Context, jiraCode string) (owner, name, defaultBranch string, err error) {
+	prj, err := FindProjectByCode(ctx, jiraCode)
+	if err != nil {
+		return "", "", "", err
+	}
+	docs := BsonGetDoc(prj, "documents")
+	owner = BsonGetStr(docs, "repoOwner")
+	name = BsonGetStr(docs, "repoName")
+	defaultBranch = BsonGetStr(docs, "defaultBranch")
+	if defaultBranch == "" {
+		defaultBranch = "main"
+	}
+	return
 }
 
-func SoftDeleteDocLink(ctx context.Context, id, by string) error {
-	return softDelete(ctx, DocLinks(), id, by)
+// --- DocLinks (유지) ---
+
+func DocLinks() *bson.M { return nil } // placeholder
+
+func InitDocRepoIndexes() {
+	log.Println("docRepo indexes: using project.documents (no separate collection)")
 }
+
+// --- bson 헬퍼 ---
+
+func BsonGetDoc(doc bson.M, key string) bson.M {
+	if doc == nil {
+		return nil
+	}
+	switch v := doc[key].(type) {
+	case bson.M:
+		return v
+	case bson.D:
+		m := bson.M{}
+		for _, e := range v {
+			m[e.Key] = e.Value
+		}
+		return m
+	}
+	return nil
+}
+
+func BsonGetStr(doc bson.M, key string) string {
+	if doc == nil {
+		return ""
+	}
+	s, _ := doc[key].(string)
+	return s
+}
+
+// UpdateProjectDocRepo project.documents에 repo 정보 설정
+func UpdateProjectDocRepo(ctx context.Context, jiraCode, repoName, repoOwner, repoUrl string) {
+	database.Collection("projects").UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+		bson.M{"$set": bson.M{
+			"documents.repoName":      repoName,
+			"documents.repoOwner":     repoOwner,
+			"documents.repoUrl":       repoUrl,
+			"documents.defaultBranch": "main",
+		}},
+	)
+}
+
+// dummy to keep import
+var _ = time.Now

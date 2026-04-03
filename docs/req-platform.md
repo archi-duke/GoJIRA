@@ -159,68 +159,93 @@ draft(게시전) → active(게시중) → expired(게시종료)
 **개요:** GitHub를 원본 저장소/형상관리 엔진으로 활용하여 설계 문서의 버전 관리, 승인, 소스코드 연결을 제공한다.
 GitHub 미숙자도 사용할 수 있도록 과제 중심의 간편 UI를 제공한다.
 
-**컬렉션:**
+**데이터 저장:**
+- 별도 컬렉션 없음 — `project.documents`에 repo 정보를 직접 저장
+```json
+{
+  "documents": {
+    "repoName": "GOJIRA_20260327134724",
+    "repoOwner": "dkdoc7",
+    "repoUrl": "https://github.com/dkdoc7/GOJIRA_20260327134724",
+    "defaultBranch": "main"
+  }
+}
+```
+- 승인자(auditors)는 프로젝트 레벨에서 관리
+- repo 이름 규칙: `{JIRA_CODE}_{프로젝트생성시간}` (예: `GOJIRA_20260327134724`)
 
-| 컬렉션 | 용도 | 주요 필드 |
-|--------|------|----------|
-| docRepos | 프로젝트-GitHub repo 매핑 | projectId, repoName, repoOwner, repoUrl, auditors |
-| docLinks | 문서-코드 연결 | taskId, docRepoId, codeRepoUrl, codePath, prUrl |
+> **결정 사유:**
+> - **별도 컬렉션(docRepos) 미사용**: 1 프로젝트 = 1 repo 관계에서 별도 컬렉션은 관리 복잡도만 높임. 두 곳의 데이터 불일치 문제 발생.
+> - project.documents에 모든 repo 정보를 통합하여 진실의 원천(source of truth)을 단일화.
 
 **문서 작업 방식 (로컬 Git 기반):**
 ```
 [앱 서비스] 문서 생성 요청
-  → [Platform-API] 서버 로컬에 repo clone/pull
-  → 브랜치 생성 → 파일 생성/편집 → git add/commit/push
+  → [Platform-API] repo 없으면 자동 생성 (GitHub API + project.documents 갱신)
+  → 서버 로컬에 repo clone/pull
+  → 브랜치 생성 (docs/{userId}) → 파일 생성/편집 → git add/commit/push
   → GitHub PR 생성 → auditors를 reviewer로 자동 할당
   → [승인자] Docs UI에서 승인/반려
   → 승인 완료 → 머지 → main 반영
 ```
 
 > **결정 사유:**
-> - **로컬 Git 방식 채택**: GitHub Contents API(파일별 원격 커밋)가 아닌, 서버 로컬에서 clone → 편집 → commit/push하는 표준 Git 워크플로우.
-> - 여러 파일을 한 커밋으로 묶을 수 있고, git diff 등 표준 도구 활용 가능.
-> - Contents API는 파일당 1 커밋, Rate Limit 소모가 크고 대량 작업에 부적합.
+> - **로컬 Git 방식 채택**: 여러 파일을 한 커밋으로 묶을 수 있고, git diff 등 표준 도구 활용 가능.
+> - **브랜치 사용자별 고정**: `docs/{userId}` — 사용자당 1개 브랜치로 관리 단순화.
+> - **열린 PR 확인**: 문서 생성 전 미완료 PR이 있으면 차단하여 충돌 방지.
 
-**API:**
+**API (projectCode 기반):**
 
 | 구분 | 엔드포인트 | 설명 |
 |------|-----------|------|
-| Repo | POST /DocRepo | repo 생성 (GitHub + DB 등록, GITRP >= 15) |
-| Repo | GET /DocRepo | repo 목록 조회 |
-| 조회 | GET /DocRepo/{id}/tree | 문서 트리 (GitHub tree API) |
-| 조회 | GET /DocRepo/{id}/file | 파일 내용 (Markdown 렌더링용) |
-| 조회 | GET /DocRepo/{id}/commits | 커밋 이력 |
-| 조회 | GET /DocRepo/{id}/branches | 브랜치 목록 |
-| Git | POST /DocRepo/{id}/clone | 서버 로컬에 repo clone/pull |
-| Git | POST /DocRepo/{id}/git/write | 로컬 파일 쓰기 + commit/push |
-| Git | POST /DocRepo/{id}/git/publish | 브랜치 생성 + 파일 쓰기 + commit/push + PR 생성 |
-| PR | POST /DocRepo/{id}/pr | PR 생성 (auditors reviewer 할당) |
-| PR | GET /DocRepo/{id}/prs | PR 목록 + 승인 상태 |
-| PR | POST /DocRepo/{id}/pr/{num}/review | 승인/반려 |
-| PR | POST /DocRepo/{id}/pr/{num}/merge | 머지 |
-| Link | POST /DocLink | 문서-코드 연결 등록 |
-| Link | GET /DocLink | 연결 조회 |
+| Repo | POST /DocRepo/{code} | repo 생성 (없으면 자동, project.documents에 저장) |
+| Repo | GET /DocRepo | repo가 있는 프로젝트 목록 |
+| Sync | POST /DocRepo/sync | GitHub vs 프로젝트 비교 (orphan/missing 감지) |
+| 조회 | GET /DocRepo/{code}/tree | 문서 트리 |
+| 조회 | GET /DocRepo/{code}/file | 파일 내용 (Markdown) |
+| 조회 | GET /DocRepo/{code}/commits | 커밋 이력 |
+| 조회 | GET /DocRepo/{code}/branches | 브랜치 목록 |
+| Git | POST /DocRepo/{code}/git/publish | 브랜치 생성 + 파일 쓰기 + commit/push + PR 생성 |
+| PR | POST /DocRepo/{code}/pr | PR 생성 (auditors reviewer 할당) |
+| PR | GET /DocRepo/{code}/prs | PR 목록 |
+| PR | POST /DocRepo/{code}/pr/{num}/review | 승인/반려 |
+| PR | POST /DocRepo/{code}/pr/{num}/merge | 머지 |
+| 삭제 | DELETE /DocRepo/{code}/github | GitHub repo 삭제 + project.documents 비우기 |
+| 삭제 | DELETE /DocRepo/{code}/purge | project.documents만 비우기 |
+
+**Sync 동작 (↻ 버튼):**
+- GitHub 전체 repo 목록 vs 프로젝트 documents 비교
+- **ok**: GitHub 존재 + 프로젝트 연결됨
+- **orphan** (주황): GitHub에 있지만 프로젝트 연결 없음 → 삭제 여부 확인
+- **missing** (빨강): 프로젝트에 연결됐지만 GitHub에 없음 → 정보 삭제 여부 확인
+
+**GitHub Webhook:**
+- repo 생성 시 자동 등록 (`PLATFORM_WEBHOOK_URL` 설정 시)
+- PR merge/push 이벤트 수신 → SSE `doc_update` 브로드캐스트 → 프론트 자동 갱신
 
 **승인 흐름:**
-- auditors가 없으면 PR 생성 차단 + "승인자를 먼저 지정하세요" 안내
-- PR 생성 시 auditors를 GitHub reviewer로 자동 할당
+- auditors는 프로젝트 레벨에서 관리 (별도 동기화 불필요)
+- PR 생성 시 프로젝트 auditors를 GitHub reviewer로 자동 할당
+- auditors 없으면 PR 생성 차단 + "승인자를 먼저 지정하세요" 안내
 - Docs UI에서 승인/반려/머지 가능
 
 **앱 서비스 연동 (GoJIRA 예시):**
 - GoJIRA-API `/Issue/docgen`: 이슈 데이터 → 타입별 Markdown 자동 생성 → Platform-API `/git/publish` 호출
 - 프로젝트 컨텍스트 메뉴 "설계문서 생성" 클릭으로 실행
 - 생성 파일: README.md, vos.md, feature.md, requirement.md, architectural-design.md, detailed-design.md
+- repo 없으면 자동 생성, 열린 PR 있으면 차단 안내
 
 **프론트 UI (DocManager):**
-- Repo 목록 (사이드바) + 탭 (Files / Commits / PRs / Graph)
-- Files: 폴더/파일 트리 탐색 + Markdown 렌더링 (react-markdown, GFM 지원)
+- 사이드바: 프로젝트별 repo 목록 (이름/프로젝트명/조직), ↻ 동기화 버튼
+- 탭: Files / Commits / PRs / Graph
+- Files: 폴더/파일 트리 탐색 + Markdown 렌더링 (react-markdown, GFM, UTF-8 base64 디코딩)
 - Commits: 커밋 이력 테이블
-- PRs: PR 목록, 승인/반려/머지 버튼, auditors 표시
+- PRs: PR 목록, 승인/반려/머지, SSE로 실시간 갱신
 - Graph: SVG 기반 브랜치/커밋 시각화
 
 > **추가 결정 사유:**
-> - **GitHub 활용**: 형상관리 기능을 중복 구현하지 않고 GitHub API/Git CLI를 활용. PR/리뷰/머지는 GitHub 엔진 그대로 사용.
-> - **PAT 인증**: 초기 설정 간단. clone URL에 토큰 포함으로 별도 SSH 키 불필요. 조직 규모 확장 시 GitHub App으로 전환 가능.
+> - **GitHub 활용**: 형상관리 기능을 중복 구현하지 않고 GitHub API/Git CLI를 활용.
+> - **PAT 인증**: 초기 설정 간단. 조직 규모 확장 시 GitHub App으로 전환 가능.
 > - **Markdown 기반**: 가볍고 Git 친화적, 계층 구조는 폴더 구조로 자연스럽게 표현.
 
 ### 3.5 네비게이션 Shell
@@ -604,3 +629,6 @@ GOJIRA_ENC_KEY=...                 # AES 암호화 키 (32 bytes)
 | D-11 | 문서 계층 구조 | GitHub 폴더 구조 활용 | 메타파일(SUMMARY.md) | 별도 메타 관리 불필요, tree API로 직접 조회 |
 | D-12 | GitHub 인증 | PAT (Personal Access Token) | GitHub App | 설정 간단, 조직 규모 확장 시 전환 가능 |
 | D-13 | 문서 커밋 방식 | 로컬 Git (clone→edit→push) | GitHub Contents API | 여러 파일 1커밋, Rate Limit 무관, 표준 Git 워크플로우 |
+| D-14 | repo 정보 저장 | project.documents에 통합 | 별도 docRepos 컬렉션 | 1:1 관계에서 별도 컬렉션은 불일치 위험만 증가. 단일 source of truth |
+| D-15 | Sync 전략 | GitHub + project.documents 비교 | docRepos 컬렉션 참조 | 별도 컬렉션 없이 직접 비교, 관리 복잡도 최소화 |
+| D-16 | PR 상태 갱신 | GitHub Webhook + SSE | 주기적 폴링 | 즉시 반영, 불필요한 API 호출 제거 |

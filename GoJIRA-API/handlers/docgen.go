@@ -27,17 +27,15 @@ func init() {
 // POST /Issue/docgen — 프로젝트 설계문서 생성/수정 + PR
 func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		PrjID     string `json:"prjID"`
-		DocRepoID string `json:"docRepoId"`
-		Message   string `json:"message"`
-		UserID    string `json:"userId"`
+		PrjID  string `json:"prjID"`
+		UserID string `json:"userId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
 	// 프로젝트 조회
@@ -47,71 +45,36 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// documents.repo에서 docRepoId 가져오기
-	if req.DocRepoID == "" {
-		req.DocRepoID = getDocRepoID(prjDoc)
-	}
-
-	// docRepoId가 없으면 자동 생성
-	if req.DocRepoID == "" {
-		projectName, _ := prjDoc["Name"].(string)
-		if projectName == "" {
-			projectName, _ = prjDoc["name"].(string)
-		}
-		repoName := fmt.Sprintf("%s_%s", req.PrjID, time.Now().Format("20060102150405"))
-		description := fmt.Sprintf("%s의 설계 문서", projectName)
-
-		createResult, sc := callPlatform("POST", "/DocRepo", map[string]interface{}{
-			"repoName":    repoName,
-			"projectId":   req.PrjID,
-			"description": description,
-			"createdBy":   "system",
-			"auditors":    []string{},
-		})
+	// repo가 없으면 자동 생성 (Platform-API에 위임)
+	repoName := getDocField(prjDoc, "repoName")
+	if repoName == "" {
+		_, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", req.PrjID), nil)
 		if sc >= 400 {
-			errMsg := "설계문서 저장소 자동 생성 실패"
-			if m, ok := createResult.(map[string]interface{}); ok {
-				if e, ok := m["error"].(string); ok {
-					errMsg += ": " + e
-				}
-			}
-			respondError(w, http.StatusBadGateway, errMsg)
+			respondError(w, http.StatusBadGateway, "설계문서 저장소 자동 생성 실패")
 			return
 		}
-
-		// 생성된 docRepoId 추출
-		if m, ok := createResult.(map[string]interface{}); ok {
-			if id, ok := m["_id"]; ok {
-				req.DocRepoID = fmt.Sprintf("%v", id)
-			}
-		}
-
-		// 프로젝트에 documents.repo 연결
-		if req.DocRepoID != "" {
-			db.UpdateProjectField(ctx, req.PrjID, "documents.repo", req.DocRepoID)
-		}
-
-		if req.DocRepoID == "" {
-			respondError(w, http.StatusInternalServerError, "설계문서 저장소 생성 후 ID를 가져올 수 없습니다")
+		// 프로젝트 다시 조회 (documents 갱신됨)
+		prjDoc = db.FindProjectByCode(ctx, req.PrjID)
+		repoName = getDocField(prjDoc, "repoName")
+		if repoName == "" {
+			respondError(w, http.StatusInternalServerError, "저장소 생성 후 정보를 가져올 수 없습니다")
 			return
 		}
 	}
 
-	// 프로젝트 auditors → docRepo 동기화
+	// 프로젝트 auditors → Platform-API에 전달 (PR 생성 시 필요)
 	if auditors := toStrSlice(prjDoc["auditors"]); len(auditors) > 0 {
-		callPlatform("PUT", fmt.Sprintf("/DocRepo/%s", req.DocRepoID), map[string]interface{}{"auditors": auditors})
+		// auditors는 프로젝트에서 관리, Platform-API의 PR 생성에서 프로젝트에서 직접 읽음
 	}
 
-	// 열린 PR 확인 — 있으면 먼저 처리하도록 안내
-	openPRs, sc := callPlatform("GET", fmt.Sprintf("/DocRepo/%s/prs?state=open", req.DocRepoID), nil)
+	// 열린 PR 확인
+	openPRs, sc := callPlatform("GET", fmt.Sprintf("/DocRepo/%s/prs?state=open", req.PrjID), nil)
 	if sc == 200 {
 		if prList, ok := openPRs.([]interface{}); ok && len(prList) > 0 {
 			titles := []string{}
 			for _, pr := range prList {
 				if m, ok := pr.(map[string]interface{}); ok {
-					title, _ := m["title"].(string)
-					num := m["number"]
-					titles = append(titles, fmt.Sprintf("#%v %s", num, title))
+					titles = append(titles, fmt.Sprintf("#%v %s", m["number"], m["title"]))
 				}
 			}
 			respondError(w, http.StatusConflict,
@@ -121,6 +84,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 이슈 가져오기
 	issueKeys := bson.A{}
 	if arr, ok := prjDoc["issues"]; ok {
 		switch v := arr.(type) {
@@ -141,21 +105,17 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 이슈 타입별 분류
+	// 이슈 타입별 분류 → Markdown 생성
 	typeGroups := map[string][]bson.M{}
 	for _, issue := range issues {
 		it, _ := issue["issueType"].(string)
 		typeGroups[it] = append(typeGroups[it], issue)
 	}
 
-	// Markdown 문서 생성
 	files := map[string]string{}
-
-	// README.md
-	projectName, _ := prjDoc["Name"].(string)
+	projectName, _ := prjDoc["name"].(string)
 	files["README.md"] = fmt.Sprintf("# %s 설계서\n\n프로젝트 코드: %s\n\n생성일: %s\n", projectName, req.PrjID, time.Now().Format("2006-01-02"))
 
-	// 타입별 문서
 	typeOrder := []string{"VOS", "Feature", "Requirement", "Architectural Design", "Detailed Design"}
 	for _, typeName := range typeOrder {
 		group := typeGroups[typeName]
@@ -169,14 +129,10 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 			subkey, _ := issue["subkey"].(string)
 			summary, _ := issue["summary"].(string)
 			desc, _ := issue["description"].(string)
-
-			md += fmt.Sprintf("## %s %s\n\n", subkey, summary)
-			md += fmt.Sprintf("- Key: %s\n", key)
+			md += fmt.Sprintf("## %s %s\n\n- Key: %s\n", subkey, summary, key)
 			if desc != "" {
 				md += fmt.Sprintf("\n%s\n", desc)
 			}
-
-			// Requirement 추가 필드
 			if typeName == "Requirement" {
 				for _, f := range []string{"reqtype", "qa", "source", "stimulus", "artifact", "response", "measure"} {
 					if v, ok := issue[f]; ok && v != nil && v != "" {
@@ -184,8 +140,6 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-
-			// Design 추가 필드
 			if strings.Contains(typeName, "Design") {
 				for _, f := range []string{"objectives", "decision", "pros", "cons", "risk", "sensitivity", "mitigation"} {
 					if v, ok := issue[f]; ok && v != nil && v != "" {
@@ -198,7 +152,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		files[fileName] = md
 	}
 
-	// 로컬 git 방식: 브랜치 생성 + 파일 쓰기 + commit/push + PR 생성
+	// Platform-API /git/publish 호출 (projectCode 기반)
 	userId := req.UserID
 	if userId == "" {
 		userId = "system"
@@ -210,18 +164,10 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		prBody += fmt.Sprintf("- %s\n", path)
 	}
 
-	msg := req.Message
-	if msg == "" {
-		msg = prTitle
-	}
-
-	publishResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/git/publish", req.DocRepoID),
+	publishResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/git/publish", req.PrjID),
 		map[string]interface{}{
-			"branch":  branchName,
-			"files":   files,
-			"message": msg,
-			"prTitle": prTitle,
-			"prBody":  prBody,
+			"branch": branchName, "files": files,
+			"message": prTitle, "prTitle": prTitle, "prBody": prBody,
 		})
 	if sc >= 400 {
 		errMsg := "문서 배포 실패"
@@ -240,6 +186,22 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		"files":   len(files),
 		"result":  publishResult,
 	})
+}
+
+func getDocField(prj bson.M, key string) string {
+	switch docs := prj["documents"].(type) {
+	case bson.M:
+		s, _ := docs[key].(string)
+		return s
+	case bson.D:
+		for _, e := range docs {
+			if e.Key == key {
+				s, _ := e.Value.(string)
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func toStrSlice(v interface{}) []string {

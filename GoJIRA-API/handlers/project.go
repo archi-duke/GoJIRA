@@ -91,11 +91,6 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	// 설계문서 저장소 자동 생성 (없으면)
 	ensureDocRepo(code, req.Name)
 
-	// auditors → docRepo에도 동기화
-	if req.Auditors != nil {
-		syncAuditorsToDocRepo(code, req.Auditors)
-	}
-
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
 }
@@ -126,9 +121,7 @@ func buildProjectDoc(req models.ProjectRequest) bson.M {
 	if req.Diagrams != nil {
 		doc["diagrams"] = req.Diagrams
 	}
-	if req.Documents != nil {
-		doc["documents"] = req.Documents
-	}
+	// documents는 시스템이 관리 — 프론트에서 덮어쓰지 않음
 	if req.Auditors != nil {
 		doc["auditors"] = req.Auditors
 	}
@@ -142,45 +135,23 @@ func nilToEmpty(v interface{}) interface{} {
 	return v
 }
 
-func syncAuditorsToDocRepo(jiraCode string, auditors []string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	prj := db.FindProjectByCode(ctx, jiraCode)
-	if prj == nil {
-		return
-	}
-	repoID := getDocRepoID(prj)
-	if repoID == "" {
-		return
-	}
-	callPlatform("PUT", fmt.Sprintf("/DocRepo/%s", repoID), map[string]interface{}{"auditors": auditors})
-	log.Printf("syncAuditors: %s → docRepo %s auditors=%v", jiraCode, repoID, auditors)
-}
-
-func getDocRepoID(prj bson.M) string {
-	log.Printf("getDocRepoID: documents type=%T value=%v", prj["documents"], prj["documents"])
+func getDocRepoName(prj bson.M) string {
 	switch docs := prj["documents"].(type) {
 	case bson.M:
-		if id, ok := docs["repo"].(string); ok {
-			return id
-		}
+		s, _ := docs["repoName"].(string)
+		return s
 	case bson.D:
 		for _, e := range docs {
-			if e.Key == "repo" {
-				if s, ok := e.Value.(string); ok {
-					return s
-				}
+			if e.Key == "repoName" {
+				s, _ := e.Value.(string)
+				return s
 			}
-		}
-	case map[string]interface{}:
-		if id, ok := docs["repo"].(string); ok {
-			return id
 		}
 	}
 	return ""
 }
 
-// ensureDocRepo 프로젝트에 docRepoId가 없으면 자동 생성
+// ensureDocRepo 프로젝트에 repo가 없으면 Platform-API로 자동 생성
 func ensureDocRepo(jiraCode, projectName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -190,37 +161,13 @@ func ensureDocRepo(jiraCode, projectName string) {
 		return
 	}
 
-	// documents.repo 확인 — 이미 있으면 skip
-	repoID := getDocRepoID(prj)
-	if repoID != "" {
-		log.Printf("ensureDocRepo: %s already has documents.repo=%s", jiraCode, repoID)
+	if getDocRepoName(prj) != "" {
 		return
 	}
-	log.Printf("ensureDocRepo: creating repo for %s (%s)", jiraCode, projectName)
 
-	repoName := fmt.Sprintf("%s_%s", jiraCode, time.Now().Format("20060102150405"))
-	description := fmt.Sprintf("%s의 설계 문서", projectName)
-
-	result, sc := callPlatform("POST", "/DocRepo", map[string]interface{}{
-		"repoName":    repoName,
-		"projectId":   jiraCode,
-		"description": description,
-		"createdBy":   "system",
-		"auditors":    []string{},
-	})
-	log.Printf("ensureDocRepo: Platform API response status=%d, result=%v", sc, result)
+	log.Printf("ensureDocRepo: creating repo for %s", jiraCode)
+	_, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", jiraCode), nil)
 	if sc >= 400 {
-		log.Printf("ensureDocRepo: repo 생성 실패 for %s (status=%d)", jiraCode, sc)
-		return
-	}
-
-	// docRepoId + repoName 추출 및 프로젝트에 연결
-	if m, ok := result.(map[string]interface{}); ok {
-		if id, ok := m["_id"]; ok {
-			docRepoID := fmt.Sprintf("%v", id)
-			db.UpdateProjectField(ctx, jiraCode, "documents.repo", docRepoID)
-			db.UpdateProjectField(ctx, jiraCode, "documents.repoName", repoName)
-			log.Printf("ensureDocRepo: %s → repo %s (id=%s)", jiraCode, repoName, docRepoID)
-		}
+		log.Printf("ensureDocRepo: 실패 for %s (status=%d)", jiraCode, sc)
 	}
 }
