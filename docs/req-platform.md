@@ -127,11 +127,82 @@ GOJIRA_ENC_KEY=...                 # AES 암호화 키 (32 bytes)
 SSE는 단방향(서버→클라이언트) 통신에 적합하며, 브라우저 네이티브 지원(EventSource)으로 별도 라이브러리 불필요.
 양방향 통신이 필요한 경우 WebSocket/SignalR로 확장 가능.
 
-## 9. 향후 확장 포인트
+## 9. 마이크로서비스 아키텍처
+
+### 9.1 서비스 분류
+
+```
+[프론트엔드 SPA]
+    │
+    ├── /api/v1/Account/*  ──→  공통 플랫폼 서비스 (인증, 계정, 권한)
+    ├── /api/v1/Notice/*   ──→  공통 플랫폼 서비스 (공지 관리)
+    │
+    ├── /api/v1/Issue/*    ──→  GoJIRA 서비스 (이슈 관리)
+    ├── /api/v1/Project/*  ──→  GoJIRA 서비스 (프로젝트 관리)
+    │
+    └── /api/v1/{NewApp}/* ──→  향후 신규 앱 서비스
+```
+
+| 구분 | 서비스 | 역할 | 공유 범위 |
+|------|--------|------|----------|
+| 공통 | Platform API | 인증, 계정/권한, 공지, SSE | 모든 앱 공유 |
+| 앱 | GoJIRA API | 이슈, 프로젝트, JIRA 연동 | GoJIRA 전용 |
+| 앱 | (향후) 신규 서비스 | 비즈니스 로직 | 각 앱 전용 |
+
+### 9.2 분리 원칙
+
+- **공통 플랫폼 서비스**: 인증/계정/권한/공지는 한 번만 구축, 모든 앱이 공유
+- **앱 서비스**: 각 앱의 비즈니스 로직만 구현, 독립 배포/스케일링
+- **데이터 분리**: 공통 컬렉션(users, authGroups, orgUnits, notices)은 플랫폼 DB, 앱 데이터는 앱별 DB
+- **새 앱 추가**: 비즈니스 API만 구현 → 플랫폼에 서비스 등록 → 네비게이션 메뉴 추가
+
+### 9.3 단계별 전환 로드맵
+
+**1단계: 코드 레벨 분리 (현재)**
+- 단일 Go 서버 내에서 패키지로 분리 (handlers/account_mgmt, handlers/notice vs handlers/issue)
+- 프론트는 단일 SPA, config.js로 API 엔드포인트 관리
+- 장점: 배포 단순, 개발 속도 빠름
+
+**2단계: 프로세스 분리**
+- 공통 플랫폼 API 서버와 앱 API 서버를 별도 프로세스로 분리
+- 각 서버 독립 포트 (예: 플랫폼 :9000, GoJIRA :9001, 신규앱 :9002)
+- 프론트 config에서 서비스별 URL 관리
+```javascript
+{
+  PLATFORM_API: 'http://localhost:9000/api/v1',  // 인증, 계정, 공지
+  GOJIRA_API: 'http://localhost:9001/api/v1',    // 이슈, 프로젝트
+  NEWAPP_API: 'http://localhost:9002/api/v1',    // 신규 앱
+}
+```
+
+**3단계: API Gateway 도입**
+- 프론트는 단일 엔드포인트(Gateway)만 호출
+- Gateway가 경로 기반으로 백엔드 서비스에 라우팅
+- 인증/권한 검증을 Gateway에서 공통 처리
+```
+[클라이언트] → [API Gateway :443]
+                ├── /api/v1/Account/* → Platform Service
+                ├── /api/v1/Notice/*  → Platform Service
+                ├── /api/v1/Issue/*   → GoJIRA Service
+                ├── /api/v1/Project/* → GoJIRA Service
+                └── /api/v1/NewApp/*  → NewApp Service
+```
+
+### 9.4 신규 앱 서비스 등록 절차
+
+1. **백엔드**: 새 Go 서버 프로젝트 생성, 비즈니스 API 구현
+2. **플랫폼 연동**: 공통 DB의 users/authGroups에서 권한 조회 API 호출
+3. **권한 코드 등록**: authGroups에 새 앱 권한 코드 추가 (예: `NEWAPP: 15`)
+4. **프론트 등록**: App.js 네비게이션에 메뉴 추가, 권한 체크 적용
+5. **Gateway 등록**: 라우팅 규칙 추가 (3단계 시)
+
+## 10. 향후 확장 포인트
 
 - **SignalR Hub**: 양방향 실시간 통신 (채팅, 협업 알림 등)
 - **RBAC 확장**: 리소스별 세분화된 권한 (프로젝트별 역할 등)
 - **감사 로그**: 사용자 행동 추적 컬렉션
 - **다국어 지원**: i18n 프레임워크 적용
 - **테마/브랜딩**: 서비스별 타이틀바 로고/색상 커스터마이징
-- **마이크로서비스**: 플랫폼(인증/권한/공지)과 비즈니스 로직 분리 배포
+- **서비스 디스커버리**: 서비스 자동 등록/해제
+- **헬스 체크**: 각 서비스 상태 모니터링 대시보드
+- **공통 로깅**: 서비스 간 분산 추적 (trace ID)
