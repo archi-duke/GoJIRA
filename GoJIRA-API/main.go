@@ -29,6 +29,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 				"project": "Project",
 				"jira":    "Jira",
 				"page":    "Page",
+				"account": "Account",
 			}
 			seg := parts[3]
 			if mapped, ok := canonical[strings.ToLower(seg)]; ok {
@@ -42,6 +43,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 				"project": "Project",
 				"jira":    "Jira",
 				"page":    "Page",
+				"account": "Account",
 			}
 			seg := parts[3]
 			if mapped, ok := canonical[strings.ToLower(seg)]; ok {
@@ -56,7 +58,8 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 func main() {
 	// Initialize MongoDB
 	db.Init()
-
+	db.InitAccountIndexes()
+	db.SeedAccountData()
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -115,6 +118,36 @@ func main() {
 		r.Post("/Project", handlers.ProjectCreateHandler)
 		r.Get("/Project", handlers.ProjectGetHandler)
 		r.Put("/Project", handlers.ProjectUpdateHandler)
+
+		// Account 관리
+		r.Route("/Account", func(r chi.Router) {
+			r.Get("/me", handlers.UserMeHandler)
+
+			r.Get("/users", handlers.UserListHandler)
+			r.Get("/users/{id}", handlers.UserGetHandler)
+			r.Post("/users", handlers.UserCreateHandler)
+			r.Put("/users/{id}", handlers.UserUpdateHandler)
+			r.Delete("/users/{id}", handlers.UserDeleteHandler)
+			r.Get("/users/{id}/authority", handlers.UserAuthorityHandler)
+
+			r.Get("/authGroups", handlers.AuthGroupListHandler)
+			r.Post("/authGroups", handlers.AuthGroupCreateHandler)
+			r.Put("/authGroups/{id}", handlers.AuthGroupUpdateHandler)
+			r.Delete("/authGroups/{id}", handlers.AuthGroupDeleteHandler)
+
+			r.Get("/orgUnits", handlers.OrgUnitListHandler)
+			r.Post("/orgUnits", handlers.OrgUnitCreateHandler)
+			r.Put("/orgUnits/{id}", handlers.OrgUnitUpdateHandler)
+			r.Delete("/orgUnits/{id}", handlers.OrgUnitDeleteHandler)
+
+			r.Get("/userProjects", handlers.UserProjectListHandler)
+			r.Post("/userProjects", handlers.UserProjectCreateHandler)
+			r.Delete("/userProjects/{id}", handlers.UserProjectDeleteHandler)
+
+			r.Get("/connections", handlers.ConnectionListHandler)
+			r.Post("/connections", handlers.ConnectionCreateHandler)
+			r.Put("/connections/{id}", handlers.ConnectionUpdateHandler)
+		})
 	})
 
 	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)
