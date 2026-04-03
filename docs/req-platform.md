@@ -183,10 +183,10 @@ SSE는 단방향(서버→클라이언트) 통신에 적합하며, 브라우저 
 - 프론트는 단일 SPA, config.js로 API 엔드포인트 관리
 - 장점: 배포 단순, 개발 속도 빠름
 
-**2단계: 프로세스 분리**
+**2단계: 프로세스 분리 (서비스별 직접 호출)**
 - 공통 플랫폼 API 서버와 앱 API 서버를 별도 프로세스로 분리
 - 각 서버 독립 포트 (예: 플랫폼 :9000, GoJIRA :9001, 신규앱 :9002)
-- 프론트 config에서 서비스별 URL 관리
+- 프론트 config에서 서비스별 URL을 직접 관리, 클라이언트가 각 서비스를 직접 호출
 ```javascript
 {
   PLATFORM_API: 'http://localhost:9000/api/v1',  // 인증, 계정, 공지
@@ -194,27 +194,39 @@ SSE는 단방향(서버→클라이언트) 통신에 적합하며, 브라우저 
   NEWAPP_API: 'http://localhost:9002/api/v1',    // 신규 앱
 }
 ```
+```
+[클라이언트]
+    ├── 직접 호출 → Platform Service :9000
+    ├── 직접 호출 → GoJIRA Service :9001
+    └── 직접 호출 → NewApp Service :9002
+```
+- 중앙 집중 ���목 없음, 서비스 간 독립성 보장
+- CORS 설정으로 교차 호출 허용
 
-**3단계: API Gateway 도입**
-- 프론트는 단일 엔드포인트(Gateway)만 호출
-- Gateway가 경로 기반으로 백엔드 서비스에 라우팅
-- 인증/권한 검증을 Gateway에서 공통 처리
+**3단계: 서비스 메시 (규모 확장 시)**
+- 각 서비스에 사��드카 프록시(Istio Envoy, Linkerd 등) 배치
+- 서비스 간 통신을 사이드카가 투명하게 처리
+- API Gateway 없이 분산 환경에서 트래픽 관리, 인증, 관찰성(observability) 확보
 ```
-[클라이언트] → [API Gateway :443]
-                ├── /api/v1/Account/* → Platform Service
-                ├── /api/v1/Notice/*  → Platform Service
-                ├── /api/v1/Issue/*   → GoJIRA Service
-                ├── /api/v1/Project/* → GoJIRA Service
-                └── /api/v1/NewApp/*  → NewApp Service
+[클라이언트]
+    │
+    ├── Service A ←[사이드카]→ Service B
+    ├── Service B ←[사이드카]→ Platform
+    └── Platform  ←[사이드카]→ Service A
 ```
+- 장점: 단�� 장애점 없음, 서비스별 독립 스케일링, 트래픽 제어/관찰성
+- 적용 시점: 서비스 수 증가, 운영 복잡도 상승 시
+
+> **API Gateway를 채택하지 않는 이유:**
+> Gateway는 모든 트래픽이 집중되는 단�� 장애점(SPOF)이 되며, 가용성과 성능에 병목을 유발할 수 있다.
+> 현재 규모에서는 직접 호출 방식이 충분하고, 향후 확장 시 서비스 메시로 전환하는 것이 더 적합하다.
 
 ### 9.4 신규 앱 서비스 등록 절차
 
-1. **백엔드**: 새 Go 서버 프로젝트 생성, 비즈니스 API 구현
-2. **플랫폼 연동**: 공통 DB의 users/authGroups에서 권한 조회 API 호출
-3. **권한 코드 등록**: authGroups에 새 앱 권한 코드 추가 (예: `NEWAPP: 15`)
-4. **프론트 등록**: App.js 네비게이션에 메뉴 추가, 권한 체크 적용
-5. **Gateway 등록**: 라우팅 규칙 추가 (3단계 시)
+1. **백엔드**: 새 Go 서버 프로젝트 생성, 독립 포트 할당, 비즈니스 API 구현
+2. **플랫폼 연동**: 공통 플랫폼 API를 호출하여 인증/권한 조회
+3. **권한 코드 등록**: 플랫폼 DB의 authGroups에 새 앱 권한 코드 추가 (예: `NEWAPP: 15`)
+4. **프론트 등록**: 앱 레지스트리에 등록, config에 서비스 URL 추가
 
 ## 10. 프론트엔드 마이크로 앱 전략
 
