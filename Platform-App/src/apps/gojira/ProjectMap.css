@@ -1,0 +1,338 @@
+/* Wrapper: slider + grid */
+.pm-wrapper {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'Pretendard', -apple-system, sans-serif;
+  font-size: 13px;
+  background: #fafbfc;
+}
+
+/* Top bar (slider + add button) */
+.pm-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px 0 0;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+}
+
+/* Sort controls */
+.pm-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pm-sort-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin-right: 2px;
+}
+
+.pm-sort-btn {
+  padding: 4px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 11px;
+  color: #555;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pm-sort-btn:hover {
+  background: #f0f4f8;
+}
+.pm-sort-active {
+  background: #eaf0f8;
+  border-color: #2980b9;
+  color: #2980b9;
+  font-weight: 600;
+}
+
+.pm-add-btn {
+  padding: 6px 16px;
+  background: #2980b9;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.pm-add-btn:hover {
+  background: #1a6da0;
+}
+
+/* Slider bar */
+.pm-slider {
+  padding: 8px 20px 4px;
+  background: #fff;
+  flex-shrink: 0;
+  flex: 1;
+}
+
+.pm-slider-track {
+  position: relative;
+  height: 16px;
+  background: #eee;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.pm-slider-range {
+  position: absolute;
+  top: 2px;
+  height: 12px;
+  background: #3498db;
+  border-radius: 6px;
+  opacity: 0.3;
+}
+
+.pm-slider-knob {
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  background: #2980b9;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: grab;
+  z-index: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.pm-slider-knob:active {
+  cursor: grabbing;
+  background: #1a5276;
+}
+
+.pm-slider-label {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #2c3e50;
+  margin-top: 4px;
+}
+
+.pm-slider-hint {
+  color: #aaa;
+  font-size: 11px;
+}
+
+/* Grid container */
+.pm-container {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  grid-template-rows: 50px 1fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Corner (top-left fixed) */
+.pm-corner {
+  grid-column: 1;
+  grid-row: 1;
+  background: #fff;
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  z-index: 3;
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+}
+
+/* Header (date axis - 2-row: year + month) */
+.pm-header {
+  grid-column: 2;
+  grid-row: 1;
+  overflow: hidden;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  z-index: 2;
+  position: relative;
+}
+
+.pm-header-inner {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Year row */
+.pm-year-row {
+  position: relative;
+  height: 50%;
+  border-bottom: 1px solid #ddd;
+}
+
+.pm-year-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2c3e50;
+  font-size: 13px;
+  font-weight: 700;
+  border-left: 2px solid #2c3e50;
+  box-sizing: border-box;
+}
+
+/* Month row */
+.pm-month-row {
+  position: relative;
+  height: 50%;
+}
+
+.pm-month-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 11px;
+  font-weight: 500;
+  border-left: 1px solid #ddd;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+/* Sidebar */
+.pm-sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  overflow: hidden;
+  background: #fff;
+  border-right: 1px solid #ddd;
+  z-index: 2;
+}
+
+.pm-sidebar-row {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-weight: 500;
+  color: #2c3e50;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pm-sidebar-clickable {
+  cursor: pointer;
+}
+.pm-sidebar-clickable:hover {
+  background: #eaf0f8;
+  color: #2980b9;
+}
+
+/* Graph area */
+.pm-graph {
+  grid-column: 2;
+  grid-row: 2;
+  overflow: auto;
+  background: #fff;
+}
+
+/* SVG elements */
+.pm-line {
+  stroke: #2980b9;
+  stroke-width: 4;
+}
+
+.pm-milestone {
+  fill: #fff;
+  stroke: #2980b9;
+  stroke-width: 2;
+}
+
+.pm-day {
+  fill: #2980b9;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.pm-ms-label {
+  fill: #7f8c8d;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.pm-prj-name {
+  fill: #2c3e50;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pm-prj-name-off {
+  fill: #95a5a6;
+  font-size: 11px;
+  font-weight: 500;
+  font-style: italic;
+}
+
+.pm-offscreen-indicator {
+  fill: #e74c3c;
+  opacity: 0.6;
+}
+
+/* Active (in-progress) project - default blue */
+.pm-row-active .pm-line { stroke: #2980b9; }
+.pm-row-active .pm-milestone { stroke: #2980b9; }
+.pm-row-active .pm-day { fill: #2980b9; }
+.pm-row-active .pm-prj-name { fill: #2c3e50; }
+
+/* Overdue project - tomato warning */
+.pm-row-overdue .pm-line { stroke: tomato; }
+.pm-row-overdue .pm-milestone { stroke: tomato; }
+.pm-row-overdue .pm-day { fill: tomato; }
+.pm-row-overdue .pm-ms-label { fill: #e07060; }
+.pm-row-overdue .pm-prj-name { fill: tomato; }
+
+/* Completed project - gray + faded */
+.pm-row-completed {
+  opacity: 0.6;
+}
+.pm-row-completed .pm-line { stroke: #999; }
+.pm-row-completed .pm-milestone { stroke: #999; }
+.pm-row-completed .pm-day { fill: #777; }
+.pm-row-completed .pm-ms-label { fill: #888; }
+.pm-row-completed .pm-prj-name { fill: #999; }
+
+.pm-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: #95a5a6;
+  font-size: 16px;
+}
+
+/* Scrollbar */
+.pm-graph::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.pm-graph::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+.pm-graph::-webkit-scrollbar-thumb {
+  background: #bdc3c7;
+  border-radius: 4px;
+}

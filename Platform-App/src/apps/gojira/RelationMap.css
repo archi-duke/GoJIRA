@@ -1,0 +1,259 @@
+/* ===== Wrapper ===== */
+.rm-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #2c3e50;
+  background: #fafbfc;
+}
+
+/* ===== Content ===== */
+.rm-content {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+}
+.rm-linking {
+  cursor: crosshair;
+}
+
+/* canvas holds both columns and svg */
+.rm-canvas {
+  position: relative;
+  display: inline-block;
+  min-width: 100%;
+}
+
+/* ===== Columns ===== */
+.rm-columns {
+  display: flex;
+  gap: 80px;
+  position: relative;
+  z-index: 1;
+}
+
+.rm-column {
+  flex: 1;
+  min-width: 200px;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rm-column-header {
+  font-size: 14px;
+  font-weight: 700;
+  color: #555;
+  padding: 8px 0;
+  border-bottom: 2px solid #ddd;
+  text-align: center;
+}
+
+/* ===== Card ===== */
+.rm-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, opacity 0.15s, box-shadow 0.15s;
+}
+.rm-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.rm-card-selected {
+  border-width: 2px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+}
+.rm-card-highlighted {
+  border-width: 2px;
+}
+.rm-card-dimmed {
+  opacity: 0.25;
+}
+
+.rm-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.rm-subkey {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rm-key {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+  background: #f0f0f0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.rm-subkey-reserved {
+  background: #f0f0f0 !important;
+  color: #666 !important;
+  font-weight: 600 !important;
+}
+
+.rm-card-summary {
+  font-size: 12px;
+  color: #555;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.rm-card-summary-edit {
+  outline: none;
+  border: 1px dashed #ccc;
+  padding: 2px 4px;
+  border-radius: 2px;
+  min-height: 20px;
+}
+.rm-card-summary-edit:focus {
+  border-color: #2980b9;
+  background: #f8fbff;
+}
+
+/* ===== Dots for linking ===== */
+.rm-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  z-index: 2;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.rm-dot-left {
+  left: -7px;
+}
+.rm-dot-right {
+  right: -7px;
+}
+.rm-dot:hover {
+  transform: translateY(-50%) scale(1.2);
+  background: #e83a1e !important;
+}
+
+/* ===== Action buttons (edit mode) ===== */
+.rm-card-actions {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.rm-action-btn {
+  width: 20px;
+  height: 18px;
+  border: none;
+  border-radius: 3px;
+  background: lightgray;
+  font-size: 10px;
+  font-weight: normal;
+  color: #000;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.rm-btn-active {
+  color: #fff;
+  background: tomato;
+}
+.rm-action-btn:hover {
+  opacity: 0.7;
+}
+
+/* ===== Add section ===== */
+.rm-add-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.rm-add-label {
+  font-size: 12px;
+  color: #888;
+}
+
+.rm-add-btn {
+  padding: 3px 10px;
+  border: 1px solid;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rm-add-btn:hover {
+  opacity: 0.7;
+}
+
+/* ===== SVG overlay ===== */
+.rm-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.rm-svg-edit {
+  z-index: 2;
+}
+
+.rm-conn {
+  stroke: darkgray;
+}
+.rm-conn-hl {
+  stroke: #e67e22;
+  stroke-width: 2.5;
+}
+.rm-conn-dimmed {
+  stroke: #ddd;
+  opacity: 0.3;
+}
+.rm-conn-hover {
+  stroke: #e83a1e;
+}
+
+/* ===== Loading ===== */
+.rm-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  font-size: 14px;
+}
+
+/* ===== Status bar ===== */
+.rm-statusbar {
+  padding: 6px 16px;
+  background: #f8f9fa;
+  border-top: 1px solid #ddd;
+  font-size: 12px;
+  color: #888;
+  flex-shrink: 0;
+}

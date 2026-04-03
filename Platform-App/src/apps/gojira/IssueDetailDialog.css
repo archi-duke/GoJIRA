@@ -1,0 +1,169 @@
+.idd-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.idd-dialog {
+  background: #fff;
+  border-radius: 8px;
+  width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.idd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.idd-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+/* Tabs */
+.idd-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #e0e0e0;
+  padding: 0 20px;
+}
+
+.idd-tab {
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-weight: normal;
+  color: #888;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.idd-tab:hover {
+  color: #2c3e50;
+}
+.idd-tab-active {
+  color: #2c3e50;
+  font-weight: 600;
+  border-bottom-color: tomato;
+}
+
+.idd-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #999;
+  padding: 0 4px;
+}
+.idd-close:hover {
+  color: #333;
+}
+
+.idd-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.idd-inline-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.idd-field-inline {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.idd-field {
+  margin-bottom: 12px;
+}
+
+.idd-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.idd-value {
+  font-size: 13px;
+  color: #2c3e50;
+  padding: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.idd-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #2c3e50;
+  box-sizing: border-box;
+}
+.idd-input:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.idd-textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+
+.idd-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.idd-save-btn {
+  padding: 6px 20px;
+  border: none;
+  border-radius: 4px;
+  background: tomato;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.idd-save-btn:hover {
+  opacity: 0.9;
+}
+
+.idd-cancel-btn {
+  padding: 6px 20px;
+  border: none;
+  border-radius: 4px;
+  background: lightgray;
+  color: #000;
+  font-size: 13px;
+  font-weight: normal;
+  cursor: pointer;
+}
+.idd-cancel-btn:hover {
+  opacity: 0.8;
+}

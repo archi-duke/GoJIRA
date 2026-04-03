@@ -1,0 +1,45 @@
+.ctx-menu {
+  position: fixed;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.ctx-menu-header {
+  padding: 6px 14px;
+  font-weight: 700;
+  color: #2c3e50;
+  border-bottom: 1px solid #eee;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-menu-item {
+  padding: 7px 14px;
+  cursor: pointer;
+  color: #333;
+  white-space: nowrap;
+}
+
+.ctx-menu-item:hover {
+  background: #f0f4f8;
+  color: #2980b9;
+}
+
+.ctx-menu-danger:hover {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+.ctx-menu-divider {
+  height: 1px;
+  background: #eee;
+  margin: 4px 0;
+}

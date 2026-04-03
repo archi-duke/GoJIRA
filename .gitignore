@@ -25,3 +25,5 @@ GoJIRA-API/cache/
 
 # Claude
 .claude/
+Platform-API/server
+Platform-App/build/

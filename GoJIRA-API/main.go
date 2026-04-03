@@ -15,40 +15,18 @@ import (
 	"gojira-api/handlers"
 )
 
-// caseInsensitiveRouting normalizes URL path to match registered routes.
 func caseInsensitiveRouting(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Preserve version prefix, normalize the rest
-		parts := strings.SplitN(r.URL.Path, "/", 5) // ["", "api", "v1", "rest..."]
-		if len(parts) >= 5 {
-			// Rebuild with original casing for path params but normalize route segments
-			// Map known routes to their canonical casing
-			canonical := map[string]string{
-				"check":   "Check",
-				"issue":   "Issue",
-				"project": "Project",
-				"jira":    "Jira",
-				"page":    "Page",
-				"account": "Account",
-				"notice":  "Notice",
-			}
-			seg := parts[3]
-			if mapped, ok := canonical[strings.ToLower(seg)]; ok {
-				parts[3] = mapped
-			}
-			r.URL.Path = strings.Join(parts, "/")
-		} else if len(parts) == 4 {
-			canonical := map[string]string{
-				"check":   "Check",
-				"issue":   "Issue",
-				"project": "Project",
-				"jira":    "Jira",
-				"page":    "Page",
-				"account": "Account",
-				"notice":  "Notice",
-			}
-			seg := parts[3]
-			if mapped, ok := canonical[strings.ToLower(seg)]; ok {
+		parts := strings.SplitN(r.URL.Path, "/", 5)
+		canonical := map[string]string{
+			"check":   "Check",
+			"issue":   "Issue",
+			"project": "Project",
+			"jira":    "Jira",
+			"page":    "Page",
+		}
+		if len(parts) >= 4 {
+			if mapped, ok := canonical[strings.ToLower(parts[3])]; ok {
 				parts[3] = mapped
 			}
 			r.URL.Path = strings.Join(parts, "/")
@@ -58,11 +36,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 }
 
 func main() {
-	// Initialize MongoDB
 	db.Init()
-	db.InitAccountIndexes()
-	db.InitNoticeIndexes()
-	db.SeedAccountData()
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -109,7 +83,7 @@ func main() {
 		// Relations
 		r.Put("/Issue/relations", handlers.RelationsHandler)
 
-		// Account
+		// Jira Account
 		r.Post("/Jira/Account", handlers.AccountCreateHandler)
 
 		// Page
@@ -121,46 +95,6 @@ func main() {
 		r.Post("/Project", handlers.ProjectCreateHandler)
 		r.Get("/Project", handlers.ProjectGetHandler)
 		r.Put("/Project", handlers.ProjectUpdateHandler)
-
-		// Account 관리
-		r.Route("/Account", func(r chi.Router) {
-			r.Get("/me", handlers.UserMeHandler)
-
-			r.Get("/users", handlers.UserListHandler)
-			r.Get("/users/{id}", handlers.UserGetHandler)
-			r.Post("/users", handlers.UserCreateHandler)
-			r.Put("/users/{id}", handlers.UserUpdateHandler)
-			r.Delete("/users/{id}", handlers.UserDeleteHandler)
-			r.Get("/users/{id}/authority", handlers.UserAuthorityHandler)
-
-			r.Get("/authGroups", handlers.AuthGroupListHandler)
-			r.Post("/authGroups", handlers.AuthGroupCreateHandler)
-			r.Put("/authGroups/{id}", handlers.AuthGroupUpdateHandler)
-			r.Delete("/authGroups/{id}", handlers.AuthGroupDeleteHandler)
-
-			r.Get("/orgUnits", handlers.OrgUnitListHandler)
-			r.Post("/orgUnits", handlers.OrgUnitCreateHandler)
-			r.Put("/orgUnits/{id}", handlers.OrgUnitUpdateHandler)
-			r.Delete("/orgUnits/{id}", handlers.OrgUnitDeleteHandler)
-
-			r.Get("/userProjects", handlers.UserProjectListHandler)
-			r.Post("/userProjects", handlers.UserProjectCreateHandler)
-			r.Delete("/userProjects/{id}", handlers.UserProjectDeleteHandler)
-
-			r.Get("/connections", handlers.ConnectionListHandler)
-			r.Post("/connections", handlers.ConnectionCreateHandler)
-			r.Put("/connections/{id}", handlers.ConnectionUpdateHandler)
-		})
-
-		// Notice
-		r.Get("/Notice/stream", handlers.NoticeStreamHandler)
-		r.Get("/Notice/active", handlers.NoticeActiveHandler)
-		r.Get("/Notice", handlers.NoticeListHandler)
-		r.Get("/Notice/{id}", handlers.NoticeGetHandler)
-		r.Post("/Notice", handlers.NoticeCreateHandler)
-		r.Put("/Notice/{id}", handlers.NoticeUpdateHandler)
-		r.Delete("/Notice/{id}", handlers.NoticeDeleteHandler)
-		r.Post("/Notice/{id}/view", handlers.NoticeViewHandler)
 	})
 
 	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)
