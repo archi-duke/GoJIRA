@@ -129,16 +129,17 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
 
   async function handleDocGen(project) {
     const prjCode = getJiraCode(project);
-    const docRepoId = prompt('DocRepo ID를 입력하세요 (Docs 탭에서 확인)');
-    if (!docRepoId) return;
-    const msg = prompt('커밋 메시지', `${prjCode} 설계문서 갱신`);
-    if (msg === null) return;
+    const hasRepo = !!project.docRepoId;
+    const msg = hasRepo
+      ? `${prjCode} 프로젝트의 설계문서를 생성/갱신하시겠습니까?`
+      : `${prjCode} 프로젝트에 설계문서 저장소가 없습니다.\n자동으로 저장소를 생성하고 설계문서를 생성하시겠습니까?`;
+    if (!window.confirm(msg)) return;
 
     try {
       const res = await fetch(`${API_BASE}/Issue/docgen`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prjID: prjCode, docRepoId, message: msg }),
+        body: JSON.stringify({ prjID: prjCode }),
       });
       const data = await res.json();
       if (res.ok) {

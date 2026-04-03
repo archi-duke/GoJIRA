@@ -39,11 +39,63 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// 프로젝트의 이슈 가져오기
+	// 프로젝트 조회
 	prjDoc := db.FindProjectByCode(ctx, req.PrjID)
 	if prjDoc == nil {
 		respondError(w, http.StatusNotFound, "프로젝트를 찾을 수 없습니다")
 		return
+	}
+
+	// docRepoId: 요청에 없으면 프로젝트에서 가져오기
+	if req.DocRepoID == "" {
+		if id, ok := prjDoc["docRepoId"].(string); ok {
+			req.DocRepoID = id
+		}
+	}
+
+	// docRepoId가 없으면 자동 생성
+	if req.DocRepoID == "" {
+		projectName, _ := prjDoc["Name"].(string)
+		if projectName == "" {
+			projectName, _ = prjDoc["name"].(string)
+		}
+		repoName := fmt.Sprintf("%s_%s", req.PrjID, time.Now().Format("20060102150405"))
+		description := fmt.Sprintf("%s의 설계 문서", projectName)
+
+		createResult, sc := callPlatform("POST", "/DocRepo", map[string]interface{}{
+			"repoName":    repoName,
+			"projectId":   req.PrjID,
+			"description": description,
+			"createdBy":   "system",
+			"auditors":    []string{},
+		})
+		if sc >= 400 {
+			errMsg := "설계문서 저장소 자동 생성 실패"
+			if m, ok := createResult.(map[string]interface{}); ok {
+				if e, ok := m["error"].(string); ok {
+					errMsg += ": " + e
+				}
+			}
+			respondError(w, http.StatusBadGateway, errMsg)
+			return
+		}
+
+		// 생성된 docRepoId 추출
+		if m, ok := createResult.(map[string]interface{}); ok {
+			if id, ok := m["_id"]; ok {
+				req.DocRepoID = fmt.Sprintf("%v", id)
+			}
+		}
+
+		// 프로젝트에 docRepoId 연결
+		if req.DocRepoID != "" {
+			db.UpdateProjectField(ctx, req.PrjID, "docRepoId", req.DocRepoID)
+		}
+
+		if req.DocRepoID == "" {
+			respondError(w, http.StatusInternalServerError, "설계문서 저장소 생성 후 ID를 가져올 수 없습니다")
+			return
+		}
 	}
 
 	issueKeys := bson.A{}

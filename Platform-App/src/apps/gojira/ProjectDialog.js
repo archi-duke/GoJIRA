@@ -109,6 +109,12 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
               <div className="dlg-text">{form.PLMCode.join(', ')}</div>
             </>
           )}
+
+          {/* 설계문서 저장소 */}
+          <div className="dlg-section">설계문서</div>
+          <div className="dlg-grid">
+            <Field label="Doc Repo ID" value={form.docRepoId || '(자동 생성)'} editable={false} />
+          </div>
         </div>
 
         <div className="dlg-footer">

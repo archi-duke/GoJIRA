@@ -239,6 +239,14 @@ func ReplaceIssueKeyInProject(ctx context.Context, jiraCode string, oldKey, newK
 }
 
 // UpdateProjectIssues replaces the entire issues array for a project
+func UpdateProjectField(ctx context.Context, jiraCode string, field string, value interface{}) error {
+	_, err := Projects().UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+		bson.M{"$set": bson.M{field: value}},
+	)
+	return err
+}
+
 func UpdateProjectIssues(ctx context.Context, jiraCode string, keys []string) error {
 	_, err := Projects().UpdateOne(ctx,
 		bson.M{"jiraCodes.main.jiraCode": jiraCode},
