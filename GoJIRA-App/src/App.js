@@ -4,6 +4,8 @@ import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import AccountManager from './components/AccountManager';
+import NoticeManager from './components/NoticeManager';
+import NoticePopup from './components/NoticePopup';
 import { getAuthUser } from './utils/auth';
 import config from './config';
 import './App.css';
@@ -43,19 +45,19 @@ function App() {
   const activeNav = ['map', 'issues', 'relationMap', 'satam'].includes(page) ? 'map' : page;
 
   // USR 권한 15 = CRUD 전체 → Account/Notice 메뉴 접근 허용
-  const hasAdmin = authority && (authority.USR || 0) >= 15;
+  const hasAccountAdmin = authority && (authority.USR || 0) >= 15;
+  const hasNoticeAdmin = authority && (authority.NOTMGR || 0) >= 15;
 
   if (!user) return null;
 
-  // 권한 없이 account/notice 접근 시도 시 map으로 리다이렉트
-  if ((page === 'account' || page === 'notice') && authority !== null && !hasAdmin) {
-    navigate('map');
-  }
+  // 권한 없이 접근 시도 시 map으로 리다이렉트
+  if (page === 'account' && authority !== null && !hasAccountAdmin) navigate('map');
+  if (page === 'notice' && authority !== null && !hasNoticeAdmin) navigate('map');
 
   const navItems = [
     { key: 'map', label: 'Project' },
-    ...(hasAdmin ? [{ key: 'account', label: 'Account' }] : []),
-    ...(hasAdmin ? [{ key: 'notice', label: 'Notice' }] : []),
+    ...(hasAccountAdmin ? [{ key: 'account', label: 'Account' }] : []),
+    ...(hasNoticeAdmin ? [{ key: 'notice', label: 'Notice' }] : []),
   ];
 
   let content;
@@ -65,10 +67,10 @@ function App() {
     content = <RelationMap project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
   } else if (page === 'satam' && selectedProject) {
     content = <SATAM project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
-  } else if (page === 'account' && hasAdmin) {
+  } else if (page === 'account' && hasAccountAdmin) {
     content = <AccountManager user={user} />;
-  } else if (page === 'notice' && hasAdmin) {
-    content = <div className="app-placeholder">Notice 관리 (준비 중)</div>;
+  } else if (page === 'notice' && hasNoticeAdmin) {
+    content = <NoticeManager user={user} />;
   } else {
     content = <ProjectMap onProjectClick={(p) => navigate('issues', p)} onRelationMap={(p) => navigate('relationMap', p)} onSATAM={(p) => navigate('satam', p)} user={user} />;
   }
@@ -91,6 +93,7 @@ function App() {
         <span className="app-user">{user}</span>
       </div>
       <div className="app-body">{content}</div>
+      <NoticePopup />
     </div>
   );
 }

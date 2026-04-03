@@ -30,6 +30,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 				"jira":    "Jira",
 				"page":    "Page",
 				"account": "Account",
+				"notice":  "Notice",
 			}
 			seg := parts[3]
 			if mapped, ok := canonical[strings.ToLower(seg)]; ok {
@@ -44,6 +45,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 				"jira":    "Jira",
 				"page":    "Page",
 				"account": "Account",
+				"notice":  "Notice",
 			}
 			seg := parts[3]
 			if mapped, ok := canonical[strings.ToLower(seg)]; ok {
@@ -59,6 +61,7 @@ func main() {
 	// Initialize MongoDB
 	db.Init()
 	db.InitAccountIndexes()
+	db.InitNoticeIndexes()
 	db.SeedAccountData()
 
 	r := chi.NewRouter()
@@ -148,6 +151,16 @@ func main() {
 			r.Post("/connections", handlers.ConnectionCreateHandler)
 			r.Put("/connections/{id}", handlers.ConnectionUpdateHandler)
 		})
+
+		// Notice
+		r.Get("/Notice/stream", handlers.NoticeStreamHandler)
+		r.Get("/Notice/active", handlers.NoticeActiveHandler)
+		r.Get("/Notice", handlers.NoticeListHandler)
+		r.Get("/Notice/{id}", handlers.NoticeGetHandler)
+		r.Post("/Notice", handlers.NoticeCreateHandler)
+		r.Put("/Notice/{id}", handlers.NoticeUpdateHandler)
+		r.Delete("/Notice/{id}", handlers.NoticeDeleteHandler)
+		r.Post("/Notice/{id}/view", handlers.NoticeViewHandler)
 	})
 
 	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)

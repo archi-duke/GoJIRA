@@ -1,0 +1,41 @@
+.np-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10000;
+}
+.np-popup {
+  background: #fff; border-radius: 8px; width: 520px; max-height: 70vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+}
+.np-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 20px; border-bottom: 1px solid #eee;
+}
+.np-title { font-size: 16px; font-weight: 700; color: #2c3e50; }
+.np-emergency {
+  display: inline-block; padding: 2px 8px; margin-right: 8px;
+  background: #e74c3c; color: #fff; border-radius: 3px; font-size: 11px; font-weight: 600;
+}
+.np-pager { font-size: 12px; color: #888; }
+.np-body {
+  flex: 1; overflow: auto; padding: 20px;
+  font-size: 14px; line-height: 1.7; color: #333;
+}
+.np-markdown {
+  white-space: pre-wrap; font-family: inherit; font-size: 14px;
+  margin: 0; background: none; border: none;
+}
+.np-html { line-height: 1.7; }
+.np-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 20px; border-top: 1px solid #eee;
+}
+.np-hide-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; cursor: pointer; }
+.np-btns { display: flex; gap: 8px; }
+.np-btn {
+  padding: 7px 18px; border: none; border-radius: 4px;
+  background: lightgray; font-size: 13px; cursor: pointer; color: #000;
+}
+.np-btn-primary { background: #2c3e50; color: #fff; }
