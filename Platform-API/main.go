@@ -19,8 +19,10 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.SplitN(r.URL.Path, "/", 5)
 		canonical := map[string]string{
-			"account": "Account",
-			"notice":  "Notice",
+			"account":  "Account",
+			"notice":   "Notice",
+			"docrepo":  "DocRepo",
+			"doclink":  "DocLink",
 		}
 		if len(parts) >= 4 {
 			if mapped, ok := canonical[strings.ToLower(parts[3])]; ok {
@@ -36,6 +38,7 @@ func main() {
 	db.Init()
 	db.InitAccountIndexes()
 	db.InitNoticeIndexes()
+	db.InitDocRepoIndexes()
 	db.SeedAccountData()
 
 	r := chi.NewRouter()
@@ -90,6 +93,26 @@ func main() {
 		r.Put("/Notice/{id}", handlers.NoticeUpdateHandler)
 		r.Delete("/Notice/{id}", handlers.NoticeDeleteHandler)
 		r.Post("/Notice/{id}/view", handlers.NoticeViewHandler)
+
+		// DocRepo — 문서 이력관리
+		r.Post("/DocRepo", handlers.DocRepoCreateHandler)
+		r.Get("/DocRepo", handlers.DocRepoListHandler)
+		r.Put("/DocRepo/{id}", handlers.DocRepoUpdateHandler)
+		r.Delete("/DocRepo/{id}", handlers.DocRepoDeleteHandler)
+		r.Get("/DocRepo/{id}/tree", handlers.DocRepoTreeHandler)
+		r.Get("/DocRepo/{id}/file", handlers.DocRepoFileHandler)
+		r.Get("/DocRepo/{id}/commits", handlers.DocRepoCommitsHandler)
+		r.Get("/DocRepo/{id}/branches", handlers.DocRepoBranchesHandler)
+		r.Post("/DocRepo/{id}/pr", handlers.DocRepoPRCreateHandler)
+		r.Get("/DocRepo/{id}/prs", handlers.DocRepoPRListHandler)
+		r.Post("/DocRepo/{id}/pr/{num}/review", handlers.DocRepoPRReviewHandler)
+		r.Post("/DocRepo/{id}/pr/{num}/merge", handlers.DocRepoPRMergeHandler)
+		r.Get("/DocRepo/{id}/pr/{num}/reviews", handlers.DocRepoPRReviewsHandler)
+
+		// DocLink — 문서-코드 연결
+		r.Post("/DocLink", handlers.DocLinkCreateHandler)
+		r.Get("/DocLink", handlers.DocLinkListHandler)
+		r.Delete("/DocLink/{id}", handlers.DocLinkDeleteHandler)
 	})
 
 	fmt.Printf("Platform API server starting on %s\n", config.ServerPort)

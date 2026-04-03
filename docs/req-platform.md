@@ -131,6 +131,7 @@ Company > Division > Team > Group
 | PRJ | 프로젝트 관리 | 프로젝트 CRUD |
 | ALLPRJ | 전체 프로젝트 | 모든 프로젝트 접근 |
 | NOTMGR | 공지 관리 | Notice 메뉴 접근 |
+| GITRP | 문서 이력관리 | Docs 메뉴 접근 (15=repo 생성, 6=PR/승인, 4=조회) |
 
 신규 서비스 추가 시 권한 코드를 추가하고, 필요한 authGroup에 비트마스크를 설정한다.
 
@@ -153,7 +154,54 @@ draft(게시전) → active(게시중) → expired(게시종료)
 > - **SSE 선택**: 비상 공지는 서버→클라이언트 단방향 푸시만 필요. SSE는 브라우저 네이티브 지원(EventSource)으로 별도 라이브러리 불필요하고, HTTP 기반이라 방화벽/프록시 호환성 좋음.
 > - **WebSocket/SignalR 미채택**: 양방향 통신이 필요하지 않은 현 시점에서 과도한 복잡도. 향후 채팅 등 양방향 기능 추가 시 검토.
 
-### 3.4 네비게이션 Shell
+### 3.4 문서 이력관리 (Docs)
+
+**개요:** GitHub를 원본 저장소/형상관리 엔진으로 활용하여 설계 문서의 버전 관리, 승인, 소스코드 연결을 제공한다.
+GitHub 미숙자도 사용할 수 있도록 과제 중심의 간편 UI를 제공한다.
+
+**컬렉션:**
+
+| 컬렉션 | 용도 | 주요 필드 |
+|--------|------|----------|
+| docRepos | 프로젝트-GitHub repo 매핑 | projectId, repoName, repoOwner, repoUrl, auditors |
+| docLinks | 문서-코드 연결 | taskId, docRepoId, codeRepoUrl, codePath, prUrl |
+
+**API:**
+- POST /DocRepo — repo 생성 (GITRP >= 15)
+- GET /DocRepo — repo 목록
+- GET /DocRepo/{id}/tree — 문서 트리 (GitHub tree API 프록시)
+- GET /DocRepo/{id}/file — 파일 내용 (Markdown 렌더링용)
+- GET /DocRepo/{id}/commits — 커밋 이력
+- GET /DocRepo/{id}/branches — 브랜치 목록
+- POST /DocRepo/{id}/pr — PR 생성 (문서 배포 요청, auditors를 reviewer로 자동 할당)
+- GET /DocRepo/{id}/prs — PR 목록 + 승인 상태
+- POST /DocRepo/{id}/pr/{num}/review — 승인/반려
+- POST /DocRepo/{id}/pr/{num}/merge — 머지
+- POST /DocLink — 문서-코드 연결 등록
+- GET /DocLink — 연결 조회
+
+**승인 흐름:**
+```
+[작성자] 문서 수정 → commit → PR 생성 (배포 요청)
+  → [시스템] auditors를 PR reviewer로 자동 할당
+  → [승인자] UI에서 승인/반려
+  → 승인 완료 → 머지 → main 반영
+```
+- auditors가 없으면 PR 생성 차단 + "승인자를 먼저 지정하세요" 안내
+
+**프론트 UI (DocManager):**
+- Repo 목록 (사이드바) + 탭 (Files / Commits / PRs / Graph)
+- Files: 폴더/파일 트리 탐색 + Markdown 렌더링 (react-markdown, GFM 지원)
+- Commits: 커밋 이력 테이블
+- PRs: PR 목록, 승인/반려/머지 버튼, auditors 표시
+- Graph: SVG 기반 브랜치/커밋 시각화
+
+> **결정 사유:**
+> - **GitHub 활용**: 형상관리 기능을 중복 구현하지 않고 GitHub API를 프록시. PR/리뷰/머지는 GitHub 엔진 그대로 활용.
+> - **PAT 인증**: 초기 설정 간단. 조직 규모 확장 시 GitHub App으로 전환 가능.
+> - **Markdown 기반**: 가볍고 Git 친화적, 계층 구조는 폴더 구조로 자연스럽게 표현.
+
+### 3.5 네비게이션 Shell
 
 **구조:**
 ```
@@ -323,7 +371,7 @@ GoJIRA/
 │   └── src/
 │       ├── App.js             (Shell, 인증, 네비게이션, 앱 레지스트리)
 │       ├── utils/             (auth, exportUtils)
-│       ├── components/        (CommonBar, AccountManager, NoticeManager, NoticePopup)
+│       ├── components/        (CommonBar, AccountManager, NoticeManager, NoticePopup, DocManager)
 │       └── apps/              (앱 레지스트리 진입점)
 │
 ├── GoJIRA-API/                ← GoJIRA 앱 서비스 (:9001)
@@ -530,3 +578,6 @@ GOJIRA_ENC_KEY=...                 # AES 암호화 키 (32 bytes)
 | D-07 | 인증 정보 저장 | .env + AES-256-GCM | 코드 하드코딩 | 보안, 환경별 설정 분리 |
 | D-08 | 조직 계층 | 유형 기반 자동 정렬 | sortOrder 수동 지정 | Company>Division>Team>Group 고정 순서, 관리 부담 감소 |
 | D-09 | SSO 개발 모드 | USE_SSO=false 고정 사용자 | 항상 SSO 필수 | 폐쇄망 외부 개발 환경에서 SSO 서버 없이 독립 테스트 |
+| D-10 | 문서 형상관리 | GitHub API 프록시 | 자체 Git 서버 | GitHub의 PR/리뷰/머지 기능을 그대로 활용, 중복 구현 방지 |
+| D-11 | 문서 계층 구조 | GitHub 폴더 구조 활용 | 메타파일(SUMMARY.md) | 별도 메타 관리 불필요, tree API로 직접 조회 |
+| D-12 | GitHub 인증 | PAT (Personal Access Token) | GitHub App | 설정 간단, 조직 규모 확장 시 전환 가능 |

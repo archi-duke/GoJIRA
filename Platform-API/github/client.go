@@ -1,0 +1,258 @@
+package github
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+
+	"platform-api/config"
+)
+
+var httpClient = &http.Client{}
+
+func doRequest(method, path string, body interface{}) ([]byte, int, error) {
+	var reqBody io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		reqBody = bytes.NewReader(b)
+	}
+
+	u := config.GitHubAPI + path
+	req, err := http.NewRequest(method, u, reqBody)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	if config.GitHubToken != "" {
+		req.Header.Set("Authorization", "Bearer "+config.GitHubToken)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return data, resp.StatusCode, nil
+}
+
+func parseJSON(data []byte) interface{} {
+	var result interface{}
+	json.Unmarshal(data, &result)
+	return result
+}
+
+// --- Repo ---
+
+func CreateRepo(name, description string, isPrivate bool) (map[string]interface{}, error) {
+	path := "/orgs/" + config.GitHubOrg + "/repos"
+	if config.GitHubOrg == "" {
+		path = "/user/repos"
+	}
+	body := map[string]interface{}{
+		"name":        name,
+		"description": description,
+		"private":     isPrivate,
+		"auto_init":   true,
+	}
+	data, status, err := doRequest("POST", path, body)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("create repo failed (%d): %s", status, string(data))
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
+func DeleteRepo(owner, repo string) error {
+	_, status, err := doRequest("DELETE", "/repos/"+owner+"/"+repo, nil)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("delete repo failed (%d)", status)
+	}
+	return nil
+}
+
+func GetRepo(owner, repo string) (map[string]interface{}, error) {
+	data, status, err := doRequest("GET", "/repos/"+owner+"/"+repo, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("get repo failed (%d)", status)
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
+// --- Tree ---
+
+func GetTree(owner, repo, ref string) (interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, ref)
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("get tree failed (%d)", status)
+	}
+	return parseJSON(data), nil
+}
+
+// --- File content ---
+
+func GetFileContent(owner, repo, path string, ref string) (map[string]interface{}, error) {
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, path)
+	if ref != "" {
+		u += "?ref=" + url.QueryEscape(ref)
+	}
+	data, status, err := doRequest("GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("get file failed (%d)", status)
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
+// --- Commits ---
+
+func ListCommits(owner, repo, branch string, perPage int) (interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/commits?sha=%s&per_page=%d", owner, repo, branch, perPage)
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("list commits failed (%d)", status)
+	}
+	return parseJSON(data), nil
+}
+
+// --- Branches ---
+
+func ListBranches(owner, repo string) (interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/branches", owner, repo)
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("list branches failed (%d)", status)
+	}
+	return parseJSON(data), nil
+}
+
+// --- Pull Requests ---
+
+func CreatePR(owner, repo, title, body, head, base string) (map[string]interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls", owner, repo)
+	payload := map[string]string{
+		"title": title,
+		"body":  body,
+		"head":  head,
+		"base":  base,
+	}
+	data, status, err := doRequest("POST", path, payload)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("create PR failed (%d): %s", status, string(data))
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
+func ListPRs(owner, repo, state string) (interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls?state=%s", owner, repo, state)
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("list PRs failed (%d)", status)
+	}
+	return parseJSON(data), nil
+}
+
+func GetPR(owner, repo string, prNumber int) (map[string]interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, prNumber)
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("get PR failed (%d)", status)
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
+func CreateReview(owner, repo string, prNumber int, event, body string) error {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, prNumber)
+	payload := map[string]string{"event": event, "body": body}
+	data, status, err := doRequest("POST", path, payload)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("create review failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
+func MergePR(owner, repo string, prNumber int, mergeMethod string) error {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, prNumber)
+	payload := map[string]string{"merge_method": mergeMethod}
+	data, status, err := doRequest("PUT", path, payload)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("merge PR failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
+// --- Reviewers ---
+
+func RequestReviewers(owner, repo string, prNumber int, reviewers []string) error {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, prNumber)
+	payload := map[string]interface{}{"reviewers": reviewers}
+	data, status, err := doRequest("POST", path, payload)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("request reviewers failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
+func ListReviews(owner, repo string, prNumber int) (interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, prNumber)
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("list reviews failed (%d)", status)
+	}
+	return parseJSON(data), nil
+}

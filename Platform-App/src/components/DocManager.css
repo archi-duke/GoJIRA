@@ -1,0 +1,68 @@
+.dm-wrapper { display: flex; height: 100%; overflow: hidden; }
+
+/* Sidebar */
+.dm-sidebar { width: 240px; border-right: 1px solid #ddd; background: #f8f9fa; display: flex; flex-direction: column; flex-shrink: 0; }
+.dm-sidebar-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; font-weight: 600; font-size: 14px; border-bottom: 1px solid #ddd; }
+.dm-add-btn { width: 26px; height: 26px; border: none; border-radius: 4px; background: #2c3e50; color: #fff; font-size: 16px; cursor: pointer; }
+.dm-repo-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #eee; }
+.dm-repo-item:hover { background: #eee; }
+.dm-repo-active { background: #e3ecf5; }
+.dm-repo-name { display: block; font-size: 13px; font-weight: 600; color: #2c3e50; }
+.dm-repo-owner { font-size: 11px; color: #888; }
+
+/* Main */
+.dm-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.dm-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #ddd; }
+.dm-repo-title { font-size: 14px; font-weight: 600; color: #2c3e50; }
+.dm-view-tabs { display: flex; gap: 4px; }
+.dm-tab { padding: 5px 12px; border: none; border-radius: 4px; background: none; color: #888; font-size: 12px; cursor: pointer; }
+.dm-tab:hover { background: #f0f0f0; color: #333; }
+.dm-tab-active { color: #2c3e50; font-weight: 600; border-bottom: 2px solid tomato; border-radius: 0; }
+
+.dm-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 15px; }
+
+/* Tree */
+.dm-tree-wrap { display: flex; flex: 1; overflow: hidden; }
+.dm-tree-list { width: 280px; overflow: auto; border-right: 1px solid #eee; flex-shrink: 0; }
+.dm-tree-item { padding: 6px 8px; cursor: pointer; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.dm-tree-item:hover { background: #f0f0f0; }
+.dm-tree-folder { color: #555; }
+.dm-tree-selected { background: #e3ecf5; font-weight: 600; }
+.dm-tree-icon { font-size: 14px; }
+.dm-file-viewer { flex: 1; overflow: auto; }
+.dm-file-header { padding: 8px 16px; font-size: 12px; color: #666; border-bottom: 1px solid #eee; background: #fafafa; }
+.dm-file-content { padding: 16px; font-size: 14px; line-height: 1.7; }
+.dm-file-content pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
+
+/* Table */
+.dm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dm-table th { text-align: left; padding: 8px 10px; background: #f5f5f5; border-bottom: 2px solid #ddd; font-weight: 600; color: #555; }
+.dm-table td { padding: 7px 10px; border-bottom: 1px solid #eee; }
+.dm-table tbody tr:hover { background: #fafafa; }
+.dm-sha { font-family: monospace; font-size: 12px; color: #2980b9; }
+.dm-date { font-size: 12px; color: #888; white-space: nowrap; }
+.dm-commits, .dm-prs { flex: 1; overflow: auto; padding: 0; }
+
+/* PR */
+.dm-pr-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 10px; border-bottom: 1px solid #eee; }
+.dm-pr-filters { display: flex; gap: 4px; }
+.dm-pr-auditors { font-size: 12px; color: #666; }
+.dm-warn { color: tomato; font-weight: 600; }
+.dm-pr-state { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.dm-pr-open { background: #27ae60; color: #fff; }
+.dm-pr-closed { background: #888; color: #fff; }
+.dm-pr-actions { white-space: nowrap; }
+.dm-approve-btn, .dm-reject-btn, .dm-merge-btn { padding: 3px 10px; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; margin-left: 4px; }
+.dm-approve-btn { background: #27ae60; color: #fff; }
+.dm-reject-btn { background: #e74c3c; color: #fff; }
+.dm-merge-btn { background: #2c3e50; color: #fff; }
+
+/* Graph */
+.dm-graph { flex: 1; overflow: auto; }
+.dm-graph-header { padding: 10px 16px; border-bottom: 1px solid #eee; font-size: 13px; color: #555; }
+.dm-branch-tag { display: inline-block; padding: 2px 8px; background: #e8e8e8; border-radius: 10px; font-size: 11px; margin-left: 6px; color: #333; }
+.dm-graph-body { display: flex; overflow: auto; }
+.dm-graph-list { flex: 1; }
+.dm-graph-row { display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 13px; }
+.dm-graph-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-graph-author { font-size: 12px; color: #888; width: 100px; text-align: right; }

@@ -7,9 +7,12 @@ import (
 )
 
 var (
-	ServerPort = envOrDefault("PLATFORM_SERVER_PORT", ":9000")
-	MongoURI   = envOrDefault("PLATFORM_MONGO_URI", "mongodb://localhost:27017")
-	MongoDB    = envOrDefault("PLATFORM_MONGO_DB", "gojira")
+	ServerPort  = envOrDefault("PLATFORM_SERVER_PORT", ":9000")
+	MongoURI    = envOrDefault("PLATFORM_MONGO_URI", "mongodb://localhost:27017")
+	MongoDB     = envOrDefault("PLATFORM_MONGO_DB", "gojira")
+	GitHubToken = envOrDefault("PLATFORM_GITHUB_TOKEN", "")
+	GitHubOrg   = envOrDefault("PLATFORM_GITHUB_ORG", "")
+	GitHubAPI   = envOrDefault("PLATFORM_GITHUB_API", "https://api.github.com")
 )
 
 func init() {

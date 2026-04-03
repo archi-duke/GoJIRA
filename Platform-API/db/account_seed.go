@@ -18,7 +18,7 @@ func SeedAccountData() {
 		{
 			"_id": "ag_master", "code": "MASTER", "name": "Master",
 			"description": "전체 관리 권한",
-			"authority":   bson.M{"ALLPRJ": 15, "USR": 15, "ORG": 15, "PRJ": 15, "NOTMGR": 15},
+			"authority":   bson.M{"ALLPRJ": 15, "USR": 15, "ORG": 15, "PRJ": 15, "NOTMGR": 15, "GITRP": 15},
 		},
 		{
 			"_id": "ag_editor", "code": "EDITOR", "name": "Editor",

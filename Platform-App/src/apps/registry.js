@@ -26,6 +26,13 @@ const appRegistry = [
     authCode: 'NOTMGR',
     authLevel: 15,
   },
+  {
+    key: 'docs',
+    label: 'Docs',
+    component: null,         // 내장 컴포넌트 (DocManager)
+    authCode: 'GITRP',
+    authLevel: 4,            // 조회 이상
+  },
 ];
 
 export default appRegistry;

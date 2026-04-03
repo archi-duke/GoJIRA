@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import AccountManager from './components/AccountManager';
 import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
+import DocManager from './components/DocManager';
 import { getAuthUser } from './utils/auth';
 import appRegistry from './apps/registry';
 import config from './config';
@@ -54,6 +55,8 @@ function App() {
     content = <AccountManager user={user} />;
   } else if (page === 'notice') {
     content = <NoticeManager user={user} />;
+  } else if (page === 'docs') {
+    content = <DocManager user={user} />;
   } else {
     const appEntry = appRegistry.find(a => a.key === page || (a.subPages && a.subPages.includes(page)));
     if (appEntry && appEntry.component) {
