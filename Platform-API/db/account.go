@@ -107,7 +107,10 @@ func insertDoc(ctx context.Context, col *mongo.Collection, doc bson.M) error {
 	if doc["updatedBy"] == nil {
 		doc["updatedBy"] = doc["createdBy"]
 	}
-	_, err := col.InsertOne(ctx, doc)
+	result, err := col.InsertOne(ctx, doc)
+	if err == nil && result.InsertedID != nil {
+		doc["_id"] = result.InsertedID
+	}
 	return err
 }
 

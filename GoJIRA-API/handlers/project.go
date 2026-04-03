@@ -38,7 +38,7 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 설계문서 저장소 자동 생성
-	go ensureDocRepo(code, req.Name)
+	ensureDocRepo(code, req.Name)
 
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
@@ -89,7 +89,7 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 설계문서 저장소 자동 생성 (없으면)
-	go ensureDocRepo(code, req.Name)
+	ensureDocRepo(code, req.Name)
 
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
@@ -127,8 +127,10 @@ func ensureDocRepo(jiraCode, projectName string) {
 
 	// 이미 docRepoId가 있으면 skip
 	if id, ok := prj["docRepoId"].(string); ok && id != "" {
+		log.Printf("ensureDocRepo: %s already has docRepoId=%s", jiraCode, id)
 		return
 	}
+	log.Printf("ensureDocRepo: creating repo for %s (%s)", jiraCode, projectName)
 
 	repoName := fmt.Sprintf("%s_%s", jiraCode, time.Now().Format("20060102150405"))
 	description := fmt.Sprintf("%s의 설계 문서", projectName)
@@ -140,6 +142,7 @@ func ensureDocRepo(jiraCode, projectName string) {
 		"createdBy":   "system",
 		"auditors":    []string{},
 	})
+	log.Printf("ensureDocRepo: Platform API response status=%d, result=%v", sc, result)
 	if sc >= 400 {
 		log.Printf("ensureDocRepo: repo 생성 실패 for %s (status=%d)", jiraCode, sc)
 		return
