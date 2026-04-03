@@ -14,6 +14,7 @@ var (
 	GitHubOrg   = envOrDefault("PLATFORM_GITHUB_ORG", "")
 	GitHubURL   = envOrDefault("GITHUB_URL", "https://github.com/")
 	GitHubAPI   string
+	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 )
 
 func init() {
@@ -26,6 +27,7 @@ func init() {
 	GitHubToken = envOrDefault("PLATFORM_GITHUB_TOKEN", "")
 	GitHubOrg = envOrDefault("PLATFORM_GITHUB_ORG", "")
 	GitHubURL = envOrDefault("GITHUB_URL", "https://github.com/")
+	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 
 	// GitHubURL → GitHubAPI 변환
 	base := strings.TrimRight(GitHubURL, "/")

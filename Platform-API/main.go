@@ -111,6 +111,11 @@ func main() {
 		r.Put("/DocRepo/{id}/file", handlers.DocRepoFilePutHandler)
 		r.Post("/DocRepo/{id}/branch", handlers.DocRepoBranchCreateHandler)
 
+		// Git 로컬 작업
+		r.Post("/DocRepo/{id}/clone", handlers.DocRepoCloneHandler)
+		r.Post("/DocRepo/{id}/git/write", handlers.DocRepoGitWriteHandler)
+		r.Post("/DocRepo/{id}/git/publish", handlers.DocRepoGitPublishHandler)
+
 		// DocLink — 문서-코드 연결
 		r.Post("/DocLink", handlers.DocLinkCreateHandler)
 		r.Get("/DocLink", handlers.DocLinkListHandler)

@@ -166,28 +166,50 @@ GitHub 미숙자도 사용할 수 있도록 과제 중심의 간편 UI를 제공
 | docRepos | 프로젝트-GitHub repo 매핑 | projectId, repoName, repoOwner, repoUrl, auditors |
 | docLinks | 문서-코드 연결 | taskId, docRepoId, codeRepoUrl, codePath, prUrl |
 
-**API:**
-- POST /DocRepo — repo 생성 (GITRP >= 15)
-- GET /DocRepo — repo 목록
-- GET /DocRepo/{id}/tree — 문서 트리 (GitHub tree API 프록시)
-- GET /DocRepo/{id}/file — 파일 내용 (Markdown 렌더링용)
-- GET /DocRepo/{id}/commits — 커밋 이력
-- GET /DocRepo/{id}/branches — 브랜치 목록
-- POST /DocRepo/{id}/pr — PR 생성 (문서 배포 요청, auditors를 reviewer로 자동 할당)
-- GET /DocRepo/{id}/prs — PR 목록 + 승인 상태
-- POST /DocRepo/{id}/pr/{num}/review — 승인/반려
-- POST /DocRepo/{id}/pr/{num}/merge — 머지
-- POST /DocLink — 문서-코드 연결 등록
-- GET /DocLink — 연결 조회
-
-**승인 흐름:**
+**문서 작업 방식 (로컬 Git 기반):**
 ```
-[작성자] 문서 수정 → commit → PR 생성 (배포 요청)
-  → [시스템] auditors를 PR reviewer로 자동 할당
-  → [승인자] UI에서 승인/반려
+[앱 서비스] 문서 생성 요청
+  → [Platform-API] 서버 로컬에 repo clone/pull
+  → 브랜치 생성 → 파일 생성/편집 → git add/commit/push
+  → GitHub PR 생성 → auditors를 reviewer로 자동 할당
+  → [승인자] Docs UI에서 승인/반려
   → 승인 완료 → 머지 → main 반영
 ```
+
+> **결정 사유:**
+> - **로컬 Git 방식 채택**: GitHub Contents API(파일별 원격 커밋)가 아닌, 서버 로컬에서 clone → 편집 → commit/push하는 표준 Git 워크플로우.
+> - 여러 파일을 한 커밋으로 묶을 수 있고, git diff 등 표준 도구 활용 가능.
+> - Contents API는 파일당 1 커밋, Rate Limit 소모가 크고 대량 작업에 부적합.
+
+**API:**
+
+| 구분 | 엔드포인트 | 설명 |
+|------|-----------|------|
+| Repo | POST /DocRepo | repo 생성 (GitHub + DB 등록, GITRP >= 15) |
+| Repo | GET /DocRepo | repo 목록 조회 |
+| 조회 | GET /DocRepo/{id}/tree | 문서 트리 (GitHub tree API) |
+| 조회 | GET /DocRepo/{id}/file | 파일 내용 (Markdown 렌더링용) |
+| 조회 | GET /DocRepo/{id}/commits | 커밋 이력 |
+| 조회 | GET /DocRepo/{id}/branches | 브랜치 목록 |
+| Git | POST /DocRepo/{id}/clone | 서버 로컬에 repo clone/pull |
+| Git | POST /DocRepo/{id}/git/write | 로컬 파일 쓰기 + commit/push |
+| Git | POST /DocRepo/{id}/git/publish | 브랜치 생성 + 파일 쓰기 + commit/push + PR 생성 |
+| PR | POST /DocRepo/{id}/pr | PR 생성 (auditors reviewer 할당) |
+| PR | GET /DocRepo/{id}/prs | PR 목록 + 승인 상태 |
+| PR | POST /DocRepo/{id}/pr/{num}/review | 승인/반려 |
+| PR | POST /DocRepo/{id}/pr/{num}/merge | 머지 |
+| Link | POST /DocLink | 문서-코드 연결 등록 |
+| Link | GET /DocLink | 연결 조회 |
+
+**승인 흐름:**
 - auditors가 없으면 PR 생성 차단 + "승인자를 먼저 지정하세요" 안내
+- PR 생성 시 auditors를 GitHub reviewer로 자동 할당
+- Docs UI에서 승인/반려/머지 가능
+
+**앱 서비스 연동 (GoJIRA 예시):**
+- GoJIRA-API `/Issue/docgen`: 이슈 데이터 → 타입별 Markdown 자동 생성 → Platform-API `/git/publish` 호출
+- 프로젝트 컨텍스트 메뉴 "설계문서 생성" 클릭으로 실행
+- 생성 파일: README.md, vos.md, feature.md, requirement.md, architectural-design.md, detailed-design.md
 
 **프론트 UI (DocManager):**
 - Repo 목록 (사이드바) + 탭 (Files / Commits / PRs / Graph)
@@ -196,9 +218,9 @@ GitHub 미숙자도 사용할 수 있도록 과제 중심의 간편 UI를 제공
 - PRs: PR 목록, 승인/반려/머지 버튼, auditors 표시
 - Graph: SVG 기반 브랜치/커밋 시각화
 
-> **결정 사유:**
-> - **GitHub 활용**: 형상관리 기능을 중복 구현하지 않고 GitHub API를 프록시. PR/리뷰/머지는 GitHub 엔진 그대로 활용.
-> - **PAT 인증**: 초기 설정 간단. 조직 규모 확장 시 GitHub App으로 전환 가능.
+> **추가 결정 사유:**
+> - **GitHub 활용**: 형상관리 기능을 중복 구현하지 않고 GitHub API/Git CLI를 활용. PR/리뷰/머지는 GitHub 엔진 그대로 사용.
+> - **PAT 인증**: 초기 설정 간단. clone URL에 토큰 포함으로 별도 SSH 키 불필요. 조직 규모 확장 시 GitHub App으로 전환 가능.
 > - **Markdown 기반**: 가볍고 Git 친화적, 계층 구조는 폴더 구조로 자연스럽게 표현.
 
 ### 3.5 네비게이션 Shell
@@ -581,3 +603,4 @@ GOJIRA_ENC_KEY=...                 # AES 암호화 키 (32 bytes)
 | D-10 | 문서 형상관리 | GitHub API 프록시 | 자체 Git 서버 | GitHub의 PR/리뷰/머지 기능을 그대로 활용, 중복 구현 방지 |
 | D-11 | 문서 계층 구조 | GitHub 폴더 구조 활용 | 메타파일(SUMMARY.md) | 별도 메타 관리 불필요, tree API로 직접 조회 |
 | D-12 | GitHub 인증 | PAT (Personal Access Token) | GitHub App | 설정 간단, 조직 규모 확장 시 전환 가능 |
+| D-13 | 문서 커밋 방식 | 로컬 Git (clone→edit→push) | GitHub Contents API | 여러 파일 1커밋, Rate Limit 무관, 표준 Git 워크플로우 |

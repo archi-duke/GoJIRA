@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -124,62 +123,30 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		files[fileName] = md
 	}
 
-	// 브랜치 생성
+	// 로컬 git 방식: 브랜치 생성 + 파일 쓰기 + commit/push + PR 생성
 	branchName := fmt.Sprintf("docs/%s-%s", req.PrjID, time.Now().Format("20060102-150405"))
-	branchResult, statusCode := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/branch", req.DocRepoID),
-		map[string]string{"name": branchName, "from": "main"})
-	if statusCode >= 400 {
-		errMsg := "브랜치 생성 실패"
-		if m, ok := branchResult.(map[string]interface{}); ok {
-			if e, ok := m["error"].(string); ok {
-				errMsg += ": " + e
-			}
-		}
-		respondError(w, http.StatusBadGateway, fmt.Sprintf("%s (status=%d, docRepoId=%s)", errMsg, statusCode, req.DocRepoID))
-		return
-	}
-
-	// 파일 커밋
-	for path, content := range files {
-		b64 := base64.StdEncoding.EncodeToString([]byte(content))
-
-		// 기존 파일 SHA 조회 (수정 시 필요)
-		sha := ""
-		fileData, sc := callPlatform("GET", fmt.Sprintf("/DocRepo/%s/file?path=%s&ref=%s", req.DocRepoID, path, branchName), nil)
-		if sc == 200 {
-			if m, ok := fileData.(map[string]interface{}); ok {
-				sha, _ = m["sha"].(string)
-			}
-		}
-
-		msg := req.Message
-		if msg == "" {
-			msg = "문서 갱신: " + path
-		}
-
-		_, sc = callPlatform("PUT", fmt.Sprintf("/DocRepo/%s/file", req.DocRepoID),
-			map[string]interface{}{
-				"path": path, "content": b64, "message": msg,
-				"branch": branchName, "sha": sha,
-			})
-		if sc >= 400 {
-			respondError(w, http.StatusBadGateway, fmt.Sprintf("파일 커밋 실패: %s", path))
-			return
-		}
-	}
-
-	// PR 생성
 	prTitle := fmt.Sprintf("[%s] 설계문서 갱신 %s", req.PrjID, time.Now().Format("2006-01-02"))
 	prBody := fmt.Sprintf("프로젝트 %s의 설계문서를 갱신합니다.\n\n변경 파일:\n", req.PrjID)
 	for path := range files {
 		prBody += fmt.Sprintf("- %s\n", path)
 	}
 
-	prResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/pr", req.DocRepoID),
-		map[string]string{"title": prTitle, "body": prBody, "head": branchName, "base": "main"})
+	msg := req.Message
+	if msg == "" {
+		msg = prTitle
+	}
+
+	publishResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/git/publish", req.DocRepoID),
+		map[string]interface{}{
+			"branch":  branchName,
+			"files":   files,
+			"message": msg,
+			"prTitle": prTitle,
+			"prBody":  prBody,
+		})
 	if sc >= 400 {
-		errMsg := "PR 생성 실패"
-		if m, ok := prResult.(map[string]interface{}); ok {
+		errMsg := "문서 배포 실패"
+		if m, ok := publishResult.(map[string]interface{}); ok {
 			if e, ok := m["error"].(string); ok {
 				errMsg += ": " + e
 			}
@@ -192,7 +159,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "설계문서 생성 및 PR 요청 완료",
 		"branch":  branchName,
 		"files":   len(files),
-		"pr":      prResult,
+		"result":  publishResult,
 	})
 }
 
