@@ -49,17 +49,28 @@ func parseJSON(data []byte) interface{} {
 // --- Repo ---
 
 func CreateRepo(name, description string, isPrivate bool) (map[string]interface{}, error) {
-	path := "/orgs/" + config.GitHubOrg + "/repos"
-	if config.GitHubOrg == "" {
-		path = "/user/repos"
-	}
 	body := map[string]interface{}{
 		"name":        name,
 		"description": description,
 		"private":     isPrivate,
 		"auto_init":   true,
 	}
-	data, status, err := doRequest("POST", path, body)
+
+	// 조직으로 먼저 시도, 실패하면 개인 계정으로 fallback
+	if config.GitHubOrg != "" {
+		data, status, err := doRequest("POST", "/orgs/"+config.GitHubOrg+"/repos", body)
+		if err != nil {
+			return nil, err
+		}
+		if status < 400 {
+			result := map[string]interface{}{}
+			json.Unmarshal(data, &result)
+			return result, nil
+		}
+	}
+
+	// 개인 계정
+	data, status, err := doRequest("POST", "/user/repos", body)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +104,86 @@ func GetRepo(owner, repo string) (map[string]interface{}, error) {
 	result := map[string]interface{}{}
 	json.Unmarshal(data, &result)
 	return result, nil
+}
+
+// --- File CRUD (Contents API) ---
+
+// CreateOrUpdateFile creates or updates a file in a repo.
+// sha is required for updates (empty for new files).
+func CreateOrUpdateFile(owner, repo, filePath, content, message, branch, sha string) (map[string]interface{}, error) {
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
+	body := map[string]interface{}{
+		"message": message,
+		"content": content, // base64 encoded
+		"branch":  branch,
+	}
+	if sha != "" {
+		body["sha"] = sha
+	}
+	data, status, err := doRequest("PUT", u, body)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("create/update file failed (%d): %s", status, string(data))
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
+// DeleteFile deletes a file from a repo.
+func DeleteFile(owner, repo, filePath, message, branch, sha string) error {
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
+	body := map[string]interface{}{
+		"message": message,
+		"sha":     sha,
+		"branch":  branch,
+	}
+	_, status, err := doRequest("DELETE", u, body)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("delete file failed (%d)", status)
+	}
+	return nil
+}
+
+// --- Branch ---
+
+// GetBranchRef gets the SHA of a branch.
+func GetBranchRef(owner, repo, branch string) (string, error) {
+	path := fmt.Sprintf("/repos/%s/%s/git/ref/heads/%s", owner, repo, branch)
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return "", err
+	}
+	if status >= 400 {
+		return "", fmt.Errorf("get branch ref failed (%d)", status)
+	}
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	obj, _ := result["object"].(map[string]interface{})
+	sha, _ := obj["sha"].(string)
+	return sha, nil
+}
+
+// CreateBranch creates a new branch from a source branch SHA.
+func CreateBranch(owner, repo, newBranch, fromSHA string) error {
+	path := fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo)
+	body := map[string]string{
+		"ref": "refs/heads/" + newBranch,
+		"sha": fromSHA,
+	}
+	data, status, err := doRequest("POST", path, body)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("create branch failed (%d): %s", status, string(data))
+	}
+	return nil
 }
 
 // --- Tree ---

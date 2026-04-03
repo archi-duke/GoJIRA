@@ -119,8 +119,35 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM }) {
       case 'satam':
         if (onSATAM) onSATAM(project);
         break;
+      case 'docgen':
+        handleDocGen(project);
+        break;
       default:
         break;
+    }
+  }
+
+  async function handleDocGen(project) {
+    const prjCode = getJiraCode(project);
+    const docRepoId = prompt('DocRepo ID를 입력하세요 (Docs 탭에서 확인)');
+    if (!docRepoId) return;
+    const msg = prompt('커밋 메시지', `${prjCode} 설계문서 갱신`);
+    if (msg === null) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/Issue/docgen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prjID: prjCode, docRepoId, message: msg }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`설계문서 생성 완료!\n브랜치: ${data.branch}\n파일 수: ${data.files}\nPR이 생성되었습니다.`);
+      } else {
+        alert('실패: ' + (data.error || res.statusText));
+      }
+    } catch (err) {
+      alert('설계문서 생성 실패: ' + err.message);
     }
   }
 

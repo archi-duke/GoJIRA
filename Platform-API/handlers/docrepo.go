@@ -360,6 +360,83 @@ func DocRepoPRReviewsHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, reviews)
 }
 
+// --- File CRUD ---
+
+// PUT /DocRepo/{id}/file — 파일 생성/수정
+func DocRepoFilePutHandler(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	owner, name, err := getRepoInfo(ctx, id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "docRepo not found")
+		return
+	}
+
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"` // base64 encoded
+		Message string `json:"message"`
+		Branch  string `json:"branch"`
+		SHA     string `json:"sha"` // 수정 시 필요
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Branch == "" {
+		req.Branch = "main"
+	}
+	if req.Message == "" {
+		req.Message = "update " + req.Path
+	}
+
+	result, err := github.CreateOrUpdateFile(owner, name, req.Path, req.Content, req.Message, req.Branch, req.SHA)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// POST /DocRepo/{id}/branch — 브랜치 생성
+func DocRepoBranchCreateHandler(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	owner, name, err := getRepoInfo(ctx, id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "docRepo not found")
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+		From string `json:"from"` // 소스 브랜치 (기본: main)
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.From == "" {
+		req.From = "main"
+	}
+
+	sha, err := github.GetBranchRef(owner, name, req.From)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "소스 브랜치 조회 실패: "+err.Error())
+		return
+	}
+
+	if err := github.CreateBranch(owner, name, req.Name, sha); err != nil {
+		respondError(w, http.StatusBadGateway, "브랜치 생성 실패: "+err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"branch": req.Name, "sha": sha})
+}
+
 // --- DocLink ---
 
 // POST /DocLink

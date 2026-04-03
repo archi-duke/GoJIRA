@@ -9,6 +9,7 @@ import (
 
 var (
 	ServerPort     = envOrDefault("GOJIRA_SERVER_PORT", ":9001")
+	PlatformAPI    = envOrDefault("GOJIRA_PLATFORM_API", "http://localhost:9000/api/v2")
 	JiraMockURL    = envOrDefault("GOJIRA_JIRA_URL", "http://localhost:8000")
 	JiraAPIBase    = envOrDefault("GOJIRA_JIRA_API_BASE", "/rest/api/2")
 	JiraUser       string

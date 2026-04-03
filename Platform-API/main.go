@@ -108,6 +108,8 @@ func main() {
 		r.Post("/DocRepo/{id}/pr/{num}/review", handlers.DocRepoPRReviewHandler)
 		r.Post("/DocRepo/{id}/pr/{num}/merge", handlers.DocRepoPRMergeHandler)
 		r.Get("/DocRepo/{id}/pr/{num}/reviews", handlers.DocRepoPRReviewsHandler)
+		r.Put("/DocRepo/{id}/file", handlers.DocRepoFilePutHandler)
+		r.Post("/DocRepo/{id}/branch", handlers.DocRepoBranchCreateHandler)
 
 		// DocLink — 문서-코드 연결
 		r.Post("/DocLink", handlers.DocLinkCreateHandler)
