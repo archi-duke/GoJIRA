@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../config';
@@ -12,12 +12,42 @@ export default function DocManager({ user }) {
   const [view, setView] = useState('tree');
   const [syncing, setSyncing] = useState(false);
   const [repoStatus, setRepoStatus] = useState({});
+  const [openPRs, setOpenPRs] = useState({});
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const resizing = useRef(false);
 
   const fetchRepos = useCallback(() => {
-    fetch(API).then(r => r.json()).then(d => setRepos(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch(API).then(r => r.json()).then(d => {
+      const list = Array.isArray(d) ? d : [];
+      setRepos(list);
+      // 각 repo의 열린 PR 수 조회
+      list.forEach(r => {
+        fetch(`${API}/${r.projectCode}/prs?state=open`)
+          .then(res => res.json())
+          .then(prs => {
+            if (Array.isArray(prs)) {
+              setOpenPRs(prev => ({ ...prev, [r.projectCode]: prs.length }));
+            }
+          }).catch(() => {});
+      });
+    }).catch(() => {});
   }, []);
 
   useEffect(() => { fetchRepos(); }, [fetchRepos]);
+
+  function handleResizeStart(e) {
+    e.preventDefault();
+    resizing.current = true;
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    function onMove(ev) {
+      if (!resizing.current) return;
+      setSidebarWidth(Math.max(160, Math.min(500, startW + ev.clientX - startX)));
+    }
+    function onUp() { resizing.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -60,7 +90,7 @@ export default function DocManager({ user }) {
 
   return (
     <div className="dm-wrapper">
-      <div className="dm-sidebar">
+      <div className="dm-sidebar" style={{ width: sidebarWidth }}>
         <div className="dm-sidebar-header">
           <span>Repositories</span>
           <div className="dm-sidebar-btns">
@@ -76,13 +106,19 @@ export default function DocManager({ user }) {
             <div key={r.projectCode}
               className={`dm-repo-item ${selectedRepo?.projectCode === r.projectCode ? 'dm-repo-active' : ''} ${cls}`}
               onClick={() => { setSelectedRepo(r); setView('tree'); }}>
-              <span className="dm-repo-name">{r.repoName}</span>
+              <span className="dm-repo-name">
+                {r.repoName}
+                {openPRs[r.projectCode] > 0 && (
+                  <span className="dm-pr-badge">{openPRs[r.projectCode]}</span>
+                )}
+              </span>
               <span className="dm-repo-sub">{r.projectName}</span>
               <span className="dm-repo-sub">{r.repoOwner}</span>
             </div>
           );
         })}
       </div>
+      <div className="dm-resize-handle" onMouseDown={handleResizeStart} />
 
       <div className="dm-main">
         {selectedRepo ? (

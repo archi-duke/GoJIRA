@@ -75,11 +75,17 @@ func Pull(owner, repo, branch string) error {
 	return err
 }
 
-// CheckoutNewBranch main에서 새 브랜치 생성
+// CheckoutNewBranch main에서 새 브랜치 생성 (이미 있으면 reset)
 func CheckoutNewBranch(owner, repo, branch string) error {
 	dir := repoDir(owner, repo)
 	gitCmd(dir, "checkout", "main")
 	gitCmd(dir, "pull", "origin", "main")
+	// 브랜치가 이미 있으면 checkout 후 main으로 reset
+	if _, err := gitCmd(dir, "checkout", branch); err == nil {
+		gitCmd(dir, "reset", "--hard", "main")
+		return nil
+	}
+	// 없으면 새로 생성
 	_, err := gitCmd(dir, "checkout", "-b", branch)
 	return err
 }

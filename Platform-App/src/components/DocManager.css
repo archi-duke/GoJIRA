@@ -1,7 +1,9 @@
 .dm-wrapper { display: flex; height: 100%; overflow: hidden; }
 
 /* Sidebar */
-.dm-sidebar { width: 240px; border-right: 1px solid #ddd; background: #f8f9fa; display: flex; flex-direction: column; flex-shrink: 0; }
+.dm-sidebar { border-right: 1px solid #ddd; background: #f8f9fa; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+.dm-resize-handle { width: 4px; cursor: col-resize; background: transparent; flex-shrink: 0; }
+.dm-resize-handle:hover { background: #ccc; }
 .dm-sidebar-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; font-weight: 600; font-size: 14px; border-bottom: 1px solid #ddd; }
 .dm-sidebar-btns { display: flex; gap: 4px; }
 .dm-sync-btn { width: 26px; height: 26px; border: none; border-radius: 4px; background: lightgray; color: #000; font-size: 14px; cursor: pointer; }
@@ -14,7 +16,8 @@
 .dm-repo-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #eee; }
 .dm-repo-item:hover { background: #eee; }
 .dm-repo-active { background: #e3ecf5; }
-.dm-repo-name { display: block; font-size: 13px; font-weight: 600; color: #2c3e50; }
+.dm-repo-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #2c3e50; }
+.dm-pr-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; background: #27ae60; color: #fff; border-radius: 8px; font-size: 9px; font-weight: 600; }
 .dm-repo-sub { display: block; font-size: 11px; color: #888; }
 
 /* Main */

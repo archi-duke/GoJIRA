@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
 	// 프로젝트 조회
@@ -47,6 +48,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 
 	// repo가 없으면 자동 생성 (Platform-API에 위임)
 	repoName := getDocField(prjDoc, "repoName")
+	log.Printf("docgen: %s repoName=%q documents_type=%T", req.PrjID, repoName, prjDoc["documents"])
 	if repoName == "" {
 		_, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", req.PrjID), nil)
 		if sc >= 400 {
@@ -228,6 +230,8 @@ func toStrSlice(v interface{}) []string {
 	return nil
 }
 
+var platformClient = &http.Client{Timeout: 120 * time.Second}
+
 func callPlatform(method, path string, body interface{}) (interface{}, int) {
 	var reqBody io.Reader
 	if body != nil {
@@ -236,7 +240,7 @@ func callPlatform(method, path string, body interface{}) (interface{}, int) {
 	}
 	req, _ := http.NewRequest(method, platformAPI+path, reqBody)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := platformClient.Do(req)
 	if err != nil {
 		return nil, 500
 	}
