@@ -97,22 +97,41 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 func buildProjectDoc(req models.ProjectRequest) bson.M {
 	code := req.MainJiraCode()
-	return bson.M{
-		"name":       req.Name,
-		"jiraCodes":  bson.M{"main": bson.M{"jiraCode": code}},
-		"status":     req.Status,
-		"devTeam":    req.DevTeam,
-		"devGroup":   req.DevGroup,
-		"members":    req.Members,
-		"feature":    req.Feature,
-		"architect":  req.Architect,
-		"PL":         req.PL,
-		"schedules":  req.Schedules,
-		"issueQuery": req.IssueQuery,
-		"PLMCode":    req.PLMCode,
-		"diagrams":   req.Diagrams,
-		"documents":  req.Documents,
+	doc := bson.M{
+		"name":      req.Name,
+		"jiraCodes": bson.M{"main": bson.M{"jiraCode": code}},
+		"status":    req.Status,
+		"devTeam":   req.DevTeam,
+		"devGroup":  req.DevGroup,
+		"feature":   req.Feature,
+		"architect": req.Architect,
+		"PL":        req.PL,
 	}
+	// nil인 필드는 $set에서 제외하여 기존 값 보존
+	if req.Members != nil {
+		doc["members"] = req.Members
+	}
+	if req.Schedules != nil {
+		doc["schedules"] = req.Schedules
+	}
+	doc["issueQuery"] = req.IssueQuery
+	if req.PLMCode != nil {
+		doc["PLMCode"] = req.PLMCode
+	}
+	if req.Diagrams != nil {
+		doc["diagrams"] = req.Diagrams
+	}
+	if req.Documents != nil {
+		doc["documents"] = req.Documents
+	}
+	return doc
+}
+
+func nilToEmpty(v interface{}) interface{} {
+	if v == nil {
+		return []interface{}{}
+	}
+	return v
 }
 
 // ensureDocRepo 프로젝트에 docRepoId가 없으면 자동 생성
