@@ -12,14 +12,14 @@ import (
 	"platform-api/config"
 )
 
-// repoDir 메인 클론 경로 (main 브랜치 용)
+// repoDir bare repository 경로
 func repoDir(owner, repo string) string {
-	return filepath.Join(config.RepoBaseDir, owner, repo)
+	return filepath.Join(config.RepoBaseDir, owner, repo+".git")
 }
 
-// worktreeDir 사용자별 worktree 경로
+// worktreeDir 사용자별 worktree 경로 (bare repo 아래)
 func worktreeDir(owner, repo, userID string) string {
-	return filepath.Join(config.RepoBaseDir, owner, repo+"-wt", userID)
+	return filepath.Join(repoDir(owner, repo), userID)
 }
 
 // repoLocks 레포별 mutex (동시 git 작업 방지)
@@ -62,7 +62,7 @@ func cloneURL(owner, repo string) string {
 	return fmt.Sprintf("%s/%s/%s.git", base, owner, repo)
 }
 
-// EnsureClone 메인 클론이 없으면 clone, 있으면 fetch
+// EnsureClone bare repository가 없으면 clone, 있으면 fetch
 func EnsureClone(owner, repo string) (string, error) {
 	mu := getRepoLock(owner, repo)
 	mu.Lock()
@@ -70,27 +70,25 @@ func EnsureClone(owner, repo string) (string, error) {
 
 	dir := repoDir(owner, repo)
 
-	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); os.IsNotExist(err) {
 		os.MkdirAll(filepath.Dir(dir), 0755)
 		url := cloneURL(owner, repo)
-		log.Printf("git clone %s/%s → %s", owner, repo, dir)
-		if _, err := gitCmd(".", "clone", url, dir); err != nil {
+		log.Printf("git clone --bare %s/%s → %s", owner, repo, dir)
+		if _, err := gitCmd(".", "clone", "--bare", url, dir); err != nil {
 			return "", err
 		}
-		gitCmd(dir, "config", "user.name", "GoJIRA Platform")
-		gitCmd(dir, "config", "user.email", "platform@gojira.local")
 	} else {
-		gitCmd(dir, "fetch", "origin")
+		gitCmd(dir, "fetch", "origin", "main")
 	}
 
 	return dir, nil
 }
 
 // EnsureWorktree 사용자별 worktree 생성/반환
-// 메인 클론에서 사용자 브랜치로 worktree를 만든다.
+// bare repo에서 사용자 브랜치로 worktree를 만든다.
 func EnsureWorktree(owner, repo, userID string) (string, string, error) {
-	// 먼저 메인 클론 확보
-	mainDir, err := EnsureClone(owner, repo)
+	// 먼저 bare repo 확보
+	bareDir, err := EnsureClone(owner, repo)
 	if err != nil {
 		return "", "", err
 	}
@@ -102,28 +100,21 @@ func EnsureWorktree(owner, repo, userID string) (string, string, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// worktree가 이미 있으면 반환
+	// worktree가 이미 있으면 fetch만 하고 반환
 	if _, err := os.Stat(filepath.Join(wtDir, ".git")); err == nil {
-		// fetch하고 최신화
-		gitCmd(mainDir, "fetch", "origin")
+		gitCmd(wtDir, "fetch", "origin")
 		return wtDir, branch, nil
 	}
 
-	// 메인 클론에서 fetch
-	gitCmd(mainDir, "fetch", "origin")
+	// bare repo에서 fetch
+	gitCmd(bareDir, "fetch", "origin")
 
-	// 리모트에 브랜치가 있으면 로컬에 등록
-	gitCmd(mainDir, "branch", "-D", branch)                        // 기존 로컬 브랜치 정리
-	gitCmd(mainDir, "branch", branch, "origin/main")               // main 기준으로 생성
-
-	// worktree 추가
+	// worktree 추가 (bare repo에서 origin/main 기준)
 	os.MkdirAll(filepath.Dir(wtDir), 0755)
-	if _, err := gitCmd(mainDir, "worktree", "add", wtDir, branch); err != nil {
+	if _, err := gitCmd(bareDir, "worktree", "add", wtDir, "-b", branch, "origin/main"); err != nil {
 		// 이미 있는 경우 정리 후 재시도
-		gitCmd(mainDir, "worktree", "remove", wtDir, "--force")
-		gitCmd(mainDir, "branch", "-D", branch)
-		gitCmd(mainDir, "branch", branch, "origin/main")
-		if _, err := gitCmd(mainDir, "worktree", "add", wtDir, branch); err != nil {
+		gitCmd(bareDir, "worktree", "remove", wtDir, "--force")
+		if _, err := gitCmd(bareDir, "worktree", "add", wtDir, "-b", branch, "origin/main"); err != nil {
 			return "", "", fmt.Errorf("worktree 생성 실패: %v", err)
 		}
 	}
@@ -165,23 +156,18 @@ func CheckoutNewBranch(owner, repo, branch string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// main 최신화 후 리셋
-	mainDir := repoDir(owner, repo)
-	gitCmd(mainDir, "fetch", "origin")
+	// bare repo 최신화 후 worktree도 리셋
+	bareDir := repoDir(owner, repo)
+	gitCmd(bareDir, "fetch", "origin")
 	gitCmd(wtDir, "reset", "--hard", "origin/main")
 
 	return nil
 }
 
-// WriteLocalFile worktree에 파일 쓰기
+// WriteLocalFile 사용 금지 (bare repo이므로 불가)
+// WriteWorktreeFile을 사용하세요.
 func WriteLocalFile(owner, repo, filePath, content string) error {
-	// filePath에서 userID 판별은 어려우므로, 현재 작업 중인 worktree를 찾기 위해
-	// 먼저 메인 클론 경로에서 시도, 없으면 에러
-	// 호출자가 worktree 경로를 직접 지정하는 방식으로 전환
-	dir := repoDir(owner, repo)
-	fullPath := filepath.Join(dir, filePath)
-	os.MkdirAll(filepath.Dir(fullPath), 0755)
-	return os.WriteFile(fullPath, []byte(content), 0644)
+	return fmt.Errorf("WriteLocalFile은 bare repo에서 사용 불가. WriteWorktreeFile을 사용하세요.")
 }
 
 // WriteWorktreeFile 사용자 worktree에 파일 쓰기
@@ -239,14 +225,14 @@ func CommitAndPush(owner, repo, branch, message string) error {
 
 // ListWorktrees 사용자별 worktree 목록 반환
 func ListWorktrees(owner, repo string) []string {
-	wtBase := filepath.Join(config.RepoBaseDir, owner, repo+"-wt")
+	wtBase := repoDir(owner, repo)
 	entries, err := os.ReadDir(wtBase)
 	if err != nil {
 		return nil
 	}
 	var users []string
 	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") && e.Name() != "objects" && e.Name() != "refs" && e.Name() != "hooks" {
 			users = append(users, e.Name())
 		}
 	}
@@ -275,26 +261,23 @@ func DiscardWorktree(owner, repo, userID string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	mainDir := repoDir(owner, repo)
+	bareDir := repoDir(owner, repo)
 	wtDir := worktreeDir(owner, repo, userID)
 	branch := fmt.Sprintf("docs/%s", userID)
 
-	gitCmd(mainDir, "worktree", "remove", wtDir, "--force")
-	gitCmd(mainDir, "branch", "-D", branch)
+	gitCmd(bareDir, "worktree", "remove", wtDir, "--force")
+	gitCmd(bareDir, "branch", "-D", branch)
 	os.RemoveAll(wtDir)
 
 	log.Printf("worktree discarded: %s/%s user=%s", owner, repo, userID)
 	return nil
 }
 
-// Pull 최신 코드 pull
+// Pull 최신 코드 pull (bare repo에서는 사용 불가, 호환성 유지용)
 func Pull(owner, repo, branch string) error {
-	dir := repoDir(owner, repo)
-	if _, err := gitCmd(dir, "checkout", branch); err != nil {
-		gitCmd(dir, "fetch", "origin", branch)
-		gitCmd(dir, "checkout", "-b", branch, "origin/"+branch)
-	}
-	_, err := gitCmd(dir, "pull", "origin", branch)
+	bareDir := repoDir(owner, repo)
+	// bare repo에서는 단순히 fetch만 수행
+	_, err := gitCmd(bareDir, "fetch", "origin", branch)
 	return err
 }
 
@@ -303,7 +286,7 @@ func GetLocalRepoDir(owner, repo string) string {
 	return repoDir(owner, repo)
 }
 
-// ListLocalRepos 로컬 repos 폴더에 있는 {owner}/{repo} 목록 반환
+// ListLocalRepos 로컬 bare repos 폴더에 있는 {owner}/{repo} 목록 반환
 func ListLocalRepos() []struct{ Owner, Repo string } {
 	var result []struct{ Owner, Repo string }
 	owners, err := os.ReadDir(config.RepoBaseDir)
@@ -322,30 +305,24 @@ func ListLocalRepos() []struct{ Owner, Repo string } {
 			if !repoEntry.IsDir() || strings.HasPrefix(repoEntry.Name(), ".") {
 				continue
 			}
-			// -wt 디렉토리는 제외
-			if strings.HasSuffix(repoEntry.Name(), "-wt") {
+			// bare repo만 (*.git 파일이 있는 디렉토리)
+			if !strings.HasSuffix(repoEntry.Name(), ".git") {
 				continue
 			}
-			result = append(result, struct{ Owner, Repo string }{ownerEntry.Name(), repoEntry.Name()})
+			// {repo}.git → {repo}로 변환
+			repoName := strings.TrimSuffix(repoEntry.Name(), ".git")
+			result = append(result, struct{ Owner, Repo string }{ownerEntry.Name(), repoName})
 		}
 	}
 	return result
 }
 
-// RemoveLocalRepo 로컬 clone 및 worktree 폴더 삭제
+// RemoveLocalRepo bare repo 및 모든 worktree 폴더 삭제
 func RemoveLocalRepo(owner, repo string) error {
 	dir := repoDir(owner, repo)
-	wtBase := filepath.Join(config.RepoBaseDir, owner, repo+"-wt")
-
-	// worktree 먼저 정리
-	if _, err := os.Stat(wtBase); err == nil {
-		log.Printf("removing worktrees: %s", wtBase)
-		os.RemoveAll(wtBase)
-	}
-
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil
 	}
-	log.Printf("removing local repo: %s", dir)
+	log.Printf("removing bare repo and all worktrees: %s", dir)
 	return os.RemoveAll(dir)
 }
