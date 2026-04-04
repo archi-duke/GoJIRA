@@ -28,7 +28,7 @@ const appRegistry = [
   },
   {
     key: 'docs',
-    label: 'Docs',
+    label: 'Repository',
     component: null,         // 내장 컴포넌트 (DocManager)
     authCode: 'GITRP',
     authLevel: 4,            // 조회 이상
