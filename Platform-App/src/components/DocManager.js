@@ -418,39 +418,83 @@ function DocTree({ repo }) {
 
 // --- Commit History ---
 function CommitHistory({ repo }) {
-  const [commits, setCommits] = useState([]);
+  const [allCommits, setAllCommits] = useState({});
   const [branches, setBranches] = useState([]);
-  const [selectedBranch, setSelectedBranch] = useState(repo.defaultBranch || 'main');
+  const [activeBranches, setActiveBranches] = useState(new Set());
+
+  const colors = ['#6b9bc3', '#7fb685', 'tomato', '#d4a862', '#8a8dc9', '#6abfb0', '#c4876e'];
 
   useEffect(() => {
     fetch(`${API}/${repo.projectCode}/branches`)
       .then(r => r.json()).then(d => {
         const list = Array.isArray(d) ? d.map(b => b.name || b) : [];
         setBranches(list);
+        // 기본: main만 활성화
+        const defaultActive = new Set();
+        if (list.includes('main')) defaultActive.add('main');
+        else if (list.length > 0) defaultActive.add(list[0]);
+        setActiveBranches(defaultActive);
       }).catch(() => {});
   }, [repo]);
 
   useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/commits?branch=${selectedBranch}&perPage=50`)
-      .then(r => r.json()).then(d => setCommits(Array.isArray(d) ? d : [])).catch(() => {});
-  }, [repo, selectedBranch]);
+    activeBranches.forEach(branch => {
+      if (allCommits[branch]) return;
+      fetch(`${API}/${repo.projectCode}/commits?branch=${branch}&perPage=50`)
+        .then(r => r.json()).then(d => {
+          setAllCommits(prev => ({ ...prev, [branch]: Array.isArray(d) ? d : [] }));
+        }).catch(() => {});
+    });
+  }, [repo, activeBranches]);
+
+  const toggleBranch = (branch) => {
+    const next = new Set(activeBranches);
+    if (next.has(branch)) next.delete(branch);
+    else next.add(branch);
+    setActiveBranches(next);
+  };
+
+  // 활성화된 브랜치의 커밋을 합치고 날짜순 정렬 + 중복 제거
+  const merged = [];
+  const seen = new Set();
+  activeBranches.forEach(branch => {
+    (allCommits[branch] || []).forEach(c => {
+      if (!seen.has(c.sha)) {
+        seen.add(c.sha);
+        merged.push({ ...c, _branch: branch });
+      }
+    });
+  });
+  merged.sort((a, b) => new Date(b.commit?.author?.date || 0) - new Date(a.commit?.author?.date || 0));
 
   return (
     <div className="dm-commits">
-      <div style={{ padding: '10px 10px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <select
-          value={selectedBranch}
-          onChange={e => setSelectedBranch(e.target.value)}
-          style={{ padding: '4px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
-        >
-          {branches.map(b => <option key={b} value={b}>{b}</option>)}
-        </select>
-        <span style={{ fontSize: '12px', color: '#888' }}>{commits.length}개 커밋</span>
+      <div style={{ padding: '10px 10px 6px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+        {branches.map((b, i) => (
+          <span
+            key={b}
+            onClick={() => toggleBranch(b)}
+            style={{
+              display: 'inline-block',
+              padding: '3px 10px',
+              fontSize: '12px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              borderLeft: `4px solid ${colors[i % colors.length]}`,
+              background: activeBranches.has(b) ? '#f0f0f0' : '#fff',
+              color: activeBranches.has(b) ? '#333' : '#bbb',
+              opacity: activeBranches.has(b) ? 1 : 0.5,
+            }}
+          >
+            {b}
+          </span>
+        ))}
+        <span style={{ fontSize: '12px', color: '#888', marginLeft: '4px' }}>{merged.length}개 커밋</span>
       </div>
       <table className="dm-table">
         <thead><tr><th>SHA</th><th>메시지</th><th>작성자</th><th>일시</th></tr></thead>
         <tbody>
-          {commits.map(c => (
+          {merged.map(c => (
             <tr key={c.sha}>
               <td className="dm-sha">{(c.sha || '').slice(0, 7)}</td>
               <td>{c.commit?.message?.split('\n')[0]}</td>
