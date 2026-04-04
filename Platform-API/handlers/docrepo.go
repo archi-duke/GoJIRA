@@ -397,6 +397,8 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		Date    string   `json:"date"`
 		Parents []string `json:"parents"`
 		Refs    []string `json:"refs"`
+		Lane    int      `json:"lane"`      // 그래프 lane 번호
+		Lanes   []int    `json:"lanes"`     // merge 커밋의 모든 parent lane
 	}
 	commitMap := map[string]*graphCommit{}
 	var branchNames []string
@@ -503,6 +505,45 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Lane assignment: git log --graph 스타일
+	// 각 commit에 lane 번호를 할당 (branch 추적용)
+	commitLane := map[string]int{}
+	laneMap := map[int]string{} // lane -> head commit sha
+	maxLane := 0
+
+	for _, c := range allCommits {
+		var assignedLane int
+
+		if len(c.Parents) == 0 {
+			// Root commit: 새 lane
+			assignedLane = maxLane
+			maxLane++
+		} else {
+			// 첫 parent의 lane 사용 (main lane)
+			parentSHA := c.Parents[0]
+			if lane, ok := commitLane[parentSHA]; ok {
+				assignedLane = lane
+			} else {
+				// parent 정보가 없으면 새 lane
+				assignedLane = maxLane
+				maxLane++
+			}
+
+			// Merge 커밋: 다른 parent들의 lane도 기록
+			if len(c.Parents) > 1 {
+				for _, parentSHA := range c.Parents[1:] {
+					if lane, ok := commitLane[parentSHA]; ok {
+						c.Lanes = append(c.Lanes, lane)
+					}
+				}
+			}
+		}
+
+		c.Lane = assignedLane
+		commitLane[c.SHA] = assignedLane
+		laneMap[assignedLane] = c.SHA
+	}
+
 	// offset/limit 적용
 	var sliced []*graphCommit
 	if offset < len(allCommits) {
@@ -518,6 +559,7 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		"commits":  sliced,
 		"total":    len(allCommits),
 		"hasMore":  offset+limit < len(allCommits),
+		"maxLane":  maxLane,
 	})
 }
 

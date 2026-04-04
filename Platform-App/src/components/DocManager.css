@@ -118,12 +118,14 @@
 .dm-branch-tag { display: inline-block; padding: 2px 8px; background: #f5f5f5; border-radius: 3px; font-size: 11px; color: #333; padding-left: 10px; transition: opacity 0.2s; }
 .dm-branch-tag:hover { opacity: 0.8; }
 .dm-branch-inactive { opacity: 0.4; }
-.dm-graph-body { display: flex; overflow: auto; }
+.dm-graph-body { display: flex; overflow: auto; flex: 1; }
 .dm-graph-list { flex: 1; }
-.dm-graph-row { display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 13px; }
+.dm-graph-row { display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+.dm-graph-row:hover { background: #fafafa; }
 .dm-graph-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dm-graph-author { font-size: 12px; color: #888; width: 100px; text-align: right; }
 .dm-graph-ref { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; color: #fff; white-space: nowrap; }
+.dm-graph-lane-indicator { font-size: 10px; color: #ccc; }
 
 /* Editor */
 .dm-editor-start { display: flex; align-items: center; justify-content: center; height: 100%; text-align: center; }

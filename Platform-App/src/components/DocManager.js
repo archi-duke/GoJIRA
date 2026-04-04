@@ -719,54 +719,30 @@ function GitGraph({ repo }) {
   const branchColor = {};
   branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
 
-  // 필터링된 커밋 기반 lane 할당
+  // Backend에서 제공한 lane 정보 사용
+  // 필터링된 커밋들의 lane을 재매핑 (필터링으로 인해 lane 번호 변경될 수 있음)
   const shaIdx = {};
-  filteredCommits.forEach((c, i) => { shaIdx[c.sha] = i; });
-  const lanes = new Array(filteredCommits.length).fill(-1);
-  const laneUsed = [];
-
-  // 각 커밋에 lane 할당
-  function assignLane(idx) {
-    if (lanes[idx] >= 0) return lanes[idx];
-    const c = filteredCommits[idx];
-    // refs에 main이 있으면 lane 0
-    if (c.refs?.includes('main')) {
-      lanes[idx] = 0;
-      if (!laneUsed.includes(0)) laneUsed.push(0);
-      return 0;
+  const lanesToUse = new Set();
+  filteredCommits.forEach((c, i) => {
+    shaIdx[c.sha] = i;
+    lanesToUse.add(c.lane);
+    if (c.lanes) {
+      c.lanes.forEach(l => lanesToUse.add(l));
     }
-    // parent가 있으면 parent의 lane 우선 시도
-    if (c.parents?.length) {
-      const pIdx = shaIdx[c.parents[0]];
-      if (pIdx !== undefined) {
-        const pLane = assignLane(pIdx);
-        // parent에 여러 자식이 있으면 새 lane
-        const siblings = filteredCommits.filter((cc, ii) => ii !== idx && cc.parents?.[0] === c.parents[0] && lanes[ii] >= 0);
-        if (siblings.length === 0 && lanes[idx] < 0) {
-          lanes[idx] = pLane;
-          return pLane;
-        }
-      }
-    }
-    if (lanes[idx] >= 0) return lanes[idx];
-    // 새 lane 할당
-    let newLane = 0;
-    while (laneUsed.includes(newLane)) newLane++;
-    laneUsed.push(newLane);
-    lanes[idx] = newLane;
-    return newLane;
-  }
+  });
 
-  // main 브랜치 커밋 먼저 lane 0 할당
-  filteredCommits.forEach((c, i) => { if (c.refs?.includes('main')) lanes[i] = 0; });
-  if (!laneUsed.includes(0) && filteredCommits.length) laneUsed.push(0);
-  filteredCommits.forEach((_, i) => assignLane(i));
+  // lane 번호를 연속된 인덱스로 재매핑
+  const laneRemap = {};
+  const sortedLanes = Array.from(lanesToUse).sort((a, b) => a - b);
+  sortedLanes.forEach((lane, idx) => {
+    laneRemap[lane] = idx;
+  });
 
-  const maxLane = Math.max(...lanes, 0);
+  const maxLane = sortedLanes.length > 0 ? Math.max(...sortedLanes.map(l => laneRemap[l])) : 0;
   const rowH = 34;
-  const colW = 24;
-  const svgW = (maxLane + 1) * colW + 20;
-  const x = lane => lane * colW + 16;
+  const colW = 30;
+  const svgW = (maxLane + 1) * colW + 40;
+  const x = lane => laneRemap[lane] * colW + 20;
   const y = i => i * rowH + 18;
 
   // 커밋에 대한 색상 결정
@@ -797,25 +773,66 @@ function GitGraph({ repo }) {
       <div className="dm-graph-body">
         <svg width={svgW} height={filteredCommits.length * rowH + 20} style={{ flexShrink: 0 }}>
           {/* 연결선: 자식→부모 */}
-          {filteredCommits.map((c, i) => c.parents?.map(psha => {
-            const pi = shaIdx[psha];
-            if (pi === undefined) return null;
-            const x1 = x(lanes[i]), y1 = y(i);
-            const x2 = x(lanes[pi]), y2 = y(pi);
-            if (x1 === x2) {
-              return <line key={`${c.sha}-${psha}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke={nodeColor(c)} strokeWidth={2} />;
+          {filteredCommits.map((c, i) => {
+            const lines = [];
+            if (c.parents?.length) {
+              // 첫 parent (main lane)
+              const mainParent = c.parents[0];
+              const pi = shaIdx[mainParent];
+              if (pi !== undefined) {
+                const x1 = x(c.lane), y1 = y(i);
+                const x2 = x(filteredCommits[pi].lane), y2 = y(pi);
+                const color = nodeColor(c);
+                if (Math.abs(x1 - x2) < 1) {
+                  // 같은 lane: 직선
+                  lines.push(
+                    <line key={`main-${c.sha}`} x1={x1} y1={y1} x2={x2} y2={y2}
+                      stroke={color} strokeWidth={2} />
+                  );
+                } else {
+                  // 다른 lane: 곡선
+                  lines.push(
+                    <path key={`main-${c.sha}`}
+                      d={`M${x1},${y1} C${x1},${y1 + rowH / 2} ${x2},${y2 - rowH / 2} ${x2},${y2}`}
+                      fill="none" stroke={color} strokeWidth={2} />
+                  );
+                }
+              }
+
+              // 다른 parents (merge)
+              if (c.lanes) {
+                c.lanes.forEach(mergeLane => {
+                  // 원본 lane 번호로 부모 찾기
+                  const mergeParent = c.parents.find(psha => {
+                    const pidx = shaIdx[psha];
+                    return pidx !== undefined && filteredCommits[pidx].lane === mergeLane;
+                  });
+                  if (mergeParent) {
+                    const pi = shaIdx[mergeParent];
+                    const x1 = x(c.lane), y1 = y(i);
+                    const x2 = x(filteredCommits[pi].lane), y2 = y(pi);
+                    const color = '#ccc'; // merge 선은 회색
+                    lines.push(
+                      <path key={`merge-${c.sha}-${mergeLane}`}
+                        d={`M${x1},${y1} C${x1 - 20},${y1 + rowH / 2} ${x2 + 20},${y2 - rowH / 2} ${x2},${y2}`}
+                        fill="none" stroke={color} strokeWidth={1} strokeDasharray="2,2" />
+                    );
+                  }
+                });
+              }
             }
-            return <path key={`${c.sha}-${psha}`} d={`M${x1},${y1} C${x1},${y1 + rowH / 2} ${x2},${y2 - rowH / 2} ${x2},${y2}`} fill="none" stroke={nodeColor(c)} strokeWidth={2} />;
-          }))}
+            return lines;
+          })}
+
           {/* 노드 */}
           {filteredCommits.map((c, i) => {
             const isMerge = c.parents?.length > 1;
-            return <circle key={c.sha} cx={x(lanes[i])} cy={y(i)} r={isMerge ? 6 : 4}
+            return <circle key={c.sha} cx={x(c.lane)} cy={y(i)} r={isMerge ? 6 : 4}
               fill={nodeColor(c)} stroke={isMerge ? '#fff' : 'none'} strokeWidth={isMerge ? 2 : 0} />;
           })}
         </svg>
         <div className="dm-graph-list">
-          {filteredCommits.map(c => (
+          {filteredCommits.map((c, i) => (
             <div key={c.sha} className="dm-graph-row" style={{ height: rowH }}>
               <span className="dm-sha">{(c.sha || '').slice(0, 7)}</span>
               {c.refs?.map(ref => (
@@ -824,6 +841,7 @@ function GitGraph({ repo }) {
               <span className="dm-graph-msg">{(c.message || '').split('\n')[0]}</span>
               <span className="dm-graph-author">{c.author}</span>
               <span className="dm-date">{(c.date || '').slice(0, 10)}</span>
+              {c.parents?.length > 1 && <span style={{ fontSize: '10px', color: '#999' }}> [merge]</span>}
             </div>
           ))}
           {hasMore && (
