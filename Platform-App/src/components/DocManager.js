@@ -727,22 +727,42 @@ function GitGraph({ repo }) {
   if (!data) return <div className="dm-graph">로딩 중...</div>;
   const { branches = [], commits = [], hasMore = false } = data;
 
-  // 선택된 브랜치의 모든 커밋 포함 (HEAD뿐만 아니라 모든 조상)
-  // 각 커밋이 선택된 브랜치에 속하는지 추적
-  const selectedLanes = new Set();
+  // 선택된 브랜치의 모든 커밋 포함 (HEAD부터 모든 ancestor)
+  // ancestry 기반 필터링: 각 선택 브랜치의 HEAD부터 부모를 재귀 추적
+  const shaMap = {};
   commits.forEach(c => {
-    if (c.refs && c.refs.some(ref => selectedBranches.has(ref))) {
-      selectedLanes.add(c.lane);
-      if (c.lanes) {
-        c.lanes.forEach(l => selectedLanes.add(l));
+    shaMap[c.sha] = c;
+  });
+
+  const includedShas = new Set();
+
+  // 각 선택된 브랜치의 HEAD 찾기
+  selectedBranches.forEach(branch => {
+    const headCommit = commits.find(c => c.refs && c.refs.includes(branch));
+    if (headCommit) {
+      // HEAD부터 시작해서 모든 부모를 재귀 추적
+      const queue = [headCommit.sha];
+      const visited = new Set();
+
+      while (queue.length > 0) {
+        const sha = queue.shift();
+        if (visited.has(sha)) continue;
+        visited.add(sha);
+        includedShas.add(sha);
+
+        const commit = shaMap[sha];
+        if (commit && commit.parents) {
+          commit.parents.forEach(p => {
+            if (!visited.has(p)) {
+              queue.push(p);
+            }
+          });
+        }
       }
     }
   });
 
-  const filteredCommits = commits.filter(c =>
-    selectedLanes.has(c.lane) ||
-    (c.lanes && c.lanes.some(l => selectedLanes.has(l)))
-  );
+  const filteredCommits = commits.filter(c => includedShas.has(c.sha));
 
   const handleBranchToggle = (branch) => {
     const newSet = new Set(selectedBranches);
