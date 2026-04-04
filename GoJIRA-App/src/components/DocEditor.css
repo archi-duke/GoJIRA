@@ -5,7 +5,7 @@
 .de-btn-danger { background: #e74c3c; color: #fff; }
 
 .de-editor { display: flex; flex: 1; overflow: hidden; }
-.de-sidebar { width: 220px; border-right: 1px solid #e0e0e0; overflow-y: auto; background: #fafafa; flex-shrink: 0; }
+.de-sidebar { width: 220px; border-right: 1px solid #e0e0e0; overflow-y: auto; background: #fafafa; flex-shrink: 0; display: flex; flex-direction: column; }
 .de-sidebar-header { padding: 8px 12px; font-size: 11px; color: #888; border-bottom: 1px solid #eee; }
 .de-file { padding: 6px 12px; font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .de-file:hover { background: #eee; }

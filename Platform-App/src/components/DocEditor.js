@@ -64,7 +64,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     const res = await fetch(`${API}/${projectCode}/file`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: selectedFile, content, message: `${selectedFile} 수정`, branch: 'main' }),
+      body: JSON.stringify({ path: selectedFile, content, message: `${selectedFile} 수정` }),
     });
     setSaving(false);
     if (res.ok) {
@@ -83,7 +83,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     const res = await fetch(`${API}/${projectCode}/file`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: selectedFile, message: `${selectedFile} 삭제`, branch: 'main' }),
+      body: JSON.stringify({ path: selectedFile, message: `${selectedFile} 삭제` }),
     });
     if (res.ok) {
       setSelectedFile(null);
@@ -97,6 +97,22 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     } else {
       const err = await res.json().catch(() => ({}));
       modalAlert(err.error || '삭제 실패');
+    }
+  }
+
+  // 발행신청 (PR 생성)
+  async function handleCreatePR() {
+    if (!await modalConfirm(`docs/${user} 브랜치의 변경사항을 발행 신청(PR)하시겠습니까?`)) return;
+    const res = await fetch(`${API}/${projectCode}/pr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      body: JSON.stringify({ title: `[${projectCode}] 설계문서 배포 요청` }),
+    });
+    if (res.ok) {
+      modalAlert('발행 신청(PR)이 생성되었습니다.');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      modalAlert(err.error || 'PR 생성 실패');
     }
   }
 
@@ -130,6 +146,11 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
               {item.path}
             </div>
           ))}
+          <div style={{ padding: '12px', borderTop: '1px solid #eee', marginTop: 'auto' }}>
+            <button className="de-btn de-btn-primary" style={{ width: '100%' }} onClick={handleCreatePR}>
+              발행신청 (PR)
+            </button>
+          </div>
         </div>
         <div className="de-main">
           {selectedFile ? (
