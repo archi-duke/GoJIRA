@@ -836,12 +836,13 @@ function GitGraph({ repo }) {
     laneColors[lane] = branch && branchColor[branch] ? branchColor[branch] : '#999';
   });
 
-  const rowH = 34;
-  const colW = 28;
+  const nodeR = 7;
+  const rowH = 40;
+  const colW = 32;
   const maxLane = sortedLanes.length > 0 ? Math.max(...sortedLanes) : 0;
   const svgW = (maxLane + 1) * colW + 20;
-  const x = lane => lane * colW + 14;
-  const y = i => i * rowH + 18;
+  const x = lane => lane * colW + 16;
+  const y = i => i * rowH + 20;
 
   return (
     <div className="dm-graph">
@@ -867,7 +868,6 @@ function GitGraph({ repo }) {
 
             const cx = x(c.lane);
             const cy = y(i);
-            const color = laneColors[c.lane] || '#999';
 
             c.parents.forEach((parentSha, pIdx) => {
               const pi = shaIdx[parentSha];
@@ -875,23 +875,23 @@ function GitGraph({ repo }) {
               const parent = filteredCommits[pi];
               const px = x(parent.lane);
               const py = y(pi);
-              const pColor = laneColors[parent.lane] || '#999';
+
+              // 라인 색상: 도착하는 쪽(부모) lane 색상
+              const lineColor = laneColors[parent.lane] || '#999';
 
               if (c.lane === parent.lane) {
                 // 같은 lane: 수직선
                 lines.push(
                   <line key={`${c.sha}-p${pIdx}`}
-                    x1={cx} y1={cy + 6} x2={px} y2={py - 6}
-                    stroke={color} strokeWidth={2} />
+                    x1={cx} y1={cy + nodeR} x2={px} y2={py - nodeR}
+                    stroke={lineColor} strokeWidth={3} strokeLinecap="round" />
                 );
               } else {
-                // 다른 lane: merge/branch 곡선
-                // 커밋에서 아래로 내려간 뒤, 부모 lane으로 꺾임
-                const bendY = cy + rowH * 0.6;
+                // 다른 lane: S-커브 (c5.png 스타일)
                 lines.push(
                   <path key={`${c.sha}-p${pIdx}`}
-                    d={`M${cx},${cy + 6} L${cx},${bendY} Q${cx},${py - 6} ${px},${py - 6} L${px},${py - 6}`}
-                    fill="none" stroke={pColor} strokeWidth={2} />
+                    d={`M${cx},${cy + nodeR} C${cx},${cy + rowH * 0.8} ${px},${py - rowH * 0.8} ${px},${py - nodeR}`}
+                    fill="none" stroke={lineColor} strokeWidth={3} strokeLinecap="round" />
                 );
               }
             });
@@ -903,8 +903,8 @@ function GitGraph({ repo }) {
             const color = laneColors[c.lane] || '#999';
             return (
               <circle key={c.sha}
-                cx={x(c.lane)} cy={y(i)} r={5}
-                fill={color} stroke="#fff" strokeWidth={1.5} />
+                cx={x(c.lane)} cy={y(i)} r={nodeR}
+                fill={color} stroke="#fff" strokeWidth={2.5} />
             );
           })}
         </svg>
