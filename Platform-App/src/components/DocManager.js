@@ -719,42 +719,8 @@ function GitGraph({ repo }) {
   if (!data) return <div className="dm-graph">로딩 중...</div>;
   const { branches = [], commits = [], hasMore = false } = data;
 
-  // 선택된 브랜치의 모든 커밋 포함 (HEAD부터 모든 ancestor)
-  // ancestry 기반 필터링: 각 선택 브랜치의 HEAD부터 부모를 재귀 추적
-  const shaMap = {};
-  commits.forEach(c => {
-    shaMap[c.sha] = c;
-  });
-
-  const includedShas = new Set();
-
-  // 각 선택된 브랜치의 HEAD 찾기
-  selectedBranches.forEach(branch => {
-    const headCommit = commits.find(c => c.refs && c.refs.includes(branch));
-    if (headCommit) {
-      // HEAD부터 시작해서 모든 부모를 재귀 추적
-      const queue = [headCommit.sha];
-      const visited = new Set();
-
-      while (queue.length > 0) {
-        const sha = queue.shift();
-        if (visited.has(sha)) continue;
-        visited.add(sha);
-        includedShas.add(sha);
-
-        const commit = shaMap[sha];
-        if (commit && commit.parents) {
-          commit.parents.forEach(p => {
-            if (!visited.has(p)) {
-              queue.push(p);
-            }
-          });
-        }
-      }
-    }
-  });
-
-  const filteredCommits = commits.filter(c => includedShas.has(c.sha));
+  // 모든 커밋 표시 (필터링 없음)
+  const filteredCommits = commits;
 
   const handleBranchToggle = (branch) => {
     const newSet = new Set(selectedBranches);
@@ -770,6 +736,15 @@ function GitGraph({ repo }) {
   const colors = ['#e74c3c', '#27ae60', '#2980b9', '#f39c12', '#8e44ad', '#1abc9c', '#d35400'];
   const branchColor = {};
   branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
+
+  // Lane을 브랜치와 매핑: 각 lane에 해당하는 브랜치 찾기
+  const laneToLaneBranch = {}; // lane -> branch name (그 lane에서 시작한 브랜치)
+  branches.forEach(branch => {
+    const headCommit = filteredCommits.find(c => c.refs && c.refs.includes(branch));
+    if (headCommit) {
+      laneToLaneBranch[headCommit.lane] = branch;
+    }
+  });
 
   // Backend에서 제공한 lane 정보 사용
   // 필터링된 커밋들의 lane을 재매핑 (필터링으로 인해 lane 번호 변경될 수 있음)
@@ -807,10 +782,17 @@ function GitGraph({ repo }) {
     return '#2c3e50';
   }
 
-  // 각 lane별 색상 매핑
+  // 각 lane별 색상 매핑: 브랜치 색상 기반
   const laneColors = {};
-  sortedLanes.forEach((lane, idx) => {
-    laneColors[lane] = colors[idx % colors.length];
+  sortedLanes.forEach((lane) => {
+    // 이 lane이 어느 브랜치인지 찾기
+    const branch = laneToLaneBranch[lane];
+    if (branch && branchColor[branch]) {
+      laneColors[lane] = branchColor[branch];
+    } else {
+      // 해당 브랜치 없으면 그냥 회색
+      laneColors[lane] = '#999';
+    }
   });
 
   return (
