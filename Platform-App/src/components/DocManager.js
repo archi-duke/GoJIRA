@@ -812,7 +812,7 @@ function GitGraph({ repo }) {
   });
 
   // ─── 색상 및 좌표 ───
-  const colors = ['#6b9bc3', '#7fb685', '#c48db0', '#d4a862', '#8a8dc9', '#6abfb0', '#c4876e'];
+  const colors = ['#6b9bc3', '#7fb685', 'tomato', '#d4a862', '#8a8dc9', '#6abfb0', '#c4876e'];
   const branchColor = {};
   branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
 
@@ -850,10 +850,8 @@ function GitGraph({ repo }) {
         {branches.map(b => (
           <span
             key={b}
-            className={`dm-branch-tag ${selectedBranches.has(b) ? 'dm-branch-active' : 'dm-branch-inactive'}`}
-            style={{ borderLeft: `4px solid ${branchColor[b] || '#888'}`, cursor: 'pointer' }}
-            onClick={() => handleBranchToggle(b)}
-            title="클릭으로 브랜치 표시/숨김"
+            className="dm-branch-tag"
+            style={{ borderLeft: `4px solid ${branchColor[b] || '#888'}` }}
           >
             {b}
           </span>
@@ -916,9 +914,8 @@ function GitGraph({ repo }) {
                 <span key={ref} className="dm-graph-ref" style={{ background: branchColor[ref] || '#888' }}>{ref}</span>
               ))}
               <span className="dm-graph-msg">{(c.message || '').split('\n')[0]}</span>
-              <span className="dm-graph-author">{c.author}</span>
-              <span className="dm-date">{(c.date || '').slice(0, 10)}</span>
-              {c.parents?.length > 1 && <span style={{ fontSize: '10px', color: '#999' }}> [merge]</span>}
+              <span className="dm-graph-col-author">{c.author}</span>
+              <span className="dm-graph-col-date">{(c.date || '').slice(0, 10)}</span>
             </div>
           ))}
           {hasMore && (
