@@ -812,7 +812,7 @@ function GitGraph({ repo }) {
   });
 
   // ─── 색상 및 좌표 ───
-  const colors = ['#e74c3c', '#27ae60', '#2980b9', '#f39c12', '#8e44ad', '#1abc9c', '#d35400'];
+  const colors = ['#6b9bc3', '#7fb685', '#c48db0', '#d4a862', '#8a8dc9', '#6abfb0', '#c4876e'];
   const branchColor = {};
   branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
 
