@@ -15,8 +15,9 @@ import './App.css';
 const PLATFORM_API = config.PLATFORM_API;
 
 function App() {
-  const [user] = useState(() => getAuthUser());
+  const [user, setUser] = useState(() => getAuthUser());
   const [authority, setAuthority] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [selectedProject, setSelectedProject] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('gojira_project')); }
@@ -28,9 +29,25 @@ function App() {
     if (!user) return;
     fetch(`${PLATFORM_API}/Account/me?knoxId=${encodeURIComponent(user)}`)
       .then(r => r.json())
-      .then(data => setAuthority(data.authority || {}))
+      .then(data => {
+        setAuthority(data.authority || {});
+        if ((data.authority?.USR || 0) >= 15) {
+          fetch(`${PLATFORM_API}/Account/users`).then(r => r.json())
+            .then(d => setAllUsers(Array.isArray(d) ? d : []));
+        }
+      })
       .catch(() => setAuthority({}));
   }, [user]);
+
+  function switchUser(knoxId) {
+    setUser(knoxId);
+    setAuthority(null);
+    setAllUsers([]);
+    setPage('map');
+    setSelectedProject(null);
+    sessionStorage.setItem('gojira_page', 'map');
+    sessionStorage.removeItem('gojira_project');
+  }
 
   const navigate = useCallback((p, project) => {
     setPage(p);
@@ -94,7 +111,20 @@ function App() {
             </button>
           ))}
         </nav>
-        <span className="app-user">{user}</span>
+        {allUsers.length > 0 ? (
+          <select
+            className="app-user-switch"
+            value={user}
+            onChange={e => switchUser(e.target.value)}
+            title="개발용: 사용자 전환"
+          >
+            {allUsers.map(u => (
+              <option key={u.knoxId} value={u.knoxId}>{u.knoxId} ({u.name})</option>
+            ))}
+          </select>
+        ) : (
+          <span className="app-user">{user}</span>
+        )}
       </div>
       <div className="app-body">{content}</div>
       <AlertModal />

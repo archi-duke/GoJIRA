@@ -52,6 +52,20 @@
   font-size: 13px;
   color: #ccc;
 }
+.app-user-switch {
+  font-size: 13px;
+  color: #ccc;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  outline: none;
+}
+.app-user-switch option {
+  color: #000;
+  background: #fff;
+}
 
 .app-body {
   flex: 1;
