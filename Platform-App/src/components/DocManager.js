@@ -804,7 +804,12 @@ function GitGraph({ repo }) {
     if (laneOf[c.sha] !== undefined) c.lane = laneOf[c.sha];
   });
 
-  const filteredCommits = commits;
+  // 날짜 역순 정렬 (Gitea/c2.png와 동일한 순서)
+  const filteredCommits = [...commits].sort((a, b) => {
+    const da = new Date(a.date || 0).getTime();
+    const db = new Date(b.date || 0).getTime();
+    return db - da; // 최신 먼저
+  });
 
   // ─── 색상 및 좌표 ───
   const colors = ['#e74c3c', '#27ae60', '#2980b9', '#f39c12', '#8e44ad', '#1abc9c', '#d35400'];
