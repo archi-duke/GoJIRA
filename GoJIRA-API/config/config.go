@@ -19,10 +19,13 @@ var (
 	ConfluencePass string
 	MongoURI       = envOrDefault("GOJIRA_MONGO_URI", "mongodb://localhost:27017")
 	MongoDB        = envOrDefault("GOJIRA_MONGO_DB", "gojira")
+	OpenAIAPIKey   = envOrDefault("OPENAI_API_KEY", "")
 )
 
 func init() {
 	loadEnvFile(".env")
+
+	OpenAIAPIKey = envOrDefault("OPENAI_API_KEY", "")
 
 	raw := envOrDefault("GOJIRA_JIRA_USER", "")
 	if val, err := Decrypt(raw); err == nil {

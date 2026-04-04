@@ -66,6 +66,50 @@
 .dm-approve-btn { background: #27ae60; color: #fff; }
 .dm-reject-btn { background: #e74c3c; color: #fff; }
 .dm-merge-btn { background: #2c3e50; color: #fff; }
+.dm-merge-btn:disabled { background: #bbb; cursor: not-allowed; opacity: 0.6; }
+
+/* Review Status */
+.dm-review-status { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.dm-rv { font-size: 11px; padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+.dm-rv-approved { background: #e8f5e9; color: #27ae60; }
+.dm-rv-rejected { background: #ffebee; color: #e74c3c; }
+.dm-rv-pending { background: #f5f5f5; color: #999; }
+.dm-rv-summary { font-size: 11px; color: #666; font-weight: 600; margin-left: 4px; }
+.dm-pr-merged { background: #7c3aed; color: #fff; }
+
+/* PR detail link */
+.dm-pr-detail-link { margin-left: 8px; font-size: 11px; color: #2980b9; text-decoration: none; }
+.dm-pr-detail-link:hover { text-decoration: underline; }
+
+/* PR messages */
+.dm-pr-msg-row td { padding-top: 0 !important; padding-bottom: 8px !important; border-bottom: 1px solid #eee; }
+.dm-pr-msg { font-size: 12px; padding: 4px 10px; border-radius: 4px; }
+.dm-pr-msg-reject { background: #fff5f5; color: #c0392b; border-left: 3px solid #e74c3c; }
+.dm-pr-msg-approved { background: #f0fdf4; color: #27ae60; border-left: 3px solid #27ae60; }
+
+/* PR expand */
+.dm-pr-row:hover { background: #f5f8fc !important; }
+.dm-pr-expand-icon { font-size: 11px; color: #999; margin-right: 5px; }
+.dm-pr-detail-row td { padding: 0 10px 12px 10px !important; border-bottom: 1px solid #eee; background: #fafcff; }
+.dm-pr-detail-panel { padding: 10px 12px; border: 1px solid #e0e8f0; border-radius: 6px; background: #fff; }
+.dm-pr-detail-label { font-size: 11px; font-weight: 600; color: #888; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+.dm-pr-body { margin-bottom: 14px; }
+.dm-pr-body-text { margin: 0; font-size: 13px; line-height: 1.6; background: #f7f9fb; border-radius: 4px; padding: 8px 12px; white-space: pre-wrap; word-break: break-word; font-family: inherit; border: 1px solid #e8eef4; }
+.dm-pr-body-empty { font-size: 12px; color: #bbb; }
+.dm-pr-reviews-section { }
+.dm-pr-review-list { display: flex; flex-direction: column; gap: 6px; }
+.dm-pr-review-item { border-radius: 4px; padding: 7px 10px; border-left: 3px solid #ddd; background: #f9f9f9; }
+.dm-rv-item-approved { border-left-color: #27ae60; background: #f0fdf4; }
+.dm-rv-item-rejected { border-left-color: #e74c3c; background: #fff5f5; }
+.dm-rv-item-pending { border-left-color: #ccc; background: #f9f9f9; }
+.dm-pr-review-header { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.dm-pr-review-user { font-size: 12px; font-weight: 600; color: #333; }
+.dm-pr-review-state { font-size: 11px; padding: 1px 7px; border-radius: 8px; }
+.dm-rv-item-state-approved { background: #e8f5e9; color: #27ae60; }
+.dm-rv-item-state-rejected { background: #ffebee; color: #e74c3c; }
+.dm-rv-item-state-pending { background: #f5f5f5; color: #999; }
+.dm-pr-review-body { font-size: 12px; color: #444; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+.dm-pr-review-empty { font-size: 12px; color: #bbb; }
 
 /* Graph */
 .dm-graph { flex: 1; overflow: auto; }

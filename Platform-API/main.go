@@ -23,6 +23,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 			"notice":   "Notice",
 			"docrepo":  "DocRepo",
 			"doclink":  "DocLink",
+			"git":      "Git",
 		}
 		if len(parts) >= 4 {
 			if mapped, ok := canonical[strings.ToLower(parts[3])]; ok {
@@ -97,22 +98,27 @@ func main() {
 		r.Delete("/Notice/{id}", handlers.NoticeDeleteHandler)
 		r.Post("/Notice/{id}/view", handlers.NoticeViewHandler)
 
+		// Git 플랫폼 사용자 목록
+		r.Get("/Git/users", handlers.GitUsersHandler)
+
 		// DocRepo — 문서 이력관리 (projectCode 기반)
-		r.Get("/DocRepo", handlers.DocRepoListHandler)
-		r.Post("/DocRepo/sync", handlers.DocRepoSyncHandler)
-		r.Post("/DocRepo/{code}", handlers.DocRepoCreateHandler)
-		r.Delete("/DocRepo/{code}/purge", handlers.DocRepoPurgeHandler)
-		r.Delete("/DocRepo/{code}/github", handlers.DocRepoGHDeleteHandler)
-		r.Get("/DocRepo/{code}/tree", handlers.DocRepoTreeHandler)
-		r.Get("/DocRepo/{code}/file", handlers.DocRepoFileHandler)
-		r.Get("/DocRepo/{code}/commits", handlers.DocRepoCommitsHandler)
-		r.Get("/DocRepo/{code}/branches", handlers.DocRepoBranchesHandler)
-		r.Post("/DocRepo/{code}/pr", handlers.DocRepoPRCreateHandler)
-		r.Get("/DocRepo/{code}/prs", handlers.DocRepoPRListHandler)
-		r.Post("/DocRepo/{code}/pr/{num}/review", handlers.DocRepoPRReviewHandler)
-		r.Post("/DocRepo/{code}/pr/{num}/merge", handlers.DocRepoPRMergeHandler)
-		r.Get("/DocRepo/{code}/pr/{num}/reviews", handlers.DocRepoPRReviewsHandler)
-		r.Post("/DocRepo/{code}/git/publish", handlers.DocRepoGitPublishHandler)
+		r.Route("/DocRepo", func(r chi.Router) {
+			r.Get("/", handlers.DocRepoListHandler)
+			r.Post("/sync", handlers.DocRepoSyncHandler)
+			r.Post("/{code}", handlers.DocRepoCreateHandler)
+			r.Delete("/{code}/purge", handlers.DocRepoPurgeHandler)
+			r.Delete("/{code}/github", handlers.DocRepoGHDeleteHandler)
+			r.Get("/{code}/tree", handlers.DocRepoTreeHandler)
+			r.Get("/{code}/file", handlers.DocRepoFileHandler)
+			r.Get("/{code}/commits", handlers.DocRepoCommitsHandler)
+			r.Get("/{code}/branches", handlers.DocRepoBranchesHandler)
+			r.Post("/{code}/pr", handlers.DocRepoPRCreateHandler)
+			r.Get("/{code}/prs", handlers.DocRepoPRListHandler)
+			r.Post("/{code}/pr/{num}/review", handlers.DocRepoPRReviewHandler)
+			r.Post("/{code}/pr/{num}/merge", handlers.DocRepoPRMergeHandler)
+			r.Get("/{code}/pr/{num}/reviews", handlers.DocRepoPRReviewsHandler)
+			r.Post("/{code}/git/publish", handlers.DocRepoGitPublishHandler)
+		})
 
 		// DocLink — 향후 구현
 	})

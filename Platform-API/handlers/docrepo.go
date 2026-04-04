@@ -17,6 +17,23 @@ import (
 	"platform-api/github"
 )
 
+// GET /DocRepo/git-users — Git 플랫폼 사용자 목록
+func GitUsersHandler(w http.ResponseWriter, r *http.Request) {
+	users, err := github.ListUsers()
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "사용자 목록 조회 실패: "+err.Error())
+		return
+	}
+	// login, full_name만 추출
+	result := []map[string]string{}
+	for _, u := range users {
+		login, _ := u["login"].(string)
+		fullName, _ := u["full_name"].(string)
+		result = append(result, map[string]string{"login": login, "fullName": fullName})
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
 // --- 프로젝트 코드 기반 repo 관리 ---
 
 // POST /DocRepo/{code} — repo 생성 (project.documents에 저장)
@@ -72,10 +89,25 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	db.UpdateProjectDocRepo(ctx, code, req.RepoName, owner, repoURL)
 
+	// 조직 Members 팀에 repo 추가 (멤버가 접근 가능하도록)
+	if err := github.AddRepoToOrgTeam(req.RepoName); err != nil {
+		log.Printf("조직 팀에 repo 추가 실패: %v", err)
+	}
+
 	// Webhook 자동 등록
 	if config.WebhookURL != "" {
 		github.CreateWebhook(owner, req.RepoName, config.WebhookURL, config.WebhookSecret,
-			[]string{"pull_request", "push"})
+			[]string{"pull_request", "pull_request_review", "push"})
+	}
+
+	// Branch protection: 모든 리뷰 완료 전 머지 불가
+	auditors := toStringSlice(prj["auditors"])
+	reviewCount := len(auditors)
+	if reviewCount == 0 {
+		reviewCount = 1
+	}
+	if err := github.SetBranchProtection(owner, req.RepoName, "main", reviewCount); err != nil {
+		log.Printf("branch protection 설정 실패 (나중에 재시도 가능): %v", err)
 	}
 
 	log.Printf("DocRepo created: %s/%s for %s", owner, req.RepoName, code)
@@ -182,6 +214,32 @@ func DocRepoSyncHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// 정상 연결된 레포에 branch protection 설정 (없으면 적용)
+	for _, rs := range results {
+		if rs.Status == "ok" && rs.RepoOwner != "" && rs.RepoName != "" {
+			go func(owner, repo string) {
+				if err := github.SetBranchProtection(owner, repo, "main", 1); err != nil {
+					log.Printf("sync: branch protection 설정 실패 %s/%s: %v", owner, repo, err)
+				} else {
+					log.Printf("sync: branch protection 확인/설정 완료 %s/%s", owner, repo)
+				}
+			}(rs.RepoOwner, rs.RepoName)
+		}
+	}
+
+	// 로컬 clone 폴더 중 GitHub에 없는 것 자동 삭제
+	activeRepos := map[string]bool{}
+	for _, gr := range ghRepos {
+		name, _ := gr["name"].(string)
+		activeRepos[name] = true
+	}
+	for _, local := range github.ListLocalRepos() {
+		if !activeRepos[local.Repo] {
+			log.Printf("sync: removing stale local repo %s/%s", local.Owner, local.Repo)
+			github.RemoveLocalRepo(local.Owner, local.Repo)
+		}
+	}
+
 	respondJSON(w, http.StatusOK, results)
 }
 
@@ -203,6 +261,7 @@ func DocRepoGHDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	github.RemoveLocalRepo(owner, name)
 	db.ClearProjectDocRepo(ctx, code)
 	respondJSON(w, http.StatusOK, "deleted")
 }
@@ -212,6 +271,13 @@ func DocRepoPurgeHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+
+	// 로컬 clone 폴더도 삭제
+	owner, name, _, err := db.GetProjectDocInfo(ctx, code)
+	if err == nil && name != "" {
+		github.RemoveLocalRepo(owner, name)
+	}
+
 	db.ClearProjectDocRepo(ctx, code)
 	respondJSON(w, http.StatusOK, "purged")
 }
@@ -334,6 +400,13 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 리뷰어 계정 존재 여부 확인
+	if missing := github.CheckUsersExist(auditors); len(missing) > 0 {
+		respondError(w, http.StatusBadRequest,
+			fmt.Sprintf("Git 플랫폼에 존재하지 않는 사용자: %s — 해당 계정을 먼저 생성하세요", strings.Join(missing, ", ")))
+		return
+	}
+
 	var req struct {
 		Title string `json:"title"`
 		Body  string `json:"body"`
@@ -352,7 +425,15 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prNum := int(pr["number"].(float64))
-	github.RequestReviewers(owner, name, prNum, auditors)
+	prURL, _ := pr["html_url"].(string)
+	prTitle, _ := pr["title"].(string)
+	if errs := github.RequestReviewers(owner, name, prNum, auditors); errs != nil {
+		log.Printf("리뷰어 등록 실패: %v", errs)
+	}
+
+	// 승인자에게 메일 알림
+	notifyPRCreated(name, prNum, prTitle, prURL, auditors)
+
 	respondJSON(w, http.StatusOK, pr)
 }
 
@@ -412,6 +493,55 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
+	// 머지 전 리뷰 완료 검증
+	pr, err := github.GetPR(owner, name, num)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	requested, _ := pr["requested_reviewers"].([]interface{})
+	reviews, _ := github.ListReviews(owner, name, num)
+	reviewList, _ := reviews.([]interface{})
+
+	// 사용자별 최신 리뷰 상태
+	byUser := map[string]string{}
+	for _, rv := range reviewList {
+		rm, _ := rv.(map[string]interface{})
+		state, _ := rm["state"].(string)
+		if state == "PENDING" {
+			continue
+		}
+		user, _ := rm["user"].(map[string]interface{})
+		login, _ := user["login"].(string)
+		byUser[login] = state
+	}
+
+	// 대기 중인 리뷰어가 있으면 차단
+	if len(requested) > 0 {
+		respondError(w, http.StatusConflict, "아직 리뷰를 완료하지 않은 승인자가 있습니다")
+		return
+	}
+	// 반려된 리뷰가 있으면 차단
+	for user, state := range byUser {
+		if state == "CHANGES_REQUESTED" {
+			respondError(w, http.StatusConflict, fmt.Sprintf("%s님이 반려했습니다. 수정 후 다시 요청하세요", user))
+			return
+		}
+	}
+	// 승인된 리뷰가 하나도 없으면 차단
+	hasApproval := false
+	for _, state := range byUser {
+		if state == "APPROVED" {
+			hasApproval = true
+			break
+		}
+	}
+	if !hasApproval {
+		respondError(w, http.StatusConflict, "최소 1명 이상의 승인이 필요합니다")
+		return
+	}
+
 	if err := github.MergePR(owner, name, num, "merge"); err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
@@ -459,6 +589,13 @@ func DocRepoGitPublishHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 리뷰어 계정 존재 여부 확인
+	if missing := github.CheckUsersExist(auditors); len(missing) > 0 {
+		respondError(w, http.StatusBadRequest,
+			fmt.Sprintf("Git 플랫폼에 존재하지 않는 사용자: %s — 해당 계정을 먼저 생성하세요", strings.Join(missing, ", ")))
+		return
+	}
+
 	var req struct {
 		Branch  string            `json:"branch"`
 		Files   map[string]string `json:"files"`
@@ -493,7 +630,11 @@ func DocRepoGitPublishHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prNum := int(pr["number"].(float64))
+	prURL, _ := pr["html_url"].(string)
 	github.RequestReviewers(owner, name, prNum, auditors)
+
+	// 승인자에게 메일 알림
+	notifyPRCreated(name, prNum, req.PRTitle, prURL, auditors)
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"branch": req.Branch, "files": len(req.Files), "pr": pr,

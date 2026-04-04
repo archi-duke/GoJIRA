@@ -39,6 +39,8 @@ func GitHubWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	switch event {
 	case "pull_request":
 		handlePREvent(payload)
+	case "pull_request_review":
+		handlePRReviewEvent(payload)
 	case "push":
 		handlePushEvent(payload)
 	}
@@ -63,16 +65,67 @@ func handlePREvent(payload map[string]interface{}) {
 
 	log.Printf("webhook PR: action=%s #%v %s state=%s merged=%v repo=%s", action, number, title, state, merged, repoName)
 
+	mergeable, _ := pr["mergeable"].(bool)
+	mergeableState, _ := pr["mergeable_state"].(string)
+
 	// SSE 브로드캐스트 — PR 상태 변경 알림
 	BroadcastDocEvent(map[string]interface{}{
-		"type":     "pr_update",
+		"type":           "pr_update",
+		"action":         action,
+		"repo":           repoName,
+		"prNumber":       number,
+		"title":          title,
+		"state":          state,
+		"merged":         merged,
+		"mergeable":      mergeable,
+		"mergeableState": mergeableState,
+	})
+}
+
+func handlePRReviewEvent(payload map[string]interface{}) {
+	action, _ := payload["action"].(string)
+	review, _ := payload["review"].(map[string]interface{})
+	pr, _ := payload["pull_request"].(map[string]interface{})
+	repo, _ := payload["repository"].(map[string]interface{})
+	if review == nil || pr == nil {
+		return
+	}
+
+	repoName, _ := repo["name"].(string)
+	number := pr["number"]
+	reviewState, _ := review["state"].(string)
+	reviewer, _ := review["user"].(map[string]interface{})
+	reviewerLogin, _ := reviewer["login"].(string)
+	reviewBody, _ := review["body"].(string)
+
+	prURL, _ := pr["html_url"].(string)
+	prTitle, _ := pr["title"].(string)
+	prUser, _ := pr["user"].(map[string]interface{})
+	prCreator, _ := prUser["login"].(string)
+
+	log.Printf("webhook PR review: action=%s #%v reviewer=%s state=%s repo=%s", action, number, reviewerLogin, reviewState, repoName)
+
+	BroadcastDocEvent(map[string]interface{}{
+		"type":     "pr_review",
 		"action":   action,
 		"repo":     repoName,
 		"prNumber": number,
-		"title":    title,
-		"state":    state,
-		"merged":   merged,
+		"reviewer": reviewerLogin,
+		"state":    reviewState,
+		"body":     reviewBody,
 	})
+
+	// 승인 리뷰이고, 대기 중인 리뷰어가 없으면 머지 가능 알림
+	if reviewState == "approved" {
+		requested, _ := pr["requested_reviewers"].([]interface{})
+		if len(requested) == 0 {
+			prNum := 0
+			if n, ok := number.(float64); ok {
+				prNum = int(n)
+			}
+			notifyMergeable(repoName, prNum, prTitle, prURL, prCreator)
+		}
+	}
 }
 
 func handlePushEvent(payload map[string]interface{}) {

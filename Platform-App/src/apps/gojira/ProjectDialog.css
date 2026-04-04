@@ -189,3 +189,16 @@
   font-size: 12px;
   width: 140px;
 }
+.dlg-auditor-select {
+  padding: 3px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #fff;
+  cursor: pointer;
+  color: #555;
+}
+.dlg-auditor-warn {
+  font-size: 11px;
+  color: tomato;
+}

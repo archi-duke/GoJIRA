@@ -1,8 +1,14 @@
 
 [기본 원칙]
-- Git 플랫폼은 GitHub를 사용한다.
-- GitHub의 기본 기능을 대체하지 말고, GitHub를 원본 저장소 및 형상관리 엔진으로 활용한다.
-- 사용자는 GitHub에 직접 익숙하지 않아도 되도록, 과제 중심의 간편한 UI를 별도로 제공한다.
+- Git 플랫폼은 용도에 따라 분리하여 사용한다.
+  - 소스코드 저장소: GitHub
+  - 설계문서 저장소: Gitea (self-hosted, Docker 기반)
+- 설계문서를 Gitea에서 관리하는 이유:
+  - 설계서의 보안성 확보 (private 레포에서도 branch protection 무료 지원)
+  - GitHub Free 플랜의 private 레포 제약 회피 (branch protection 미지원)
+  - self-hosted 환경으로 데이터 주권 확보
+- Gitea는 GitHub REST API 호환 구조(API v1)를 제공하므로, 기존 GitHub 연동 코드를 최소 변경으로 재사용한다.
+- 사용자는 Git 플랫폼에 직접 익숙하지 않아도 되도록, 과제 중심의 간편한 UI를 별도로 제공한다.
 - 문서는 Markdown 기반이며, 여러 파일로 구성된 계층형(hierarchy) 구조를 가진다.
 - 문서와 소스코드는 연결 관리되어야 한다.
 - 승인자는 Project의 auditors 필드에 등록된 사용자로 한다.
@@ -11,10 +17,12 @@
 [구현 목표]
 다음 요구사항을 만족하는 시스템 또는 모듈을 설계하고 구현하라.
 
-1. GitHub 사용
-- 문서 저장소와 형상관리는 GitHub를 사용한다.
+1. Git 플랫폼 사용
+- 설계문서 저장소와 형상관리는 Gitea(self-hosted)를 사용한다.
+- 소스코드 저장소는 GitHub를 유지한다.
 - 문서 변경은 Git commit, branch, PR 기반으로 관리한다.
-- GitHub API를 활용할 수 있도록 구조를 설계한다.
+- Gitea API(v1)를 활용할 수 있도록 구조를 설계하며, GitHub API 호환성을 유지한다.
+- 환경 설정(GITHUB_URL)만 변경하면 GitHub ↔ Gitea 전환이 가능하도록 설계한다.
 
 2. 프로젝트 설계서용 레포지토리 생성
 - 과제 또는 프로젝트에 대해 설계서용 GitHub repository를 생성할 수 있어야 한다.
@@ -63,18 +71,47 @@
 - 문서 구조를 repository 내 폴더 구조 또는 메타데이터로 표현할 수 있어야 한다.
 - UI에서는 계층 구조를 탐색 가능하게 표시해야 한다.
 
-[권장 구현 방향]
-- GitHub를 원본 저장소로 사용한다.
-- 과제 관리 시스템 또는 별도 백엔드가 GitHub API와 연계한다.
-- 내부 DB에는 Task, 문서 메타데이터, GitHub repository 정보, PR 정보, auditor 정보, 문서-코드 매핑 정보를 저장한다.
-- UI는 과제 중심 탐색 구조를 갖고, 사용자가 GitHub를 직접 사용하지 않고도 주요 승인/조회/배포 작업을 할 수 있게 한다.
-- 문서 배포 요청은 GitHub PR 생성으로 처리한다.
+8. 승인(PR) 및 배포(Merge) 처리 규칙
+- 승인자는 Task 정보의 auditors 필드에 등록된 사용자로 한다.
+- auditors가 비어 있거나 유효한 승인자가 없으면 승인 요청을 생성하거나 승인 절차를 진행하지 않는다.
+- 이 경우 사용자에게 “승인자를 먼저 지정하세요” 또는 이에 준하는 명확한 안내 메시지를 제공한다.
+- 승인 요청 화면에는 현재 auditors 정보를 표시할 수 있어야 한다.
+- 승인 요청은 GitHub PR 생성으로 처리한다.
 - 승인 처리는 GitHub review/merge 흐름과 연계한다.
+- PR 생성시 메시지를 LLM 기반으로 커밋내용을 요약하여 PR 제목과 본문에 자동으로 입력한다.
+- PR 승인시 UI의 승인요청에 메시지를 보여준다.
+- 메시지의 우상단에 [상세보기] 버튼을 배치하고 클릭하면 GitHub PR로 이동한다. 
+- 레포 생성시 branch protection을 설정하여 모든 리뷰가 끝나기 전에는 머지 할 수 없도록 한다.
+  - Gitea: branch_protections API로 private 레포에서도 무료 지원
+  - GitHub Free: private 레포 미지원 → API 레벨에서 머지 전 리뷰 완료 검증으로 보완
+- UI 에도 리뷰 진행 상황을 보여 주고 완료 되면 머지 버튼을 활성화 한다.
+- 웹훅(pull_request, pull_request_review, push)을 이용하여 머지 가능 상태를 실시간으로 반영한다.
+- PR 요청 발생, 머지 가능 상황은 메일로 발송되게한다 (향후 메신저 등을 연계 할 것임)
+
+[권장 구현 방향]
+- 설계문서는 Gitea(self-hosted)를 원본 저장소로 사용한다.
+- 소스코드는 GitHub를 원본 저장소로 유지한다.
+- 과제 관리 시스템(Platform-API)이 Gitea/GitHub API와 연계한다.
+- 내부 DB에는 Task, 문서 메타데이터, repository 정보, PR 정보, auditor 정보, 문서-코드 매핑 정보를 저장한다.
+- UI는 과제 중심 탐색 구조를 갖고, 사용자가 Git 플랫폼을 직접 사용하지 않고도 주요 승인/조회/배포 작업을 할 수 있게 한다.
+- 문서 배포 요청은 PR 생성으로 처리한다.
+- 승인 처리는 review/merge 흐름과 연계한다.
+- 환경 설정만으로 GitHub ↔ Gitea 전환이 가능하도록 API 추상화 계층을 유지한다.
 
 
 [추가 제약]
-- GitHub의 기존 PR/이력/형상관리 기능을 중복 구현하지 않는다.
-- 다만 GitHub 미숙자를 위한 간편한 업무 UI는 별도로 제공한다.
+- Git 플랫폼(Gitea/GitHub)의 기존 PR/이력/형상관리 기능을 중복 구현하지 않는다.
+- 다만 Git 미숙자를 위한 간편한 업무 UI는 별도로 제공한다.
 - 구조는 향후 코드 생성 및 설계-코드 정합성 검토 기능으로 확장 가능해야 한다.
 - 구현 제안 시 실제 운영 가능한 수준의 구체성을 유지한다.
+
+[인프라 구성]
+- Gitea: Docker 컨테이너로 운영 (포트 3300)
+  - 설계문서 전용 Git 서버
+  - SQLite3 기반 경량 구성
+  - private 레포 + branch protection 무료 지원
+- GitHub: 소스코드 저장소 (기존 유지)
+- 전환 설정: Platform-API의 .env 파일에서 GITHUB_URL을 변경하면 즉시 전환 가능
+  - GitHub: GITHUB_URL=https://github.com/
+  - Gitea: GITHUB_URL=http://localhost:3300/
 

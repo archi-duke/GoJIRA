@@ -34,8 +34,9 @@ func gitCmd(dir string, args ...string) (string, error) {
 func cloneURL(owner, repo string) string {
 	base := strings.TrimRight(config.GitHubURL, "/")
 	if config.GitHubToken != "" {
-		// https://token@github.com/owner/repo.git
+		// http(s)://token@host/owner/repo.git
 		base = strings.Replace(base, "https://", fmt.Sprintf("https://%s@", config.GitHubToken), 1)
+		base = strings.Replace(base, "http://", fmt.Sprintf("http://%s@", config.GitHubToken), 1)
 	}
 	return fmt.Sprintf("%s/%s/%s.git", base, owner, repo)
 }
@@ -113,7 +114,7 @@ func CommitAndPush(owner, repo, branch, message string) error {
 	if _, err := gitCmd(dir, "commit", "-m", message); err != nil {
 		return err
 	}
-	if _, err := gitCmd(dir, "push", "origin", branch); err != nil {
+	if _, err := gitCmd(dir, "push", "--force-with-lease", "origin", branch); err != nil {
 		return err
 	}
 	return nil
@@ -122,4 +123,39 @@ func CommitAndPush(owner, repo, branch, message string) error {
 // GetLocalRepoDir 로컬 repo 경로 반환 (존재 여부 확인 없이)
 func GetLocalRepoDir(owner, repo string) string {
 	return repoDir(owner, repo)
+}
+
+// ListLocalRepos 로컬 repos 폴더에 있는 {owner}/{repo} 목록 반환
+func ListLocalRepos() []struct{ Owner, Repo string } {
+	var result []struct{ Owner, Repo string }
+	owners, err := os.ReadDir(config.RepoBaseDir)
+	if err != nil {
+		return result
+	}
+	for _, ownerEntry := range owners {
+		if !ownerEntry.IsDir() || strings.HasPrefix(ownerEntry.Name(), ".") {
+			continue
+		}
+		repos, err := os.ReadDir(filepath.Join(config.RepoBaseDir, ownerEntry.Name()))
+		if err != nil {
+			continue
+		}
+		for _, repoEntry := range repos {
+			if !repoEntry.IsDir() || strings.HasPrefix(repoEntry.Name(), ".") {
+				continue
+			}
+			result = append(result, struct{ Owner, Repo string }{ownerEntry.Name(), repoEntry.Name()})
+		}
+	}
+	return result
+}
+
+// RemoveLocalRepo 로컬 clone 폴더 삭제
+func RemoveLocalRepo(owner, repo string) error {
+	dir := repoDir(owner, repo)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	log.Printf("removing local repo: %s", dir)
+	return os.RemoveAll(dir)
 }

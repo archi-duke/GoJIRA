@@ -245,10 +245,36 @@ function CommitHistory({ repo }) {
 function PRList({ repo, user }) {
   const [prs, setPRs] = useState([]);
   const [filter, setFilter] = useState('open');
+  const [reviewMap, setReviewMap] = useState({});
+  const [expandedPR, setExpandedPR] = useState(null);
 
   const fetchPRs = useCallback(() => {
     fetch(`${API}/${repo.projectCode}/prs?state=${filter}`)
-      .then(r => r.json()).then(d => setPRs(Array.isArray(d) ? d : [])).catch(() => {});
+      .then(r => r.json()).then(d => {
+        const list = Array.isArray(d) ? d : [];
+        setPRs(list);
+        // 열린 PR의 리뷰 상태 조회
+        list.filter(pr => pr.state === 'open').forEach(pr => {
+          fetch(`${API}/${repo.projectCode}/pr/${pr.number}/reviews`)
+            .then(r => r.json()).then(reviews => {
+              if (!Array.isArray(reviews)) return;
+              // 사용자별 최신 리뷰만 유지
+              const byUser = {};
+              reviews.forEach(rv => {
+                if (rv.state === 'PENDING') return;
+                byUser[rv.user?.login] = rv;
+              });
+              const latest = Object.values(byUser);
+              const approved = latest.filter(rv => rv.state === 'APPROVED');
+              const rejected = latest.filter(rv => rv.state === 'CHANGES_REQUESTED');
+              const requested = pr.requested_reviewers || [];
+              setReviewMap(prev => ({
+                ...prev,
+                [pr.number]: { reviews: latest, approved, rejected, pending: requested }
+              }));
+            }).catch(() => {});
+        });
+      }).catch(() => {});
   }, [repo, filter]);
 
   useEffect(() => { fetchPRs(); }, [fetchPRs]);
@@ -258,6 +284,7 @@ function PRList({ repo, user }) {
     const streamUrl = config.API_BASE.replace('/DocRepo', '') + '/Notice/stream';
     const es = new EventSource(streamUrl);
     es.addEventListener('doc_update', () => { fetchPRs(); });
+    es.addEventListener('doc_review', () => { fetchPRs(); });
     return () => es.close();
   }, [fetchPRs]);
 
@@ -273,8 +300,40 @@ function PRList({ repo, user }) {
 
   async function handleMerge(prNum) {
     if (!window.confirm('머지하시겠습니까?')) return;
-    await fetch(`${API}/${repo.projectCode}/pr/${prNum}/merge`, { method: 'POST' });
+    const res = await fetch(`${API}/${repo.projectCode}/pr/${prNum}/merge`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || '머지 실패');
+    }
     fetchPRs();
+  }
+
+  function ReviewStatus({ pr }) {
+    const info = reviewMap[pr.number];
+    if (!info) return null;
+    const total = info.approved.length + info.rejected.length + info.pending.length;
+    if (total === 0) return null;
+    return (
+      <div className="dm-review-status">
+        {info.approved.map(rv => (
+          <span key={rv.user?.login} className="dm-rv dm-rv-approved" title={rv.user?.login + ' 승인'}>✓ {rv.user?.login}</span>
+        ))}
+        {info.rejected.map(rv => (
+          <span key={rv.user?.login} className="dm-rv dm-rv-rejected" title={rv.user?.login + ' 반려'}>✗ {rv.user?.login}</span>
+        ))}
+        {info.pending.map(u => (
+          <span key={u.login} className="dm-rv dm-rv-pending" title={u.login + ' 대기중'}>◦ {u.login}</span>
+        ))}
+        <span className="dm-rv-summary">{info.approved.length}/{total}</span>
+      </div>
+    );
+  }
+
+  function isMergeable(pr) {
+    const info = reviewMap[pr.number];
+    if (!info) return false;
+    const total = info.approved.length + info.rejected.length + info.pending.length;
+    return total > 0 && info.rejected.length === 0 && info.pending.length === 0;
   }
 
   return (
@@ -287,26 +346,99 @@ function PRList({ repo, user }) {
         </div>
       </div>
       <table className="dm-table">
-        <thead><tr><th>#</th><th>제목</th><th>상태</th><th>작성자</th><th>일시</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>제목</th><th>상태</th><th>리뷰</th><th>작성자</th><th>일시</th><th></th></tr></thead>
         <tbody>
-          {prs.map(pr => (
-            <tr key={pr.number}>
-              <td>{pr.number}</td>
-              <td>{pr.title}</td>
-              <td><span className={`dm-pr-state dm-pr-${pr.state}`}>{pr.state}</span></td>
-              <td>{pr.user?.login}</td>
-              <td className="dm-date">{(pr.created_at || '').slice(0, 10)}</td>
-              <td className="dm-pr-actions">
-                {pr.state === 'open' && (
-                  <>
-                    <button className="dm-approve-btn" onClick={() => handleReview(pr.number, 'APPROVE')}>승인</button>
-                    <button className="dm-reject-btn" onClick={() => handleReview(pr.number, 'REQUEST_CHANGES')}>반려</button>
-                    <button className="dm-merge-btn" onClick={() => handleMerge(pr.number)}>머지</button>
-                  </>
+          {prs.map(pr => {
+            const info = reviewMap[pr.number];
+            const lastReject = info?.rejected?.[info.rejected.length - 1];
+            const isExpanded = expandedPR === pr.number;
+            return (
+              <React.Fragment key={pr.number}>
+                <tr className="dm-pr-row" onClick={() => setExpandedPR(isExpanded ? null : pr.number)} style={{cursor:'pointer'}}>
+                  <td>{pr.number}</td>
+                  <td>
+                    <span className="dm-pr-expand-icon">{isExpanded ? '▾' : '▸'}</span>
+                    {pr.title}
+                    {pr.html_url && (
+                      <a href={pr.html_url} target="_blank" rel="noopener noreferrer" className="dm-pr-detail-link" title="Gitea에서 보기" onClick={e => e.stopPropagation()}>상세보기</a>
+                    )}
+                  </td>
+                  <td><span className={`dm-pr-state ${pr.merged_at ? 'dm-pr-merged' : 'dm-pr-' + pr.state}`}>{pr.merged_at ? 'merged' : pr.state}</span></td>
+                  <td><ReviewStatus pr={pr} /></td>
+                  <td>{pr.user?.login}</td>
+                  <td className="dm-date">{(pr.created_at || '').slice(0, 10)}</td>
+                  <td className="dm-pr-actions" onClick={e => e.stopPropagation()}>
+                    {pr.state === 'open' && (
+                      <>
+                        <button className="dm-approve-btn" onClick={() => handleReview(pr.number, 'APPROVE')}>승인</button>
+                        <button className="dm-reject-btn" onClick={() => handleReview(pr.number, 'REQUEST_CHANGES')}>반려</button>
+                        <button className="dm-merge-btn" onClick={() => handleMerge(pr.number)} disabled={!isMergeable(pr)}
+                          title={isMergeable(pr) ? '머지' : '모든 승인이 완료되어야 머지할 수 있습니다'}>머지</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+                {isExpanded && (
+                  <tr className="dm-pr-detail-row">
+                    <td></td>
+                    <td colSpan={6}>
+                      <div className="dm-pr-detail-panel">
+                        {pr.body ? (
+                          <div className="dm-pr-body">
+                            <div className="dm-pr-detail-label">본문</div>
+                            <pre className="dm-pr-body-text">{pr.body}</pre>
+                          </div>
+                        ) : (
+                          <div className="dm-pr-body dm-pr-body-empty">본문 없음</div>
+                        )}
+                        <div className="dm-pr-reviews-section">
+                          <div className="dm-pr-detail-label">리뷰 코멘트</div>
+                          {info?.reviews?.length > 0 ? (
+                            <div className="dm-pr-review-list">
+                              {info.reviews.map((rv, i) => (
+                                <div key={i} className={`dm-pr-review-item dm-rv-item-${rv.state === 'APPROVED' ? 'approved' : rv.state === 'CHANGES_REQUESTED' ? 'rejected' : 'pending'}`}>
+                                  <div className="dm-pr-review-header">
+                                    <span className="dm-pr-review-user">{rv.user?.login}</span>
+                                    <span className={`dm-pr-review-state dm-rv-item-state-${rv.state === 'APPROVED' ? 'approved' : rv.state === 'CHANGES_REQUESTED' ? 'rejected' : 'pending'}`}>
+                                      {rv.state === 'APPROVED' ? '✓ 승인' : rv.state === 'CHANGES_REQUESTED' ? '✗ 반려' : rv.state}
+                                    </span>
+                                    <span className="dm-date">{(rv.submitted_at || '').slice(0, 16).replace('T', ' ')}</span>
+                                  </div>
+                                  {rv.body && <div className="dm-pr-review-body">{rv.body}</div>}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="dm-pr-review-empty">리뷰 코멘트 없음</div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
                 )}
-              </td>
-            </tr>
-          ))}
+                {!isExpanded && lastReject?.body && (
+                  <tr className="dm-pr-msg-row">
+                    <td></td>
+                    <td colSpan={6}>
+                      <div className="dm-pr-msg dm-pr-msg-reject">
+                        <strong>{lastReject.user?.login}</strong>: {lastReject.body}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {!isExpanded && info?.approved?.length > 0 && info.pending?.length === 0 && info.rejected?.length === 0 && pr.state === 'open' && (
+                  <tr className="dm-pr-msg-row">
+                    <td></td>
+                    <td colSpan={6}>
+                      <div className="dm-pr-msg dm-pr-msg-approved">
+                        모든 승인이 완료되었습니다. 머지할 수 있습니다.
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>

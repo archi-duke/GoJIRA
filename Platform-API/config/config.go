@@ -17,6 +17,12 @@ var (
 	RepoBaseDir    = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 	WebhookURL     = envOrDefault("PLATFORM_WEBHOOK_URL", "")
 	WebhookSecret  = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
+
+	SMTPHost = envOrDefault("SMTP_HOST", "")
+	SMTPPort = envOrDefault("SMTP_PORT", "587")
+	SMTPUser = envOrDefault("SMTP_USER", "")
+	SMTPPass string
+	SMTPFrom = envOrDefault("SMTP_FROM", "")
 )
 
 func init() {
@@ -32,13 +38,26 @@ func init() {
 	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 	WebhookURL = envOrDefault("PLATFORM_WEBHOOK_URL", "")
 	WebhookSecret = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
+	SMTPHost = envOrDefault("SMTP_HOST", "")
+	SMTPPort = envOrDefault("SMTP_PORT", "587")
+	SMTPUser = envOrDefault("SMTP_USER", "")
+	SMTPFrom = envOrDefault("SMTP_FROM", "")
+
+	// SMTP 비밀번호 복호화
+	raw := envOrDefault("SMTP_PASS", "")
+	if val, err := Decrypt(raw); err == nil {
+		SMTPPass = val
+	} else {
+		SMTPPass = raw
+	}
 
 	// GitHubURL → GitHubAPI 변환
 	base := strings.TrimRight(GitHubURL, "/")
 	if strings.Contains(base, "github.com") && !strings.Contains(base, ".github.com") {
 		GitHubAPI = "https://api.github.com"
 	} else {
-		GitHubAPI = base + "/api/v3"
+		// Gitea, Forgejo 등 self-hosted Git 플랫폼
+		GitHubAPI = base + "/api/v1"
 	}
 }
 

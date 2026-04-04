@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"platform-api/db"
+	"platform-api/github"
 )
 
 // === Users ===
@@ -48,6 +50,25 @@ func UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Gitea에 사용자 자동 등록 (knoxId → username)
+	if knoxId, _ := doc["knoxId"].(string); knoxId != "" {
+		email, _ := doc["email"].(string)
+		if email == "" {
+			email = knoxId + "@gojira.local"
+		}
+		fullName, _ := doc["name"].(string)
+		password := knoxId + "!2026"
+		if err := github.CreateUser(knoxId, email, fullName, password); err != nil {
+			log.Printf("Gitea 사용자 생성 실패 (%s): %v", knoxId, err)
+		} else {
+			log.Printf("Gitea 사용자 생성 완료: %s", knoxId)
+			if err := github.AddUserToOrgTeam(knoxId); err != nil {
+				log.Printf("Gitea 조직 멤버 추가 실패 (%s): %v", knoxId, err)
+			}
+		}
+	}
+
 	respondJSON(w, http.StatusOK, doc)
 }
 

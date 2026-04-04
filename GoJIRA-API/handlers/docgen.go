@@ -160,11 +160,9 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		userId = "system"
 	}
 	branchName := fmt.Sprintf("docs/%s", userId)
-	prTitle := fmt.Sprintf("[%s] 설계문서 갱신 %s", req.PrjID, time.Now().Format("2006-01-02"))
-	prBody := fmt.Sprintf("프로젝트 %s의 설계문서를 갱신합니다.\n\n변경 파일:\n", req.PrjID)
-	for path := range files {
-		prBody += fmt.Sprintf("- %s\n", path)
-	}
+
+	// LLM 기반 PR 제목/본문 생성
+	prTitle, prBody := summarizePRContent(projectName, req.PrjID, files)
 
 	publishResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/git/publish", req.PrjID),
 		map[string]interface{}{

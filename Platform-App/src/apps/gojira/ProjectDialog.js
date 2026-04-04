@@ -1,14 +1,25 @@
 import React, { useState, useEffect } from 'react';
+import config from '../../config';
 import './ProjectDialog.css';
 
 export default function ProjectDialog({ project, mode, onClose, onSave }) {
   const [form, setForm] = useState({});
+  const [gitUsers, setGitUsers] = useState([]);
 
   useEffect(() => {
     if (project) {
       setForm({ ...project });
     }
   }, [project]);
+
+  useEffect(() => {
+    if (mode === 'edit') {
+      fetch(`${config.API_BASE}/Git/users`)
+        .then(r => r.json())
+        .then(users => { if (Array.isArray(users)) setGitUsers(users); })
+        .catch(() => {});
+    }
+  }, [mode]);
 
   if (!project) return null;
 
@@ -81,17 +92,28 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
                     }}>x</button>
                   </span>
                 ))}
-                <input
-                  className="dlg-auditor-input"
-                  placeholder="추가할 ID 입력 후 Enter"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.target.value.trim()) {
-                      const val = e.target.value.trim();
+                <select
+                  className="dlg-auditor-select"
+                  value=""
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val && !(form.auditors || []).includes(val)) {
                       setForm(prev => ({ ...prev, auditors: [...(prev.auditors || []), val] }));
-                      e.target.value = '';
                     }
                   }}
-                />
+                >
+                  <option value="">+ 승인자 추가</option>
+                  {gitUsers
+                    .filter(u => !(form.auditors || []).includes(u.login))
+                    .map(u => (
+                      <option key={u.login} value={u.login}>
+                        {u.login}{u.fullName ? ` (${u.fullName})` : ''}
+                      </option>
+                    ))}
+                </select>
+                {gitUsers.length === 0 && (
+                  <span className="dlg-auditor-warn">Git 사용자 목록을 불러올 수 없습니다</span>
+                )}
               </div>
             </>
           )}

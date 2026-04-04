@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"platform-api/config"
 )
@@ -44,6 +45,102 @@ func parseJSON(data []byte) interface{} {
 	var result interface{}
 	json.Unmarshal(data, &result)
 	return result
+}
+
+// --- User ---
+
+// CreateUser Gitea에 사용자 생성
+func CreateUser(username, email, fullName, password string) error {
+	body := map[string]interface{}{
+		"username":             username,
+		"email":                email,
+		"full_name":            fullName,
+		"password":             password,
+		"must_change_password": false,
+	}
+	data, status, err := doRequest("POST", "/admin/users", body)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("create user failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
+// getOrgMembersTeamID 조직의 Members 팀 ID 조회
+func getOrgMembersTeamID() (int, error) {
+	if config.GitHubOrg == "" {
+		return 0, fmt.Errorf("no org configured")
+	}
+	data, status, err := doRequest("GET", "/orgs/"+config.GitHubOrg+"/teams", nil)
+	if err != nil || status >= 400 {
+		return 0, fmt.Errorf("get teams failed")
+	}
+	var teams []map[string]interface{}
+	json.Unmarshal(data, &teams)
+	for _, t := range teams {
+		name, _ := t["name"].(string)
+		if name == "Members" {
+			return int(t["id"].(float64)), nil
+		}
+	}
+	return 0, fmt.Errorf("Members team not found")
+}
+
+// AddUserToOrgTeam 사용자를 조직 Members 팀에 추가
+func AddUserToOrgTeam(username string) error {
+	teamID, err := getOrgMembersTeamID()
+	if err != nil {
+		return err
+	}
+	_, st, err := doRequest("PUT", fmt.Sprintf("/teams/%d/members/%s", teamID, username), nil)
+	if err != nil || st >= 400 {
+		return fmt.Errorf("add to team failed (%d)", st)
+	}
+	return nil
+}
+
+// AddRepoToOrgTeam repo를 조직 Members 팀에 추가 (멤버가 repo에 접근 가능하도록)
+func AddRepoToOrgTeam(repoName string) error {
+	if config.GitHubOrg == "" {
+		return nil
+	}
+	teamID, err := getOrgMembersTeamID()
+	if err != nil {
+		return err
+	}
+	_, st, err := doRequest("PUT", fmt.Sprintf("/teams/%d/repos/%s/%s", teamID, config.GitHubOrg, repoName), nil)
+	if err != nil || st >= 400 {
+		return fmt.Errorf("add repo to team failed (%d)", st)
+	}
+	return nil
+}
+
+// CheckUsersExist 사용자 목록 중 존재하지 않는 사용자를 반환
+func CheckUsersExist(usernames []string) []string {
+	var missing []string
+	for _, u := range usernames {
+		_, status, err := doRequest("GET", "/users/"+u, nil)
+		if err != nil || status == 404 {
+			missing = append(missing, u)
+		}
+	}
+	return missing
+}
+
+// ListUsers Git 플랫폼의 사용자 목록 조회
+func ListUsers() ([]map[string]interface{}, error) {
+	data, status, err := doRequest("GET", "/admin/users?limit=100", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("list users failed (%d)", status)
+	}
+	var users []map[string]interface{}
+	json.Unmarshal(data, &users)
+	return users, nil
 }
 
 // --- Repo ---
@@ -386,6 +483,72 @@ func RequestReviewers(owner, repo string, prNumber int, reviewers []string) erro
 		return fmt.Errorf("request reviewers failed (%d): %s", status, string(data))
 	}
 	return nil
+}
+
+// --- Branch Protection ---
+
+// SetBranchProtection main 브랜치에 보호 규칙 설정 (모든 리뷰 완료 전 머지 불가)
+func SetBranchProtection(owner, repo, branch string, requiredReviewers int) error {
+	if IsGitea() {
+		return setBranchProtectionGitea(owner, repo, branch, requiredReviewers)
+	}
+	return setBranchProtectionGitHub(owner, repo, branch, requiredReviewers)
+}
+
+func setBranchProtectionGitHub(owner, repo, branch string, requiredReviewers int) error {
+	path := fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch)
+	body := map[string]interface{}{
+		"required_pull_request_reviews": map[string]interface{}{
+			"required_approving_review_count": requiredReviewers,
+			"dismiss_stale_reviews":           true,
+		},
+		"enforce_admins":         false,
+		"required_status_checks": nil,
+		"restrictions":           nil,
+	}
+	data, status, err := doRequest("PUT", path, body)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("set branch protection failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
+func setBranchProtectionGitea(owner, repo, branch string, requiredReviewers int) error {
+	path := fmt.Sprintf("/repos/%s/%s/branch_protections", owner, repo)
+	body := map[string]interface{}{
+		"branch_name":                   branch,
+		"enable_push":                   false,
+		"enable_merge_whitelist":        false,
+		"enable_approvals_whitelist":    false,
+		"required_approvals":            requiredReviewers,
+		"dismiss_stale_approvals":       true,
+		"block_on_rejected_reviews":     true,
+		"block_on_outdated_branch":      false,
+	}
+	data, status, err := doRequest("POST", path, body)
+	if err != nil {
+		return err
+	}
+	// 이미 존재하면 PATCH로 업데이트
+	if status == 422 || status == 409 {
+		path = fmt.Sprintf("/repos/%s/%s/branch_protections/%s", owner, repo, branch)
+		data, status, err = doRequest("PATCH", path, body)
+		if err != nil {
+			return err
+		}
+	}
+	if status >= 400 {
+		return fmt.Errorf("set branch protection failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
+// IsGitea API URL로 Gitea 여부 판별
+func IsGitea() bool {
+	return strings.Contains(config.GitHubAPI, "/api/v1")
 }
 
 func ListReviews(owner, repo string, prNumber int) (interface{}, error) {
