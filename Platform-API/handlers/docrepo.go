@@ -360,6 +360,143 @@ func DocRepoCommitsHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, commits)
 }
 
+// GET /DocRepo/{code}/graph — 전체 브랜치의 커밋 그래프 데이터
+func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	branchData, err := github.ListBranches(owner, name)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	branchList, _ := branchData.([]interface{})
+
+	// 각 브랜치의 커밋을 수집하고, 브랜치 이름 매핑
+	type graphCommit struct {
+		SHA     string   `json:"sha"`
+		Message string   `json:"message"`
+		Author  string   `json:"author"`
+		Date    string   `json:"date"`
+		Parents []string `json:"parents"`
+		Refs    []string `json:"refs"`
+	}
+	commitMap := map[string]*graphCommit{}
+	var branchNames []string
+
+	for _, b := range branchList {
+		bm, _ := b.(map[string]interface{})
+		bName, _ := bm["name"].(string)
+		branchNames = append(branchNames, bName)
+
+		commits, err := github.ListCommits(owner, name, bName, 30)
+		if err != nil {
+			continue
+		}
+		commitList, _ := commits.([]interface{})
+		for _, c := range commitList {
+			cm, _ := c.(map[string]interface{})
+			sha, _ := cm["sha"].(string)
+			if sha == "" {
+				continue
+			}
+			if _, exists := commitMap[sha]; !exists {
+				commit, _ := cm["commit"].(map[string]interface{})
+				msg := ""
+				author := ""
+				date := ""
+				if commit != nil {
+					msg, _ = commit["message"].(string)
+					if a, ok := commit["author"].(map[string]interface{}); ok {
+						author, _ = a["name"].(string)
+						date, _ = a["date"].(string)
+					}
+				}
+				var parents []string
+				if ps, ok := cm["parents"].([]interface{}); ok {
+					for _, p := range ps {
+						pm, _ := p.(map[string]interface{})
+						psha, _ := pm["sha"].(string)
+						if psha != "" {
+							parents = append(parents, psha)
+						}
+					}
+				}
+				commitMap[sha] = &graphCommit{
+					SHA: sha, Message: msg, Author: author, Date: date, Parents: parents,
+				}
+			}
+			// 브랜치 HEAD에 ref 추가
+			headSHA := ""
+			if bc, ok := bm["commit"].(map[string]interface{}); ok {
+				headSHA, _ = bc["id"].(string)
+			}
+			if sha == headSHA {
+				commitMap[sha].Refs = append(commitMap[sha].Refs, bName)
+			}
+		}
+	}
+
+	// 위상정렬 (topological sort): 자식이 부모보다 먼저 나오도록
+	childCount := map[string]int{}
+	for _, c := range commitMap {
+		for _, p := range c.Parents {
+			childCount[p]++
+		}
+	}
+	// 자식이 없는(=HEAD) 커밋부터 시작
+	var queue []string
+	for sha := range commitMap {
+		if childCount[sha] == 0 {
+			queue = append(queue, sha)
+		}
+	}
+	// 같은 깊이에서는 main 브랜치 우선, 그 다음 날짜순
+	var allCommits []*graphCommit
+	visited := map[string]bool{}
+	for len(queue) > 0 {
+		// queue를 정렬: main ref 우선, 날짜 최신 우선
+		for i := 0; i < len(queue); i++ {
+			for j := i + 1; j < len(queue); j++ {
+				ci, cj := commitMap[queue[i]], commitMap[queue[j]]
+				// main ref가 있으면 우선
+				iMain := hasRef(ci.Refs, "main")
+				jMain := hasRef(cj.Refs, "main")
+				if jMain && !iMain {
+					queue[i], queue[j] = queue[j], queue[i]
+				} else if iMain == jMain && cj.Date > ci.Date {
+					queue[i], queue[j] = queue[j], queue[i]
+				}
+			}
+		}
+		sha := queue[0]
+		queue = queue[1:]
+		if visited[sha] {
+			continue
+		}
+		visited[sha] = true
+		c := commitMap[sha]
+		allCommits = append(allCommits, c)
+		for _, p := range c.Parents {
+			childCount[p]--
+			if childCount[p] == 0 {
+				queue = append(queue, p)
+			}
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"branches": branchNames,
+		"commits":  allCommits,
+	})
+}
+
 // GET /DocRepo/{code}/branches
 func DocRepoBranchesHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
@@ -418,7 +555,8 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 		req.Base = "main"
 	}
 
-	pr, err := github.CreatePR(owner, name, req.Title, req.Body, req.Head, req.Base)
+	userToken := getUserToken(r)
+	pr, err := github.CreatePR(owner, name, req.Title, req.Body, req.Head, req.Base, userToken)
 	if err != nil {
 		respondError(w, http.StatusBadGateway, "PR 생성 실패: "+err.Error())
 		return
@@ -470,15 +608,36 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
 	var req struct {
 		Event string `json:"event"`
 		Body  string `json:"body"`
 	}
 	decodeJSON(r, &req)
-	if err := github.CreateReview(owner, name, num, req.Event, req.Body); err != nil {
+	if req.Body == "" {
+		req.Body = "LGTM"
+	}
+
+	userToken := getUserToken(r)
+	reviewID, err := github.CreateReview(owner, name, num, req.Event, req.Body, userToken)
+	if err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+
+	// Gitea 1.25 API 버그: APPROVE/REQUEST_CHANGES가 PENDING으로 저장됨 → DB 직접 수정
+	if reviewID > 0 {
+		if err := github.FixReviewState(reviewID, req.Event); err != nil {
+			log.Printf("review state fix 실패 (id=%d): %v", reviewID, err)
+		}
+	}
+
+	// 승인/반려 후 requested_reviewers에서 해당 사용자 제거
+	knoxID := r.Header.Get("X-User-Id")
+	if knoxID != "" {
+		github.RemoveRequestedReviewer(owner, name, num, knoxID)
+	}
+
 	respondJSON(w, http.StatusOK, "review submitted")
 }
 
@@ -494,22 +653,15 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 머지 전 리뷰 완료 검증
-	pr, err := github.GetPR(owner, name, num)
-	if err != nil {
-		respondError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	requested, _ := pr["requested_reviewers"].([]interface{})
+	// Gitea 리뷰 상태 기반 머지 검증
 	reviews, _ := github.ListReviews(owner, name, num)
 	reviewList, _ := reviews.([]interface{})
 
-	// 사용자별 최신 리뷰 상태
 	byUser := map[string]string{}
 	for _, rv := range reviewList {
 		rm, _ := rv.(map[string]interface{})
 		state, _ := rm["state"].(string)
-		if state == "PENDING" {
+		if state == "PENDING" || state == "REQUEST_REVIEW" {
 			continue
 		}
 		user, _ := rm["user"].(map[string]interface{})
@@ -517,11 +669,6 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		byUser[login] = state
 	}
 
-	// 대기 중인 리뷰어가 있으면 차단
-	if len(requested) > 0 {
-		respondError(w, http.StatusConflict, "아직 리뷰를 완료하지 않은 승인자가 있습니다")
-		return
-	}
 	// 반려된 리뷰가 있으면 차단
 	for user, state := range byUser {
 		if state == "CHANGES_REQUESTED" {
@@ -542,6 +689,7 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// admin 토큰으로 머지 (branch protection 우회)
 	if err := github.MergePR(owner, name, num, "merge"); err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
@@ -624,7 +772,8 @@ func DocRepoGitPublishHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pr, err := github.CreatePR(owner, name, req.PRTitle, req.PRBody, req.Branch, "main")
+	userToken := getUserToken(r)
+	pr, err := github.CreatePR(owner, name, req.PRTitle, req.PRBody, req.Branch, "main", userToken)
 	if err != nil {
 		respondError(w, http.StatusBadGateway, "PR 생성 실패: "+err.Error())
 		return
@@ -639,6 +788,26 @@ func DocRepoGitPublishHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"branch": req.Branch, "files": len(req.Files), "pr": pr,
 	})
+}
+
+func hasRef(refs []string, name string) bool {
+	for _, r := range refs {
+		if r == name {
+			return true
+		}
+	}
+	return false
+}
+
+// getUserToken 요청에서 X-User-Id 헤더로 Gitea 토큰 조회
+func getUserToken(r *http.Request) string {
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return db.GetUserGiteaToken(ctx, userID)
 }
 
 // --- helpers ---

@@ -112,6 +112,7 @@ func main() {
 			r.Get("/{code}/file", handlers.DocRepoFileHandler)
 			r.Get("/{code}/commits", handlers.DocRepoCommitsHandler)
 			r.Get("/{code}/branches", handlers.DocRepoBranchesHandler)
+			r.Get("/{code}/graph", handlers.DocRepoGraphHandler)
 			r.Post("/{code}/pr", handlers.DocRepoPRCreateHandler)
 			r.Get("/{code}/prs", handlers.DocRepoPRListHandler)
 			r.Post("/{code}/pr/{num}/review", handlers.DocRepoPRReviewHandler)

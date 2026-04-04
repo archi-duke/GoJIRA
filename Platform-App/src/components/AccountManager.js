@@ -47,7 +47,12 @@ export default function AccountManager({ user }) {
       delete body.updatedBy;
       delete body.isActive;
     }
-    await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || '저장 실패');
+      return;
+    }
     setEditItem(null);
     fetchAll();
   }

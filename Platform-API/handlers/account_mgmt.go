@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -44,16 +45,36 @@ func UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+
+	// 저장 전 중복 검증
+	knoxId, _ := doc["knoxId"].(string)
+	email, _ := doc["email"].(string)
+	if knoxId != "" {
+		if exists, _ := db.KnoxIdExists(ctx, knoxId); exists {
+			respondError(w, http.StatusConflict, fmt.Sprintf("Knox ID '%s'이(가) 이미 등록되어 있습니다.", knoxId))
+			return
+		}
+	}
+	if email != "" {
+		if exists, _ := db.EmailExists(ctx, email); exists {
+			respondError(w, http.StatusConflict, fmt.Sprintf("이메일 '%s'이(가) 이미 등록되어 있습니다. 다른 이메일을 입력하세요.", email))
+			return
+		}
+		if knoxId != "" && github.CheckEmailExists(email) {
+			respondError(w, http.StatusConflict, fmt.Sprintf("이메일 '%s'이(가) Git 플랫폼에서 이미 사용 중입니다. 다른 이메일을 입력하세요.", email))
+			return
+		}
+	}
+
 	if err := db.InsertUser(ctx, doc); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Gitea에 사용자 자동 등록 (knoxId → username)
-	if knoxId, _ := doc["knoxId"].(string); knoxId != "" {
-		email, _ := doc["email"].(string)
+	if knoxId != "" {
 		if email == "" {
 			email = knoxId + "@gojira.local"
 		}
@@ -65,6 +86,13 @@ func UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Gitea 사용자 생성 완료: %s", knoxId)
 			if err := github.AddUserToOrgTeam(knoxId); err != nil {
 				log.Printf("Gitea 조직 멤버 추가 실패 (%s): %v", knoxId, err)
+			}
+			// Gitea API 토큰 생성 → DB 저장
+			if token, err := github.CreateUserToken(knoxId, password); err != nil {
+				log.Printf("Gitea 토큰 생성 실패 (%s): %v", knoxId, err)
+			} else {
+				db.UpdateUserGiteaToken(ctx, knoxId, token)
+				log.Printf("Gitea 토큰 생성 완료: %s", knoxId)
 			}
 		}
 	}
@@ -81,6 +109,24 @@ func UserUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+
+	// 이메일 변경 시 중복 검증
+	if email, ok := updates["email"].(string); ok && email != "" {
+		if exists, _ := db.EmailExistsExcept(ctx, email, id); exists {
+			respondError(w, http.StatusConflict, fmt.Sprintf("이메일 '%s'이(가) 이미 등록되어 있습니다. 다른 이메일을 입력하세요.", email))
+			return
+		}
+		if github.CheckEmailExists(email) {
+			// 본인 Gitea 계정의 이메일이면 허용
+			user, _ := db.FindUserByID(ctx, id)
+			knoxId, _ := user["knoxId"].(string)
+			if !github.IsOwnEmail(knoxId, email) {
+				respondError(w, http.StatusConflict, fmt.Sprintf("이메일 '%s'이(가) Git 플랫폼에서 이미 사용 중입니다. 다른 이메일을 입력하세요.", email))
+				return
+			}
+		}
+	}
+
 	if err := db.UpdateUser(ctx, id, updates); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -126,7 +172,15 @@ func UserMeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 권한도 함께 반환
-	userID, _ := user["_id"].(string)
+	var userID string
+	switch id := user["_id"].(type) {
+	case bson.ObjectID:
+		userID = id.Hex()
+	case string:
+		userID = id
+	default:
+		userID = fmt.Sprintf("%v", id)
+	}
 	auth, _ := db.CalcUserAuthority(ctx, userID)
 	respondJSON(w, http.StatusOK, bson.M{"user": user, "authority": auth})
 }

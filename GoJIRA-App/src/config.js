@@ -5,7 +5,7 @@ const config = {
   API_BASE: process.env.REACT_APP_API_BASE || 'http://localhost:9001/api/v2',
   SSO_URL: process.env.REACT_APP_SSO_URL || 'https://sso.example.com',
   USE_SSO: false,
-  DEV_USER: 'duke.kimm',
+  DEV_USER: 'batman',
 };
 
 export default config;

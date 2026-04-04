@@ -168,7 +168,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		map[string]interface{}{
 			"branch": branchName, "files": files,
 			"message": prTitle, "prTitle": prTitle, "prBody": prBody,
-		})
+		}, userId)
 	if sc >= 400 {
 		errMsg := "문서 배포 실패"
 		if m, ok := publishResult.(map[string]interface{}); ok {
@@ -230,7 +230,7 @@ func toStrSlice(v interface{}) []string {
 
 var platformClient = &http.Client{Timeout: 120 * time.Second}
 
-func callPlatform(method, path string, body interface{}) (interface{}, int) {
+func callPlatform(method, path string, body interface{}, userID ...string) (interface{}, int) {
 	var reqBody io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -238,6 +238,9 @@ func callPlatform(method, path string, body interface{}) (interface{}, int) {
 	}
 	req, _ := http.NewRequest(method, platformAPI+path, reqBody)
 	req.Header.Set("Content-Type", "application/json")
+	if len(userID) > 0 && userID[0] != "" {
+		req.Header.Set("X-User-Id", userID[0])
+	}
 	resp, err := platformClient.Do(req)
 	if err != nil {
 		return nil, 500

@@ -6,7 +6,7 @@ const config = {
   // SSO 설정
   SSO_URL: process.env.REACT_APP_SSO_URL || 'https://sso.example.com',
   USE_SSO: false,
-  DEV_USER: 'duke.kimm',
+  DEV_USER: 'batman',
 };
 
 export default config;

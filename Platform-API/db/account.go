@@ -148,6 +148,40 @@ func FindUserByKnoxID(ctx context.Context, knoxID string) (bson.M, error) {
 	return result, nil
 }
 
+// UpdateUserGiteaToken knoxId로 사용자의 giteaToken 필드 업데이트
+func UpdateUserGiteaToken(ctx context.Context, knoxID, token string) error {
+	_, err := Users().UpdateOne(ctx, bson.M{"knoxId": knoxID}, bson.M{"$set": bson.M{"giteaToken": token}})
+	return err
+}
+
+// GetUserGiteaToken knoxId로 사용자의 giteaToken 조회
+func GetUserGiteaToken(ctx context.Context, knoxID string) string {
+	user, err := FindUserByKnoxID(ctx, knoxID)
+	if err != nil {
+		return ""
+	}
+	token, _ := user["giteaToken"].(string)
+	return token
+}
+
+// KnoxIdExists Knox ID 중복 여부 확인
+func KnoxIdExists(ctx context.Context, knoxId string) (bool, error) {
+	count, err := Users().CountDocuments(ctx, bson.M{"knoxId": knoxId, "isActive": true})
+	return count > 0, err
+}
+
+// EmailExists 이메일 중복 여부 확인
+func EmailExists(ctx context.Context, email string) (bool, error) {
+	count, err := Users().CountDocuments(ctx, bson.M{"email": email, "isActive": true})
+	return count > 0, err
+}
+
+// EmailExistsExcept 특정 사용자를 제외하고 이메일 중복 여부 확인
+func EmailExistsExcept(ctx context.Context, email, excludeID string) (bool, error) {
+	count, err := Users().CountDocuments(ctx, bson.M{"email": email, "isActive": true, "_id": bson.M{"$ne": toID(excludeID)}})
+	return count > 0, err
+}
+
 func InsertUser(ctx context.Context, doc bson.M) error {
 	return insertDoc(ctx, Users(), doc)
 }

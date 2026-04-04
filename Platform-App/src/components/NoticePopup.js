@@ -3,9 +3,8 @@ import config from '../config';
 import './NoticePopup.css';
 
 const API = config.API_BASE + '/Notice';
-const HIDE_KEY = 'gojira_notice_hide_until';
-
-export default function NoticePopup() {
+export default function NoticePopup({ user }) {
+  const HIDE_KEY = `gojira_notice_hide_until_${user || 'anon'}`;
   const [notices, setNotices] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [visible, setVisible] = useState(false);

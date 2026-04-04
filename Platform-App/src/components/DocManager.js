@@ -258,19 +258,21 @@ function PRList({ repo, user }) {
           fetch(`${API}/${repo.projectCode}/pr/${pr.number}/reviews`)
             .then(r => r.json()).then(reviews => {
               if (!Array.isArray(reviews)) return;
-              // 사용자별 최신 리뷰만 유지
+              // 사용자별 최신 리뷰만 유지 (PENDING, REQUEST_REVIEW 제외)
               const byUser = {};
               reviews.forEach(rv => {
-                if (rv.state === 'PENDING') return;
+                if (rv.state === 'PENDING' || rv.state === 'REQUEST_REVIEW') return;
                 byUser[rv.user?.login] = rv;
               });
               const latest = Object.values(byUser);
               const approved = latest.filter(rv => rv.state === 'APPROVED');
               const rejected = latest.filter(rv => rv.state === 'CHANGES_REQUESTED');
-              const requested = pr.requested_reviewers || [];
+              // pending = requested_reviewers 중 아직 승인/반려하지 않은 사용자
+              const reviewed = new Set(Object.keys(byUser));
+              const pending = (pr.requested_reviewers || []).filter(r => !reviewed.has(r.login));
               setReviewMap(prev => ({
                 ...prev,
-                [pr.number]: { reviews: latest, approved, rejected, pending: requested }
+                [pr.number]: { reviews: latest, approved, rejected, pending }
               }));
             }).catch(() => {});
         });
@@ -289,18 +291,31 @@ function PRList({ repo, user }) {
   }, [fetchPRs]);
 
   async function handleReview(prNum, event) {
-    const body = event === 'REQUEST_CHANGES' ? prompt('반려 사유') : '';
-    if (event === 'REQUEST_CHANGES' && !body) return;
-    await fetch(`${API}/${repo.projectCode}/pr/${prNum}/review`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    let body;
+    if (event === 'REQUEST_CHANGES') {
+      body = prompt('반려 사유');
+      if (!body) return;
+    } else {
+      body = prompt('승인 의견', 'LGTM');
+      if (body === null) return;
+      if (!body) body = 'LGTM';
+    }
+    const res = await fetch(`${API}/${repo.projectCode}/pr/${prNum}/review`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
       body: JSON.stringify({ event, body: body || '' }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || '처리 실패');
+    }
     fetchPRs();
   }
 
   async function handleMerge(prNum) {
     if (!window.confirm('머지하시겠습니까?')) return;
-    const res = await fetch(`${API}/${repo.projectCode}/pr/${prNum}/merge`, { method: 'POST' });
+    const res = await fetch(`${API}/${repo.projectCode}/pr/${prNum}/merge`, {
+      method: 'POST', headers: { 'X-User-Id': user },
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       alert(err.error || '머지 실패');
@@ -368,14 +383,22 @@ function PRList({ repo, user }) {
                   <td>{pr.user?.login}</td>
                   <td className="dm-date">{(pr.created_at || '').slice(0, 10)}</td>
                   <td className="dm-pr-actions" onClick={e => e.stopPropagation()}>
-                    {pr.state === 'open' && (
-                      <>
-                        <button className="dm-approve-btn" onClick={() => handleReview(pr.number, 'APPROVE')}>승인</button>
-                        <button className="dm-reject-btn" onClick={() => handleReview(pr.number, 'REQUEST_CHANGES')}>반려</button>
+                    {pr.state === 'open' && (() => {
+                      const myReview = reviewMap[pr.number]?.reviews?.find(rv => rv.user?.login === user);
+                      const myState = myReview?.state;
+                      return <>
+                        {pr.user?.login !== user && (
+                          <>
+                            <button className="dm-approve-btn" disabled={myState === 'APPROVED'}
+                              onClick={() => handleReview(pr.number, 'APPROVE')}>{myState === 'APPROVED' ? '승인됨' : '승인'}</button>
+                            <button className="dm-reject-btn" disabled={myState === 'CHANGES_REQUESTED'}
+                              onClick={() => handleReview(pr.number, 'REQUEST_CHANGES')}>{myState === 'CHANGES_REQUESTED' ? '반려됨' : '반려'}</button>
+                          </>
+                        )}
                         <button className="dm-merge-btn" onClick={() => handleMerge(pr.number)} disabled={!isMergeable(pr)}
                           title={isMergeable(pr) ? '머지' : '모든 승인이 완료되어야 머지할 수 있습니다'}>머지</button>
-                      </>
-                    )}
+                      </>;
+                    })()}
                   </td>
                 </tr>
                 {isExpanded && (
@@ -447,35 +470,117 @@ function PRList({ repo, user }) {
 
 // --- Git Graph ---
 function GitGraph({ repo }) {
-  const [commits, setCommits] = useState([]);
-  const [branches, setBranches] = useState([]);
+  const [data, setData] = useState(null);
   useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/commits?branch=${repo.defaultBranch || 'main'}&perPage=30`)
-      .then(r => r.json()).then(d => setCommits(Array.isArray(d) ? d : [])).catch(() => {});
-    fetch(`${API}/${repo.projectCode}/branches`)
-      .then(r => r.json()).then(d => setBranches(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch(`${API}/${repo.projectCode}/graph`)
+      .then(r => r.json()).then(setData).catch(() => {});
   }, [repo]);
 
-  const rowH = 32;
+  if (!data) return <div className="dm-graph">로딩 중...</div>;
+  const { branches = [], commits = [] } = data;
+
+  // 브랜치별 색상
+  const colors = ['#e74c3c', '#27ae60', '#2980b9', '#f39c12', '#8e44ad', '#1abc9c', '#d35400'];
+  const branchColor = {};
+  branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
+
+  // 커밋별 lane(컬럼) 할당 — parent 기반
+  const shaIdx = {};
+  commits.forEach((c, i) => { shaIdx[c.sha] = i; });
+  const lanes = new Array(commits.length).fill(-1);
+  const laneUsed = [];
+
+  // 각 커밋에 lane 할당
+  function assignLane(idx) {
+    if (lanes[idx] >= 0) return lanes[idx];
+    const c = commits[idx];
+    // refs에 main이 있으면 lane 0
+    if (c.refs?.includes('main')) {
+      lanes[idx] = 0;
+      if (!laneUsed.includes(0)) laneUsed.push(0);
+      return 0;
+    }
+    // parent가 있으면 parent의 lane 우선 시도
+    if (c.parents?.length) {
+      const pIdx = shaIdx[c.parents[0]];
+      if (pIdx !== undefined) {
+        const pLane = assignLane(pIdx);
+        // parent에 여러 자식이 있으면 새 lane
+        const siblings = commits.filter((cc, ii) => ii !== idx && cc.parents?.[0] === c.parents[0] && lanes[ii] >= 0);
+        if (siblings.length === 0 && lanes[idx] < 0) {
+          lanes[idx] = pLane;
+          return pLane;
+        }
+      }
+    }
+    if (lanes[idx] >= 0) return lanes[idx];
+    // 새 lane 할당
+    let newLane = 0;
+    while (laneUsed.includes(newLane)) newLane++;
+    laneUsed.push(newLane);
+    lanes[idx] = newLane;
+    return newLane;
+  }
+
+  // main 브랜치 커밋 먼저 lane 0 할당
+  commits.forEach((c, i) => { if (c.refs?.includes('main')) lanes[i] = 0; });
+  if (!laneUsed.includes(0) && commits.length) laneUsed.push(0);
+  commits.forEach((_, i) => assignLane(i));
+
+  const maxLane = Math.max(...lanes, 0);
+  const rowH = 34;
+  const colW = 24;
+  const svgW = (maxLane + 1) * colW + 20;
+  const x = lane => lane * colW + 16;
+  const y = i => i * rowH + 18;
+
+  // 커밋에 대한 색상 결정
+  function nodeColor(c) {
+    if (c.refs?.length) {
+      for (const ref of c.refs) {
+        if (branchColor[ref]) return branchColor[ref];
+      }
+    }
+    return '#2c3e50';
+  }
+
   return (
     <div className="dm-graph">
       <div className="dm-graph-header">
-        브랜치: {branches.map(b => <span key={b.name} className="dm-branch-tag">{b.name}</span>)}
+        {branches.map(b => (
+          <span key={b} className="dm-branch-tag" style={{ borderLeft: `3px solid ${branchColor[b] || '#888'}` }}>{b}</span>
+        ))}
       </div>
       <div className="dm-graph-body">
-        <svg width={80} height={commits.length * rowH + 20}>
-          <line x1={20} y1={10} x2={20} y2={commits.length * rowH + 10} stroke="#aaa" strokeWidth={2} />
-          {commits.map((c, i) => (
-            <circle key={c.sha} cx={20} cy={i * rowH + 20} r={5} fill={i === 0 ? 'tomato' : '#2c3e50'} />
-          ))}
+        <svg width={svgW} height={commits.length * rowH + 20} style={{ flexShrink: 0 }}>
+          {/* 연결선: 자식→부모 */}
+          {commits.map((c, i) => c.parents?.map(psha => {
+            const pi = shaIdx[psha];
+            if (pi === undefined) return null;
+            const x1 = x(lanes[i]), y1 = y(i);
+            const x2 = x(lanes[pi]), y2 = y(pi);
+            if (x1 === x2) {
+              return <line key={`${c.sha}-${psha}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke={nodeColor(c)} strokeWidth={2} />;
+            }
+            return <path key={`${c.sha}-${psha}`} d={`M${x1},${y1} C${x1},${y1 + rowH / 2} ${x2},${y2 - rowH / 2} ${x2},${y2}`} fill="none" stroke={nodeColor(c)} strokeWidth={2} />;
+          }))}
+          {/* 노드 */}
+          {commits.map((c, i) => {
+            const isMerge = c.parents?.length > 1;
+            return <circle key={c.sha} cx={x(lanes[i])} cy={y(i)} r={isMerge ? 6 : 4}
+              fill={nodeColor(c)} stroke={isMerge ? '#fff' : 'none'} strokeWidth={isMerge ? 2 : 0} />;
+          })}
         </svg>
         <div className="dm-graph-list">
           {commits.map(c => (
             <div key={c.sha} className="dm-graph-row" style={{ height: rowH }}>
               <span className="dm-sha">{(c.sha || '').slice(0, 7)}</span>
-              <span className="dm-graph-msg">{c.commit?.message?.split('\n')[0]}</span>
-              <span className="dm-graph-author">{c.commit?.author?.name}</span>
-              <span className="dm-date">{(c.commit?.author?.date || '').slice(0, 10)}</span>
+              {c.refs?.map(ref => (
+                <span key={ref} className="dm-graph-ref" style={{ background: branchColor[ref] || '#888' }}>{ref}</span>
+              ))}
+              <span className="dm-graph-msg">{(c.message || '').split('\n')[0]}</span>
+              <span className="dm-graph-author">{c.author}</span>
+              <span className="dm-date">{(c.date || '').slice(0, 10)}</span>
             </div>
           ))}
         </div>

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"net/url"
 	"strings"
 
@@ -15,6 +16,19 @@ import (
 var httpClient = &http.Client{}
 
 func doRequest(method, path string, body interface{}) ([]byte, int, error) {
+	return doRequestWithToken(method, path, body, config.GitHubToken)
+}
+
+// doRequestAs 사용자 토큰으로 Gitea API 호출 (토큰이 없으면 관리자 토큰 사용)
+func doRequestAs(method, path string, body interface{}, userToken string) ([]byte, int, error) {
+	token := userToken
+	if token == "" {
+		token = config.GitHubToken
+	}
+	return doRequestWithToken(method, path, body, token)
+}
+
+func doRequestWithToken(method, path string, body interface{}, token string) ([]byte, int, error) {
 	var reqBody io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -28,8 +42,8 @@ func doRequest(method, path string, body interface{}) ([]byte, int, error) {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
-	if config.GitHubToken != "" {
-		req.Header.Set("Authorization", "Bearer "+config.GitHubToken)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := httpClient.Do(req)
@@ -141,6 +155,65 @@ func ListUsers() ([]map[string]interface{}, error) {
 	var users []map[string]interface{}
 	json.Unmarshal(data, &users)
 	return users, nil
+}
+
+// CheckEmailExists Gitea에서 이메일 중복 여부 확인
+func CheckEmailExists(email string) bool {
+	users, err := ListUsers()
+	if err != nil {
+		return false
+	}
+	for _, u := range users {
+		if e, _ := u["email"].(string); e == email {
+			return true
+		}
+	}
+	return false
+}
+
+// IsOwnEmail 해당 Gitea 사용자의 이메일인지 확인
+func IsOwnEmail(username, email string) bool {
+	if username == "" {
+		return false
+	}
+	data, status, err := doRequest("GET", "/users/"+username, nil)
+	if err != nil || status >= 400 {
+		return false
+	}
+	var user map[string]interface{}
+	json.Unmarshal(data, &user)
+	e, _ := user["email"].(string)
+	return e == email
+}
+
+// CreateUserToken Gitea 사용자의 API 토큰 생성 (Basic Auth 사용)
+func CreateUserToken(username, password string) (string, error) {
+	u := config.GitHubAPI + fmt.Sprintf("/users/%s/tokens", username)
+	body := map[string]interface{}{
+		"name":   "gojira-auto",
+		"scopes": []string{"all"},
+	}
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", u, bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth(username, password)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("create token failed (%d): %s", resp.StatusCode, string(data))
+	}
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	token, _ := result["sha1"].(string)
+	return token, nil
 }
 
 // --- Repo ---
@@ -398,7 +471,7 @@ func ListBranches(owner, repo string) (interface{}, error) {
 
 // --- Pull Requests ---
 
-func CreatePR(owner, repo, title, body, head, base string) (map[string]interface{}, error) {
+func CreatePR(owner, repo, title, body, head, base string, userToken ...string) (map[string]interface{}, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls", owner, repo)
 	payload := map[string]string{
 		"title": title,
@@ -406,7 +479,11 @@ func CreatePR(owner, repo, title, body, head, base string) (map[string]interface
 		"head":  head,
 		"base":  base,
 	}
-	data, status, err := doRequest("POST", path, payload)
+	token := ""
+	if len(userToken) > 0 {
+		token = userToken[0]
+	}
+	data, status, err := doRequestAs("POST", path, payload, token)
 	if err != nil {
 		return nil, err
 	}
@@ -444,23 +521,40 @@ func GetPR(owner, repo string, prNumber int) (map[string]interface{}, error) {
 	return result, nil
 }
 
-func CreateReview(owner, repo string, prNumber int, event, body string) error {
+// CreateReview PR에 리뷰(승인/반려)를 생성하고, 리뷰 ID를 반환한다.
+func CreateReview(owner, repo string, prNumber int, event, body string, userToken ...string) (int, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, prNumber)
 	payload := map[string]string{"event": event, "body": body}
-	data, status, err := doRequest("POST", path, payload)
+	token := ""
+	if len(userToken) > 0 {
+		token = userToken[0]
+	}
+	data, status, err := doRequestAs("POST", path, payload, token)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if status >= 400 {
-		return fmt.Errorf("create review failed (%d): %s", status, string(data))
+		return 0, fmt.Errorf("create review failed (%d): %s", status, string(data))
 	}
-	return nil
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	id, _ := result["id"].(float64)
+	return int(id), nil
 }
 
-func MergePR(owner, repo string, prNumber int, mergeMethod string) error {
+func MergePR(owner, repo string, prNumber int, mergeMethod string, userToken ...string) error {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, prNumber)
+	method := "PUT"
 	payload := map[string]string{"merge_method": mergeMethod}
-	data, status, err := doRequest("PUT", path, payload)
+	if IsGitea() {
+		method = "POST"
+		payload = map[string]string{"Do": mergeMethod}
+	}
+	token := ""
+	if len(userToken) > 0 {
+		token = userToken[0]
+	}
+	data, status, err := doRequestAs(method, path, payload, token)
 	if err != nil {
 		return err
 	}
@@ -483,6 +577,13 @@ func RequestReviewers(owner, repo string, prNumber int, reviewers []string) erro
 		return fmt.Errorf("request reviewers failed (%d): %s", status, string(data))
 	}
 	return nil
+}
+
+// RemoveRequestedReviewer 리뷰 완료 후 requested_reviewers에서 제거
+func RemoveRequestedReviewer(owner, repo string, prNumber int, username string) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, prNumber)
+	payload := map[string]interface{}{"reviewers": []string{username}}
+	doRequest("DELETE", path, payload)
 }
 
 // --- Branch Protection ---
@@ -542,6 +643,26 @@ func setBranchProtectionGitea(owner, repo, branch string, requiredReviewers int)
 	}
 	if status >= 400 {
 		return fmt.Errorf("set branch protection failed (%d): %s", status, string(data))
+	}
+	return nil
+}
+
+// FixReviewState Gitea DB에서 리뷰 type을 직접 업데이트 (Gitea 1.25 API 버그 우회)
+// event: "APPROVE" → type=1, "REQUEST_CHANGES" → type=2
+func FixReviewState(reviewID int, event string) error {
+	typeVal := 0
+	switch event {
+	case "APPROVE":
+		typeVal = 1
+	case "REQUEST_CHANGES":
+		typeVal = 2
+	default:
+		return nil
+	}
+	cmd := exec.Command("docker", "exec", "gojira-gitea", "sqlite3", "/data/gitea/gitea.db",
+		fmt.Sprintf("UPDATE review SET type=%d, official=1 WHERE id=%d;", typeVal, reviewID))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("fix review state failed: %v (%s)", err, string(out))
 	}
 	return nil
 }
