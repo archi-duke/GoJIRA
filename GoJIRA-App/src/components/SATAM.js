@@ -532,6 +532,7 @@ function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
 /* ---------- 메인 SATAM 컴포넌트 ---------- */
 
 const NAV_ITEMS = [
+  { key: 'docs', label: 'Docs' },
   { key: 'issues', label: 'Issues' },
   { key: 'relationMap', label: 'Relation Map' },
   { key: 'satam', label: 'SATAM' },

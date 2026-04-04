@@ -10,6 +10,7 @@ const STATUS_OPTIONS = ['To Do', 'In Progress', 'Done'];
 const PRIORITY_OPTIONS = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];
 
 const NAV_ITEMS = [
+  { key: 'docs', label: 'Docs' },
   { key: 'issues', label: 'Issues' },
   { key: 'relationMap', label: 'Relation Map' },
   { key: 'satam', label: 'SATAM' },

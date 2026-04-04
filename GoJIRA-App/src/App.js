@@ -3,6 +3,8 @@ import ProjectMap from './components/ProjectMap';
 import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
+import DocEditor from './components/DocEditor';
+import AlertModal from './components/AlertModal';
 import AccountManager from './components/AccountManager';
 import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
@@ -42,7 +44,7 @@ function App() {
     navigate(target, selectedProject);
   }, [navigate, selectedProject]);
 
-  const activeNav = ['map', 'issues', 'relationMap', 'satam'].includes(page) ? 'map' : page;
+  const activeNav = ['map', 'issues', 'docs', 'relationMap', 'satam'].includes(page) ? 'map' : page;
 
   // USR 권한 15 = CRUD 전체 → Account/Notice 메뉴 접근 허용
   const hasAccountAdmin = authority && (authority.USR || 0) >= 15;
@@ -61,7 +63,9 @@ function App() {
   ];
 
   let content;
-  if (page === 'issues' && selectedProject) {
+  if (page === 'docs' && selectedProject) {
+    content = <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} />;
+  } else if (page === 'issues' && selectedProject) {
     content = <IssueList project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
   } else if (page === 'relationMap' && selectedProject) {
     content = <RelationMap project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
@@ -93,6 +97,7 @@ function App() {
         <span className="app-user">{user}</span>
       </div>
       <div className="app-body">{content}</div>
+      <AlertModal />
       <NoticePopup />
     </div>
   );

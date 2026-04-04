@@ -114,6 +114,7 @@ function bezierPath(x1, y1, x2, y2) {
 /* ---------- main component ---------- */
 
 const NAV_ITEMS = [
+  { key: 'docs', label: 'Docs' },
   { key: 'issues', label: 'Issues' },
   { key: 'relationMap', label: 'Relation Map' },
   { key: 'satam', label: 'SATAM' },
