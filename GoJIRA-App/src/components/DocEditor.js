@@ -15,7 +15,6 @@ const NAV_ITEMS = [
   { key: 'satam', label: 'SATAM' },
 ];
 
-// base64 → UTF-8 디코딩
 function decodeBase64(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -28,20 +27,41 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const hasRepo = !!project?.documents?.repoName;
 
   const [tree, setTree] = useState(null);
+  const [changedFiles, setChangedFiles] = useState(new Set());
   const [selectedFile, setSelectedFile] = useState(null);
   const [content, setContent] = useState('');
   const [original, setOriginal] = useState('');
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
 
-  // 진입 시 파일 트리 로드
+  // 진입 시 main 트리 + 사용자 브랜치 트리 비교
   useEffect(() => {
     if (!hasRepo) return;
-    fetch(`${API}/${projectCode}/tree?ref=main`)
-      .then(r => r.json()).then(d => setTree(d)).catch(() => {});
-  }, [projectCode, hasRepo]);
+    const branch = `docs/${user}`;
 
-  // 파일 클릭 → main에서 읽기
+    // main 트리
+    fetch(`${API}/${projectCode}/tree?ref=main`)
+      .then(r => r.json()).then(mainTree => {
+        setTree(mainTree);
+
+        // 사용자 브랜치 트리와 비교
+        fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`)
+          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+          .then(userTree => {
+            const mainShaMap = {};
+            (mainTree?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; });
+            const changed = new Set();
+            (userTree?.tree || []).forEach(f => {
+              if (mainShaMap[f.path] !== f.sha) changed.add(f.path);
+            });
+            // main에만 있는 파일 (삭제된 파일)은 제외
+            setChangedFiles(changed);
+          })
+          .catch(() => setChangedFiles(new Set()));
+      })
+      .catch(() => {});
+  }, [projectCode, hasRepo, user]);
+
   async function handleFileClick(path) {
     if (editMode && content !== original) {
       if (!await modalConfirm('저장하지 않은 변경이 있습니다. 이동하시겠습니까?')) return;
@@ -57,7 +77,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
-  // 저장 (Gitea API로 직접 커밋)
   async function handleSave() {
     if (!await modalConfirm(`"${selectedFile}" 파일을 저장(커밋)하시겠습니까?`)) return;
     setSaving(true);
@@ -70,6 +89,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     if (res.ok) {
       setOriginal(content);
       setEditMode(false);
+      setChangedFiles(prev => new Set([...prev, selectedFile]));
       modalAlert('저장 완료');
     } else {
       const err = await res.json().catch(() => ({}));
@@ -77,7 +97,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
-  // 삭제
   async function handleDelete() {
     if (!await modalConfirm(`"${selectedFile}" 파일을 삭제하시겠습니까?`)) return;
     const res = await fetch(`${API}/${projectCode}/file`, {
@@ -90,7 +109,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       setContent('');
       setOriginal('');
       setEditMode(false);
-      // 트리 다시 로드
       fetch(`${API}/${projectCode}/tree?ref=main`)
         .then(r => r.json()).then(d => setTree(d)).catch(() => {});
       modalAlert('삭제 완료');
@@ -100,7 +118,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
-  // 발행신청 (PR 생성)
   async function handleCreatePR() {
     if (!await modalConfirm(`docs/${user} 브랜치의 변경사항을 발행 신청(PR)하시겠습니까?`)) return;
     const res = await fetch(`${API}/${projectCode}/pr`, {
@@ -132,25 +149,36 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 
   const modified = content !== original;
   const items = (tree?.tree || []).filter(i => i.type !== 'tree').sort((a, b) => a.path.localeCompare(b.path));
+  const hasChanges = changedFiles.size > 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <CommonBar title={barTitle} onBack={onBack} nav={nav} />
       <div className="de-editor">
         <div className="de-sidebar">
-          <div className="de-sidebar-header">main</div>
-          {items.map(item => (
-            <div key={item.path}
-              className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''}`}
-              onClick={() => handleFileClick(item.path)}>
-              {item.path}
-            </div>
-          ))}
-          <div style={{ padding: '12px', borderTop: '1px solid #eee', marginTop: 'auto' }}>
-            <button className="de-btn de-btn-primary" style={{ width: '100%' }} onClick={handleCreatePR}>
-              발행신청 (PR)
+          <div className="de-sidebar-header">
+            <span>main</span>
+            <button
+              className={`de-btn ${hasChanges ? 'de-btn-primary' : ''}`}
+              style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
+              onClick={handleCreatePR}
+              disabled={!hasChanges}
+              title={hasChanges ? `${changedFiles.size}개 파일 변경됨` : '변경사항 없음'}
+            >
+              발행신청
             </button>
           </div>
+          {items.map(item => {
+            const isChanged = changedFiles.has(item.path);
+            return (
+              <div key={item.path}
+                className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${isChanged ? 'de-file-changed' : ''}`}
+                onClick={() => handleFileClick(item.path)}>
+                {isChanged && <span className="de-file-badge">M</span>}
+                {item.path}
+              </div>
+            );
+          })}
         </div>
         <div className="de-main">
           {selectedFile ? (
