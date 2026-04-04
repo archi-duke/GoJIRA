@@ -699,9 +699,21 @@ function GitGraph({ repo }) {
   if (!data) return <div className="dm-graph">로딩 중...</div>;
   const { branches = [], commits = [], hasMore = false } = data;
 
-  // 선택된 브랜치의 커밋만 필터링
+  // 선택된 브랜치의 모든 커밋 포함 (HEAD뿐만 아니라 모든 조상)
+  // 각 커밋이 선택된 브랜치에 속하는지 추적
+  const selectedLanes = new Set();
+  commits.forEach(c => {
+    if (c.refs && c.refs.some(ref => selectedBranches.has(ref))) {
+      selectedLanes.add(c.lane);
+      if (c.lanes) {
+        c.lanes.forEach(l => selectedLanes.add(l));
+      }
+    }
+  });
+
   const filteredCommits = commits.filter(c =>
-    c.refs && c.refs.some(ref => selectedBranches.has(ref))
+    selectedLanes.has(c.lane) ||
+    (c.lanes && c.lanes.some(l => selectedLanes.has(l)))
   );
 
   const handleBranchToggle = (branch) => {
@@ -792,56 +804,70 @@ function GitGraph({ repo }) {
             />
           ))}
 
-          {/* 연결선: 자식→부모 */}
+          {/* 연결선: 현재 커밋 → 다음 커밋 */}
           {filteredCommits.map((c, i) => {
             const lines = [];
-            if (c.parents?.length) {
-              // 첫 parent (main lane)
-              const mainParent = c.parents[0];
-              const pi = shaIdx[mainParent];
-              if (pi !== undefined) {
-                const x1 = x(c.lane), y1 = y(i);
-                const x2 = x(filteredCommits[pi].lane), y2 = y(pi);
-                const color = laneColors[c.lane] || nodeColor(c);
-                if (Math.abs(x1 - x2) < 1) {
-                  // 같은 lane: 직선
-                  lines.push(
-                    <line key={`main-${c.sha}`} x1={x1} y1={y1 + 8} x2={x2} y2={y2 - 8}
-                      stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-                  );
-                } else {
-                  // 다른 lane: 곡선 (GitExtensions 스타일)
-                  const midY = (y1 + y2) / 2;
-                  lines.push(
-                    <path key={`main-${c.sha}`}
-                      d={`M${x1},${y1 + 8} L${x1},${midY} Q${(x1 + x2) / 2},${midY} ${x2},${midY} L${x2},${y2 - 8}`}
-                      fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-                  );
-                }
-              }
 
-              // 다른 parents (merge)
-              if (c.lanes) {
-                c.lanes.forEach(mergeLane => {
-                  const mergeParent = c.parents.find(psha => {
-                    const pidx = shaIdx[psha];
-                    return pidx !== undefined && filteredCommits[pidx].lane === mergeLane;
-                  });
-                  if (mergeParent) {
-                    const pi = shaIdx[mergeParent];
-                    const x1 = x(c.lane), y1 = y(i);
-                    const x2 = x(filteredCommits[pi].lane), y2 = y(pi);
-                    const mergeColor = laneColors[mergeLane] || '#ccc';
-                    const midY = (y1 + y2) / 2;
-                    lines.push(
-                      <path key={`merge-${c.sha}-${mergeLane}`}
-                        d={`M${x1},${y1 + 8} L${x1},${midY} Q${(x1 + x2) / 2},${midY} ${x2},${midY} L${x2},${y2 - 8}`}
-                        fill="none" stroke={mergeColor} strokeWidth={1.5} opacity={0.7} strokeLinecap="round" />
-                    );
-                  }
-                });
+            // 같은 lane의 다음 커밋으로의 라인
+            if (i + 1 < filteredCommits.length) {
+              const nextC = filteredCommits[i + 1];
+              const x1 = x(c.lane);
+              const y1 = y(i);
+              const x2 = x(nextC.lane);
+              const y2 = y(i + 1);
+
+              if (Math.abs(x1 - x2) < 1) {
+                // 같은 lane: 수직선
+                lines.push(
+                  <line
+                    key={`line-${c.sha}`}
+                    x1={x1} y1={y1 + 10}
+                    x2={x2} y2={y2 - 10}
+                    stroke={laneColors[c.lane] || nodeColor(c)}
+                    strokeWidth={2.5}
+                    strokeLinecap="round"
+                  />
+                );
+              } else {
+                // 다른 lane: 곡선 (GitExtensions 스타일)
+                const midY = (y1 + y2) / 2;
+                lines.push(
+                  <path
+                    key={`curve-${c.sha}`}
+                    d={`M${x1},${y1 + 10} C${x1},${midY} ${x2},${midY} ${x2},${y2 - 10}`}
+                    fill="none"
+                    stroke={laneColors[c.lane] || nodeColor(c)}
+                    strokeWidth={2.5}
+                    strokeLinecap="round"
+                  />
+                );
               }
             }
+
+            // Merge 커밋: 다른 lane에서 오는 라인
+            if (c.lanes && c.lanes.length > 0) {
+              for (const mergeLane of c.lanes) {
+                // mergeLane에서 현재 커밋으로 오는 라인
+                const x1 = x(mergeLane);
+                const y1 = y(i) - rowH; // 이전 행에서 시작
+                const x2 = x(c.lane);
+                const y2 = y(i);
+
+                const midY = (y1 + y2) / 2;
+                lines.push(
+                  <path
+                    key={`merge-${c.sha}-${mergeLane}`}
+                    d={`M${x1},${y1 + 10} C${x1},${midY} ${x2},${midY} ${x2},${y2 - 10}`}
+                    fill="none"
+                    stroke={laneColors[mergeLane] || '#999'}
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    opacity={0.8}
+                  />
+                );
+              }
+            }
+
             return lines;
           })}
 
@@ -852,7 +878,14 @@ function GitGraph({ repo }) {
             return (
               <g key={c.sha}>
                 {/* 배경 원 */}
-                <circle cx={x(c.lane)} cy={y(i)} r={isMerge ? 7 : 5} fill="#fff" stroke={nodeCol} strokeWidth={2.5} />
+                <circle
+                  cx={x(c.lane)}
+                  cy={y(i)}
+                  r={isMerge ? 7 : 5}
+                  fill="#fff"
+                  stroke={nodeCol}
+                  strokeWidth={2.5}
+                />
                 {/* merge 표시 */}
                 {isMerge && (
                   <circle cx={x(c.lane)} cy={y(i)} r={3} fill={nodeCol} />
