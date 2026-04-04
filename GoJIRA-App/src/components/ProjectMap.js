@@ -143,7 +143,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`설계문서 생성 완료!\n브랜치: ${data.branch}\n파일 수: ${data.files}\nPR이 생성되었습니다.`);
+        alert(`설계문서 생성 완료!\n브랜치: ${data.branch}\n파일 수: ${data.files}\n\n문서관리 > Edit 탭에서 확인 후 배포(PR) 요청하세요.`);
       } else {
         alert('실패: ' + (data.error || res.statusText));
       }

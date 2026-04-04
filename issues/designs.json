@@ -33,7 +33,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "구조설계 1 123",
+            "summary": "구조설계 1",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/issue/KAN-4/watchers",
                 "watchCount": 0,
@@ -264,7 +264,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-04-04T14:20:06.191+0900",
+            "updated": "2026-04-04T20:36:50.996+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -905,7 +905,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "상세설계 111",
+            "summary": "상세설계 1",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/issue/KAN-4/watchers",
                 "watchCount": 0,
@@ -1001,7 +1001,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-31T14:56:59.908+0900",
+            "updated": "2026-04-04T21:38:39.585+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",
@@ -1092,7 +1092,7 @@
             },
             "description": null,
             "resolution": null,
-            "summary": "상세설계 222",
+            "summary": "상세설계2",
             "watches": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/issue/KAN-4/watchers",
                 "watchCount": 0,
@@ -1233,7 +1233,7 @@
                 }
             ],
             "assignee": null,
-            "updated": "2026-03-31T14:56:59.935+0900",
+            "updated": "2026-04-04T21:38:41.708+0900",
             "status": {
                 "self": "https://dukekimm.atlassian.net/rest/api/3/status/10000",
                 "description": "",

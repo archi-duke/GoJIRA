@@ -119,6 +119,14 @@ func main() {
 			r.Post("/{code}/pr/{num}/merge", handlers.DocRepoPRMergeHandler)
 			r.Get("/{code}/pr/{num}/reviews", handlers.DocRepoPRReviewsHandler)
 			r.Post("/{code}/git/publish", handlers.DocRepoGitPublishHandler)
+			// 문서 편집 API
+			r.Post("/{code}/edit/start", handlers.DocRepoEditStartHandler)
+			r.Get("/{code}/edit/file", handlers.DocRepoEditFileHandler)
+			r.Put("/{code}/edit/file", handlers.DocRepoEditSaveHandler)
+			r.Post("/{code}/edit/commit", handlers.DocRepoEditCommitHandler)
+			r.Post("/{code}/edit/pr", handlers.DocRepoEditPRHandler)
+			r.Get("/{code}/edit/status", handlers.DocRepoEditStatusHandler)
+			r.Delete("/{code}/edit/discard", handlers.DocRepoEditDiscardHandler)
 		})
 
 		// DocLink — 향후 구현

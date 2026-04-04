@@ -3,6 +3,7 @@ import AccountManager from './components/AccountManager';
 import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
 import DocManager from './components/DocManager';
+import AlertModal from './components/AlertModal';
 import { getAuthUser } from './utils/auth';
 import appRegistry from './apps/registry';
 import config from './config';
@@ -119,6 +120,7 @@ function App() {
       </div>
       <div className="app-body">{content}</div>
       <NoticePopup user={user} />
+      <AlertModal />
     </div>
   );
 }

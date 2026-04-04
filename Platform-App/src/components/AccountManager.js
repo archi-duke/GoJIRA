@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
+import { modalAlert } from './AlertModal';
 import './AccountManager.css';
 
 const API = config.API_BASE + '/Account';
@@ -50,7 +51,7 @@ export default function AccountManager({ user }) {
     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert(err.error || '저장 실패');
+      modalAlert(err.error || '저장 실패');
       return;
     }
     setEditItem(null);

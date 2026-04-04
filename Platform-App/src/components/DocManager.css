@@ -122,3 +122,27 @@
 .dm-graph-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dm-graph-author { font-size: 12px; color: #888; width: 100px; text-align: right; }
 .dm-graph-ref { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; color: #fff; white-space: nowrap; }
+
+/* Editor */
+.dm-editor-start { display: flex; align-items: center; justify-content: center; height: 100%; text-align: center; }
+.dm-pending-notice p { margin-bottom: 12px; font-size: 14px; color: #555; }
+.dm-btn { padding: 6px 16px; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; margin: 0 4px; background: lightgray; color: #000; }
+.dm-btn-primary { background: #2c3e50; color: #fff; }
+.dm-btn-danger { background: #e74c3c; color: #fff; }
+
+.dm-editor { display: flex; flex: 1; overflow: hidden; }
+.dm-editor-sidebar { width: 220px; border-right: 1px solid #e0e0e0; overflow-y: auto; background: #fafafa; flex-shrink: 0; }
+.dm-editor-sidebar-header { padding: 8px 12px; font-size: 11px; color: #888; border-bottom: 1px solid #eee; }
+.dm-editor-file { padding: 6px 12px; font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-editor-file:hover { background: #eee; }
+.dm-editor-file-active { background: #d6eaf8; font-weight: 600; }
+
+.dm-editor-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.dm-editor-toolbar { display: flex; align-items: center; padding: 6px 12px; border-bottom: 1px solid #eee; gap: 8px; }
+.dm-editor-filename { font-size: 13px; font-weight: 600; flex: 1; }
+.dm-modified { color: #e67e22; font-size: 16px; }
+.dm-editor-actions { display: flex; gap: 4px; align-items: center; }
+
+.dm-editor-body { flex: 1; overflow: auto; }
+.dm-editor-textarea { width: 100%; height: 100%; border: none; outline: none; resize: none; padding: 16px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; }
+.dm-editor-preview { padding: 16px; font-size: 14px; line-height: 1.7; }

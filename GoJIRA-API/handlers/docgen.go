@@ -161,13 +161,13 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	branchName := fmt.Sprintf("docs/%s", userId)
 
-	// LLM 기반 PR 제목/본문 생성
-	prTitle, prBody := summarizePRContent(projectName, req.PrjID, files)
+	// LLM 기반 커밋 메시지 생성
+	commitMsg, _ := summarizePRContent(projectName, req.PrjID, files)
 
 	publishResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/git/publish", req.PrjID),
 		map[string]interface{}{
 			"branch": branchName, "files": files,
-			"message": prTitle, "prTitle": prTitle, "prBody": prBody,
+			"message": commitMsg,
 		}, userId)
 	if sc >= 400 {
 		errMsg := "문서 배포 실패"
@@ -181,7 +181,7 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"message": "설계문서 생성 및 PR 요청 완료",
+		"message": "설계문서가 작업 브랜치에 생���되었습니다.",
 		"branch":  branchName,
 		"files":   len(files),
 		"result":  publishResult,
