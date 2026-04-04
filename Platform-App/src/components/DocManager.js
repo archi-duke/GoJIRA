@@ -812,7 +812,7 @@ function GitGraph({ repo }) {
       </div>
       <div className="dm-graph-body">
         <svg width={svgW} height={filteredCommits.length * rowH + 20} style={{ flexShrink: 0 }}>
-          {/* 배경 lane 라인 */}
+          {/* 배경 lane 라인: 각 브랜치별 수직선 */}
           {sortedLanes.map(lane => (
             <line
               key={`bg-lane-${lane}`}
@@ -821,8 +821,8 @@ function GitGraph({ repo }) {
               x2={x(lane)}
               y2={filteredCommits.length * rowH + 20}
               stroke={laneColors[lane]}
-              strokeWidth={1}
-              opacity={0.1}
+              strokeWidth={2}
+              opacity={0.4}
             />
           ))}
 
