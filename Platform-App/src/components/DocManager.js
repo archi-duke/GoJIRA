@@ -681,6 +681,26 @@ function GitGraph({ repo }) {
   useEffect(() => {
     fetch(`${API}/${repo.projectCode}/graph?offset=${offset}&limit=${limit}`)
       .then(r => r.json()).then(d => {
+        // lanes 정보 재구성 (merge parent의 lane 정보)
+        const shaToCommit = {};
+        (d.commits || []).forEach(c => {
+          shaToCommit[c.sha] = c;
+        });
+
+        d.commits?.forEach(c => {
+          if (c.parents?.length > 1) {
+            // merge 커밋: 2번째 parent부터의 lane 수집
+            c.lanes = [];
+            for (let i = 1; i < c.parents.length; i++) {
+              const parentSha = c.parents[i];
+              const parentCommit = shaToCommit[parentSha];
+              if (parentCommit && parentCommit.lane !== undefined) {
+                c.lanes.push(parentCommit.lane);
+              }
+            }
+          }
+        });
+
         if (offset === 0) {
           setData(d);
           // 초기: 모든 브랜치 선택
@@ -804,17 +824,21 @@ function GitGraph({ repo }) {
             />
           ))}
 
-          {/* 연결선: 현재 커밋 → 다음 커밋 */}
+          {/* 연결선: 각 커밋 → 부모 커밋 */}
           {filteredCommits.map((c, i) => {
             const lines = [];
+            if (!c.parents || c.parents.length === 0) return lines;
 
-            // 같은 lane의 다음 커밋으로의 라인
-            if (i + 1 < filteredCommits.length) {
-              const nextC = filteredCommits[i + 1];
-              const x1 = x(c.lane);
-              const y1 = y(i);
-              const x2 = x(nextC.lane);
-              const y2 = y(i + 1);
+            const x1 = x(c.lane);
+            const y1 = y(i);
+
+            // 첫 번째 parent (main line)
+            const mainParent = c.parents[0];
+            const parentIdx = shaIdx[mainParent];
+            if (parentIdx !== undefined) {
+              const pCommit = filteredCommits[parentIdx];
+              const x2 = x(pCommit.lane);
+              const y2 = y(parentIdx);
 
               if (Math.abs(x1 - x2) < 1) {
                 // 같은 lane: 수직선
@@ -823,46 +847,46 @@ function GitGraph({ repo }) {
                     key={`line-${c.sha}`}
                     x1={x1} y1={y1 + 10}
                     x2={x2} y2={y2 - 10}
-                    stroke={laneColors[c.lane] || nodeColor(c)}
-                    strokeWidth={2.5}
+                    stroke={laneColors[c.lane]}
+                    strokeWidth={2}
                     strokeLinecap="round"
                   />
                 );
               } else {
-                // 다른 lane: 곡선 (GitExtensions 스타일)
+                // 다른 lane: 곡선
                 const midY = (y1 + y2) / 2;
                 lines.push(
                   <path
-                    key={`curve-${c.sha}`}
+                    key={`line-${c.sha}`}
                     d={`M${x1},${y1 + 10} C${x1},${midY} ${x2},${midY} ${x2},${y2 - 10}`}
                     fill="none"
-                    stroke={laneColors[c.lane] || nodeColor(c)}
-                    strokeWidth={2.5}
+                    stroke={laneColors[c.lane]}
+                    strokeWidth={2}
                     strokeLinecap="round"
                   />
                 );
               }
             }
 
-            // Merge 커밋: 다른 lane에서 오는 라인
-            if (c.lanes && c.lanes.length > 0) {
-              for (const mergeLane of c.lanes) {
-                // mergeLane에서 현재 커밋으로 오는 라인
-                const x1 = x(mergeLane);
-                const y1 = y(i) - rowH; // 이전 행에서 시작
-                const x2 = x(c.lane);
-                const y2 = y(i);
+            // 다른 parents (merge lines)
+            for (let j = 1; j < c.parents.length; j++) {
+              const mergeParent = c.parents[j];
+              const mergeParentIdx = shaIdx[mergeParent];
+              if (mergeParentIdx !== undefined) {
+                const mCommit = filteredCommits[mergeParentIdx];
+                const x2 = x(mCommit.lane);
+                const y2 = y(mergeParentIdx);
 
                 const midY = (y1 + y2) / 2;
                 lines.push(
                   <path
-                    key={`merge-${c.sha}-${mergeLane}`}
+                    key={`merge-${c.sha}-${j}`}
                     d={`M${x1},${y1 + 10} C${x1},${midY} ${x2},${midY} ${x2},${y2 - 10}`}
                     fill="none"
-                    stroke={laneColors[mergeLane] || '#999'}
-                    strokeWidth={2}
+                    stroke={laneColors[mCommit.lane] || '#bbb'}
+                    strokeWidth={1.5}
                     strokeLinecap="round"
-                    opacity={0.8}
+                    opacity={0.7}
                   />
                 );
               }
@@ -871,25 +895,23 @@ function GitGraph({ repo }) {
             return lines;
           })}
 
-          {/* 노드 */}
+          {/* 노드 (Gitea 스타일 다이아몬드) */}
           {filteredCommits.map((c, i) => {
             const isMerge = c.parents?.length > 1;
-            const nodeCol = nodeColor(c);
+            const nodeCol = isMerge ? '#e74c3c' : '#27ae60';
+            const cx = x(c.lane);
+            const cy = y(i);
+            const size = 6;
+
             return (
               <g key={c.sha}>
-                {/* 배경 원 */}
-                <circle
-                  cx={x(c.lane)}
-                  cy={y(i)}
-                  r={isMerge ? 7 : 5}
-                  fill="#fff"
-                  stroke={nodeCol}
-                  strokeWidth={2.5}
+                {/* 다이아몬드 모양 노드 */}
+                <polygon
+                  points={`${cx},${cy - size} ${cx + size},${cy} ${cx},${cy + size} ${cx - size},${cy}`}
+                  fill={nodeCol}
+                  stroke="#fff"
+                  strokeWidth={1.5}
                 />
-                {/* merge 표시 */}
-                {isMerge && (
-                  <circle cx={x(c.lane)} cy={y(i)} r={3} fill={nodeCol} />
-                )}
               </g>
             );
           })}
