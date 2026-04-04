@@ -740,9 +740,9 @@ function GitGraph({ repo }) {
 
   const maxLane = sortedLanes.length > 0 ? Math.max(...sortedLanes.map(l => laneRemap[l])) : 0;
   const rowH = 34;
-  const colW = 30;
-  const svgW = (maxLane + 1) * colW + 40;
-  const x = lane => laneRemap[lane] * colW + 20;
+  const colW = 45;
+  const svgW = (maxLane + 1) * colW + 60;
+  const x = lane => laneRemap[lane] * colW + 30;
   const y = i => i * rowH + 18;
 
   // 커밋에 대한 색상 결정
@@ -755,6 +755,12 @@ function GitGraph({ repo }) {
     return '#2c3e50';
   }
 
+  // 각 lane별 색상 매핑
+  const laneColors = {};
+  sortedLanes.forEach((lane, idx) => {
+    laneColors[lane] = colors[idx % colors.length];
+  });
+
   return (
     <div className="dm-graph">
       <div className="dm-graph-header">
@@ -762,7 +768,7 @@ function GitGraph({ repo }) {
           <span
             key={b}
             className={`dm-branch-tag ${selectedBranches.has(b) ? 'dm-branch-active' : 'dm-branch-inactive'}`}
-            style={{ borderLeft: `3px solid ${branchColor[b] || '#888'}`, cursor: 'pointer' }}
+            style={{ borderLeft: `4px solid ${branchColor[b] || '#888'}`, cursor: 'pointer' }}
             onClick={() => handleBranchToggle(b)}
             title="클릭으로 브랜치 표시/숨김"
           >
@@ -772,6 +778,20 @@ function GitGraph({ repo }) {
       </div>
       <div className="dm-graph-body">
         <svg width={svgW} height={filteredCommits.length * rowH + 20} style={{ flexShrink: 0 }}>
+          {/* 배경 lane 라인 */}
+          {sortedLanes.map(lane => (
+            <line
+              key={`bg-lane-${lane}`}
+              x1={x(lane)}
+              y1={0}
+              x2={x(lane)}
+              y2={filteredCommits.length * rowH + 20}
+              stroke={laneColors[lane]}
+              strokeWidth={1}
+              opacity={0.1}
+            />
+          ))}
+
           {/* 연결선: 자식→부모 */}
           {filteredCommits.map((c, i) => {
             const lines = [];
@@ -782,19 +802,20 @@ function GitGraph({ repo }) {
               if (pi !== undefined) {
                 const x1 = x(c.lane), y1 = y(i);
                 const x2 = x(filteredCommits[pi].lane), y2 = y(pi);
-                const color = nodeColor(c);
+                const color = laneColors[c.lane] || nodeColor(c);
                 if (Math.abs(x1 - x2) < 1) {
                   // 같은 lane: 직선
                   lines.push(
-                    <line key={`main-${c.sha}`} x1={x1} y1={y1} x2={x2} y2={y2}
-                      stroke={color} strokeWidth={2} />
+                    <line key={`main-${c.sha}`} x1={x1} y1={y1 + 8} x2={x2} y2={y2 - 8}
+                      stroke={color} strokeWidth={2.5} strokeLinecap="round" />
                   );
                 } else {
-                  // 다른 lane: 곡선
+                  // 다른 lane: 곡선 (GitExtensions 스타일)
+                  const midY = (y1 + y2) / 2;
                   lines.push(
                     <path key={`main-${c.sha}`}
-                      d={`M${x1},${y1} C${x1},${y1 + rowH / 2} ${x2},${y2 - rowH / 2} ${x2},${y2}`}
-                      fill="none" stroke={color} strokeWidth={2} />
+                      d={`M${x1},${y1 + 8} L${x1},${midY} Q${(x1 + x2) / 2},${midY} ${x2},${midY} L${x2},${y2 - 8}`}
+                      fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" />
                   );
                 }
               }
@@ -802,7 +823,6 @@ function GitGraph({ repo }) {
               // 다른 parents (merge)
               if (c.lanes) {
                 c.lanes.forEach(mergeLane => {
-                  // 원본 lane 번호로 부모 찾기
                   const mergeParent = c.parents.find(psha => {
                     const pidx = shaIdx[psha];
                     return pidx !== undefined && filteredCommits[pidx].lane === mergeLane;
@@ -811,11 +831,12 @@ function GitGraph({ repo }) {
                     const pi = shaIdx[mergeParent];
                     const x1 = x(c.lane), y1 = y(i);
                     const x2 = x(filteredCommits[pi].lane), y2 = y(pi);
-                    const color = '#ccc'; // merge 선은 회색
+                    const mergeColor = laneColors[mergeLane] || '#ccc';
+                    const midY = (y1 + y2) / 2;
                     lines.push(
                       <path key={`merge-${c.sha}-${mergeLane}`}
-                        d={`M${x1},${y1} C${x1 - 20},${y1 + rowH / 2} ${x2 + 20},${y2 - rowH / 2} ${x2},${y2}`}
-                        fill="none" stroke={color} strokeWidth={1} strokeDasharray="2,2" />
+                        d={`M${x1},${y1 + 8} L${x1},${midY} Q${(x1 + x2) / 2},${midY} ${x2},${midY} L${x2},${y2 - 8}`}
+                        fill="none" stroke={mergeColor} strokeWidth={1.5} opacity={0.7} strokeLinecap="round" />
                     );
                   }
                 });
@@ -827,8 +848,17 @@ function GitGraph({ repo }) {
           {/* 노드 */}
           {filteredCommits.map((c, i) => {
             const isMerge = c.parents?.length > 1;
-            return <circle key={c.sha} cx={x(c.lane)} cy={y(i)} r={isMerge ? 6 : 4}
-              fill={nodeColor(c)} stroke={isMerge ? '#fff' : 'none'} strokeWidth={isMerge ? 2 : 0} />;
+            const nodeCol = nodeColor(c);
+            return (
+              <g key={c.sha}>
+                {/* 배경 원 */}
+                <circle cx={x(c.lane)} cy={y(i)} r={isMerge ? 7 : 5} fill="#fff" stroke={nodeCol} strokeWidth={2.5} />
+                {/* merge 표시 */}
+                {isMerge && (
+                  <circle cx={x(c.lane)} cy={y(i)} r={3} fill={nodeCol} />
+                )}
+              </g>
+            );
           })}
         </svg>
         <div className="dm-graph-list">
