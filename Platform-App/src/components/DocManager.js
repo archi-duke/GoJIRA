@@ -419,13 +419,34 @@ function DocTree({ repo }) {
 // --- Commit History ---
 function CommitHistory({ repo }) {
   const [commits, setCommits] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [selectedBranch, setSelectedBranch] = useState(repo.defaultBranch || 'main');
+
   useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/commits?branch=${repo.defaultBranch || 'main'}&perPage=50`)
-      .then(r => r.json()).then(d => setCommits(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch(`${API}/${repo.projectCode}/branches`)
+      .then(r => r.json()).then(d => {
+        const list = Array.isArray(d) ? d.map(b => b.name || b) : [];
+        setBranches(list);
+      }).catch(() => {});
   }, [repo]);
+
+  useEffect(() => {
+    fetch(`${API}/${repo.projectCode}/commits?branch=${selectedBranch}&perPage=50`)
+      .then(r => r.json()).then(d => setCommits(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [repo, selectedBranch]);
 
   return (
     <div className="dm-commits">
+      <div style={{ padding: '10px 10px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <select
+          value={selectedBranch}
+          onChange={e => setSelectedBranch(e.target.value)}
+          style={{ padding: '4px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
+        >
+          {branches.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <span style={{ fontSize: '12px', color: '#888' }}>{commits.length}개 커밋</span>
+      </div>
       <table className="dm-table">
         <thead><tr><th>SHA</th><th>메시지</th><th>작성자</th><th>일시</th></tr></thead>
         <tbody>
