@@ -429,11 +429,8 @@ function CommitHistory({ repo }) {
       .then(r => r.json()).then(d => {
         const list = Array.isArray(d) ? d.map(b => b.name || b) : [];
         setBranches(list);
-        // 기본: main만 활성화
-        const defaultActive = new Set();
-        if (list.includes('main')) defaultActive.add('main');
-        else if (list.length > 0) defaultActive.add(list[0]);
-        setActiveBranches(defaultActive);
+        // 기본: 모든 브랜치 활성화
+        setActiveBranches(new Set(list));
       }).catch(() => {});
   }, [repo]);
 
