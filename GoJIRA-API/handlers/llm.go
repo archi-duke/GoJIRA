@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"gojira-api/config"
 )
@@ -39,7 +40,7 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 규칙:
 - 제목: 70자 이내, "[프로젝트코드] 핵심변경내용" 형식
 - 본문: 변경 내용을 3~5줄로 요약 (마크다운 bullet 사용)
-- JSON 형식으로만 응답: {"title": "...", "body": "..."}
+- 순수 JSON만 응답 (코드블록이나 마크다운 없이): {"title": "...", "body": "..."}
 
 파일 내용:
 %s`, projectName, projectCode, content)
@@ -82,7 +83,17 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 		return fallbackTitle, fallbackBody
 	}
 
-	text := result.Choices[0].Message.Content
+	text := strings.TrimSpace(result.Choices[0].Message.Content)
+	// GPT가 ```json ... ``` 코드블록으로 감쌀 경우 제거
+	if strings.HasPrefix(text, "```") {
+		if i := strings.Index(text, "\n"); i != -1 {
+			text = text[i+1:]
+		}
+		if strings.HasSuffix(text, "```") {
+			text = strings.TrimSuffix(text, "```")
+		}
+		text = strings.TrimSpace(text)
+	}
 	var parsed struct {
 		Title string `json:"title"`
 		Body  string `json:"body"`
