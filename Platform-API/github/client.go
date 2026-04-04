@@ -354,6 +354,29 @@ func CreateOrUpdateFile(owner, repo, filePath, content, message, branch, sha str
 	return result, nil
 }
 
+// CreateOrUpdateFileAs creates/updates a file with user token.
+func CreateOrUpdateFileAs(owner, repo, filePath, content, message, branch, sha, userToken string) (map[string]interface{}, error) {
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
+	body := map[string]interface{}{
+		"message": message,
+		"content": content,
+		"branch":  branch,
+	}
+	if sha != "" {
+		body["sha"] = sha
+	}
+	data, status, err := doRequestAs("PUT", u, body, userToken)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("create/update file failed (%d): %s", status, string(data))
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
 // DeleteFile deletes a file from a repo.
 func DeleteFile(owner, repo, filePath, message, branch, sha string) error {
 	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
@@ -363,6 +386,24 @@ func DeleteFile(owner, repo, filePath, message, branch, sha string) error {
 		"branch":  branch,
 	}
 	_, status, err := doRequest("DELETE", u, body)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("delete file failed (%d)", status)
+	}
+	return nil
+}
+
+// DeleteFileAs deletes a file with user token.
+func DeleteFileAs(owner, repo, filePath, message, branch, sha, userToken string) error {
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
+	body := map[string]interface{}{
+		"message": message,
+		"sha":     sha,
+		"branch":  branch,
+	}
+	_, status, err := doRequestAs("DELETE", u, body, userToken)
 	if err != nil {
 		return err
 	}

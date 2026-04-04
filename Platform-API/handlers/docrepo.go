@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -331,6 +333,93 @@ func DocRepoFileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, content)
 }
+
+// PUT /DocRepo/{code}/file — 파일 수정 (사용자 브랜치에 커밋)
+func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	userId := r.Header.Get("X-User-Id")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	var body struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	// 사용자 브랜치 (docs/{userId})
+	branch := "docs/" + userId
+	// 브랜치가 없으면 main에서 생성
+	if _, err := github.GetBranchRef(owner, name, branch); err != nil {
+		mainSHA, _ := github.GetBranchRef(owner, name, "main")
+		if mainSHA != "" {
+			github.CreateBranch(owner, name, branch, mainSHA)
+		}
+	}
+	// 현재 파일의 SHA (사용자 브랜치 기준, 없으면 main 기준)
+	sha := ""
+	existing, err := github.GetFileContent(owner, name, body.Path, branch)
+	if err == nil {
+		sha, _ = existing["sha"].(string)
+	} else {
+		existing, err = github.GetFileContent(owner, name, body.Path, "main")
+		if err == nil {
+			sha, _ = existing["sha"].(string)
+		}
+	}
+	// 사용자 토큰 가져오기
+	userToken := getUserToken(r)
+	// content를 base64로 인코딩
+	encoded := base64.StdEncoding.EncodeToString([]byte(body.Content))
+	result, err := github.CreateOrUpdateFileAs(owner, name, body.Path, encoded, body.Message, branch, sha, userToken)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// DELETE /DocRepo/{code}/file — 파일 삭제 (사용자 브랜치에서)
+func DocRepoFileDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	userId := r.Header.Get("X-User-Id")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	var body struct {
+		Path    string `json:"path"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	branch := "docs/" + userId
+	existing, err := github.GetFileContent(owner, name, body.Path, branch)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "file not found")
+		return
+	}
+	sha, _ := existing["sha"].(string)
+	userToken := getUserToken(r)
+	if err := github.DeleteFileAs(owner, name, body.Path, body.Message, branch, sha, userToken); err != nil {
+		respondError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 
 // GET /DocRepo/{code}/commits
 func DocRepoCommitsHandler(w http.ResponseWriter, r *http.Request) {

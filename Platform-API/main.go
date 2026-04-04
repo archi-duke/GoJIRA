@@ -110,6 +110,8 @@ func main() {
 			r.Delete("/{code}/github", handlers.DocRepoGHDeleteHandler)
 			r.Get("/{code}/tree", handlers.DocRepoTreeHandler)
 			r.Get("/{code}/file", handlers.DocRepoFileHandler)
+			r.Put("/{code}/file", handlers.DocRepoFileUpdateHandler)
+			r.Delete("/{code}/file", handlers.DocRepoFileDeleteHandler)
 			r.Get("/{code}/commits", handlers.DocRepoCommitsHandler)
 			r.Get("/{code}/branches", handlers.DocRepoBranchesHandler)
 			r.Get("/{code}/graph", handlers.DocRepoGraphHandler)
