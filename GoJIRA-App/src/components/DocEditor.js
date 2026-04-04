@@ -29,13 +29,17 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [previewMode, setPreviewMode] = useState(false);
   const [hasPending, setHasPending] = useState(false);
 
-  // 미완료 작업 확인
+  // 진입 시 파일 트리 + 미완료 작업 확인
   useEffect(() => {
     if (!hasRepo) return;
+    // 파일 트리 바로 로드
+    fetch(`${API}/${projectCode}/tree?ref=main`)
+      .then(r => r.json()).then(d => setTree(d)).catch(() => {});
+    // 미완료 작업 확인
     fetch(`${API}/${projectCode}/edit/status`, { headers: { 'X-User-Id': user } })
       .then(r => r.json()).then(d => {
         setHasPending(d.hasPending);
-        if (d.hasPending) setBranch(d.branch);
+        if (d.hasPending) { setBranch(d.branch); setStarted(true); }
       }).catch(() => {});
   }, [projectCode, user, hasRepo]);
 
@@ -135,26 +139,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const modified = content !== original;
   const items = (tree?.tree || []).filter(i => i.type !== 'tree').sort((a, b) => a.path.localeCompare(b.path));
 
-  if (!started) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <CommonBar title={barTitle} onBack={onBack} nav={nav} />
-        <div className="de-start">
-        {hasPending ? (
-          <div>
-            <p>이전에 작업하던 내용이 있습니다. ({branch})</p>
-            <button className="de-btn" onClick={resumeEdit}>이어서 작업</button>
-            <button className="de-btn de-btn-danger" onClick={discardEdit}>폐기</button>
-          </div>
-        ) : (
-          <div>
-            <p>문서를 편집하려면 작업을 시작하세요.</p>
-            <button className="de-btn de-btn-primary" onClick={startEdit}>편집 시작</button>
-          </div>
-        )}
-        </div>
-      </div>
-    );
+  // 파일 읽기 (읽기 전용 모드 - main에서 직접)
+  async function handleFileRead(path) {
+    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
+    if (res.ok) {
+      const d = await res.json();
+      const text = d.content ? atob(d.content) : '';
+      setSelectedFile(path); setContent(text); setOriginal(text); setPreviewMode(true);
+    }
   }
 
   return (
@@ -162,11 +154,17 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       <CommonBar title={barTitle} onBack={onBack} nav={nav} />
       <div className="de-editor">
       <div className="de-sidebar">
-        <div className="de-sidebar-header">{branch}</div>
+        <div className="de-sidebar-header">
+          {started ? branch : 'main (읽기 전용)'}
+          {!started && (
+            <button className="de-btn de-btn-primary" style={{ marginLeft: 8, padding: '2px 8px', fontSize: '11px' }}
+              onClick={startEdit}>편집 시작</button>
+          )}
+        </div>
         {items.map(item => (
           <div key={item.path}
             className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''}`}
-            onClick={() => handleFileClick(item.path)}>
+            onClick={() => started ? handleFileClick(item.path) : handleFileRead(item.path)}>
             {item.path}
           </div>
         ))}
@@ -177,15 +175,15 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             <div className="de-toolbar">
               <span className="de-filename">{selectedFile} {modified && <span className="de-modified">●</span>}</span>
               <div className="de-actions">
-                <button className={`de-tab ${!previewMode ? 'de-tab-active' : ''}`} onClick={() => setPreviewMode(false)}>편집</button>
+                {started && <button className={`de-tab ${!previewMode ? 'de-tab-active' : ''}`} onClick={() => setPreviewMode(false)}>편집</button>}
                 <button className={`de-tab ${previewMode ? 'de-tab-active' : ''}`} onClick={() => setPreviewMode(true)}>미리보기</button>
-                <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
-                <button className="de-btn" onClick={handleCommit}>커밋/푸시</button>
-                <button className="de-btn de-btn-primary" onClick={handleCreatePR}>배포(PR) 요청</button>
+                {started && <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>}
+                {started && <button className="de-btn" onClick={handleCommit}>커밋/푸시</button>}
+                {started && <button className="de-btn de-btn-primary" onClick={handleCreatePR}>배포(PR) 요청</button>}
               </div>
             </div>
             <div className="de-body">
-              {previewMode ? (
+              {previewMode || !started ? (
                 <div className="de-preview">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
                 </div>
