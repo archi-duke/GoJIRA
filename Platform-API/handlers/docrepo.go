@@ -361,6 +361,7 @@ func DocRepoCommitsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /DocRepo/{code}/graph — 전체 브랜치의 커밋 그래프 데이터
+// 파라미터: offset=0, limit=30 (페이지네이션)
 func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -369,6 +370,16 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
+	}
+
+	// 페이지네이션 파라미터
+	offset := 0
+	limit := 30
+	if o := r.URL.Query().Get("offset"); o != "" {
+		fmt.Sscanf(o, "%d", &offset)
+	}
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
 	}
 
 	branchData, err := github.ListBranches(owner, name)
@@ -395,7 +406,8 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		bName, _ := bm["name"].(string)
 		branchNames = append(branchNames, bName)
 
-		commits, err := github.ListCommits(owner, name, bName, 30)
+		// offset + limit만큼 가져오기 (페이지네이션)
+		commits, err := github.ListCommits(owner, name, bName, offset+limit)
 		if err != nil {
 			continue
 		}
@@ -491,9 +503,21 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// offset/limit 적용
+	var sliced []*graphCommit
+	if offset < len(allCommits) {
+		end := offset + limit
+		if end > len(allCommits) {
+			end = len(allCommits)
+		}
+		sliced = allCommits[offset:end]
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"branches": branchNames,
-		"commits":  allCommits,
+		"commits":  sliced,
+		"total":    len(allCommits),
+		"hasMore":  offset+limit < len(allCommits),
 	})
 }
 

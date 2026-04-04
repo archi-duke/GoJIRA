@@ -114,8 +114,10 @@
 
 /* Graph */
 .dm-graph { flex: 1; overflow: auto; }
-.dm-graph-header { padding: 10px 16px; border-bottom: 1px solid #eee; font-size: 13px; color: #555; display: flex; gap: 4px; flex-wrap: wrap; }
-.dm-branch-tag { display: inline-block; padding: 2px 8px; background: #f5f5f5; border-radius: 3px; font-size: 11px; color: #333; padding-left: 10px; }
+.dm-graph-header { padding: 10px 16px; border-bottom: 1px solid #eee; font-size: 13px; color: #555; display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.dm-branch-tag { display: inline-block; padding: 2px 8px; background: #f5f5f5; border-radius: 3px; font-size: 11px; color: #333; padding-left: 10px; transition: opacity 0.2s; }
+.dm-branch-tag:hover { opacity: 0.8; }
+.dm-branch-inactive { opacity: 0.4; }
 .dm-graph-body { display: flex; overflow: auto; }
 .dm-graph-list { flex: 1; }
 .dm-graph-row { display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 13px; }

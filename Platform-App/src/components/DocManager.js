@@ -673,29 +673,62 @@ function PRList({ repo, user }) {
 // --- Git Graph ---
 function GitGraph({ repo }) {
   const [data, setData] = useState(null);
+  const [selectedBranches, setSelectedBranches] = useState(new Set());
+  const [offset, setOffset] = useState(0);
+
+  const limit = 30;
+
   useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/graph`)
-      .then(r => r.json()).then(setData).catch(() => {});
-  }, [repo]);
+    fetch(`${API}/${repo.projectCode}/graph?offset=${offset}&limit=${limit}`)
+      .then(r => r.json()).then(d => {
+        if (offset === 0) {
+          setData(d);
+          // 초기: 모든 브랜치 선택
+          setSelectedBranches(new Set(d.branches || []));
+        } else {
+          // Show More: 기존 데이터에 추가
+          setData(prev => ({
+            ...prev,
+            commits: [...(prev?.commits || []), ...(d.commits || [])],
+            hasMore: d.hasMore,
+          }));
+        }
+      }).catch(() => {});
+  }, [repo, offset]);
 
   if (!data) return <div className="dm-graph">로딩 중...</div>;
-  const { branches = [], commits = [] } = data;
+  const { branches = [], commits = [], hasMore = false } = data;
+
+  // 선택된 브랜치의 커밋만 필터링
+  const filteredCommits = commits.filter(c =>
+    c.refs && c.refs.some(ref => selectedBranches.has(ref))
+  );
+
+  const handleBranchToggle = (branch) => {
+    const newSet = new Set(selectedBranches);
+    if (newSet.has(branch)) {
+      newSet.delete(branch);
+    } else {
+      newSet.add(branch);
+    }
+    setSelectedBranches(newSet);
+  };
 
   // 브랜치별 색상
   const colors = ['#e74c3c', '#27ae60', '#2980b9', '#f39c12', '#8e44ad', '#1abc9c', '#d35400'];
   const branchColor = {};
   branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
 
-  // 커밋별 lane(컬럼) 할당 — parent 기반
+  // 필터링된 커밋 기반 lane 할당
   const shaIdx = {};
-  commits.forEach((c, i) => { shaIdx[c.sha] = i; });
-  const lanes = new Array(commits.length).fill(-1);
+  filteredCommits.forEach((c, i) => { shaIdx[c.sha] = i; });
+  const lanes = new Array(filteredCommits.length).fill(-1);
   const laneUsed = [];
 
   // 각 커밋에 lane 할당
   function assignLane(idx) {
     if (lanes[idx] >= 0) return lanes[idx];
-    const c = commits[idx];
+    const c = filteredCommits[idx];
     // refs에 main이 있으면 lane 0
     if (c.refs?.includes('main')) {
       lanes[idx] = 0;
@@ -708,7 +741,7 @@ function GitGraph({ repo }) {
       if (pIdx !== undefined) {
         const pLane = assignLane(pIdx);
         // parent에 여러 자식이 있으면 새 lane
-        const siblings = commits.filter((cc, ii) => ii !== idx && cc.parents?.[0] === c.parents[0] && lanes[ii] >= 0);
+        const siblings = filteredCommits.filter((cc, ii) => ii !== idx && cc.parents?.[0] === c.parents[0] && lanes[ii] >= 0);
         if (siblings.length === 0 && lanes[idx] < 0) {
           lanes[idx] = pLane;
           return pLane;
@@ -725,9 +758,9 @@ function GitGraph({ repo }) {
   }
 
   // main 브랜치 커밋 먼저 lane 0 할당
-  commits.forEach((c, i) => { if (c.refs?.includes('main')) lanes[i] = 0; });
-  if (!laneUsed.includes(0) && commits.length) laneUsed.push(0);
-  commits.forEach((_, i) => assignLane(i));
+  filteredCommits.forEach((c, i) => { if (c.refs?.includes('main')) lanes[i] = 0; });
+  if (!laneUsed.includes(0) && filteredCommits.length) laneUsed.push(0);
+  filteredCommits.forEach((_, i) => assignLane(i));
 
   const maxLane = Math.max(...lanes, 0);
   const rowH = 34;
@@ -750,13 +783,21 @@ function GitGraph({ repo }) {
     <div className="dm-graph">
       <div className="dm-graph-header">
         {branches.map(b => (
-          <span key={b} className="dm-branch-tag" style={{ borderLeft: `3px solid ${branchColor[b] || '#888'}` }}>{b}</span>
+          <span
+            key={b}
+            className={`dm-branch-tag ${selectedBranches.has(b) ? 'dm-branch-active' : 'dm-branch-inactive'}`}
+            style={{ borderLeft: `3px solid ${branchColor[b] || '#888'}`, cursor: 'pointer' }}
+            onClick={() => handleBranchToggle(b)}
+            title="클릭으로 브랜치 표시/숨김"
+          >
+            {b}
+          </span>
         ))}
       </div>
       <div className="dm-graph-body">
-        <svg width={svgW} height={commits.length * rowH + 20} style={{ flexShrink: 0 }}>
+        <svg width={svgW} height={filteredCommits.length * rowH + 20} style={{ flexShrink: 0 }}>
           {/* 연결선: 자식→부모 */}
-          {commits.map((c, i) => c.parents?.map(psha => {
+          {filteredCommits.map((c, i) => c.parents?.map(psha => {
             const pi = shaIdx[psha];
             if (pi === undefined) return null;
             const x1 = x(lanes[i]), y1 = y(i);
@@ -767,14 +808,14 @@ function GitGraph({ repo }) {
             return <path key={`${c.sha}-${psha}`} d={`M${x1},${y1} C${x1},${y1 + rowH / 2} ${x2},${y2 - rowH / 2} ${x2},${y2}`} fill="none" stroke={nodeColor(c)} strokeWidth={2} />;
           }))}
           {/* 노드 */}
-          {commits.map((c, i) => {
+          {filteredCommits.map((c, i) => {
             const isMerge = c.parents?.length > 1;
             return <circle key={c.sha} cx={x(lanes[i])} cy={y(i)} r={isMerge ? 6 : 4}
               fill={nodeColor(c)} stroke={isMerge ? '#fff' : 'none'} strokeWidth={isMerge ? 2 : 0} />;
           })}
         </svg>
         <div className="dm-graph-list">
-          {commits.map(c => (
+          {filteredCommits.map(c => (
             <div key={c.sha} className="dm-graph-row" style={{ height: rowH }}>
               <span className="dm-sha">{(c.sha || '').slice(0, 7)}</span>
               {c.refs?.map(ref => (
@@ -785,6 +826,11 @@ function GitGraph({ repo }) {
               <span className="dm-date">{(c.date || '').slice(0, 10)}</span>
             </div>
           ))}
+          {hasMore && (
+            <div style={{ textAlign: 'center', padding: '10px' }}>
+              <button className="dm-btn" onClick={() => setOffset(offset + limit)}>더 보기 (Show More)</button>
+            </div>
+          )}
         </div>
       </div>
     </div>
