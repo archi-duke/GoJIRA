@@ -719,81 +719,124 @@ function GitGraph({ repo }) {
   if (!data) return <div className="dm-graph">로딩 중...</div>;
   const { branches = [], commits = [], hasMore = false } = data;
 
-  // 모든 커밋 표시 (필터링 없음)
-  const filteredCommits = commits;
-
   const handleBranchToggle = (branch) => {
     const newSet = new Set(selectedBranches);
-    if (newSet.has(branch)) {
-      newSet.delete(branch);
-    } else {
-      newSet.add(branch);
-    }
+    if (newSet.has(branch)) newSet.delete(branch);
+    else newSet.add(branch);
     setSelectedBranches(newSet);
   };
 
-  // 브랜치별 색상
+  // ─── 프론트엔드 Lane 재계산 ───
+  const shaMap = {};
+  commits.forEach(c => { shaMap[c.sha] = c; });
+
+  // 1) main first-parent chain → lane 0
+  const mainHead = commits.find(c => c.refs?.includes('main'));
+  const mainChain = new Set();
+  if (mainHead) {
+    let sha = mainHead.sha;
+    while (sha && shaMap[sha]) {
+      mainChain.add(sha);
+      sha = shaMap[sha].parents?.[0];
+    }
+  }
+
+  // 2) 브랜치별 lane 번호 할당
+  const branchLaneNum = { main: 0 };
+  let nextLane = 1;
+  branches.filter(b => b !== 'main').forEach(b => {
+    branchLaneNum[b] = nextLane++;
+  });
+
+  // 3) 커밋별 lane 할당
+  const laneOf = {}; // sha → lane number
+
+  // main chain → lane 0
+  mainChain.forEach(sha => { laneOf[sha] = 0; });
+
+  // merge 커밋의 second parent → 해당 브랜치 lane으로 추적
+  mainChain.forEach(sha => {
+    const c = shaMap[sha];
+    if (c.parents?.length > 1) {
+      const secondSha = c.parents[1];
+      const secondCommit = shaMap[secondSha];
+      if (!secondCommit) return;
+
+      // second parent의 브랜치 이름 찾기
+      let branchName = secondCommit.refs?.find(r => branchLaneNum[r] !== undefined);
+      if (!branchName) {
+        // refs가 없는 경우 (이미 merge된 커밋) → 같은 lane 패턴 추적
+        // merge commit message에서 브랜치 이름 추출 시도
+        const msg = c.message || '';
+        const match = msg.match(/from\s+(\S+)/);
+        if (match) {
+          const foundBranch = branches.find(b => match[1].includes(b));
+          if (foundBranch) branchName = foundBranch;
+        }
+      }
+
+      const lane = branchName ? branchLaneNum[branchName] : (nextLane++);
+
+      // second parent 부터 main chain에 도달할 때까지 같은 lane 할당
+      let cur = secondSha;
+      while (cur && shaMap[cur] && laneOf[cur] === undefined) {
+        laneOf[cur] = lane;
+        cur = shaMap[cur].parents?.[0];
+      }
+    }
+  });
+
+  // 아직 merge 안 된 브랜치 (docs/duke.kimm, docs/test 등)
+  branches.filter(b => b !== 'main').forEach(b => {
+    const head = commits.find(c => c.refs?.includes(b));
+    if (head && laneOf[head.sha] === undefined) {
+      const lane = branchLaneNum[b];
+      let sha = head.sha;
+      while (sha && shaMap[sha] && laneOf[sha] === undefined) {
+        laneOf[sha] = lane;
+        sha = shaMap[sha].parents?.[0];
+      }
+    }
+  });
+
+  // lane 할당 결과를 커밋에 적용
+  commits.forEach(c => {
+    if (laneOf[c.sha] !== undefined) c.lane = laneOf[c.sha];
+  });
+
+  const filteredCommits = commits;
+
+  // ─── 색상 및 좌표 ───
   const colors = ['#e74c3c', '#27ae60', '#2980b9', '#f39c12', '#8e44ad', '#1abc9c', '#d35400'];
   const branchColor = {};
   branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
 
-  // Lane을 브랜치와 매핑: 각 lane에 해당하는 브랜치 찾기
-  const laneToLaneBranch = {}; // lane -> branch name (그 lane에서 시작한 브랜치)
-  branches.forEach(branch => {
-    const headCommit = filteredCommits.find(c => c.refs && c.refs.includes(branch));
-    if (headCommit) {
-      laneToLaneBranch[headCommit.lane] = branch;
-    }
-  });
-
-  // Backend에서 제공한 lane 정보 사용
-  // 필터링된 커밋들의 lane을 재매핑 (필터링으로 인해 lane 번호 변경될 수 있음)
+  // 사용 중인 lane 수집
   const shaIdx = {};
-  const lanesToUse = new Set();
+  const usedLanes = new Set();
   filteredCommits.forEach((c, i) => {
     shaIdx[c.sha] = i;
-    lanesToUse.add(c.lane);
-    if (c.lanes) {
-      c.lanes.forEach(l => lanesToUse.add(l));
-    }
+    usedLanes.add(c.lane);
   });
+  const sortedLanes = Array.from(usedLanes).sort((a, b) => a - b);
 
-  // lane 번호를 연속된 인덱스로 재매핑
-  const laneRemap = {};
-  const sortedLanes = Array.from(lanesToUse).sort((a, b) => a - b);
-  sortedLanes.forEach((lane, idx) => {
-    laneRemap[lane] = idx;
-  });
+  // lane → 브랜치 이름 매핑
+  const laneToBranch = {};
+  Object.entries(branchLaneNum).forEach(([b, l]) => { laneToBranch[l] = b; });
 
-  const maxLane = sortedLanes.length > 0 ? Math.max(...sortedLanes.map(l => laneRemap[l])) : 0;
-  const rowH = 34;
-  const colW = 45;
-  const svgW = (maxLane + 1) * colW + 60;
-  const x = lane => laneRemap[lane] * colW + 30;
-  const y = i => i * rowH + 18;
-
-  // 커밋에 대한 색상 결정
-  function nodeColor(c) {
-    if (c.refs?.length) {
-      for (const ref of c.refs) {
-        if (branchColor[ref]) return branchColor[ref];
-      }
-    }
-    return '#2c3e50';
-  }
-
-  // 각 lane별 색상 매핑: 브랜치 색상 기반
+  // lane 색상
   const laneColors = {};
-  sortedLanes.forEach((lane) => {
-    // 이 lane이 어느 브랜치인지 찾기
-    const branch = laneToLaneBranch[lane];
-    if (branch && branchColor[branch]) {
-      laneColors[lane] = branchColor[branch];
-    } else {
-      // 해당 브랜치 없으면 그냥 회색
-      laneColors[lane] = '#999';
-    }
+  sortedLanes.forEach(lane => {
+    const branch = laneToBranch[lane];
+    laneColors[lane] = branch && branchColor[branch] ? branchColor[branch] : '#999';
   });
+
+  const rowH = 34;
+  const colW = 28;
+  const maxLane = sortedLanes.length > 0 ? Math.max(...sortedLanes) : 0;
+  const svgW = (maxLane + 1) * colW + 20;
+  const x = lane => lane * colW + 14;
+  const y = i => i * rowH + 18;
 
   return (
     <div className="dm-graph">
@@ -812,109 +855,51 @@ function GitGraph({ repo }) {
       </div>
       <div className="dm-graph-body">
         <svg width={svgW} height={filteredCommits.length * rowH + 20} style={{ flexShrink: 0 }}>
-          {/* 배경 lane 라인: 각 브랜치별 수직선 */}
-          {sortedLanes.map(lane => (
-            <line
-              key={`bg-lane-${lane}`}
-              x1={x(lane)}
-              y1={0}
-              x2={x(lane)}
-              y2={filteredCommits.length * rowH + 20}
-              stroke={laneColors[lane]}
-              strokeWidth={2}
-              opacity={0.4}
-            />
-          ))}
-
           {/* 연결선: 각 커밋 → 부모 커밋 */}
           {filteredCommits.map((c, i) => {
             const lines = [];
             if (!c.parents || c.parents.length === 0) return lines;
 
-            const x1 = x(c.lane);
-            const y1 = y(i);
+            const cx = x(c.lane);
+            const cy = y(i);
+            const color = laneColors[c.lane] || '#999';
 
-            // 첫 번째 parent (main line)
-            const mainParent = c.parents[0];
-            const parentIdx = shaIdx[mainParent];
-            if (parentIdx !== undefined) {
-              const pCommit = filteredCommits[parentIdx];
-              const x2 = x(pCommit.lane);
-              const y2 = y(parentIdx);
+            c.parents.forEach((parentSha, pIdx) => {
+              const pi = shaIdx[parentSha];
+              if (pi === undefined) return;
+              const parent = filteredCommits[pi];
+              const px = x(parent.lane);
+              const py = y(pi);
+              const pColor = laneColors[parent.lane] || '#999';
 
-              if (Math.abs(x1 - x2) < 1) {
+              if (c.lane === parent.lane) {
                 // 같은 lane: 수직선
                 lines.push(
-                  <line
-                    key={`line-${c.sha}`}
-                    x1={x1} y1={y1 + 10}
-                    x2={x2} y2={y2 - 10}
-                    stroke={laneColors[c.lane]}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
+                  <line key={`${c.sha}-p${pIdx}`}
+                    x1={cx} y1={cy + 6} x2={px} y2={py - 6}
+                    stroke={color} strokeWidth={2} />
                 );
               } else {
-                // 다른 lane: 곡선
-                const midY = (y1 + y2) / 2;
+                // 다른 lane: merge/branch 곡선
+                // 커밋에서 아래로 내려간 뒤, 부모 lane으로 꺾임
+                const bendY = cy + rowH * 0.6;
                 lines.push(
-                  <path
-                    key={`line-${c.sha}`}
-                    d={`M${x1},${y1 + 10} C${x1},${midY} ${x2},${midY} ${x2},${y2 - 10}`}
-                    fill="none"
-                    stroke={laneColors[c.lane]}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
+                  <path key={`${c.sha}-p${pIdx}`}
+                    d={`M${cx},${cy + 6} L${cx},${bendY} Q${cx},${py - 6} ${px},${py - 6} L${px},${py - 6}`}
+                    fill="none" stroke={pColor} strokeWidth={2} />
                 );
               }
-            }
-
-            // 다른 parents (merge lines)
-            for (let j = 1; j < c.parents.length; j++) {
-              const mergeParent = c.parents[j];
-              const mergeParentIdx = shaIdx[mergeParent];
-              if (mergeParentIdx !== undefined) {
-                const mCommit = filteredCommits[mergeParentIdx];
-                const x2 = x(mCommit.lane);
-                const y2 = y(mergeParentIdx);
-
-                const midY = (y1 + y2) / 2;
-                lines.push(
-                  <path
-                    key={`merge-${c.sha}-${j}`}
-                    d={`M${x1},${y1 + 10} C${x1},${midY} ${x2},${midY} ${x2},${y2 - 10}`}
-                    fill="none"
-                    stroke={laneColors[mCommit.lane] || '#bbb'}
-                    strokeWidth={1.5}
-                    strokeLinecap="round"
-                    opacity={0.7}
-                  />
-                );
-              }
-            }
-
+            });
             return lines;
           })}
 
-          {/* 노드 (Gitea 스타일 다이아몬드) */}
+          {/* 노드 */}
           {filteredCommits.map((c, i) => {
-            const isMerge = c.parents?.length > 1;
-            const nodeCol = isMerge ? '#e74c3c' : '#27ae60';
-            const cx = x(c.lane);
-            const cy = y(i);
-            const size = 6;
-
+            const color = laneColors[c.lane] || '#999';
             return (
-              <g key={c.sha}>
-                {/* 다이아몬드 모양 노드 */}
-                <polygon
-                  points={`${cx},${cy - size} ${cx + size},${cy} ${cx},${cy + size} ${cx - size},${cy}`}
-                  fill={nodeCol}
-                  stroke="#fff"
-                  strokeWidth={1.5}
-                />
-              </g>
+              <circle key={c.sha}
+                cx={x(c.lane)} cy={y(i)} r={5}
+                fill={color} stroke="#fff" strokeWidth={1.5} />
             );
           })}
         </svg>
