@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
+import { modalAlert, modalConfirm } from './AlertModal';
 import CommonBar from './CommonBar';
 import config from '../config';
 import './DocEditor.css';
@@ -15,111 +15,89 @@ const NAV_ITEMS = [
   { key: 'satam', label: 'SATAM' },
 ];
 
+// base64 → UTF-8 디코딩
+function decodeBase64(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
 export default function DocEditor({ project, user, onBack, currentPage, onNavigate }) {
   const projectCode = project?.jiraCodes?.main?.jiraCode || '';
   const hasRepo = !!project?.documents?.repoName;
 
-  const [started, setStarted] = useState(false);
-  const [branch, setBranch] = useState('');
   const [tree, setTree] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [content, setContent] = useState('');
   const [original, setOriginal] = useState('');
   const [saving, setSaving] = useState(false);
-  const [previewMode, setPreviewMode] = useState(false);
-  const [hasPending, setHasPending] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
-  // 진입 시 파일 트리 + 미완료 작업 확인
+  // 진입 시 파일 트리 로드
   useEffect(() => {
     if (!hasRepo) return;
-    // 파일 트리 바로 로드
     fetch(`${API}/${projectCode}/tree?ref=main`)
       .then(r => r.json()).then(d => setTree(d)).catch(() => {});
-    // 미완료 작업 확인
-    fetch(`${API}/${projectCode}/edit/status`, { headers: { 'X-User-Id': user } })
-      .then(r => r.json()).then(d => {
-        setHasPending(d.hasPending);
-        if (d.hasPending) { setBranch(d.branch); setStarted(true); }
-      }).catch(() => {});
-  }, [projectCode, user, hasRepo]);
+  }, [projectCode, hasRepo]);
 
-  async function startEdit() {
-    const res = await fetch(`${API}/${projectCode}/edit/start`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-    });
-    if (!res.ok) { modalAlert('작업 공간 생성 실패'); return; }
-    const d = await res.json();
-    setBranch(d.branch);
-    setStarted(true);
-    fetchTree();
-  }
-
-  function resumeEdit() { setStarted(true); fetchTree(); }
-
-  async function discardEdit() {
-    if (!await modalConfirm('작업 내용을 폐기하시겠습니까?')) return;
-    await fetch(`${API}/${projectCode}/edit/discard`, {
-      method: 'DELETE', headers: { 'X-User-Id': user },
-    });
-    setHasPending(false); setStarted(false); setSelectedFile(null); setContent('');
-  }
-
-  function fetchTree() {
-    fetch(`${API}/${projectCode}/tree?ref=main`)
-      .then(r => r.json()).then(d => setTree(d)).catch(() => {});
-  }
-
+  // 파일 클릭 → main에서 읽기
   async function handleFileClick(path) {
-    if (content !== original && selectedFile) {
+    if (editMode && content !== original) {
       if (!await modalConfirm('저장하지 않은 변경이 있습니다. 이동하시겠습니까?')) return;
     }
-    const res = await fetch(`${API}/${projectCode}/edit/file?path=${encodeURIComponent(path)}`, {
-      headers: { 'X-User-Id': user },
-    });
+    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
     if (res.ok) {
       const d = await res.json();
-      setSelectedFile(path); setContent(d.content); setOriginal(d.content); setPreviewMode(false);
-    } else {
-      const res2 = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
-      if (res2.ok) {
-        const d = await res2.json();
-        const text = d.content ? atob(d.content) : '';
-        setSelectedFile(path); setContent(text); setOriginal(text); setPreviewMode(false);
-      }
+      const text = d.content ? decodeBase64(d.content) : '';
+      setSelectedFile(path);
+      setContent(text);
+      setOriginal(text);
+      setEditMode(false);
     }
   }
 
+  // 저장 (Gitea API로 직접 커밋)
   async function handleSave() {
+    if (!await modalConfirm(`"${selectedFile}" 파일을 저장(커밋)하시겠습니까?`)) return;
     setSaving(true);
-    await fetch(`${API}/${projectCode}/edit/file`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: selectedFile, content }),
+    const res = await fetch(`${API}/${projectCode}/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      body: JSON.stringify({ path: selectedFile, content, message: `${selectedFile} 수정`, branch: 'main' }),
     });
-    setOriginal(content); setSaving(false);
+    setSaving(false);
+    if (res.ok) {
+      setOriginal(content);
+      setEditMode(false);
+      modalAlert('저장 완료');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      modalAlert(err.error || '저장 실패');
+    }
   }
 
-  async function handleCommit() {
-    const msg = await modalPrompt('커밋 메시지', `${selectedFile || '문서'} 수정`);
-    if (!msg) return;
-    if (content !== original && selectedFile) await handleSave();
-    const res = await fetch(`${API}/${projectCode}/edit/commit`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ message: msg }),
+  // 삭제
+  async function handleDelete() {
+    if (!await modalConfirm(`"${selectedFile}" 파일을 삭제하시겠습니까?`)) return;
+    const res = await fetch(`${API}/${projectCode}/file`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      body: JSON.stringify({ path: selectedFile, message: `${selectedFile} 삭제`, branch: 'main' }),
     });
-    if (res.ok) modalAlert('커밋 완료');
-    else { const err = await res.json().catch(() => ({})); modalAlert(err.error || '커밋 실패'); }
-  }
-
-  async function handleCreatePR() {
-    const title = await modalPrompt('PR 제목', `[${projectCode}] 설계문서 배포 요청`);
-    if (!title) return;
-    if (content !== original && selectedFile) await handleSave();
-    const res = await fetch(`${API}/${projectCode}/edit/pr`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ title }),
-    });
-    if (res.ok) modalAlert('PR이 생성되었습니다.');
-    else { const err = await res.json().catch(() => ({})); modalAlert(err.error || 'PR 생성 실패'); }
+    if (res.ok) {
+      setSelectedFile(null);
+      setContent('');
+      setOriginal('');
+      setEditMode(false);
+      // 트리 다시 로드
+      fetch(`${API}/${projectCode}/tree?ref=main`)
+        .then(r => r.json()).then(d => setTree(d)).catch(() => {});
+      modalAlert('삭제 완료');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      modalAlert(err.error || '삭제 실패');
+    }
   }
 
   const barTitle = `${project?.name || ''} (${projectCode})`;
@@ -139,64 +117,55 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const modified = content !== original;
   const items = (tree?.tree || []).filter(i => i.type !== 'tree').sort((a, b) => a.path.localeCompare(b.path));
 
-  // 파일 읽기 (읽기 전용 모드 - main에서 직접)
-  async function handleFileRead(path) {
-    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
-    if (res.ok) {
-      const d = await res.json();
-      const text = d.content ? atob(d.content) : '';
-      setSelectedFile(path); setContent(text); setOriginal(text); setPreviewMode(true);
-    }
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <CommonBar title={barTitle} onBack={onBack} nav={nav} />
       <div className="de-editor">
-      <div className="de-sidebar">
-        <div className="de-sidebar-header">
-          {started ? branch : 'main (읽기 전용)'}
-          {!started && (
-            <button className="de-btn de-btn-primary" style={{ marginLeft: 8, padding: '2px 8px', fontSize: '11px' }}
-              onClick={startEdit}>편집 시작</button>
+        <div className="de-sidebar">
+          <div className="de-sidebar-header">main</div>
+          {items.map(item => (
+            <div key={item.path}
+              className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''}`}
+              onClick={() => handleFileClick(item.path)}>
+              {item.path}
+            </div>
+          ))}
+        </div>
+        <div className="de-main">
+          {selectedFile ? (
+            <>
+              <div className="de-toolbar">
+                <span className="de-filename">{selectedFile} {modified && <span className="de-modified">●</span>}</span>
+                <div className="de-actions">
+                  {editMode ? (
+                    <>
+                      <button className="de-tab" onClick={() => setEditMode(false)}>미리보기</button>
+                      <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="de-tab de-tab-active">미리보기</button>
+                      <button className="de-btn" onClick={() => setEditMode(true)}>편집</button>
+                      <button className="de-btn de-btn-danger" onClick={handleDelete}>삭제</button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="de-body">
+                {editMode ? (
+                  <textarea className="de-textarea" value={content}
+                    onChange={e => setContent(e.target.value)} spellCheck={false} />
+                ) : (
+                  <div className="de-preview">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="de-placeholder">파일을 선택하세요</div>
           )}
         </div>
-        {items.map(item => (
-          <div key={item.path}
-            className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''}`}
-            onClick={() => started ? handleFileClick(item.path) : handleFileRead(item.path)}>
-            {item.path}
-          </div>
-        ))}
-      </div>
-      <div className="de-main">
-        {selectedFile ? (
-          <>
-            <div className="de-toolbar">
-              <span className="de-filename">{selectedFile} {modified && <span className="de-modified">●</span>}</span>
-              <div className="de-actions">
-                {started && <button className={`de-tab ${!previewMode ? 'de-tab-active' : ''}`} onClick={() => setPreviewMode(false)}>편집</button>}
-                <button className={`de-tab ${previewMode ? 'de-tab-active' : ''}`} onClick={() => setPreviewMode(true)}>미리보기</button>
-                {started && <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>}
-                {started && <button className="de-btn" onClick={handleCommit}>커밋/푸시</button>}
-                {started && <button className="de-btn de-btn-primary" onClick={handleCreatePR}>배포(PR) 요청</button>}
-              </div>
-            </div>
-            <div className="de-body">
-              {previewMode || !started ? (
-                <div className="de-preview">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-                </div>
-              ) : (
-                <textarea className="de-textarea" value={content}
-                  onChange={e => setContent(e.target.value)} spellCheck={false} />
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="de-placeholder">파일을 선택하세요</div>
-        )}
-      </div>
       </div>
     </div>
   );
