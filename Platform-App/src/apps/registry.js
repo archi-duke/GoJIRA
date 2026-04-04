@@ -10,7 +10,7 @@ const appRegistry = [
     component: GoJIRAApp,
     authCode: null,          // 전체 접근
     authLevel: 0,
-    subPages: ['issues', 'relationMap', 'satam'],
+    subPages: ['docs', 'issues', 'relationMap', 'satam'],
   },
   {
     key: 'account',

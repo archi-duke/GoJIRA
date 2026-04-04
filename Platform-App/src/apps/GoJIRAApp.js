@@ -3,6 +3,7 @@ import ProjectMap from './gojira/ProjectMap';
 import IssueList from './gojira/IssueList';
 import RelationMap from './gojira/RelationMap';
 import SATAM from './gojira/SATAM';
+import DocEditor from '../components/DocEditor';
 
 export default function GoJIRAApp({ user, authority }) {
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
@@ -23,6 +24,9 @@ export default function GoJIRAApp({ user, authority }) {
     navigate(target, selectedProject);
   }, [navigate, selectedProject]);
 
+  if (page === 'docs' && selectedProject) {
+    return <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} />;
+  }
   if (page === 'issues' && selectedProject) {
     return <IssueList project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
   }
