@@ -703,16 +703,8 @@ function GitGraph({ repo }) {
 
         if (offset === 0) {
           setData(d);
-          // 초기: main 브랜치만 선택 (Gitea 처럼)
-          const mainBranch = new Set();
-          const mainIdx = (d.branches || []).indexOf('main');
-          if (mainIdx >= 0) {
-            mainBranch.add('main');
-          } else if (d.branches?.length > 0) {
-            // main이 없으면 첫 브랜치 선택
-            mainBranch.add(d.branches[0]);
-          }
-          setSelectedBranches(mainBranch);
+          // 초기: 모든 브랜치 선택 (전체 히스토리 표시)
+          setSelectedBranches(new Set(d.branches || []));
         } else {
           // Show More: 기존 데이터에 추가
           setData(prev => ({
