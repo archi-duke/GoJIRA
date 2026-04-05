@@ -34,16 +34,22 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 		content = content[:10000] + "\n...(truncated)"
 	}
 
-	prompt := fmt.Sprintf(`다음은 프로젝트 "%s" (%s)의 설계문서 파일들입니다.
+	prompt := config.LoadPrompt("pr-summary.txt", map[string]string{
+		"ProjectName": projectName,
+		"ProjectCode": projectCode,
+		"Content":     content,
+	})
+	if prompt == "" {
+		// 프롬프트 파일 로드 실패 시 인라인 폴백
+		prompt = fmt.Sprintf(`다음은 프로젝트 "%s" (%s)의 설계문서 파일들입니다.
 이 내용을 바탕으로 GitHub PR 제목과 본문을 한국어로 작성해주세요.
-
 규칙:
 - 제목: 70자 이내, "[프로젝트코드] 핵심변경내용" 형식
 - 본문: 변경 내용을 3~5줄로 요약 (마크다운 bullet 사용)
-- 순수 JSON만 응답 (코드블록이나 마크다운 없이): {"title": "...", "body": "..."}
-
+- 순수 JSON만 응답: {"title": "...", "body": "..."}
 파일 내용:
 %s`, projectName, projectCode, content)
+	}
 
 	payload := map[string]interface{}{
 		"model": "gpt-4o-mini",

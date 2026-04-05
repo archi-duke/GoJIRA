@@ -77,8 +77,11 @@ func EnsureClone(owner, repo string) (string, error) {
 		if _, err := gitCmd(".", "clone", "--bare", url, dir); err != nil {
 			return "", err
 		}
+		// bare clone은 fetch refspec이 없으므로 설정
+		gitCmd(dir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+		gitCmd(dir, "fetch", "origin")
 	} else {
-		gitCmd(dir, "fetch", "origin", "main")
+		gitCmd(dir, "fetch", "origin")
 	}
 
 	return dir, nil
@@ -103,19 +106,31 @@ func EnsureWorktree(owner, repo, userID string) (string, string, error) {
 	// worktree가 이미 있으면 fetch만 하고 반환
 	if _, err := os.Stat(filepath.Join(wtDir, ".git")); err == nil {
 		gitCmd(wtDir, "fetch", "origin")
+		TouchWorkspace(owner, repo, userID)
 		return wtDir, branch, nil
 	}
 
 	// bare repo에서 fetch
 	gitCmd(bareDir, "fetch", "origin")
 
-	// worktree 추가 (bare repo에서 origin/main 기준)
+	// 브랜치 존재 여부 확인
 	os.MkdirAll(filepath.Dir(wtDir), 0755)
-	if _, err := gitCmd(bareDir, "worktree", "add", wtDir, "-b", branch, "origin/main"); err != nil {
-		// 이미 있는 경우 정리 후 재시도
-		gitCmd(bareDir, "worktree", "remove", wtDir, "--force")
+	_, branchErr := gitCmd(bareDir, "rev-parse", "--verify", branch)
+	if branchErr == nil {
+		// 브랜치가 이미 존재 → 기존 브랜치로 worktree 생성
+		if _, err := gitCmd(bareDir, "worktree", "add", wtDir, branch); err != nil {
+			gitCmd(bareDir, "worktree", "remove", wtDir, "--force")
+			if _, err := gitCmd(bareDir, "worktree", "add", wtDir, branch); err != nil {
+				return "", "", fmt.Errorf("worktree 생성 실패: %v", err)
+			}
+		}
+	} else {
+		// 새 브랜치 생성 (origin/main 기준)
 		if _, err := gitCmd(bareDir, "worktree", "add", wtDir, "-b", branch, "origin/main"); err != nil {
-			return "", "", fmt.Errorf("worktree 생성 실패: %v", err)
+			gitCmd(bareDir, "worktree", "remove", wtDir, "--force")
+			if _, err := gitCmd(bareDir, "worktree", "add", wtDir, "-b", branch, "origin/main"); err != nil {
+				return "", "", fmt.Errorf("worktree 생성 실패: %v", err)
+			}
 		}
 	}
 
@@ -130,17 +145,22 @@ func EnsureWorktree(owner, repo, userID string) (string, string, error) {
 	}
 
 	log.Printf("worktree created: %s → %s (branch: %s)", owner+"/"+repo, wtDir, branch)
+	TouchWorkspace(owner, repo, userID)
 	return wtDir, branch, nil
 }
 
-// CheckoutNewBranch 사용자 worktree에서 main 기준으로 브랜치 리셋
-func CheckoutNewBranch(owner, repo, branch string) error {
-	// branch에서 userID 추출 (docs/{userId} 형식)
-	userID := branch
-	if strings.HasPrefix(branch, "docs/") {
-		userID = strings.TrimPrefix(branch, "docs/")
-	}
+// RebaseResult rebase 결과
+type RebaseResult struct {
+	Success  bool   `json:"success"`
+	Conflict bool   `json:"conflict"`
+	Diff     string `json:"diff,omitempty"` // 충돌 시 사용자 변경 diff
+	Message  string `json:"message"`
+}
 
+// RebaseOnMain 사용자 브랜치를 origin/main 위로 rebase
+// 충돌 시: abort → diff 보존 → reset
+func RebaseOnMain(owner, repo, userID string) *RebaseResult {
+	branch := fmt.Sprintf("docs/%s", userID)
 	wtDir := worktreeDir(owner, repo, userID)
 
 	// worktree가 없으면 먼저 생성
@@ -148,7 +168,7 @@ func CheckoutNewBranch(owner, repo, branch string) error {
 		var err2 error
 		wtDir, _, err2 = EnsureWorktree(owner, repo, userID)
 		if err2 != nil {
-			return err2
+			return &RebaseResult{Success: false, Message: "worktree 생성 실패: " + err2.Error()}
 		}
 	}
 
@@ -156,11 +176,47 @@ func CheckoutNewBranch(owner, repo, branch string) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// bare repo 최신화 후 worktree도 리셋
 	bareDir := repoDir(owner, repo)
 	gitCmd(bareDir, "fetch", "origin")
+	gitCmd(wtDir, "fetch", "origin")
+
+	// rebase 시도
+	_, err := gitCmd(wtDir, "rebase", "origin/main")
+	if err == nil {
+		return &RebaseResult{
+			Success: true,
+			Message: fmt.Sprintf("브랜치 %s가 main과 동기화되었습니다.", branch),
+		}
+	}
+
+	// 충돌 발생 — abort 후 diff 보존
+	log.Printf("rebase 충돌 발생: %s/%s user=%s, abort 진행", owner, repo, userID)
+	gitCmd(wtDir, "rebase", "--abort")
+
+	// 사용자 변경 내용을 diff로 추출
+	diff, _ := gitCmd(wtDir, "diff", "origin/main..HEAD")
+
+	// main 기준으로 reset
 	gitCmd(wtDir, "reset", "--hard", "origin/main")
 
+	return &RebaseResult{
+		Success:  false,
+		Conflict: true,
+		Diff:     diff,
+		Message:  "충돌이 발생하여 main 기준으로 초기화되었습니다. 변경 내용을 참고하여 재작업해 주세요.",
+	}
+}
+
+// CheckoutNewBranch 사용자 worktree에서 main 기준으로 브랜치 리셋 (하위호환)
+func CheckoutNewBranch(owner, repo, branch string) error {
+	userID := branch
+	if strings.HasPrefix(branch, "docs/") {
+		userID = strings.TrimPrefix(branch, "docs/")
+	}
+	result := RebaseOnMain(owner, repo, userID)
+	if !result.Success && !result.Conflict {
+		return fmt.Errorf(result.Message)
+	}
 	return nil
 }
 
@@ -175,6 +231,7 @@ func WriteWorktreeFile(owner, repo, userID, filePath, content string) error {
 	dir := worktreeDir(owner, repo, userID)
 	fullPath := filepath.Join(dir, filePath)
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
+	TouchWorkspace(owner, repo, userID)
 	return os.WriteFile(fullPath, []byte(content), 0644)
 }
 
@@ -186,6 +243,7 @@ func ReadWorktreeFile(owner, repo, userID, filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	TouchWorkspace(owner, repo, userID)
 	return string(data), nil
 }
 
@@ -255,6 +313,26 @@ func HasPendingWork(owner, repo, userID string) bool {
 	return diff != ""
 }
 
+// PendingFiles 워크트리에서 미커밋 변경 파일 목록 반환
+func PendingFiles(owner, repo, userID string) []string {
+	wtDir := worktreeDir(owner, repo, userID)
+	if _, err := os.Stat(filepath.Join(wtDir, ".git")); os.IsNotExist(err) {
+		return nil
+	}
+	status, _ := gitCmd(wtDir, "status", "--porcelain")
+	if status == "" {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(status, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) > 3 {
+			files = append(files, strings.TrimSpace(line[2:]))
+		}
+	}
+	return files
+}
+
 // DiscardWorktree 사용자 worktree 삭제 (작업 폐기)
 func DiscardWorktree(owner, repo, userID string) error {
 	mu := getRepoLock(owner, repo)
@@ -270,6 +348,23 @@ func DiscardWorktree(owner, repo, userID string) error {
 	os.RemoveAll(wtDir)
 
 	log.Printf("worktree discarded: %s/%s user=%s", owner, repo, userID)
+	return nil
+}
+
+// RemoveWorktreeOnly worktree만 삭제 (브랜치는 유지)
+func RemoveWorktreeOnly(owner, repo, userID string) error {
+	mu := getRepoLock(owner, repo)
+	mu.Lock()
+	defer mu.Unlock()
+
+	bareDir := repoDir(owner, repo)
+	wtDir := worktreeDir(owner, repo, userID)
+
+	gitCmd(bareDir, "worktree", "remove", wtDir, "--force")
+	os.RemoveAll(wtDir)
+	removeWorkspaceAccess(owner, repo, userID)
+
+	log.Printf("worktree removed (branch kept): %s/%s user=%s", owner, repo, userID)
 	return nil
 }
 

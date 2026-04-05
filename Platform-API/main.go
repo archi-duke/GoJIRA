@@ -10,8 +10,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"context"
+	"time"
+
 	"platform-api/config"
 	"platform-api/db"
+	gitpkg "platform-api/github"
 	"platform-api/handlers"
 )
 
@@ -40,7 +44,17 @@ func main() {
 	db.InitAccountIndexes()
 	db.InitNoticeIndexes()
 	db.InitDocRepoIndexes()
+	db.InitEditSessionIndexes()
 	db.SeedAccountData()
+
+	// Workspace TTL worker 시작
+	gitpkg.StartTTLWorker(func(owner, repo, userID string) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// projectCode는 repo name과 동일하다고 가정 (docrepo 매핑)
+		session, err := db.FindActiveSessionByUser(ctx, repo, userID)
+		return err == nil && session != nil
+	})
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -129,6 +143,10 @@ func main() {
 			r.Post("/{code}/edit/pr", handlers.DocRepoEditPRHandler)
 			r.Get("/{code}/edit/status", handlers.DocRepoEditStatusHandler)
 			r.Delete("/{code}/edit/discard", handlers.DocRepoEditDiscardHandler)
+			r.Get("/{code}/edit/pending", handlers.DocRepoEditPendingHandler)
+			r.Post("/{code}/edit/heartbeat", handlers.DocRepoEditHeartbeatHandler)
+			r.Post("/{code}/edit/release", handlers.DocRepoEditReleaseHandler)
+			r.Post("/{code}/edit/rebase", handlers.DocRepoEditRebaseHandler)
 		})
 
 		// DocLink — 향후 구현

@@ -452,7 +452,7 @@ func CreateBranch(owner, repo, newBranch, fromSHA string) error {
 // --- Tree ---
 
 func GetTree(owner, repo, ref string) (interface{}, error) {
-	path := fmt.Sprintf("/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, ref)
+	path := fmt.Sprintf("/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, url.PathEscape(ref))
 	data, status, err := doRequest("GET", path, nil)
 	if err != nil {
 		return nil, err

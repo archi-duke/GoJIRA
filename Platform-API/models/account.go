@@ -75,6 +75,17 @@ type UserConnection struct {
 	UpdatedAt      time.Time  `json:"updatedAt" bson:"updatedAt"`
 }
 
+// EditSession 문서 편집 세션 lock
+type EditSession struct {
+	ID            string    `json:"id" bson:"_id,omitempty"`
+	ProjectCode   string    `json:"projectCode" bson:"projectCode"`
+	UserID        string    `json:"userId" bson:"userId"`
+	Status        string    `json:"status" bson:"status"` // "active", "expired"
+	LastHeartbeat time.Time `json:"lastHeartbeat" bson:"lastHeartbeat"`
+	CreatedAt     time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
 // 권한 비트마스크 상수
 const (
 	PermCreate = 8 // C

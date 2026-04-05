@@ -849,6 +849,23 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+
+	// merge 후 처리: workspace 삭제 + 세션 해제 (브랜치는 유지)
+	// PR에서 head branch의 userID 추출
+	pr, _ := github.GetPR(owner, name, num)
+	if pr != nil {
+		if head, ok := pr["head"].(map[string]interface{}); ok {
+			if ref, ok := head["ref"].(string); ok && strings.HasPrefix(ref, "docs/") {
+				mergedUserID := strings.TrimPrefix(ref, "docs/")
+				// workspace만 삭제 (브랜치는 유지)
+				github.RemoveWorktreeOnly(owner, name, mergedUserID)
+				// 세션 lock 해제
+				db.ReleaseEditSession(ctx, code, mergedUserID)
+				log.Printf("merge 후 처리: workspace 삭제, 세션 ���제 (user=%s)", mergedUserID)
+			}
+		}
+	}
+
 	respondJSON(w, http.StatusOK, "merged")
 }
 
@@ -943,7 +960,7 @@ func DocRepoGitPublishHandler(w http.ResponseWriter, r *http.Request) {
 
 // --- 문서 편집 API ---
 
-// POST /DocRepo/{code}/edit/start — 편집 시작 (worktree 생성)
+// POST /DocRepo/{code}/edit/start — 편집 시작 (worktree 생성 + 세션 lock)
 func DocRepoEditStartHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -959,13 +976,132 @@ func DocRepoEditStartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 만료된 세션 정리
+	db.ExpireStaleSessions(ctx, config.EditSessionTTL)
+
+	// 세션 lock 획득 시도
+	acquired, existingUser, err := db.AcquireEditSession(ctx, code, userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "세션 lock 획득 실패: "+err.Error())
+		return
+	}
+	if !acquired {
+		respondJSON(w, http.StatusConflict, map[string]interface{}{
+			"locked":       true,
+			"lockedBy":     existingUser,
+			"readOnly":     true,
+			"message":      fmt.Sprintf("다른 사용자(%s)가 편집 중입니다. 읽기 전용으로 열립니다.", existingUser),
+		})
+		return
+	}
+
 	_, branch, err := github.EnsureWorktree(owner, name, userID)
 	if err != nil {
+		db.ReleaseEditSession(ctx, code, userID)
 		respondError(w, http.StatusInternalServerError, "작업 공간 생성 실패: "+err.Error())
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"branch": branch, "userId": userID})
+	// 자동 rebase (main 동기화)
+	rebaseResult := github.RebaseOnMain(owner, name, userID)
+
+	resp := map[string]interface{}{
+		"branch":   branch,
+		"userId":   userID,
+		"locked":   false,
+		"readOnly": false,
+	}
+	if rebaseResult.Conflict {
+		resp["conflict"] = true
+		resp["diff"] = rebaseResult.Diff
+		resp["conflictMessage"] = rebaseResult.Message
+	}
+
+	respondJSON(w, http.StatusOK, resp)
+}
+
+// POST /DocRepo/{code}/edit/heartbeat — 세션 하트비트
+func DocRepoEditHeartbeatHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
+		return
+	}
+	if err := db.UpdateHeartbeat(ctx, code, userID); err != nil {
+		respondError(w, http.StatusInternalServerError, "하트비트 갱신 실패")
+		return
+	}
+	respondJSON(w, http.StatusOK, "ok")
+}
+
+// POST /DocRepo/{code}/edit/release — 세션 lock 해제
+func DocRepoEditReleaseHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
+		return
+	}
+	if err := db.ReleaseEditSession(ctx, code, userID); err != nil {
+		respondError(w, http.StatusInternalServerError, "세션 해제 실패")
+		return
+	}
+	respondJSON(w, http.StatusOK, "released")
+}
+
+// POST /DocRepo/{code}/edit/rebase — main 동기화 (rebase)
+func DocRepoEditRebaseHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
+		return
+	}
+
+	result := github.RebaseOnMain(owner, name, userID)
+	if result.Conflict {
+		respondJSON(w, http.StatusConflict, result)
+		return
+	}
+	if !result.Success {
+		respondError(w, http.StatusInternalServerError, result.Message)
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// GET /DocRepo/{code}/edit/pending — 워크트리 미커밋 변경 파일 목록
+func DocRepoEditPendingHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
+		return
+	}
+	files := github.PendingFiles(owner, name, userID)
+	if files == nil {
+		files = []string{}
+	}
+	respondJSON(w, http.StatusOK, files)
 }
 
 // GET /DocRepo/{code}/edit/file?path=...  — worktree에서 파일 읽기
