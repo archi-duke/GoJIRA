@@ -1002,22 +1002,12 @@ func DocRepoEditStartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 자동 rebase (main 동기화)
-	rebaseResult := github.RebaseOnMain(owner, name, userID)
-
-	resp := map[string]interface{}{
+	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"branch":   branch,
 		"userId":   userID,
 		"locked":   false,
 		"readOnly": false,
-	}
-	if rebaseResult.Conflict {
-		resp["conflict"] = true
-		resp["diff"] = rebaseResult.Diff
-		resp["conflictMessage"] = rebaseResult.Message
-	}
-
-	respondJSON(w, http.StatusOK, resp)
+	})
 }
 
 // POST /DocRepo/{code}/edit/heartbeat — 세션 하트비트

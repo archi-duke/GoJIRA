@@ -72,7 +72,7 @@ function App() {
     content = <AccountManager user={user} />;
   } else if (page === 'notice') {
     content = <NoticeManager user={user} />;
-  } else if (page === 'docs') {
+  } else if (page === 'repository') {
     content = <DocManager user={user} />;
   } else {
     const appEntry = appRegistry.find(a => a.key === page || (a.subPages && a.subPages.includes(page)));

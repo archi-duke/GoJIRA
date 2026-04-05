@@ -17,9 +17,9 @@ func repoDir(owner, repo string) string {
 	return filepath.Join(config.RepoBaseDir, owner, repo+".git")
 }
 
-// worktreeDir 사용자별 worktree 경로 (bare repo 아래)
+// worktreeDir 사용자별 worktree 경로 (bare repo 외부)
 func worktreeDir(owner, repo, userID string) string {
-	return filepath.Join(repoDir(owner, repo), userID)
+	return filepath.Join(config.RepoBaseDir, owner, repo+".worktrees", userID)
 }
 
 // repoLocks 레포별 mutex (동시 git 작업 방지)
@@ -415,9 +415,15 @@ func ListLocalRepos() []struct{ Owner, Repo string } {
 // RemoveLocalRepo bare repo 및 모든 worktree 폴더 삭제
 func RemoveLocalRepo(owner, repo string) error {
 	dir := repoDir(owner, repo)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return nil
+	wtBase := filepath.Join(config.RepoBaseDir, owner, repo+".worktrees")
+
+	if _, err := os.Stat(dir); err == nil {
+		log.Printf("removing bare repo: %s", dir)
+		os.RemoveAll(dir)
 	}
-	log.Printf("removing bare repo and all worktrees: %s", dir)
-	return os.RemoveAll(dir)
+	if _, err := os.Stat(wtBase); err == nil {
+		log.Printf("removing worktrees: %s", wtBase)
+		os.RemoveAll(wtBase)
+	}
+	return nil
 }

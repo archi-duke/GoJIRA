@@ -27,7 +27,7 @@ const appRegistry = [
     authLevel: 15,
   },
   {
-    key: 'docs',
+    key: 'repository',
     label: 'Repository',
     component: null,         // 내장 컴포넌트 (DocManager)
     authCode: 'GITRP',
