@@ -141,6 +141,41 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  async function handleNewFile() {
+    const name = window.prompt('새 파일 이름을 입력하세요 (.md 확장자 자동 추가)', '');
+    if (!name || !name.trim()) return;
+    let fileName = name.trim();
+    if (!fileName.endsWith('.md')) fileName += '.md';
+    // 중복 확인
+    if (items.some(i => i.path === fileName)) {
+      modalAlert(`"${fileName}" 파일이 이미 존재합니다.`);
+      return;
+    }
+    const template = `# ${fileName.replace('.md', '')}\n\n`;
+    const res = await fetch(`${API}/${projectCode}/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      body: JSON.stringify({ path: fileName, content: template, message: `${fileName} 생성` }),
+    });
+    if (res.ok) {
+      setFileStatus(prev => ({ ...prev, [fileName]: 'added' }));
+      // 사용자 트리 새로고침
+      fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`)
+        .then(r => r.json()).then(d => setUserTree(d)).catch(() => {});
+      // 새 파일 바로 열기
+      setSelectedFile(fileName);
+      setContent(template);
+      setOriginal(template);
+      setEditMode(true);
+      setShowGraph(false);
+      setDiffMode(false);
+      modalAlert(`"${fileName}" 파일이 생성되었습니다.`);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      modalAlert(err.error || '파일 생성 실패');
+    }
+  }
+
   async function handleDiffToggle() {
     if (diffMode) { setDiffMode(false); return; }
     setLoadingDiff(true);
@@ -281,10 +316,18 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           </div>
           <div className="de-sidebar-header">
             <span>{activeTab === 'main' ? 'main' : `docs/${user}`}</span>
+            {activeTab === 'workspace' && globalEditMode && (
+              <button
+                className="de-btn"
+                style={{ marginLeft: 'auto', padding: '3px 8px', fontSize: '11px' }}
+                onClick={handleNewFile}
+                title="새 파일 추가"
+              >+</button>
+            )}
             {activeTab === 'workspace' && (
               <button
                 className={`de-btn ${hasChanges ? 'de-btn-primary' : ''}`}
-                style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
+                style={{ marginLeft: globalEditMode ? '4px' : 'auto', padding: '3px 10px', fontSize: '11px' }}
                 onClick={handleCreatePR}
                 disabled={!hasChanges}
                 title={hasChanges ? `${Object.keys(fileStatus).length}개 파일 변경됨` : '변경사항 없음'}
