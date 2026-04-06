@@ -39,6 +39,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [conflictDiff, setConflictDiff] = useState(null);
   const [pendingFiles, setPendingFiles] = useState(new Set());
   const [globalEditMode, setGlobalEditMode] = useState(false);
+  const [showGraph, setShowGraph] = useState(false);
 
   // 진입 시 main 트리 + 사용자 브랜치 트리 비교
   useEffect(() => {
@@ -236,9 +237,20 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         <div className="de-sidebar">
           <div className="de-sidebar-tabs">
             <button className={`de-sidebar-tab ${activeTab === 'main' ? 'de-sidebar-tab-active' : ''}`}
-              onClick={() => setActiveTab('main')}>Main</button>
+              onClick={() => { setActiveTab('main'); setShowGraph(false); }}>Main</button>
             <button className={`de-sidebar-tab ${activeTab === 'workspace' ? 'de-sidebar-tab-active' : ''}`}
-              onClick={() => setActiveTab('workspace')}>작업공간</button>
+              onClick={() => { setActiveTab('workspace'); setShowGraph(false); }}>작업공간</button>
+            <button
+              className={`de-sidebar-tab de-graph-btn ${showGraph ? 'de-sidebar-tab-active' : ''}`}
+              onClick={() => { setShowGraph(!showGraph); if (!showGraph) setSelectedFile(null); }}
+              title="Commit Graph"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <circle cx="4" cy="3" r="2.2" /><circle cx="4" cy="13" r="2.2" /><circle cx="12" cy="8" r="2.2" />
+                <line x1="4" y1="5.2" x2="4" y2="10.8" stroke="currentColor" strokeWidth="1.8" />
+                <path d="M4,5.2 C4,8 8,8 12,5.8" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+            </button>
           </div>
           <div className="de-sidebar-header">
             <span>{activeTab === 'main' ? 'main' : `docs/${user}`}</span>
@@ -259,7 +271,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             return (
               <div key={item.path}
                 className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''}`}
-                onClick={() => handleFileClick(item.path)}>
+                onClick={() => { setShowGraph(false); handleFileClick(item.path); }}>
                 {activeTab === 'workspace' && statusBadge(item.path)}
                 {item.path}
               </div>
@@ -267,7 +279,9 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           })}
         </div>
         <div className="de-main">
-          {selectedFile ? (
+          {showGraph ? (
+            <DocGitGraph projectCode={projectCode} />
+          ) : selectedFile ? (
             <>
               <div className="de-toolbar">
                 <span className="de-filename">{selectedFile} {modified && <span className="de-modified">●</span>}</span>
@@ -299,6 +313,158 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             </>
           ) : (
             <div className="de-placeholder">파일을 선택하세요</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Commit Graph (DocManager의 GitGraph와 동일 로직) ─── */
+function DocGitGraph({ projectCode }) {
+  const [data, setData] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const limit = 30;
+
+  useEffect(() => {
+    fetch(`${API}/${projectCode}/graph?offset=${offset}&limit=${limit}`)
+      .then(r => r.json()).then(d => {
+        const shaToCommit = {};
+        (d.commits || []).forEach(c => { shaToCommit[c.sha] = c; });
+        d.commits?.forEach(c => {
+          if (c.parents?.length > 1) {
+            c.lanes = [];
+            for (let i = 1; i < c.parents.length; i++) {
+              const parentSha = c.parents[i];
+              const parentCommit = shaToCommit[parentSha];
+              if (parentCommit && parentCommit.lane !== undefined) c.lanes.push(parentCommit.lane);
+            }
+          }
+        });
+        if (offset === 0) setData(d);
+        else setData(prev => ({ ...prev, commits: [...(prev?.commits || []), ...(d.commits || [])], hasMore: d.hasMore }));
+      }).catch(() => {});
+  }, [projectCode, offset]);
+
+  if (!data) return <div className="de-graph-wrap">로딩 중...</div>;
+  const { branches = [], commits = [], hasMore = false } = data;
+
+  const shaMap = {};
+  commits.forEach(c => { shaMap[c.sha] = c; });
+  const mainHead = commits.find(c => c.refs?.includes('main'));
+  const mainChain = new Set();
+  if (mainHead) {
+    let sha = mainHead.sha;
+    while (sha && shaMap[sha]) { mainChain.add(sha); sha = shaMap[sha].parents?.[0]; }
+  }
+  const branchLaneNum = { main: 0 };
+  let nextLane = 1;
+  branches.filter(b => b !== 'main').forEach(b => { branchLaneNum[b] = nextLane++; });
+
+  const laneOf = {};
+  mainChain.forEach(sha => { laneOf[sha] = 0; });
+  mainChain.forEach(sha => {
+    const c = shaMap[sha];
+    if (c.parents?.length > 1) {
+      const secondSha = c.parents[1];
+      const secondCommit = shaMap[secondSha];
+      if (!secondCommit) return;
+      let branchName = secondCommit.refs?.find(r => branchLaneNum[r] !== undefined);
+      if (!branchName) {
+        const msg = c.message || '';
+        const match = msg.match(/from\s+(\S+)/);
+        if (match) {
+          const foundBranch = branches.find(b => match[1].includes(b));
+          if (foundBranch) branchName = foundBranch;
+        }
+      }
+      const lane = branchName ? branchLaneNum[branchName] : (nextLane++);
+      let cur = secondSha;
+      while (cur && shaMap[cur] && laneOf[cur] === undefined) { laneOf[cur] = lane; cur = shaMap[cur].parents?.[0]; }
+    }
+  });
+  branches.filter(b => b !== 'main').forEach(b => {
+    const head = commits.find(c => c.refs?.includes(b));
+    if (head && laneOf[head.sha] === undefined) {
+      const lane = branchLaneNum[b];
+      let sha = head.sha;
+      while (sha && shaMap[sha] && laneOf[sha] === undefined) { laneOf[sha] = lane; sha = shaMap[sha].parents?.[0]; }
+    }
+  });
+  commits.forEach(c => { if (laneOf[c.sha] !== undefined) c.lane = laneOf[c.sha]; });
+
+  const filteredCommits = [...commits].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+  const colors = ['#6b9bc3', '#7fb685', 'tomato', '#d4a862', '#8a8dc9', '#6abfb0', '#c4876e'];
+  const branchColor = {};
+  branches.forEach((b, i) => { branchColor[b] = colors[i % colors.length]; });
+
+  const shaIdx = {};
+  const usedLanes = new Set();
+  filteredCommits.forEach((c, i) => { shaIdx[c.sha] = i; usedLanes.add(c.lane); });
+  const sortedLanes = Array.from(usedLanes).sort((a, b) => a - b);
+
+  const laneToBranch = {};
+  Object.entries(branchLaneNum).forEach(([b, l]) => { laneToBranch[l] = b; });
+  const laneColors = {};
+  sortedLanes.forEach(lane => {
+    const branch = laneToBranch[lane];
+    laneColors[lane] = branch && branchColor[branch] ? branchColor[branch] : '#999';
+  });
+
+  const nodeR = 7, rowH = 40, colW = 32;
+  const maxLane = sortedLanes.length > 0 ? Math.max(...sortedLanes) : 0;
+  const svgW = (maxLane + 1) * colW + 20;
+  const x = lane => lane * colW + 16;
+  const y = i => i * rowH + 20;
+
+  return (
+    <div className="de-graph-wrap">
+      <div className="de-graph-header">
+        {branches.map(b => (
+          <span key={b} className="de-graph-branch" style={{ borderLeft: `4px solid ${branchColor[b] || '#888'}` }}>{b}</span>
+        ))}
+      </div>
+      <div className="de-graph-body">
+        <svg width={svgW} height={filteredCommits.length * rowH + 20} style={{ flexShrink: 0 }}>
+          {filteredCommits.map((c, i) => {
+            const lines = [];
+            if (!c.parents || c.parents.length === 0) return lines;
+            const cx = x(c.lane), cy = y(i);
+            c.parents.forEach((parentSha, pIdx) => {
+              const pi = shaIdx[parentSha];
+              if (pi === undefined) return;
+              const parent = filteredCommits[pi];
+              const px = x(parent.lane), py = y(pi);
+              const lineColor = laneColors[parent.lane] || '#999';
+              if (c.lane === parent.lane) {
+                lines.push(<line key={`${c.sha}-p${pIdx}`} x1={cx} y1={cy + nodeR} x2={px} y2={py - nodeR} stroke={lineColor} strokeWidth={3} strokeLinecap="round" />);
+              } else {
+                lines.push(<path key={`${c.sha}-p${pIdx}`} d={`M${cx},${cy + nodeR} C${cx},${cy + rowH * 0.8} ${px},${py - rowH * 0.8} ${px},${py - nodeR}`} fill="none" stroke={lineColor} strokeWidth={3} strokeLinecap="round" />);
+              }
+            });
+            return lines;
+          })}
+          {filteredCommits.map((c, i) => (
+            <circle key={c.sha} cx={x(c.lane)} cy={y(i)} r={nodeR} fill={laneColors[c.lane] || '#999'} stroke="#fff" strokeWidth={2.5} />
+          ))}
+        </svg>
+        <div className="de-graph-list">
+          {filteredCommits.map(c => (
+            <div key={c.sha} className="de-graph-row" style={{ height: rowH }}>
+              <span className="de-graph-sha">{(c.sha || '').slice(0, 7)}</span>
+              {c.refs?.map(ref => (
+                <span key={ref} className="de-graph-ref" style={{ background: branchColor[ref] || '#888' }}>{ref}</span>
+              ))}
+              <span className="de-graph-msg">{(c.message || '').split('\n')[0]}</span>
+              <span className="de-graph-author">{c.author}</span>
+              <span className="de-graph-date">{(c.date || '').slice(0, 10)}</span>
+            </div>
+          ))}
+          {hasMore && (
+            <div style={{ textAlign: 'center', padding: '10px' }}>
+              <button className="de-btn" onClick={() => setOffset(offset + limit)}>더 보기</button>
+            </div>
           )}
         </div>
       </div>
