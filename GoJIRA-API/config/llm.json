@@ -1,0 +1,14 @@
+{
+  "endpoint": "https://api.openai.com/v1/chat/completions",
+  "model": "gpt-4o-mini",
+  "maxTokens": 500,
+  "temperature": 0.3,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "authType": "bearer",
+  "responseFormat": {
+    "choicesPath": "choices",
+    "contentPath": "message.content"
+  }
+}

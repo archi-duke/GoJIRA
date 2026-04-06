@@ -51,55 +51,12 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 %s`, projectName, projectCode, content)
 	}
 
-	payload := map[string]interface{}{
-		"model": "gpt-4o-mini",
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens":  500,
-		"temperature": 0.3,
-	}
-
-	b, _ := json.Marshal(payload)
-	req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+config.OpenAIAPIKey)
-
-	resp, err := http.DefaultClient.Do(req)
+	text, err := callLLM(prompt)
 	if err != nil {
 		log.Printf("LLM 호출 실패: %v", err)
 		return fallbackTitle, fallbackBody
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode >= 400 {
-		log.Printf("OpenAI API 오류 (%d): %s", resp.StatusCode, string(data))
-		return fallbackTitle, fallbackBody
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil || len(result.Choices) == 0 {
-		return fallbackTitle, fallbackBody
-	}
-
-	text := strings.TrimSpace(result.Choices[0].Message.Content)
-	// GPT가 ```json ... ``` 코드블록으로 감쌀 경우 제거
-	if strings.HasPrefix(text, "```") {
-		if i := strings.Index(text, "\n"); i != -1 {
-			text = text[i+1:]
-		}
-		if strings.HasSuffix(text, "```") {
-			text = strings.TrimSuffix(text, "```")
-		}
-		text = strings.TrimSpace(text)
-	}
 	var parsed struct {
 		Title string `json:"title"`
 		Body  string `json:"body"`
@@ -116,4 +73,74 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 		parsed.Body = fallbackBody
 	}
 	return parsed.Title, parsed.Body
+}
+
+// callLLM 설정 파일 기반 LLM API 호출
+func callLLM(prompt string) (string, error) {
+	cfg := config.LLM
+
+	payload := map[string]interface{}{
+		"model": cfg.Model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"max_tokens":  cfg.MaxTokens,
+		"temperature": cfg.Temperature,
+	}
+
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", cfg.Endpoint, bytes.NewReader(b))
+	if err != nil {
+		return "", fmt.Errorf("요청 생성 실패: %w", err)
+	}
+
+	// 설정 파일의 헤더 적용
+	for k, v := range cfg.Headers {
+		req.Header.Set(k, v)
+	}
+
+	// 인증 처리
+	switch cfg.AuthType {
+	case "bearer":
+		req.Header.Set("Authorization", "Bearer "+config.OpenAIAPIKey)
+	case "header":
+		if cfg.AuthHeader != "" {
+			req.Header.Set(cfg.AuthHeader, config.OpenAIAPIKey)
+		}
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("API 호출 실패: %w", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("API 오류 (%d): %s", resp.StatusCode, string(data))
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil || len(result.Choices) == 0 {
+		return "", fmt.Errorf("응답 파싱 실패: %s", string(data))
+	}
+
+	text := strings.TrimSpace(result.Choices[0].Message.Content)
+	// GPT가 ```json ... ``` 코드블록으로 감쌀 경우 제거
+	if strings.HasPrefix(text, "```") {
+		if i := strings.Index(text, "\n"); i != -1 {
+			text = text[i+1:]
+		}
+		if strings.HasSuffix(text, "```") {
+			text = strings.TrimSuffix(text, "```")
+		}
+		text = strings.TrimSpace(text)
+	}
+	return text, nil
 }

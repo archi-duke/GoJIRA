@@ -26,6 +26,7 @@ func init() {
 	loadEnvFile(".env")
 
 	OpenAIAPIKey = envOrDefault("OPENAI_API_KEY", "")
+	LoadLLMConfig()
 
 	raw := envOrDefault("GOJIRA_JIRA_USER", "")
 	if val, err := Decrypt(raw); err == nil {
