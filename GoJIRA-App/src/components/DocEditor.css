@@ -55,3 +55,64 @@
 .de-graph-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2c3e50; font-weight: 500; }
 .de-graph-author { font-size: 12px; color: #555; width: 130px; flex-shrink: 0; text-align: left; border-left: 1px solid #eee; padding-left: 10px; }
 .de-graph-date { font-size: 12px; color: #888; width: 90px; flex-shrink: 0; text-align: left; border-left: 1px solid #eee; padding-left: 10px; }
+
+/* ─── Diff Analysis ─── */
+.da-container { display: flex; flex-direction: column; height: 100%; }
+.da-tabs { display: flex; border-bottom: 2px solid #e0e0e0; background: #fafafa; padding: 0 12px; }
+.da-tab { padding: 8px 18px; border: none; background: none; font-size: 13px; color: #888; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.da-tab:hover { color: #333; background: #f0f0f0; }
+.da-tab-active { color: #2c3e50; font-weight: 600; border-bottom-color: #2c3e50; }
+.da-content { flex: 1; overflow: auto; padding: 16px; }
+.da-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 14px; }
+
+/* Unified Diff */
+.da-unified { font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.6; }
+.da-hunk { margin-bottom: 16px; border: 1px solid #e0e0e0; border-radius: 4px; overflow: hidden; }
+.da-hunk-header { background: #f0f4ff; padding: 4px 12px; color: #666; font-size: 11px; border-bottom: 1px solid #e0e0e0; }
+.da-line { padding: 1px 12px; white-space: pre-wrap; word-break: break-all; }
+.da-line-add { background: #e6ffec; color: #1a7f37; }
+.da-line-del { background: #ffebe9; color: #cf222e; }
+.da-line-ctx { color: #555; }
+
+/* Semantic Diff */
+.da-semantic { }
+.da-stats { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.da-stat { padding: 4px 12px; background: #f0f0f0; border-radius: 4px; font-size: 12px; font-weight: 600; color: #555; }
+.da-stat-add { background: #e6ffec; color: #1a7f37; }
+.da-stat-mod { background: #fff8e1; color: #e67e22; }
+.da-stat-del { background: #ffebe9; color: #cf222e; }
+
+.da-nav { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.da-nav-item { padding: 3px 10px; border-radius: 4px; font-size: 11px; text-decoration: none; color: #555; background: #f5f5f5; }
+.da-nav-added { background: #e6ffec; color: #1a7f37; }
+.da-nav-modified { background: #fff8e1; color: #e67e22; }
+.da-nav-deleted { background: #ffebe9; color: #cf222e; }
+
+.da-section { margin-bottom: 20px; border: 1px solid #e8e8e8; border-radius: 6px; overflow: hidden; }
+.da-section-added { border-left: 4px solid #27ae60; }
+.da-section-modified { border-left: 4px solid #e67e22; }
+.da-section-deleted { border-left: 4px solid #e74c3c; }
+.da-section-title { padding: 10px 14px; background: #fafafa; font-size: 14px; font-weight: 600; color: #2c3e50; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 8px; }
+.da-badge { padding: 2px 8px; border-radius: 3px; font-size: 11px; color: #fff; font-weight: 600; }
+.da-badge-added { background: #27ae60; }
+.da-badge-modified { background: #e67e22; }
+.da-badge-deleted { background: #e74c3c; }
+
+.da-block { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; font-size: 13px; line-height: 1.7; }
+.da-block:last-child { border-bottom: none; }
+.da-block-added { background: #f0fff4; }
+.da-block-deleted { background: #fff5f5; }
+.da-block-modified { background: #fffdf0; }
+.da-block-text { white-space: pre-wrap; }
+.da-text-add { color: #1a7f37; }
+.da-text-del { color: #cf222e; text-decoration: line-through; }
+.da-inline-diff { white-space: pre-wrap; }
+.da-word-add { background: #acf2bd; padding: 1px 2px; border-radius: 2px; }
+.da-word-del { background: #fdb8c0; text-decoration: line-through; padding: 1px 2px; border-radius: 2px; }
+
+/* Summary */
+.da-summary { }
+.da-summary-head { font-size: 14px; font-weight: 600; color: #2c3e50; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
+.da-summary-item { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; font-size: 13px; color: #333; border-bottom: 1px solid #f5f5f5; }
+.da-summary-indent { padding-left: 28px; font-size: 12px; color: #666; }
+.da-summary-icon { font-size: 16px; font-weight: 700; width: 18px; text-align: center; flex-shrink: 0; }

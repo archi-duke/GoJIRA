@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { modalAlert, modalConfirm } from './AlertModal';
 import CommonBar from './CommonBar';
+import DiffAnalysis from './DiffAnalysis';
 import config from '../config';
 import './DocEditor.css';
 
@@ -40,6 +41,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [pendingFiles, setPendingFiles] = useState(new Set());
   const [globalEditMode, setGlobalEditMode] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
+  const [diffMode, setDiffMode] = useState(false);
+  const [diffTab, setDiffTab] = useState('semantic');
+  const [mainContent, setMainContent] = useState('');
+  const [loadingDiff, setLoadingDiff] = useState(false);
 
   // 진입 시 main 트리 + 사용자 브랜치 트리 비교
   useEffect(() => {
@@ -134,6 +139,28 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       const err = await res.json().catch(() => ({}));
       modalAlert(err.error || '삭제 실패');
     }
+  }
+
+  async function handleDiffToggle() {
+    if (diffMode) { setDiffMode(false); return; }
+    setLoadingDiff(true);
+    try {
+      const status = fileStatus[selectedFile];
+      let mainText = '';
+      if (status !== 'added') {
+        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
+        if (res.ok) {
+          const d = await res.json();
+          mainText = d.content ? decodeBase64(d.content) : '';
+        }
+      }
+      setMainContent(mainText);
+      setDiffMode(true);
+      setDiffTab('semantic');
+    } catch (e) {
+      modalAlert('Diff 로딩 실패');
+    }
+    setLoadingDiff(false);
   }
 
   async function handleCreatePR() {
@@ -271,7 +298,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             return (
               <div key={item.path}
                 className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''}`}
-                onClick={() => { setShowGraph(false); handleFileClick(item.path); }}>
+                onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path); }}>
                 {activeTab === 'workspace' && statusBadge(item.path)}
                 {item.path}
               </div>
@@ -293,7 +320,16 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                     </>
                   ) : (
                     <>
-                      <button className="de-tab de-tab-active">미리보기</button>
+                      <button className={`de-tab ${!diffMode ? 'de-tab-active' : ''}`} onClick={() => setDiffMode(false)}>미리보기</button>
+                      {activeTab === 'workspace' && fileStatus[selectedFile] && (
+                        <button
+                          className={`de-btn ${diffMode ? 'de-btn-primary' : ''}`}
+                          onClick={handleDiffToggle}
+                          disabled={loadingDiff}
+                        >
+                          {loadingDiff ? '로딩...' : 'Diff 분석'}
+                        </button>
+                      )}
                       {globalEditMode && <button className="de-btn" onClick={() => setEditMode(true)}>편집</button>}
                       {globalEditMode && <button className="de-btn de-btn-danger" onClick={handleDelete}>삭제</button>}
                     </>
@@ -301,7 +337,9 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 </div>
               </div>
               <div className="de-body">
-                {editMode ? (
+                {diffMode ? (
+                  <DiffAnalysis oldText={mainContent} newText={content} fileName={selectedFile} activeTab={diffTab} onTabChange={setDiffTab} />
+                ) : editMode ? (
                   <textarea className="de-textarea" value={content}
                     onChange={e => setContent(e.target.value)} spellCheck={false} />
                 ) : (
