@@ -5,6 +5,7 @@ import ProjectDialog from './ProjectDialog';
 import config from '../config';
 
 const API_BASE = config.API_BASE;
+const PLATFORM_API = config.PLATFORM_API;
 
 function getJiraCode(p) {
   return p?.jiraCodes?.main?.jiraCode || '';
@@ -65,6 +66,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
     } catch {}
     return getDefaultView();
   });
+  const [alerts, setAlerts] = useState({}); // jiraCode → { issueUpdated, branchDiff, hasOpenPR }
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, project }
   const [dialog, setDialog] = useState(null);   // { project, mode: 'detail'|'edit' }
   const [sortKey, setSortKey] = useState(() => sessionStorage.getItem('gojira_pm_sortKey') || 'startDate');
@@ -87,7 +89,57 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
         if (Array.isArray(data)) setProjects(data);
       })
       .catch(() => setProjects([]));
-  }, []);
+
+    // 프로젝트 알림 상태 조회
+    fetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          const map = {};
+          data.forEach((a) => { map[a.jiraCode] = a; });
+          setAlerts(map);
+        }
+      })
+      .catch(() => {});
+
+    // SSE 구독 — main 머지 시 실시간 알림 갱신
+    const es = new EventSource(`${PLATFORM_API}/Notice/stream`);
+    es.addEventListener('doc_update', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'project_alert' && data.branchAlerts) {
+          // 웹훅으로 갱신된 브랜치 알림 반영
+          setAlerts((prev) => {
+            const next = { ...prev };
+            const code = data.projectCode;
+            const hasDiff = (data.branchAlerts || []).includes(user);
+            if (hasDiff) {
+              next[code] = { ...next[code], jiraCode: code, branchDiff: true };
+            } else {
+              // 차이 해소됨
+              if (next[code]) {
+                next[code] = { ...next[code], branchDiff: false };
+                if (!next[code].hasOpenPR) delete next[code];
+              }
+            }
+            return next;
+          });
+        } else if (data.type === 'pr_update') {
+          // PR 상태 변경 시 alerts 재조회
+          fetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
+            .then((res) => res.json())
+            .then((arr) => {
+              if (Array.isArray(arr)) {
+                const map = {};
+                arr.forEach((a) => { map[a.jiraCode] = a; });
+                setAlerts(map);
+              }
+            }).catch(() => {});
+        }
+      } catch {}
+    });
+    return () => es.close();
+  }, [user]);
 
   function handleContextMenu(e, project) {
     e.preventDefault();
@@ -143,7 +195,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`설계문서 생성 완료!\n브랜치: ${data.branch}\n파일 수: ${data.files}\n\n문서관리 > Edit 탭에서 확인 후 배포(PR) 요청하세요.`);
+        alert(`설계문서 생성 완료!\n브랜치: ${data.branch}\n파일 수: ${data.files}\nPR이 생성되었습니다.`);
       } else {
         alert('실패: ' + (data.error || res.statusText));
       }
@@ -486,6 +538,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
                     isOverdue={isOverdue}
                     onContextMenu={handleContextMenu}
                     onProjectClick={onProjectClick}
+                    alert={alerts[getJiraCode(p)]}
                   />
                 );
               })}
@@ -623,7 +676,7 @@ function RangeSlider({ viewRange, onChange }) {
 }
 
 // --- Project Row ---
-function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, onContextMenu, onProjectClick }) {
+function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, onContextMenu, onProjectClick, alert }) {
   const schedules = project.schedules || [];
   const allMilestones = schedules
     .map((s) => {
@@ -684,6 +737,9 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
   const hasRightOverflow = lastDate >= rangeEnd;
 
   const cls = isCompleted ? 'completed' : isOverdue ? 'overdue' : 'active';
+  const hasAlert = alert && alert.branchDiff;
+  const hasPR = alert && alert.hasOpenPR;
+  const alertColor = hasPR ? '#b8860b' : hasAlert ? '#e67e22' : null;
 
   return (
     <g
@@ -701,7 +757,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
       />
 
       {/* Connecting line */}
-      <line x1={firstX} y1={y} x2={lastX} y2={y} className="pm-line" />
+      <line x1={firstX} y1={y} x2={lastX} y2={y} className="pm-line" style={alertColor ? { stroke: alertColor, strokeWidth: 3 } : undefined} />
 
       {/* Left overflow triangle */}
       {hasLeftOverflow && (
@@ -725,8 +781,8 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
         const daysDiff = i === 0 ? 0 : daysBetween(allMilestones[i - 1].date, m.date);
         return (
         <g key={i}>
-          <circle cx={m.x} cy={y} r={MILESTONE_R} className="pm-milestone" />
-          <text x={m.x} y={y + 4} textAnchor="middle" className="pm-day">
+          <circle cx={m.x} cy={y} r={MILESTONE_R} className="pm-milestone" style={alertColor ? { stroke: alertColor } : undefined} />
+          <text x={m.x} y={y + 4} textAnchor="middle" className="pm-day" style={alertColor ? { fill: alertColor } : undefined}>
             {daysDiff}
           </text>
           <text
@@ -741,28 +797,35 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
         );
       })}
 
-      {/* Project name (rendered last = on top) with white background */}
+      {/* Project name (rendered last = on top) with white background + alert icon */}
       {(() => {
         const nameX = firstX - MILESTONE_R - 10;
         const nameW = (project.name || '').length * 8 + 8;
+        const iconW = alertColor ? 20 : 0;
         return (
           <>
             <rect
-              x={nameX - nameW}
+              x={nameX - nameW - iconW}
               y={y - 9}
-              width={nameW}
+              width={nameW + iconW}
               height={18}
               fill="#fff"
               rx={2}
               style={{ cursor: 'pointer' }}
               onClick={() => onProjectClick && onProjectClick(project)}
             />
+            {alertColor && (
+              <g transform={`translate(${nameX - nameW + 23}, ${y - 15}) scale(-1.3, 1.3)`}>
+                <path d="M7 1C3.1 1 0 3.6 0 6.8c0 1.8 1 3.4 2.5 4.4L1.5 13.5l3.2-1.6c.7.2 1.5.3 2.3.3 3.9 0 7-2.6 7-5.8S10.9 1 7 1z" fill={alertColor} />
+                <text x="7" y="9.5" textAnchor="middle" fontSize="7" fontWeight="bold" fill="#fff">!</text>
+              </g>
+            )}
             <text
               x={nameX}
               y={y + 4}
               textAnchor="end"
               className="pm-prj-name"
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: 'pointer', ...(alertColor ? { fill: alertColor } : {}) }}
               onClick={() => onProjectClick && onProjectClick(project)}
             >
               {project.name}

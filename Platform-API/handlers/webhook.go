@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,8 +10,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"platform-api/config"
+	"platform-api/db"
+	"platform-api/github"
 )
 
 // POST /webhook/github — GitHub Webhook 수신
@@ -132,16 +136,145 @@ func handlePushEvent(payload map[string]interface{}) {
 	ref, _ := payload["ref"].(string)
 	repo, _ := payload["repository"].(map[string]interface{})
 	repoName, _ := repo["name"].(string)
-
-	// main 브랜치 push만 알림
-	if strings.HasSuffix(ref, "/main") || strings.HasSuffix(ref, "/master") {
-		log.Printf("webhook push: %s → %s", repoName, ref)
-		BroadcastDocEvent(map[string]interface{}{
-			"type": "push",
-			"repo": repoName,
-			"ref":  ref,
-		})
+	repoOwner := ""
+	if owner, ok := repo["owner"].(map[string]interface{}); ok {
+		repoOwner, _ = owner["login"].(string)
 	}
+
+	// main 브랜치 push만 처리
+	if !strings.HasSuffix(ref, "/main") && !strings.HasSuffix(ref, "/master") {
+		return
+	}
+
+	log.Printf("webhook push: %s/%s → %s", repoOwner, repoName, ref)
+
+	// 해당 레포를 사용하는 프로젝트 찾기
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	projectCode := findProjectByRepo(ctx, repoName)
+	if projectCode == "" {
+		log.Printf("webhook push: 레포 %s에 매칭되는 프로젝트 없음", repoName)
+		BroadcastDocEvent(map[string]interface{}{"type": "push", "repo": repoName, "ref": ref})
+		return
+	}
+
+	// 모든 docs/* 브랜치 vs 새 main 비교
+	alerts := compareAllBranches(repoOwner, repoName, projectCode)
+
+	// DB 갱신: 차이가 있는 사용자 목록 저장
+	db.UpdateProjectField(ctx, projectCode, "branchAlerts", alerts)
+	// gitLastCommit은 머지로 해소되었으므로 초기화
+	db.UpdateProjectField(ctx, projectCode, "gitLastCommit", nil)
+
+	log.Printf("webhook push: %s 브랜치 비교 완료 — diff 있는 사용자: %v", projectCode, alerts)
+
+	// SSE 브로드캐스트 — 프로젝트 알림 갱신
+	BroadcastDocEvent(map[string]interface{}{
+		"type":         "project_alert",
+		"repo":         repoName,
+		"projectCode":  projectCode,
+		"ref":          ref,
+		"branchAlerts": alerts,
+	})
+}
+
+// findProjectByRepo 레포 이름으로 프로젝트 코드 찾기
+func findProjectByRepo(ctx context.Context, repoName string) string {
+	projects, err := db.FindAllProjects(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, prj := range projects {
+		docs := db.BsonGetDoc(prj, "documents")
+		name := db.BsonGetStr(docs, "repoName")
+		if name == repoName {
+			jc := db.BsonGetDoc(prj, "jiraCodes")
+			main := db.BsonGetDoc(jc, "main")
+			return db.BsonGetStr(main, "jiraCode")
+		}
+	}
+	return ""
+}
+
+// compareAllBranches 모든 docs/* 브랜치를 main과 비교, 차이 있는 사용자 목록 반환
+func compareAllBranches(owner, repoName, projectCode string) []string {
+	branchesRaw, err := github.ListBranches(owner, repoName)
+	if err != nil {
+		log.Printf("webhook: 브랜치 목록 조회 실패: %v", err)
+		return nil
+	}
+
+	branches, ok := branchesRaw.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	mainTree, err := github.GetTree(owner, repoName, "main")
+	if err != nil {
+		return nil
+	}
+	mainFiles := extractTreeFiles(mainTree)
+
+	var diffUsers []string
+	for _, b := range branches {
+		bm, ok := b.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		branchName, _ := bm["name"].(string)
+		if !strings.HasPrefix(branchName, "docs/") {
+			continue
+		}
+		userID := strings.TrimPrefix(branchName, "docs/")
+
+		userTree, err := github.GetTree(owner, repoName, branchName)
+		if err != nil {
+			continue
+		}
+		userFiles := extractTreeFiles(userTree)
+
+		if !filesEqual(mainFiles, userFiles) {
+			diffUsers = append(diffUsers, userID)
+		}
+	}
+	return diffUsers
+}
+
+// extractTreeFiles 트리에서 파일별 SHA 맵 추출
+func extractTreeFiles(tree interface{}) map[string]string {
+	files := map[string]string{}
+	tm, ok := tree.(map[string]interface{})
+	if !ok {
+		return files
+	}
+	items, _ := tm["tree"].([]interface{})
+	for _, item := range items {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		t, _ := m["type"].(string)
+		if t == "tree" {
+			continue
+		}
+		path, _ := m["path"].(string)
+		sha, _ := m["sha"].(string)
+		files[path] = sha
+	}
+	return files
+}
+
+func filesEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func verifySignature(body []byte, signature, secret string) bool {

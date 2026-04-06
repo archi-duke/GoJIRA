@@ -383,6 +383,8 @@ func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// 프로젝트 알림: 브랜치 커밋 발생
+	db.UpdateProjectField(ctx, code, "gitLastCommit", time.Now())
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -727,6 +729,9 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 	// 승인자에게 메일 알림
 	notifyPRCreated(name, prNum, prTitle, prURL, auditors)
 
+	// 프로젝트 알림: PR 생성
+	db.UpdateProjectField(ctx, code, "gitOpenPR", true)
+
 	respondJSON(w, http.StatusOK, pr)
 }
 
@@ -849,6 +854,10 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+
+	// 프로젝트 알림: PR 머지 완료 → 플래그 해제
+	db.UpdateProjectField(ctx, code, "gitOpenPR", false)
+	db.UpdateProjectField(ctx, code, "gitLastCommit", nil)
 
 	// merge 후 처리: workspace 삭제 + 세션 해제 (브랜치는 유지)
 	// PR에서 head branch의 userID 추출

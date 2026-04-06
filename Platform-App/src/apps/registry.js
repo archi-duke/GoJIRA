@@ -23,7 +23,7 @@ const appRegistry = [
     key: 'notice',
     label: 'Notice',
     component: null,         // 내장 컴포넌트 (NoticeManager)
-    authCode: 'NOTMGR',
+    authCode: 'NOTICE',
     authLevel: 15,
   },
   {

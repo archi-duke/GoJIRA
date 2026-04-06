@@ -42,6 +42,15 @@ func UpdateProjectDocuments(ctx context.Context, jiraCode string, docs bson.M) e
 	return err
 }
 
+// UpdateProjectField 프로젝트의 단일 필드 업데이트
+func UpdateProjectField(ctx context.Context, jiraCode string, field string, value interface{}) error {
+	_, err := database.Collection("projects").UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+		bson.M{"$set": bson.M{field: value}},
+	)
+	return err
+}
+
 // ClearProjectDocRepo project.documents를 빈 객체로 초기화
 func ClearProjectDocRepo(ctx context.Context, jiraCode string) {
 	database.Collection("projects").UpdateOne(ctx,

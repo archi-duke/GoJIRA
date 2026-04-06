@@ -136,19 +136,7 @@ func nilToEmpty(v interface{}) interface{} {
 }
 
 func getDocRepoName(prj bson.M) string {
-	switch docs := prj["documents"].(type) {
-	case bson.M:
-		s, _ := docs["repoName"].(string)
-		return s
-	case bson.D:
-		for _, e := range docs {
-			if e.Key == "repoName" {
-				s, _ := e.Value.(string)
-				return s
-			}
-		}
-	}
-	return ""
+	return bsonGetStr(bsonGetDoc(prj, "documents"), "repoName")
 }
 
 // ensureDocRepo 프로젝트에 repo가 없으면 Platform-API로 자동 생성

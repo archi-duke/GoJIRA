@@ -241,6 +241,7 @@
   background: #eaf0f8;
   color: #2980b9;
 }
+.pm-alert-icon { vertical-align: middle; }
 
 /* Graph area */
 .pm-graph {

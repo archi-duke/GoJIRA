@@ -98,6 +98,7 @@ func main() {
 		r.Post("/Project", handlers.ProjectCreateHandler)
 		r.Get("/Project", handlers.ProjectGetHandler)
 		r.Put("/Project", handlers.ProjectUpdateHandler)
+		r.Get("/Project/alerts", handlers.ProjectAlertsHandler)
 	})
 
 	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)

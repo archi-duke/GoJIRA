@@ -65,7 +65,7 @@ function App() {
 
   // USR 권한 15 = CRUD 전체 → Account/Notice 메뉴 접근 허용
   const hasAccountAdmin = authority && (authority.USR || 0) >= 15;
-  const hasNoticeAdmin = authority && (authority.NOTMGR || 0) >= 15;
+  const hasNoticeAdmin = authority && (authority.NOTICE || 0) >= 15;
 
   if (!user) return null;
 

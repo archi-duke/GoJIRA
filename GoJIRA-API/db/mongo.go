@@ -212,6 +212,11 @@ func UpsertProject(ctx context.Context, jiraCode string, doc bson.M) error {
 	return err
 }
 
+func UpdateProjectField(ctx context.Context, jiraCode string, field string, value interface{}) error {
+	_, err := Projects().UpdateOne(ctx, bson.M{"jiraCodes.main.jiraCode": jiraCode}, bson.M{"$set": bson.M{field: value}})
+	return err
+}
+
 // AddIssueToProject adds an issue key to the project's issues array
 func AddIssueToProject(ctx context.Context, jiraCode string, issueKey string) error {
 	_, err := Projects().UpdateOne(ctx,
@@ -238,14 +243,6 @@ func ReplaceIssueKeyInProject(ctx context.Context, jiraCode string, oldKey, newK
 	return AddIssueToProject(ctx, jiraCode, newKey)
 }
 
-// UpdateProjectIssues replaces the entire issues array for a project
-func UpdateProjectField(ctx context.Context, jiraCode string, field string, value interface{}) error {
-	_, err := Projects().UpdateOne(ctx,
-		bson.M{"jiraCodes.main.jiraCode": jiraCode},
-		bson.M{"$set": bson.M{field: value}},
-	)
-	return err
-}
 
 func UpdateProjectIssues(ctx context.Context, jiraCode string, keys []string) error {
 	_, err := Projects().UpdateOne(ctx,
