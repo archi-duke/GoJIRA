@@ -173,6 +173,71 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  async function handleRenameFile(oldPath) {
+    const base = oldPath.replace(/\.md$/, '');
+    const newName = window.prompt('새 파일 이름', base);
+    if (!newName || !newName.trim()) return;
+    let newPath = newName.trim();
+    if (!newPath.endsWith('.md')) newPath += '.md';
+    if (newPath === oldPath) return;
+    if (items.some(i => i.path === newPath)) {
+      modalAlert(`"${newPath}" 파일이 이미 존재합니다.`);
+      return;
+    }
+    const ref = `docs/${user}`;
+    const getRes = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(oldPath)}&ref=${encodeURIComponent(ref)}`);
+    if (!getRes.ok) { modalAlert('파일 읽기 실패'); return; }
+    const fileData = await getRes.json();
+    const fileContent = fileData.content ? decodeBase64(fileData.content) : '';
+    const createRes = await fetch(`${API}/${projectCode}/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      body: JSON.stringify({ path: newPath, content: fileContent, message: `${oldPath} → ${newPath} 이름 변경` }),
+    });
+    if (!createRes.ok) { modalAlert('파일 생성 실패'); return; }
+    await fetch(`${API}/${projectCode}/file`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      body: JSON.stringify({ path: oldPath, message: `${oldPath} 삭제 (이름 변경)` }),
+    });
+    setFileStatus(prev => {
+      const next = { ...prev };
+      delete next[oldPath];
+      next[newPath] = prev[oldPath] || 'added';
+      return next;
+    });
+    fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(ref)}`)
+      .then(r => r.json()).then(d => setUserTree(d)).catch(() => {});
+    setSelectedFile(newPath);
+    setContent(fileContent);
+    setOriginal(fileContent);
+    modalAlert(`"${oldPath}" → "${newPath}" 이름 변경 완료`);
+  }
+
+  async function handleDeleteFile(path) {
+    if (!await modalConfirm(`"${path}" 파일을 삭제하시겠습니까?`)) return;
+    const res = await fetch(`${API}/${projectCode}/file`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      body: JSON.stringify({ path, message: `${path} 삭제` }),
+    });
+    if (res.ok) {
+      if (selectedFile === path) {
+        setSelectedFile(null);
+        setContent('');
+        setOriginal('');
+        setEditMode(false);
+      }
+      setFileStatus(prev => { const next = { ...prev }; next[path] = 'deleted'; return next; });
+      fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`)
+        .then(r => r.json()).then(d => setUserTree(d)).catch(() => {});
+      modalAlert('삭제 완료');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      modalAlert(err.error || '삭제 실패');
+    }
+  }
+
   async function handleDiffToggle() {
     if (diffMode) { setDiffMode(false); return; }
     setLoadingDiff(true);
@@ -340,7 +405,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''}`}
                 onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path); }}>
                 {activeTab === 'workspace' && statusBadge(item.path)}
-                {item.path}
+                <span className="de-file-name">{item.path}</span>
+                {activeTab === 'workspace' && globalEditMode && (
+                  <span className="de-file-actions">
+                    <button className="de-file-act" title="이름 변경" onClick={e => { e.stopPropagation(); handleRenameFile(item.path); }}>✎</button>
+                    <button className="de-file-act de-file-act-del" title="삭제" onClick={e => { e.stopPropagation(); handleDeleteFile(item.path); }}>✕</button>
+                  </span>
+                )}
               </div>
             );
           })}

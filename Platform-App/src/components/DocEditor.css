@@ -11,8 +11,14 @@
 .de-sidebar-tab:hover { background: #f0f0f0; }
 .de-sidebar-tab-active { color: #2c3e50; font-weight: 600; border-bottom: 2px solid #2c3e50; }
 .de-sidebar-header { padding: 8px 12px; font-size: 11px; color: #888; border-bottom: 1px solid #eee; display: flex; align-items: center; }
-.de-file { padding: 6px 12px; font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.de-file { padding: 6px 12px; font-size: 12px; cursor: pointer; overflow: hidden; white-space: nowrap; display: flex; align-items: center; }
 .de-file:hover { background: #eee; }
+.de-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.de-file-actions { display: none; flex-shrink: 0; margin-left: 4px; }
+.de-file:hover .de-file-actions { display: flex; gap: 2px; }
+.de-file-act { border: none; background: none; cursor: pointer; padding: 0 3px; font-size: 12px; color: #888; line-height: 1; }
+.de-file-act:hover { color: #333; }
+.de-file-act-del:hover { color: #e74c3c; }
 .de-file-active { background: #d6eaf8; font-weight: 600; }
 .de-file-modified { color: #e67e22; }
 .de-file-added { color: #27ae60; }
