@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	"gojira-api/config"
 	"gojira-api/db"
 	"gojira-api/skills"
 )
@@ -44,40 +45,33 @@ func AgentChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
 	// 세션 관리
 	if req.SessionID == "" {
 		req.SessionID = uuid.New().String()
 		db.CreateAgentSession(ctx, req.SessionID, userID, bson.M(req.Context))
-	} else {
-		// 기존 세션에 컨텍스트 업데이트
-		if req.Context != nil {
-			db.UpdateAgentSessionContext(ctx, req.SessionID, bson.M(req.Context))
-		}
+	} else if req.Context != nil {
+		db.UpdateAgentSessionContext(ctx, req.SessionID, bson.M(req.Context))
 	}
 
-	// 대화 이력 로드 (현재 메시지 저장 전 — 이전 턴만)
+	// 이전 대화 이력 로드 (현재 메시지 저장 전)
 	session, _ := db.GetAgentSession(ctx, req.SessionID)
-	messages := buildLLMMessages(session, req.Message)
-	// 현재 사용자 메시지 명시적으로 추가
+	messages := buildMessages(session)
+
+	// 현재 사용자 메시지 추가
 	messages = append(messages, map[string]interface{}{"role": "user", "content": req.Message})
 
-	// 이제 현재 메시지를 세션에 저장
+	// 세션에 사용자 메시지 저장
 	db.AppendAgentMessage(ctx, req.SessionID, bson.M{
 		"role": "user", "content": req.Message, "timestamp": time.Now(),
 	})
 
-	// Agent Router: LLM에 tools와 함께 요청
-	tools := skills.Default.ListTools()
-	reply, actions, err := routeAgent(ctx, messages, tools, userID)
-	if err != nil {
-		log.Printf("Agent error: %v", err)
-		reply = "죄송합니다, 처리 중 오류가 발생했습니다: " + err.Error()
-	}
+	// === Agentic Loop (Claude Code 패턴) ===
+	reply, actions := agentLoop(ctx, messages, userID)
 
-	// 어시스턴트 메시지 저장
+	// 세션에 어시스턴트 응답 저장
 	db.AppendAgentMessage(ctx, req.SessionID, bson.M{
 		"role": "assistant", "content": reply, "actions": actions, "timestamp": time.Now(),
 	})
@@ -97,90 +91,50 @@ func AgentToolsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// buildLLMMessages 세션 이력으로 LLM messages 배열 구성
-func buildLLMMessages(session bson.M, currentMessage string) []map[string]interface{} {
-	msgs := []map[string]interface{}{
-		{"role": "system", "content": agentSystemPrompt()},
-	}
+// ─── Agentic Loop ───
+// Claude Code와 동일한 패턴:
+// 1. LLM에 messages + tools 전달
+// 2. stop_reason이 "tool_use"이면 도구 실행 → 결과를 messages에 추가 → 반복
+// 3. stop_reason이 "end_turn" 또는 "stop"이면 루프 종료
+// 4. 에러 발생 시 is_error: true로 LLM에 전달 → LLM이 재시도/대안 판단
 
-	// 이전 대화 이력 (최근 10턴)
-	if session != nil {
-		if history, ok := session["messages"].([]interface{}); ok {
-			start := 0
-			if len(history) > 20 {
-				start = len(history) - 20
-			}
-			for _, m := range history[start:] {
-				switch msg := m.(type) {
-				case bson.M:
-					role, _ := msg["role"].(string)
-					content, _ := msg["content"].(string)
-					if role != "" && content != "" {
-						msgs = append(msgs, map[string]interface{}{"role": role, "content": content})
-					}
-				case bson.D:
-					mm := bson.M{}
-					for _, e := range msg {
-						mm[e.Key] = e.Value
-					}
-					role, _ := mm["role"].(string)
-					content, _ := mm["content"].(string)
-					if role != "" && content != "" {
-						msgs = append(msgs, map[string]interface{}{"role": role, "content": content})
-					}
-				}
-			}
-		}
-	}
-
-	return msgs
-}
-
-// routeAgent LLM에 tool_use 요청 → Skill 실행 → 최종 응답 (재귀적 tool_call 처리)
-func routeAgent(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}, user string) (string, []map[string]interface{}, error) {
-	oaiTools := make([]map[string]interface{}, len(tools))
-	for i, t := range tools {
-		oaiTools[i] = map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        t["name"],
-				"description": t["description"],
-				"parameters":  t["input_schema"],
-			},
-		}
-	}
-
+func agentLoop(ctx context.Context, messages []map[string]interface{}, user string) (string, []map[string]interface{}) {
+	oaiTools := buildToolDefs()
 	var allActions []map[string]interface{}
-	maxRounds := 5 // 무한루프 방지
 
-	for round := 0; round < maxRounds; round++ {
+	maxTurns := 10 // 최대 turn 수
+
+	for turn := 0; turn < maxTurns; turn++ {
+		// LLM 호출
 		result, err := skills.CallLLMWithTools(messages, oaiTools)
 		if err != nil {
-			return "", allActions, err
+			log.Printf("Agent LLM error at turn %d: %v", turn, err)
+			return "LLM 호출 중 오류가 발생했습니다: " + err.Error(), allActions
 		}
 
 		choices, _ := result["choices"].([]interface{})
 		if len(choices) == 0 {
-			return "응답을 생성할 수 없습니다.", allActions, nil
+			return "응답을 생성할 수 없습니다.", allActions
 		}
 
 		choice, _ := choices[0].(map[string]interface{})
 		message, _ := choice["message"].(map[string]interface{})
+		finishReason, _ := choice["finish_reason"].(string)
 		content, _ := message["content"].(string)
 		toolCalls, _ := message["tool_calls"].([]interface{})
 
-		// tool_call이 없으면 최종 텍스트 응답
-		if len(toolCalls) == 0 {
+		// stop_reason 확인: tool_calls가 없으면 루프 종료 (end_turn)
+		if len(toolCalls) == 0 || finishReason == "stop" {
 			if content == "" && len(allActions) > 0 {
 				content = "작업이 완료되었습니다."
 			}
-			return content, allActions, nil
+			return content, allActions
 		}
 
-		// assistant message를 messages에 추가 (tool_calls 포함)
+		// assistant message를 대화 기록에 추가 (tool_calls 포함)
 		messages = append(messages, message)
 
-		// 모든 tool_call 실행
+		// 도구 실행: 각 tool_call 처리
 		for _, tc := range toolCalls {
 			tcMap, ok := tc.(map[string]interface{})
 			if !ok {
@@ -194,46 +148,123 @@ func routeAgent(ctx context.Context, messages []map[string]interface{}, tools []
 			var fnArgs map[string]interface{}
 			json.Unmarshal([]byte(fnArgsStr), &fnArgs)
 
-			log.Printf("Agent round=%d skill=%s args=%v", round, fnName, fnArgs)
+			log.Printf("Agent turn=%d tool=%s args=%v", turn, fnName, fnArgs)
 
-			skillResult, err := skills.Default.Execute(ctx, fnName, fnArgs, user)
-			if err != nil {
-				skillResult = map[string]string{"error": err.Error()}
+			// 도구 실행
+			skillResult, execErr := skills.Default.Execute(ctx, fnName, fnArgs, user)
+
+			toolResultMsg := map[string]interface{}{
+				"role":         "tool",
+				"tool_call_id": tcID,
 			}
 
-			resultJSON, _ := json.Marshal(skillResult)
-			allActions = append(allActions, map[string]interface{}{
-				"skill": fnName, "params": fnArgs, "result": skillResult,
-			})
+			if execErr != nil {
+				// Claude Code 패턴: is_error로 에러 전달 → LLM이 재시도/대안 판단
+				log.Printf("Agent tool error: %s — %v", fnName, execErr)
+				toolResultMsg["content"] = execErr.Error()
+				// OpenAI는 is_error를 직접 지원 안 하므로 content에 에러 표시
+				allActions = append(allActions, map[string]interface{}{
+					"skill": fnName, "params": fnArgs, "error": execErr.Error(),
+				})
+			} else {
+				resultJSON, _ := json.Marshal(skillResult)
+				toolResultMsg["content"] = string(resultJSON)
+				allActions = append(allActions, map[string]interface{}{
+					"skill": fnName, "params": fnArgs, "result": skillResult,
+				})
+			}
 
-			messages = append(messages, map[string]interface{}{
-				"role": "tool", "tool_call_id": tcID, "content": string(resultJSON),
-			})
+			messages = append(messages, toolResultMsg)
 		}
-		// 다음 라운드에서 LLM이 tool_result를 보고 최종 응답 또는 추가 tool_call
+
+		// 다음 turn: LLM이 tool_result를 보고 판단 (추가 tool_call 또는 최종 응답)
 	}
 
-	return "처리 라운드 초과", allActions, nil
+	return "최대 처리 단계를 초과했습니다. 질문을 좁혀서 다시 시도해주세요.", allActions
 }
 
-func agentSystemPrompt() string {
-	return `당신은 GoJIRA 프로젝트 관리 시스템의 AI 도우미입니다.
-사용자의 요청에 대해 반드시 제공된 도구(function)를 호출하여 실제 데이터를 조회하고 작업을 수행해야 합니다.
+// buildToolDefs OpenAI function calling 형식 도구 정의
+func buildToolDefs() []map[string]interface{} {
+	tools := skills.Default.ListTools()
+	oaiTools := make([]map[string]interface{}, len(tools))
+	for i, t := range tools {
+		oaiTools[i] = map[string]interface{}{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        t["name"],
+				"description": t["description"],
+				"parameters":  t["input_schema"],
+			},
+		}
+	}
+	return oaiTools
+}
 
-중요 규칙:
-- 사용자가 프로젝트, 이슈, 문서, 일정에 대해 질문하면 반드시 해당 도구를 호출하세요
-- 추측하거나 가정하지 마세요. 항상 도구를 통해 실제 데이터를 확인하세요
-- 도구 호출 결과를 한국어로 사용자가 이해하기 쉽게 요약하세요
-- 이슈/프로젝트 목록은 마크다운 표 형식으로 정리하세요
-- 프로젝트 코드가 불명확하면 먼저 project_query로 목록을 확인하세요
+// buildMessages 세션 이력에서 LLM messages 배열 구성
+func buildMessages(session bson.M) []map[string]interface{} {
+	systemPrompt := config.LoadPrompt("agent-system.txt", nil)
+	if systemPrompt == "" {
+		systemPrompt = defaultSystemPrompt()
+	}
 
-사용 가능한 도구:
-- project_query: 프로젝트 목록 조회 (프로젝트 수, 이름, 상태)
-- issue_query: 프로젝트별 이슈 조회 (타입별 필터 가능)
-- issue_manage: 이슈 관리 (action: create/update/delete/link)
-- doc_manage: 문서 관리 (action: list/summarize/diff)
-- pr_manage: PR 관리 (action: create/list)
-- schedule_analyze: 프로젝트 일정 분석`
+	msgs := []map[string]interface{}{
+		{"role": "system", "content": systemPrompt},
+	}
+
+	if session == nil {
+		return msgs
+	}
+
+	history, ok := session["messages"].([]interface{})
+	if !ok {
+		return msgs
+	}
+
+	// 최근 20개 메시지만 (컨텍스트 윈도우 관리)
+	start := 0
+	if len(history) > 20 {
+		start = len(history) - 20
+	}
+
+	for _, m := range history[start:] {
+		msg := toBsonM(m)
+		if msg == nil {
+			continue
+		}
+		role, _ := msg["role"].(string)
+		content, _ := msg["content"].(string)
+		if role == "" {
+			continue
+		}
+		// user/assistant 메시지만 이력에 포함 (tool 메시지는 턴 내에서만 유효)
+		if role == "user" || (role == "assistant" && content != "") {
+			msgs = append(msgs, map[string]interface{}{"role": role, "content": content})
+		}
+	}
+
+	return msgs
+}
+
+func toBsonM(v interface{}) bson.M {
+	switch m := v.(type) {
+	case bson.M:
+		return m
+	case bson.D:
+		r := bson.M{}
+		for _, e := range m {
+			r[e.Key] = e.Value
+		}
+		return r
+	case map[string]interface{}:
+		return bson.M(m)
+	}
+	return nil
+}
+
+func defaultSystemPrompt() string {
+	return `당신은 GoJIRA 프로젝트 관리 시스템의 AI 에이전트입니다.
+사용자의 요청을 이해하고, 제공된 도구를 사용하여 실제 데이터를 조회하고 작업을 수행합니다.
+항상 한국어로 응답합니다. 추측하지 말고 도구를 통해 확인하세요.`
 }
 
 func generateSuggestions(ctx map[string]interface{}) []string {
