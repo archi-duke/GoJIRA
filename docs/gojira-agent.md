@@ -154,8 +154,24 @@ Agent가 자동 생성하는 문서는 우선 2종류를 지원한다.
 
 | 문서 종류 | 파일 | 설명 |
 |-----------|------|------|
-| **요구사양서 (SRS)** | `requirement.md` | VOS → Feature(UC) → Requirement(QA/FR/CNST) 순서로 구조화된 요구사항 명세 |
-| **설계서** | `architectural-design.md`, `detailed-design.md` | Requirement 기반 구조/상세 설계안 (후보안 포함) |
+| **요구사양서 (SRS)** | `srs.md` | VOS → Feature(UC) → Requirement(QA/FR/CNST) 순서로 구조화된 요구사항 명세 |
+| **설계서** | `architecture.md` | Requirement 기반 구조/상세 설계안 (후보안 포함) |
+
+### 4.2.1 필수 파일 (Protected Files)
+
+아래 3개 파일은 **필수 파일**로, 과제 생성 시 빈 내용으로 자동 생성되며 **이름 변경 및 삭제가 불가능**하다.
+
+| 파일 | 용도 |
+|------|------|
+| `business.md` | 비즈니스 배경, 목표, 스테이크홀더, 범위 등 과제 기본 정보 |
+| `srs.md` | 요구사양서 (VOS → Feature → Requirement) |
+| `architecture.md` | 구조설계서 (ADSN, 후보안 포함) |
+
+**규칙:**
+- 과제(프로젝트) 생성 시 DocRepo에 위 3개 파일이 자동으로 생성된다
+- UI에서 해당 파일의 이름 변경(✎) 및 삭제(✕) 버튼을 비활성화한다
+- API에서도 해당 파일에 대한 DELETE 및 이름 변경(rename) 요청을 거부한다
+- 내용 편집은 자유롭게 가능하다
 
 ### 4.3 메뉴별 Assist 기능
 
