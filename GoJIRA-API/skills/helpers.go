@@ -158,7 +158,11 @@ func truncate(s string, maxLen int) string {
 	return s
 }
 
-// fetchFileContent Platform-API에서 파일 내용 조회
+// FetchFileContent Platform-API에서 파일 내용 조회 (exported)
+func FetchFileContent(projectCode, path, ref string) (string, error) {
+	return fetchFileContent(projectCode, path, ref)
+}
+
 func fetchFileContent(projectCode, path, ref string) (string, error) {
 	u := fmt.Sprintf("%s/DocRepo/%s/file?path=%s&ref=%s",
 		config.PlatformAPI, projectCode, url.QueryEscape(path), url.QueryEscape(ref))

@@ -13,7 +13,7 @@ import (
 	"gojira-api/config"
 	"gojira-api/db"
 	"gojira-api/handlers"
-	_ "gojira-api/skills" // Skill init() 등록
+	"gojira-api/skills"
 )
 
 func caseInsensitiveRouting(next http.Handler) http.Handler {
@@ -39,6 +39,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 
 func main() {
 	db.Init()
+	skills.AutoLoadSkills()
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -104,6 +105,7 @@ func main() {
 
 		// Agent
 		r.Post("/Agent/chat", handlers.AgentChatHandler)
+		r.Post("/Agent/assist", handlers.AgentAssistHandler)
 		r.Get("/Agent/tools", handlers.AgentToolsHandler)
 	})
 
