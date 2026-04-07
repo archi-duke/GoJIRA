@@ -148,40 +148,109 @@ Agent: 현재 SATAM 매트릭스 분석 결과입니다:
 각 메뉴의 생성/수정 영역에 `Agent Assist` 버튼을 배치한다.
 클릭 시 현재 컨텍스트(프로젝트, 이슈, 파일 등)를 자동으로 전달하여 AI가 내용을 생성/수정한다.
 
-### 4.2 메뉴별 Assist 기능
+### 4.2 문서 생성 종류
 
-#### 4.2.1 Issues
+Agent가 자동 생성하는 문서는 우선 2종류를 지원한다.
+
+| 문서 종류 | 파일 | 설명 |
+|-----------|------|------|
+| **요구사양서 (SRS)** | `requirement.md` | VOS → Feature(UC) → Requirement(QA/FR/CNST) 순서로 구조화된 요구사항 명세 |
+| **설계서** | `architectural-design.md`, `detailed-design.md` | Requirement 기반 구조/상세 설계안 (후보안 포함) |
+
+### 4.3 메뉴별 Assist 기능
+
+#### 4.3.1 Issues — 이슈 자동 생성
+
+편집모드 시 각 이슈 타입 컬럼 하단에 **"이슈 자동 생성"** 버튼을 배치한다.
+클릭 시 Agent가 필요한 자료를 확인하여 해당 타입의 이슈를 자동 생성하고, 연관 이슈를 **contain** 관계로 연결한다.
+
+##### VOS (Vision/Objective/Scope) 자동 생성
+- **입력**: 과제의 비즈니스 배경, 목표, 범위 등 제공된 자료
+- **동작**: 예상되는 스테이크홀더들의 요구(Stakeholder Needs)를 분석하여 VOS 이슈를 작성
+- **출력**: VOS 이슈 N건 생성 (각 스테이크홀더 관점별)
+
+##### Feature (Use Case) 자동 생성
+- **입력**: VOS 이슈 + 제공된 자료 (비즈니스 컨텍스트)
+- **동작**:
+  1. 시스템의 **Use Case Diagram**을 작성 (액터-유즈케이스 관계)
+  2. 각 액터와 1차 관계에 있는 유즈케이스를 **이미지(picture)**로 생성
+  3. 생성된 Use Case Diagram 이미지를 문서 저장소에 저장
+  4. 각 유즈케이스별 **User Story** 작성:
+     - Actor (행위자)
+     - Pre-condition (사전조건)
+     - Flow (기본 흐름)
+     - Alternative-flow (대안 흐름)
+     - Exception-flow (예외 흐름)
+     - Post-condition (사후조건)
+- **출력**: Feature 이슈 N건 + Use Case Diagram 이미지 + User Story
+- **관계**: VOS → Feature (contain)
+
+##### Requirement (QA/FR/CNST) 자동 생성
+- **입력**: Feature(UC) 이슈 + VOS 이슈
+- **동작**: 각 유즈케이스에서 도출되는 요구사항을 타입별로 생성
+  - **QA (Quality Attribute)**: 성능, 보안, 가용성 등 품질속성 요구사항
+  - **FR (Functional Requirement)**: 기능 요구사항
+  - **CNST (Constraint)**: 제약사항
+- **출력**: Requirement 이슈 N건 (타입별 분류)
+- **관계**: Feature → Requirement (contain)
+
+##### ADSN (Architectural Design) 자동 생성
+- **입력**: Requirement(QA, FR, CNST) 이슈
+- **동작**: 각 요구사항에 대한 설계안을 **후보안 포함**하여 생성
+  - 요구사항별 1~3개의 설계 후보안 작성
+  - 각 후보안의 장단점(pros/cons), 리스크(risk), 민감도(sensitivity) 분석
+  - 추천안 선정 및 근거 제시
+- **출력**: Architectural Design 이슈 N건 (후보안 포함)
+- **관계**: Requirement → ADSN (contain)
+
+##### 이슈 자동 생성 흐름도
+
+```
+[VOS 자동 생성]  ← 비즈니스 배경/목표
+       |
+       | contain
+       v
+[Feature(UC) 자동 생성]  ← VOS + 제공자료
+       |                    + Use Case Diagram 생성 (이미지 저장)
+       |                    + User Story 작성
+       | contain
+       v
+[Requirement 자동 생성]  ← Feature + VOS
+       |    QA / FR / CNST 타입별 분류
+       | contain
+       v
+[ADSN 자동 생성]  ← Requirement
+       후보안 포함, 장단점/리스크 분석
+```
+
+#### 4.3.2 Docs (설계문서)
 | 기능 | 동작 |
 |------|------|
-| 이슈 자동 생성 | 자연어로 설명 → 이슈타입/요약/설명/필드 자동 채움 |
-| 이슈 설명 보강 | 기존 이슈의 description을 AI가 구체화 |
-| 관련 이슈 추천 | 현재 이슈와 연관될 이슈 자동 제안 (Link 추천) |
-| 필드 자동 채움 | 요구사항 이슈의 QA/Source/Stimulus 등 자동 추론 |
-
-#### 4.2.2 Docs (설계문서)
-| 기능 | 동작 |
-|------|------|
+| SRS 자동 생성 | VOS → Feature → Requirement 이슈를 구조화하여 요구사양서 마크다운 생성 |
+| 설계서 자동 생성 | ADSN/DDSN 이슈 기반 설계서 마크다운 생성 (후보안 포함) |
+| Use Case Diagram 삽입 | Feature 생성 시 만든 다이어그램을 문서에 자동 삽입 |
 | 섹션 자동 생성 | 이슈 데이터 기반 마크다운 섹션 생성 |
 | 문서 요약 | 전체 문서 또는 변경사항 요약 |
 | Diff 해석 | Semantic Diff 결과를 자연어로 설명 |
 | 문서 리뷰 | 문서 품질/완성도 검토 및 개선 제안 |
 | 템플릿 적용 | 빈 파일에 이슈 기반 템플릿 자동 적용 |
 
-#### 4.2.3 Relation Map
+#### 4.3.3 Relation Map
 | 기능 | 동작 |
 |------|------|
 | 관계 분석 | 이슈 간 의존성 분석 및 누락 관계 제안 |
 | 영향도 분석 | 특정 이슈 변경 시 영향받는 이슈 체인 분석 |
 | 관계 자동 생성 | 이슈 내용 기반 자동 Link 생성 제안 |
+| contain 체인 검증 | VOS→Feature→Requirement→ADSN contain 관계 누락 검출 |
 
-#### 4.2.4 SATAM
+#### 4.3.4 SATAM
 | 기능 | 동작 |
 |------|------|
 | 위험도 자동 평가 | 이슈 내용 분석 → Risk/Sensitivity 등급 제안 |
 | 경감조치 생성 | 식별된 위험에 대한 Mitigation 방안 자동 작성 |
 | SATAM 리포트 | 전체 매트릭스 분석 결과를 문서화 |
 
-#### 4.2.5 Project Map
+#### 4.3.5 Project Map
 | 기능 | 동작 |
 |------|------|
 | 일정 분석 | 마일스톤 간 일정 적정성 분석 |
@@ -198,14 +267,20 @@ Agent: 현재 SATAM 매트릭스 분석 결과입니다:
 
 | Skill ID | 설명 | 입력 | 출력 | API 호출 |
 |----------|------|------|------|----------|
-| `issue_create` | 이슈 생성 | projectCode, issueType, summary, description, fields | 생성된 이슈 | POST /Issue |
+| `vos_generate` | VOS 이슈 자동 생성 | projectCode, 비즈니스 배경/목표 | VOS 이슈 N건 | POST /Issue (반복) + POST /Issue/link |
+| `feature_generate` | Feature(UC) 자동 생성 | projectCode | Feature 이슈 + UC Diagram + User Story | POST /Issue + PUT /DocRepo (이미지) |
+| `requirement_generate` | Requirement 자동 생성 | projectCode | QA/FR/CNST 이슈 N건 | POST /Issue + POST /Issue/link |
+| `adsn_generate` | ADSN 자동 생성 (후보안 포함) | projectCode | 설계안 이슈 N건 | POST /Issue + POST /Issue/link |
+| `issue_create` | 이슈 단건 생성 | projectCode, issueType, summary, description, fields | 생성된 이슈 | POST /Issue |
 | `issue_update` | 이슈 수정 | key, fields | 수정 결과 | PUT /Issue |
 | `issue_query` | 이슈 조회/검색 | projectCode, filters | 이슈 목록 | GET /Issue |
 | `issue_analyze` | 이슈 관계 분석 | projectCode | 관계 그래프 | GET /Issue + PUT /Issue/relations |
-| `doc_generate` | 설계문서 생성 | projectCode | 생성된 파일 목록 | POST /Issue/docgen |
+| `doc_generate_srs` | 요구사양서(SRS) 생성 | projectCode | requirement.md | POST /Issue/docgen |
+| `doc_generate_design` | 설계서 생성 | projectCode | architectural-design.md, detailed-design.md | POST /Issue/docgen |
 | `doc_edit` | 문서 섹션 편집 | projectCode, path, instruction | 수정된 내용 | PUT /DocRepo/{code}/file |
 | `doc_review` | 문서 리뷰 | projectCode, path | 리뷰 코멘트 | GET /DocRepo/{code}/file |
 | `doc_summarize` | 문서/변경 요약 | projectCode, path | 요약 텍스트 | GET /DocRepo/{code}/file |
+| `usecase_diagram` | UC Diagram 생성 | projectCode, features | 이미지 파일 | PUT /DocRepo (이미지 저장) |
 | `pr_create` | PR 생성 | projectCode, title, body | PR URL | POST /DocRepo/{code}/pr |
 | `diff_explain` | Diff 해석 | projectCode, path | 자연어 설명 | GET /DocRepo/{code}/file (main vs branch) |
 | `satam_analyze` | SATAM 분석 | projectCode | 분석 결과 | GET /Issue (requirements + designs) |
