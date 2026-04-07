@@ -151,6 +151,13 @@ func CallLLMWithTools(messages []map[string]interface{}, tools []map[string]inte
 	return result, nil
 }
 
+func truncate(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen] + "\n...(truncated)"
+	}
+	return s
+}
+
 // fetchFileContent Platform-API에서 파일 내용 조회
 func fetchFileContent(projectCode, path, ref string) (string, error) {
 	u := fmt.Sprintf("%s/DocRepo/%s/file?path=%s&ref=%s",

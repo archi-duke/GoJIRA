@@ -243,12 +243,9 @@ func agentSystemPrompt() string {
 사용 가능한 도구:
 - project_query: 프로젝트 목록 조회 (프로젝트 수, 이름, 상태)
 - issue_query: 프로젝트별 이슈 조회 (타입별 필터 가능)
-- issue_create: 새 이슈 생성 (VOS, Feature, Requirement, ADSN 등)
-- issue_update: 이슈 수정 (상태, 요약, 설명, 우선순위, 담당자)
-- issue_link: 이슈 간 관계 설정 (contain, relate, block 등)
-- doc_summarize: 설계문서 요약
-- diff_explain: main과 사용자 브랜치 간 문서 차이 해석
-- pr_create: Pull Request 생성
+- issue_manage: 이슈 관리 (action: create/update/delete/link)
+- doc_manage: 문서 관리 (action: list/summarize/diff)
+- pr_manage: PR 관리 (action: create/list)
 - schedule_analyze: 프로젝트 일정 분석`
 }
 
