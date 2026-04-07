@@ -23,76 +23,146 @@ GoJIRA Agent는 기존 GoJIRA 플랫폼의 기능을 AI 기반으로 고도화�
 ### 2.1 시스템 구성도
 
 ```
-[ Browser ]
-    |
-    |-- Chat UI (GoJIRA 타이틀 클릭)
-    |-- Agent Assist (각 메뉴 내 버튼)
-    |
-    v
-[ GoJIRA-API ]
-    |-- POST /api/v2/Agent/chat       (대화형)
-    |-- POST /api/v2/Agent/assist     (컨텍스트 기반 보조)
-    |
-    |-- Agent Router (의도 분석 → Skill 선택)
-    |       |
-    |       |-- Skill: issue-create
-    |       |-- Skill: issue-update
-    |       |-- Skill: doc-generate
-    |       |-- Skill: doc-edit
-    |       |-- Skill: project-analyze
-    |       |-- Skill: relation-analyze
-    |       |-- Skill: satam-analyze
-    |       |-- Skill: pr-create
-    |       |-- Skill: diff-summarize
-    |       |-- ... (확장 가능)
-    |       |
-    |       v
-    |   [ LLM Provider ] (llm.json 설정 기반)
-    |
-    |-- 기존 API 호출 (Issue, DocRepo, Project 등)
-    |
-    v
-[ Platform-API ]
-    |-- DocRepo (파일 수정, PR, 머지)
-    |-- SSE (실시간 알림)
-    |-- Webhook (Gitea 이벤트)
+┌─────────────────────────────────────────────────────────┐
+│  Agent (Claude Code / GoJIRA Web / 기타 Agent)          │
+│    └─ SKILL.md (표준 Claude Code 형식)                  │
+│         └─ !`gojira-cli ...` (쉘 명령 직접 실행)        │
+└────────────┬────────────────────────────────────────────┘
+             │ HTTP (REST API)
+             v
+┌─────────────────────────────────────────────────────────┐
+│  GoJIRA-API (Agent 서버)                                │
+│    ├─ POST /Agent/chat    (Agentic Loop — 대화형)       │
+│    ├─ POST /Agent/assist  (컨텍스트 기반 보조)          │
+│    ├─ GET  /Agent/tools   (MCP 호환 tool 목록)          │
+│    │                                                     │
+│    ├─ Agentic Loop (Claude Code 패턴)                   │
+│    │   LLM 호출 → tool_call 확인 → Skill 실행           │
+│    │   → 결과를 LLM에 전달 → 반복 (최대 10 turns)       │
+│    │                                                     │
+│    ├─ Skill Registry (SKILL.md 기반 로더)               │
+│    │   └─ skills/*/SKILL.md (YAML frontmatter + md)     │
+│    │                                                     │
+│    └─ 기존 API (Issue, Project, etc.)                   │
+│                                                          │
+├─ gojira-cli (독립 CLI 바이너리)                          │
+│    project/issue/doc/pr/schedule 서브커맨드              │
+└────────────┬────────────────────────────────────────────┘
+             │ HTTP
+             v
+┌─────────────────────────────────────────────────────────┐
+│  Platform-API                                            │
+│    ├─ DocRepo (파일, PR, 편집 세션, 머지)               │
+│    ├─ SSE (실시간 알림 push)                            │
+│    └─ Webhook (Gitea main push → 브랜치 비교 → SSE)    │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Agent 처리 흐름
+### 2.2 Agentic Loop (Claude Code 패턴)
+
+GoJIRA Agent는 Claude Code와 동일한 Agentic Loop 패턴으로 동작한다.
 
 ```
-사용자 메시지
-  → Agent Router (LLM 의도 분석)
-    → Skill 선택 + 파라미터 추출
-      → Skill 실행 (API 호출 조합)
-        → 결과 반환 + 이슈 자동 기록
-          → SSE로 UI 갱신
+사용자 메시지 수신
+    ↓
+LLM 호출 (시스템 프롬프트 + 도구 정의 + 대화 기록)
+    ↓
+분기 → 텍스트 응답 (stop) OR tool_call 반환
+    ↓
+tool_call 실행 (Skill → API 호출)
+    ↓
+결과를 대화 기록에 추가 (에러 시 에러 메시지 전달 → LLM이 재시도/대안 판단)
+    ↓
+tool_call 없을 때까지 반복 (최대 10 turns)
+    ↓
+최종 텍스트 응답 반환
 ```
 
-### 2.3 MCP (Model Context Protocol) 연동
+**채택 근거:** Claude Code의 agent loop가 검증된 패턴이며, tool_use 기반 자율 판단 + 에러 복원력이 핵심. 별도 "의도 분석 → Skill 매핑" Router 없이 LLM이 직접 tool을 선택하도록 위임.
 
-Agent가 외부 도구를 호출할 때 MCP 표준을 따른다. 각 Skill은 MCP Tool로 등록되며, LLM이 tool_use로 호출한다.
+### 2.3 Skill 실행 방식 — CLI 기반 (MCP 대신)
 
-```json
-{
-  "tools": [
-    {
-      "name": "issue_create",
-      "description": "JIRA 이슈를 생성합니다",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "projectCode": { "type": "string" },
-          "issueType": { "type": "string", "enum": ["VOS", "Feature", "Requirement", "Architectural Design", "Detailed Design"] },
-          "summary": { "type": "string" },
-          "description": { "type": "string" }
-        },
-        "required": ["projectCode", "issueType", "summary"]
-      }
-    }
-  ]
-}
+**설계 결정:** MCP 서버 방식 대신 **CLI(gojira-cli) + 쉘 실행** 방식을 채택.
+
+| 비교 | MCP 서버 | CLI (채택) |
+|------|----------|-----------|
+| 실행 | 상주 프로세스 필요 | 호출 시만 실행 |
+| 속도 | 프로토콜 핸드셰이크 | 직접 실행, 빠름 |
+| 배포 | 서버 + 설정 | 바이너리 하나 |
+| 이식성 | MCP 클라이언트 필요 | 쉘 실행만 되면 OK |
+| Claude Code | MCP 설정 필요 | `!`command`` 바로 사용 |
+
+**채택 근거:**
+- Claude Code의 `!`command``와 `Bash` 도구로 바로 사용 가능
+- MCP 프로토콜 오버헤드 제거 → 더 빠른 응답
+- 단일 Go 바이너리로 배포 간편
+- CI/CD, 스크립트 자동화에서도 동일하게 활용
+- 필요 시 나중에 `gojira-cli mcp-server` 모드로 MCP 래퍼 추가 가능
+
+### 2.4 Skill 정의 — SKILL.md 선언형 (Claude Code 표준)
+
+**설계 결정:** Skill을 Go 코드 하드코딩 대신 **SKILL.md 마크다운 파일**로 정의.
+
 ```
+.claude/skills/                     # Claude Code 표준 위치
+├── project-query/SKILL.md
+├── issue-query/SKILL.md
+├── issue-manage/SKILL.md
+├── doc-manage/SKILL.md
+├── pr-manage/SKILL.md
+└── schedule-analyze/SKILL.md
+
+GoJIRA-API/skills/                  # 서버 내장 (웹 Agent Chat용)
+├── project_query/SKILL.md
+├── issue_query/SKILL.md
+├── issue_manage/SKILL.md
+├── doc_manage/SKILL.md
+├── pr_manage/SKILL.md
+├── schedule_analyze/SKILL.md
+├── registry.go                     # 범용 SKILL.md 로더
+├── executor.go                     # 범용 실행 엔진
+└── helpers.go                      # LLM/API 호출 공통
+```
+
+SKILL.md 형식 (Claude Code 표준 YAML frontmatter + 마크다운):
+```yaml
+---
+name: issue-query
+description: 프로젝트의 이슈 목록을 조회합니다
+argument-hint: "[project-code] [--type TYPE]"
+allowed-tools: Bash
+---
+
+!`gojira-cli issue list --project $0`
+```
+
+**채택 근거:**
+- 코드 변경 없이 Skill 추가/수정 가능 (md 파일만 편집)
+- Claude Code에 `.claude/skills/`로 두면 자동 인식
+- 비개발자도 Skill 작성 가능 (프롬프트 튜닝)
+- 서버 재시작으로 핫 리로드
+
+### 2.5 Skill 도메인 통합 원칙
+
+**설계 결정:** 개별 CRUD Skill 대신 **도메인 단위**로 통합 (action 파라미터).
+
+| 방식 | 예시 | Skill 수 |
+|------|------|---------|
+| ~~개별~~ | issue_create, issue_update, issue_delete, issue_link | 4개 |
+| **도메인 (채택)** | issue_manage(action=create/update/delete/link) | 1개 |
+
+최종 6개 Skill:
+
+| Skill | action | 설명 |
+|-------|--------|------|
+| `project_query` | — | 프로젝트 조회 |
+| `issue_query` | — | 이슈 조회/검색 |
+| `issue_manage` | create/update/delete/link | 이슈 CRUD + 관계 설정 |
+| `doc_manage` | list/summarize/diff | 문서 조회/요약/diff |
+| `pr_manage` | create/list | PR 관리 |
+| `schedule_analyze` | — | 일정 분석 |
+
+**채택 근거:** OpenAI/Anthropic 권장 — tool은 10~20개 이내가 최적. 많아지면 LLM 선택 정확도 하락. 도메인별 1개로 묶으면 LLM이 도메인을 먼저 선택하고 action으로 세분화하여 정확도 유지.
 
 ---
 
@@ -277,64 +347,81 @@ Agent가 자동 생성하는 문서는 우선 2종류를 지원한다.
 
 ## 5. Skill 정의
 
-### 5.1 Skill 목록
+### 5.1 현행 Skill 목록 (구현 완료)
 
-각 Skill은 독립된 Go 함수 + LLM 프롬프트 템플릿으로 구성된다.
+도메인 단위 6개 Skill, SKILL.md 선언형 + gojira-cli 실행:
 
-| Skill ID | 설명 | 입력 | 출력 | API 호출 |
-|----------|------|------|------|----------|
-| `vos_generate` | VOS 이슈 자동 생성 | projectCode, 비즈니스 배경/목표 | VOS 이슈 N건 | POST /Issue (반복) + POST /Issue/link |
-| `feature_generate` | Feature(UC) 자동 생성 | projectCode | Feature 이슈 + UC Diagram + User Story | POST /Issue + PUT /DocRepo (이미지) |
-| `requirement_generate` | Requirement 자동 생성 | projectCode | QA/FR/CNST 이슈 N건 | POST /Issue + POST /Issue/link |
-| `adsn_generate` | ADSN 자동 생성 (후보안 포함) | projectCode | 설계안 이슈 N건 | POST /Issue + POST /Issue/link |
-| `issue_create` | 이슈 단건 생성 | projectCode, issueType, summary, description, fields | 생성된 이슈 | POST /Issue |
-| `issue_update` | 이슈 수정 | key, fields | 수정 결과 | PUT /Issue |
-| `issue_query` | 이슈 조회/검색 | projectCode, filters | 이슈 목록 | GET /Issue |
-| `issue_analyze` | 이슈 관계 분석 | projectCode | 관계 그래프 | GET /Issue + PUT /Issue/relations |
-| `doc_generate_srs` | 요구사양서(SRS) 생성 | projectCode | requirement.md | POST /Issue/docgen |
-| `doc_generate_design` | 설계서 생성 | projectCode | architectural-design.md, detailed-design.md | POST /Issue/docgen |
-| `doc_edit` | 문서 섹션 편집 | projectCode, path, instruction | 수정된 내용 | PUT /DocRepo/{code}/file |
-| `doc_review` | 문서 리뷰 | projectCode, path | 리뷰 코멘트 | GET /DocRepo/{code}/file |
-| `doc_summarize` | 문서/변경 요약 | projectCode, path | 요약 텍스트 | GET /DocRepo/{code}/file |
-| `usecase_diagram` | UC Diagram 생성 | projectCode, features | 이미지 파일 | PUT /DocRepo (이미지 저장) |
-| `pr_create` | PR 생성 | projectCode, title, body | PR URL | POST /DocRepo/{code}/pr |
-| `diff_explain` | Diff 해석 | projectCode, path | 자연어 설명 | GET /DocRepo/{code}/file (main vs branch) |
-| `satam_analyze` | SATAM 분석 | projectCode | 분석 결과 | GET /Issue (requirements + designs) |
-| `schedule_analyze` | 일정 분석 | projectCode | 분석 리포트 | GET /Project |
+| Skill | action | CLI 명령 | 설명 |
+|-------|--------|---------|------|
+| `project_query` | — | `gojira-cli project list` | 프로젝트 조회 |
+| `issue_query` | — | `gojira-cli issue list --project CODE` | 이슈 조회/필터링 |
+| `issue_manage` | create | `gojira-cli issue create --project CODE --type TYPE --summary "..."` | 이슈 생성 |
+| | update | `gojira-cli issue update --key KEY --status "..."` | 이슈 수정 |
+| | delete | `gojira-cli issue delete --key KEY` | 이슈 삭제 |
+| | link | `gojira-cli issue link --from KEY --to KEY --type contain` | 이슈 관계 설정 |
+| `doc_manage` | list | `gojira-cli doc list --project CODE` | 문서 파일 목록 |
+| | summarize | `gojira-cli doc summarize --project CODE --file FILE` | 문서 요약 (LLM) |
+| | diff | `gojira-cli doc diff --project CODE --file FILE` | 브랜치 Diff 해석 (LLM) |
+| `pr_manage` | create | `gojira-cli pr create --project CODE` | PR 생성 |
+| | list | `gojira-cli pr list --project CODE` | PR 목록 조회 |
+| `schedule_analyze` | — | `gojira-cli schedule analyze --project CODE` | 일정 분석 (LLM) |
 
-### 5.2 Skill 구조 (Go)
+### 5.2 향후 추가 예정 Skill (문서 가이드 제공 후)
 
-```go
-// skills/skill.go
-type Skill struct {
-    ID          string
-    Name        string
-    Description string
-    Parameters  json.RawMessage  // JSON Schema
-    Execute     func(ctx context.Context, params map[string]interface{}, user string) (interface{}, error)
-}
+| Skill | 설명 | 비고 |
+|-------|------|------|
+| `vos_generate` | VOS 이슈 배치 자동 생성 | business.md 기반 |
+| `feature_generate` | Feature(UC) 배치 생성 + UC Diagram | VOS 기반 |
+| `requirement_generate` | Requirement(QA/FR/CNST) 배치 생성 | Feature 기반 |
+| `adsn_generate` | 설계안(후보안 포함) 배치 생성 | Requirement 기반 |
+| `doc_generate_srs` | 요구사양서 자동 생성 | srs.md |
+| `doc_generate_design` | 설계서 자동 생성 | architecture.md |
 
-type SkillRegistry struct {
-    skills map[string]*Skill
-}
+### 5.3 Skill 파일 구조
 
-func (r *SkillRegistry) Register(skill *Skill) { ... }
-func (r *SkillRegistry) Get(id string) *Skill { ... }
-func (r *SkillRegistry) ListTools() []map[string]interface{} { ... }  // MCP tool 형식 반환
+**외부 Agent용 (Claude Code 호환):**
+```
+.claude/skills/
+├── project-query/SKILL.md      # !`gojira-cli project list`
+├── issue-query/SKILL.md        # !`gojira-cli issue list ...`
+├── issue-manage/SKILL.md       # !`gojira-cli issue create/update/delete/link`
+├── doc-manage/SKILL.md         # !`gojira-cli doc list/get/summarize/diff`
+├── pr-manage/SKILL.md          # !`gojira-cli pr create/list`
+└── schedule-analyze/SKILL.md   # !`gojira-cli schedule analyze`
 ```
 
-### 5.3 Skill 프롬프트 관리
+**서버 내장용 (웹 Agent Chat):**
+```
+GoJIRA-API/skills/
+├── */SKILL.md                  # 동일 정의
+├── registry.go                 # SKILL.md 자동 로더 (YAML frontmatter 파싱)
+├── executor.go                 # 범용 실행 엔진 (SKILL.md → API 호출)
+└── helpers.go                  # LLM/API 호출 공통
+
+GoJIRA-API/prompts/
+├── agent-system.txt            # Agent 시스템 프롬프트
+├── skill-doc-summarize.txt     # 문서 요약 프롬프트
+├── skill-diff-explain.txt      # Diff 해석 프롬프트
+└── skill-schedule-analyze.txt  # 일정 분석 프롬프트
+```
+
+### 5.4 gojira-cli (독립 CLI 바이너리)
 
 ```
-GoJIRA-API/
-  prompts/
-    agent-router.txt        # 의도 분석 + Skill 선택
-    agent-chat-system.txt   # 채팅 시스템 프롬프트
-    skill-issue-create.txt  # 이슈 생성 보조
-    skill-doc-review.txt    # 문서 리뷰
-    skill-satam-analyze.txt # SATAM 분석
-    skill-diff-explain.txt  # Diff 해석
-    ...
+gojira-cli/
+├── main.go                     # 서브커맨드 라우팅
+└── cmd/
+    ├── common.go               # HTTP 클라이언트, 출력, 플래그 파서
+    ├── project.go              # project list
+    ├── issue.go                # issue list/create/update/delete/link
+    ├── doc.go                  # doc list/get/summarize/diff
+    ├── pr.go                   # pr create/list
+    └── schedule.go             # schedule analyze
+
+환경변수:
+  GOJIRA_API_URL      GoJIRA API (default: http://localhost:9001/api/v2)
+  GOJIRA_PLATFORM_URL Platform API (default: http://localhost:9000/api/v2)
+  GOJIRA_USER         사용자 ID
 ```
 
 ---
@@ -463,38 +550,48 @@ MongoDB: agent_sessions
 
 ---
 
-## 9. 구현 단계
+## 9. 구현 단계 및 현황
 
-### Phase 1: 기반 구축 (Agent Router + Chat UI)
-- [ ] Agent Router 구현 (LLM 의도 분석 → Skill 매핑)
-- [ ] Chat UI 컴포넌트 (타이틀바 GoJIRA 클릭 → 슬라이드 패널)
-- [ ] POST /Agent/chat API
-- [ ] 대화 세션 관리 (MongoDB)
-- [ ] 기본 Skill 2~3개: issue_query, doc_summarize, schedule_analyze
+### Phase 1: 기반 구축 — ✅ 완료
+- [x] Agentic Loop 구현 (Claude Code 패턴 — turn 기반 tool_call 반복)
+- [x] Chat UI 컴포넌트 (타이틀바 GoJIRA 클릭 → 우측 슬라이드 패널)
+- [x] POST /Agent/chat, GET /Agent/tools API
+- [x] 대화 세션 관리 (MongoDB, TTL 1시간)
+- [x] 시스템 프롬프트 외부화 (prompts/agent-system.txt)
+- [x] Skill 프레임워크: SKILL.md 기반 선언형 로더 + 범용 실행 엔진
+- [x] 기본 Skill: project_query, issue_query, schedule_analyze
 
-### Phase 2: 핵심 Skill 구현
-- [ ] issue_create, issue_update (이슈 CRUD)
-- [ ] doc_generate, doc_edit (문서 생성/편집)
-- [ ] diff_explain (Diff 해석)
-- [ ] pr_create (PR 생성)
-- [ ] 이슈 추적 연동 (액션 → 코멘트 자동 기록)
+### Phase 2: 핵심 Skill + 필수 파일 — ✅ 완료
+- [x] issue_manage (create/update/delete/link) — 도메인 통합
+- [x] doc_manage (list/summarize/diff) — 도메인 통합
+- [x] pr_manage (create/list) — 도메인 통합
+- [x] 필수 파일 정책 (business.md, srs.md, architecture.md)
+- [x] 멀티턴 대화 + 멀티 tool_call 정상 동작
+- [ ] 문서 생성/수정 Skill (doc_generate_srs, doc_generate_design) — 가이드 대기
 
-### Phase 3: Agent Assist 연동
-- [ ] POST /Agent/assist API
-- [ ] Issues 화면 Assist (이슈 자동 생성, 필드 채움)
-- [ ] Docs 화면 Assist (섹션 생성, 리뷰, 템플릿)
-- [ ] 각 Assist 결과 미리보기 → 사용자 확인 후 적용
+### Phase 2.5: 표준화 리팩터링 — ✅ 완료
+- [x] Go 하드코딩 → SKILL.md 선언형 전환 (Claude Code 표준)
+- [x] gojira-cli 독립 CLI 바이너리 구현
+- [x] .claude/skills/ 표준 위치에 SKILL.md 배치
+- [x] MCP 대신 CLI + 쉘 실행 방식 채택
+- [x] Agent를 Claude Code 패턴으로 리팩터링 (에러 복원, 재귀 tool_call)
+
+### Phase 3: Agent Assist UI — 🔧 진행 중
+- [x] POST /Agent/assist API
+- [x] Issues 편집모드 자동생성 버튼 (VOS/Feature/Req/ADSN)
+- [x] Assist 결과 미리보기 패널
+- [ ] Docs 화면 Agent Assist 버튼
+- [ ] 각 Assist 결과 확인 후 적용 흐름 개선
 
 ### Phase 4: 분석 Skill + 고도화
-- [ ] satam_analyze (SATAM 자동 분석)
-- [ ] issue_analyze (관계 분석, 누락 관계 제안)
-- [ ] schedule_analyze (일정 리스크 분석)
-- [ ] 멀티턴 대화 고도화 (컨텍스트 유지, 후속 질문)
+- [ ] satam_analyze Skill 추가
+- [ ] issue_analyze (관계 분석, contain 체인 검증)
+- [ ] 멀티턴 대화 고도화 (컨텍스트 요약, 후속 질문 자동 생성)
+- [ ] Relation Map / SATAM 화면 Assist 버튼
 
-### Phase 5: MCP 표준화 + 확장
-- [ ] GET /Agent/tools (MCP tool 목록)
-- [ ] 외부 MCP 서버 연동 지원
-- [ ] Skill 플러그인 아키텍처 (동적 Skill 등록)
+### Phase 5: 확장
+- [ ] 외부 MCP 서버 연동 (필요 시 gojira-cli mcp-server 모드)
+- [ ] Skill 핫 리로드 (서버 재시작 없이)
 - [ ] Slack 등 외부 시스템 Skill
 
 ---
@@ -502,11 +599,12 @@ MongoDB: agent_sessions
 ## 10. LLM 설정 활용
 
 기존 `config/llm.json` 설정을 Agent에서도 공유한다.
+Agent의 tool_use는 max_tokens를 2000 이상으로 자동 확대하여 사용.
 
 ```json
 {
   "endpoint": "https://api.openai.com/v1/chat/completions",
-  "model": "gpt-4o-mini",
+  "model": "gpt-4o",
   "maxTokens": 500,
   "temperature": 0.3,
   "headers": { "Content-Type": "application/json" },
@@ -514,16 +612,8 @@ MongoDB: agent_sessions
 }
 ```
 
-Agent 전용 설정이 필요한 경우 `config/agent.json`으로 분리:
-```json
-{
-  "routerModel": "gpt-4o",
-  "skillModel": "gpt-4o-mini",
-  "maxConversationTurns": 20,
-  "sessionTTL": 3600,
-  "maxTokensPerTurn": 2000
-}
-```
+**모델 선택 근거:** gpt-4o-mini는 tool_use 선택 정확도가 낮아 gpt-4o로 변경.
+Agent용 max_tokens는 코드에서 2000 이상으로 자동 조정.
 
 ---
 
@@ -553,12 +643,49 @@ Agent 전용 설정이 필요한 경우 `config/agent.json`으로 분리:
 
 ---
 
-## 부록: 용어 정의
+## 부록 A: 설계 결정 기록 (ADR)
+
+### ADR-001: Agentic Loop — Claude Code 패턴 채택
+- **결정:** 별도 의도 분석 Router 대신 LLM이 직접 tool을 선택하는 Claude Code 방식
+- **근거:** 검증된 패턴, tool_use 기반 자율 판단, 에러 복원력
+- **대안:** 의도 분석 → Skill 매핑 (2단계) — 불필요한 복잡성
+
+### ADR-002: CLI 기반 실행 — MCP 대신 gojira-cli
+- **결정:** MCP 서버 대신 독립 CLI 바이너리 + 쉘 실행
+- **근거:** MCP 프로토콜 오버헤드 제거, 배포 간편 (바이너리 1개), Claude Code `!`command`` 바로 사용, CI/CD 호환
+- **대안:** MCP 서버 — 상주 프로세스 관리 부담, 현 단계에서 과도
+
+### ADR-003: SKILL.md 선언형 — Go 하드코딩 대신
+- **결정:** Claude Code 표준 SKILL.md 형식으로 Skill 정의
+- **근거:** 이식성 (다른 Agent에 그대로 사용), 코드 변경 없이 Skill 추가, 비개발자 편집 가능
+- **대안:** Go 코드로 각 Skill 구현 — 초기 구현은 빨랐으나 이식성 없음
+
+### ADR-004: 도메인 단위 Skill 통합
+- **결정:** CRUD별 개별 Skill 대신 도메인별 1개 + action 파라미터
+- **근거:** LLM tool 선택 정확도 최적화 (10~20개 이내 권장), 관리 편의
+- **대안:** 개별 Skill (issue_create, issue_update, ...) — tool 수 증가 시 정확도 하락
+
+### ADR-005: 시스템 프롬프트 외부화
+- **결정:** Go 코드 하드코딩 대신 prompts/agent-system.txt 파일
+- **근거:** 프롬프트 튜닝에 코드 변경 불필요, 재시작만으로 반영
+- **대안:** 코드 내 상수 — 변경 시 빌드/배포 필요
+
+### ADR-006: gpt-4o 모델 선택
+- **결정:** gpt-4o-mini에서 gpt-4o로 변경
+- **근거:** gpt-4o-mini는 tool_use를 무시하고 텍스트만 응답하는 문제 빈발
+- **트레이드오프:** 비용 증가, 응답 속도 약간 느림
+
+---
+
+## 부록 B: 용어 정의
 
 | 용어 | 설명 |
 |------|------|
-| Agent Router | 사용자 의도를 분석하여 적절한 Skill을 선택하는 LLM 기반 라우터 |
-| Skill | 특정 작업을 수행하는 독립 실행 단위 (MCP Tool과 1:1 매핑) |
-| MCP | Model Context Protocol - AI 모델이 외부 도구를 호출하는 표준 프로토콜 |
+| Agentic Loop | LLM → tool_call → 실행 → 결과 피드백 → 반복하는 자율 실행 루프 |
+| Turn | tool_call 1세트의 왕복 (LLM 응답 → 도구 실행 → 결과 피드백) |
+| Skill | SKILL.md로 정의된 독립 실행 단위, gojira-cli 명령과 1:1 매핑 |
+| gojira-cli | GoJIRA API를 호출하는 독립 CLI 바이너리 (Go) |
+| SKILL.md | Claude Code 표준 형식의 Skill 정의 파일 (YAML frontmatter + 마크다운) |
 | Agent Assist | 각 메뉴 내에서 컨텍스트 기반으로 동작하는 AI 보조 기능 |
-| Session | 사용자와 Agent 간 대화 세션 (TTL 기반 만료) |
+| Session | 사용자와 Agent 간 대화 세션 (MongoDB, TTL 1시간) |
+| Protected Files | business.md, srs.md, architecture.md — 삭제/이름변경 불가 필수 파일 |
