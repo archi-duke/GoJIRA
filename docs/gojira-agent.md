@@ -301,7 +301,6 @@ Agent가 자동 생성하는 문서는 우선 2종류를 지원한다.
 | `diff_explain` | Diff 해석 | projectCode, path | 자연어 설명 | GET /DocRepo/{code}/file (main vs branch) |
 | `satam_analyze` | SATAM 분석 | projectCode | 분석 결과 | GET /Issue (requirements + designs) |
 | `schedule_analyze` | 일정 분석 | projectCode | 분석 리포트 | GET /Project |
-| `confluence_export` | Confluence 배포 | projectCode, spaceKey | 배포 결과 | POST /Page/confluence |
 
 ### 5.2 Skill 구조 (Go)
 
@@ -496,7 +495,7 @@ MongoDB: agent_sessions
 - [ ] GET /Agent/tools (MCP tool 목록)
 - [ ] 외부 MCP 서버 연동 지원
 - [ ] Skill 플러그인 아키텍처 (동적 Skill 등록)
-- [ ] Confluence/Slack 등 외부 시스템 Skill
+- [ ] Slack 등 외부 시스템 Skill
 
 ---
 
