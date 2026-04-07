@@ -113,12 +113,17 @@ func AgentSessionsHandler(w http.ResponseWriter, r *http.Request) {
 	items := make([]SessionItem, 0, len(sessions))
 	for _, s := range sessions {
 		id, _ := s["_id"].(string)
-		updatedAt := ""
-		if t, ok := s["updatedAt"].(time.Time); ok {
-			updatedAt = t.Format("2006-01-02 15:04")
-		}
+		updatedAt := formatTime(s["updatedAt"])
 		title := "새 대화"
-		if msgs, ok := s["messages"].([]interface{}); ok && len(msgs) > 0 {
+		// messages는 $slice:1로 첫 메시지만 포함
+		var msgs []interface{}
+		switch v := s["messages"].(type) {
+		case []interface{}:
+			msgs = v
+		case bson.A:
+			msgs = []interface{}(v)
+		}
+		if len(msgs) > 0 {
 			msg := toBsonM(msgs[0])
 			if msg != nil {
 				if c, _ := msg["content"].(string); c != "" {
@@ -322,6 +327,18 @@ func toBsonM(v interface{}) bson.M {
 		return bson.M(m)
 	}
 	return nil
+}
+
+func formatTime(v interface{}) string {
+	switch t := v.(type) {
+	case time.Time:
+		return t.Format("2006-01-02 15:04")
+	case bson.DateTime:
+		return t.Time().Format("2006-01-02 15:04")
+	case string:
+		return t
+	}
+	return ""
 }
 
 func defaultSystemPrompt() string {
