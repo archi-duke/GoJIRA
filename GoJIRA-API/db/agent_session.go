@@ -58,9 +58,40 @@ func DeleteAgentSession(ctx context.Context, sessionID string) error {
 	return err
 }
 
-// EnsureAgentSessionIndex TTL 인덱스 생성 (1시간 후 자동 삭제)
+// ListAgentSessions 사용자의 세션 목록 조회 (최신순, 제목은 첫 메시지)
+func ListAgentSessions(ctx context.Context, userID string) ([]bson.M, error) {
+	opts := options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}).SetLimit(50)
+	// messages는 제외하고 메타데이터만 반환
+	opts.SetProjection(bson.M{"messages": bson.M{"$slice": 1}, "userId": 1, "context": 1, "createdAt": 1, "updatedAt": 1})
+	cursor, err := AgentSessions().Find(ctx, bson.M{"userId": userID}, opts)
+	if err != nil {
+		return nil, err
+	}
+	var results []bson.M
+	cursor.All(ctx, &results)
+	return results, nil
+}
+
+// SearchAgentSessions 세션 내 메시지 검색
+func SearchAgentSessions(ctx context.Context, userID, query string) ([]bson.M, error) {
+	filter := bson.M{
+		"userId":           userID,
+		"messages.content": bson.M{"$regex": query, "$options": "i"},
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}).SetLimit(20)
+	opts.SetProjection(bson.M{"messages": bson.M{"$slice": 1}, "userId": 1, "context": 1, "createdAt": 1, "updatedAt": 1})
+	cursor, err := AgentSessions().Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	var results []bson.M
+	cursor.All(ctx, &results)
+	return results, nil
+}
+
+// EnsureAgentSessionIndex TTL 인덱스 생성 (7일 후 자동 삭제)
 func EnsureAgentSessionIndex(ctx context.Context) {
-	expireAfter := int32(3600)
+	expireAfter := int32(7 * 24 * 3600) // 7일
 	AgentSessions().Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys:    bson.D{{Key: "updatedAt", Value: 1}},
 		Options: options.Index().SetExpireAfterSeconds(expireAfter),

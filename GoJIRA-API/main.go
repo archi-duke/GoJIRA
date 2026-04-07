@@ -107,6 +107,8 @@ func main() {
 		r.Post("/Agent/chat", handlers.AgentChatHandler)
 		r.Post("/Agent/assist", handlers.AgentAssistHandler)
 		r.Get("/Agent/tools", handlers.AgentToolsHandler)
+		r.Get("/Agent/sessions", handlers.AgentSessionsHandler)
+		r.Get("/Agent/session/{id}", handlers.AgentSessionDetailHandler)
 	})
 
 	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)

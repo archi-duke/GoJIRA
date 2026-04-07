@@ -2,6 +2,9 @@
 .ac-panel { width: 420px; height: 100%; background: #fff; display: flex; flex-direction: column; box-shadow: -4px 0 20px rgba(0,0,0,0.15); }
 .ac-header { display: flex; align-items: center; padding: 12px 16px; background: #2c3e50; color: #fff; }
 .ac-title { flex: 1; font-size: 15px; font-weight: 600; }
+.ac-header-btns { display: flex; align-items: center; gap: 6px; }
+.ac-header-btn { background: none; border: none; color: #aaa; cursor: pointer; padding: 4px; line-height: 1; border-radius: 4px; }
+.ac-header-btn:hover { color: #fff; background: rgba(255,255,255,0.15); }
 .ac-close { background: none; border: none; color: #fff; font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1; }
 .ac-close:hover { color: #e74c3c; }
 
@@ -38,3 +41,16 @@
 .ac-send { background: #2c3e50; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer; }
 .ac-send:hover { background: #34495e; }
 .ac-send:disabled { background: #ccc; cursor: default; }
+
+/* History & Search */
+.ac-history { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.ac-search { padding: 12px 16px; border-bottom: 1px solid #eee; }
+.ac-search-input { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font-size: 13px; outline: none; box-sizing: border-box; }
+.ac-search-input:focus { border-color: #2980b9; }
+.ac-session-list { flex: 1; overflow-y: auto; }
+.ac-session-item { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+.ac-session-item:hover { background: #f5f8ff; }
+.ac-session-active { background: #eaf0f8; border-left: 3px solid #2980b9; }
+.ac-session-title { font-size: 13px; color: #2c3e50; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-session-date { font-size: 11px; color: #999; margin-top: 3px; }
+.ac-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 13px; }

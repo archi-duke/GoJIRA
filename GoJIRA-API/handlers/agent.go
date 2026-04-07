@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
@@ -82,6 +83,68 @@ func AgentChatHandler(w http.ResponseWriter, r *http.Request) {
 		Actions:     actions,
 		Suggestions: generateSuggestions(req.Context),
 	})
+}
+
+// GET /api/v{version}/Agent/sessions — 세션 목록
+func AgentSessionsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-Id")
+	query := r.URL.Query().Get("q")
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var sessions []bson.M
+	var err error
+	if query != "" {
+		sessions, err = db.SearchAgentSessions(ctx, userID, query)
+	} else {
+		sessions, err = db.ListAgentSessions(ctx, userID)
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// 응답 형태 정리: id, title(첫 메시지), updatedAt
+	type SessionItem struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		UpdatedAt string `json:"updatedAt"`
+	}
+	items := make([]SessionItem, 0, len(sessions))
+	for _, s := range sessions {
+		id, _ := s["_id"].(string)
+		updatedAt := ""
+		if t, ok := s["updatedAt"].(time.Time); ok {
+			updatedAt = t.Format("2006-01-02 15:04")
+		}
+		title := "새 대화"
+		if msgs, ok := s["messages"].([]interface{}); ok && len(msgs) > 0 {
+			msg := toBsonM(msgs[0])
+			if msg != nil {
+				if c, _ := msg["content"].(string); c != "" {
+					title = c
+					if len(title) > 50 {
+						title = title[:50] + "..."
+					}
+				}
+			}
+		}
+		items = append(items, SessionItem{ID: id, Title: title, UpdatedAt: updatedAt})
+	}
+	respondJSON(w, http.StatusOK, items)
+}
+
+// GET /api/v{version}/Agent/session/{id} — 세션 상세 (메시지 전체)
+func AgentSessionDetailHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	session, err := db.GetAgentSession(ctx, sessionID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "세션을 찾을 수 없습니다")
+		return
+	}
+	respondJSON(w, http.StatusOK, session)
 }
 
 // GET /api/v{version}/Agent/tools — MCP tool 목록
