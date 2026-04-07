@@ -58,16 +58,16 @@ func AgentChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 사용자 메시지 저장
-	db.AppendAgentMessage(ctx, req.SessionID, bson.M{
-		"role": "user", "content": req.Message, "timestamp": time.Now(),
-	})
-
-	// 대화 이력 로드 (현재 메시지 제외한 이전 이력)
+	// 대화 이력 로드 (현재 메시지 저장 전 — 이전 턴만)
 	session, _ := db.GetAgentSession(ctx, req.SessionID)
 	messages := buildLLMMessages(session, req.Message)
 	// 현재 사용자 메시지 명시적으로 추가
 	messages = append(messages, map[string]interface{}{"role": "user", "content": req.Message})
+
+	// 이제 현재 메시지를 세션에 저장
+	db.AppendAgentMessage(ctx, req.SessionID, bson.M{
+		"role": "user", "content": req.Message, "timestamp": time.Now(),
+	})
 
 	// Agent Router: LLM에 tools와 함께 요청
 	tools := skills.Default.ListTools()
@@ -136,9 +136,8 @@ func buildLLMMessages(session bson.M, currentMessage string) []map[string]interf
 	return msgs
 }
 
-// routeAgent LLM에 tool_use 요청 → Skill 실행 → 최종 응답
+// routeAgent LLM에 tool_use 요청 → Skill 실행 → 최종 응답 (재귀적 tool_call 처리)
 func routeAgent(ctx context.Context, messages []map[string]interface{}, tools []map[string]interface{}, user string) (string, []map[string]interface{}, error) {
-	// OpenAI tools 형식으로 변환
 	oaiTools := make([]map[string]interface{}, len(tools))
 	for i, t := range tools {
 		oaiTools[i] = map[string]interface{}{
@@ -151,82 +150,70 @@ func routeAgent(ctx context.Context, messages []map[string]interface{}, tools []
 		}
 	}
 
-	result, err := skills.CallLLMWithTools(messages, oaiTools)
-	if err != nil {
-		return "", nil, err
-	}
+	var allActions []map[string]interface{}
+	maxRounds := 5 // 무한루프 방지
 
-	choices, _ := result["choices"].([]interface{})
-	if len(choices) == 0 {
-		return "응답을 생성할 수 없습니다.", nil, nil
-	}
-
-	choice, _ := choices[0].(map[string]interface{})
-	message, _ := choice["message"].(map[string]interface{})
-	content, _ := message["content"].(string)
-	toolCalls, _ := message["tool_calls"].([]interface{})
-
-	// tool_call이 없으면 바로 텍스트 응답
-	if len(toolCalls) == 0 {
-		return content, nil, nil
-	}
-
-	// tool_call 실행
-	var actions []map[string]interface{}
-	messages = append(messages, message) // assistant message (tool_calls 포함)
-
-	for _, tc := range toolCalls {
-		tcMap, ok := tc.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		fn, _ := tcMap["function"].(map[string]interface{})
-		fnName, _ := fn["name"].(string)
-		fnArgsStr, _ := fn["arguments"].(string)
-		tcID, _ := tcMap["id"].(string)
-
-		var fnArgs map[string]interface{}
-		json.Unmarshal([]byte(fnArgsStr), &fnArgs)
-
-		log.Printf("Agent executing skill: %s args=%v", fnName, fnArgs)
-
-		skillResult, err := skills.Default.Execute(ctx, fnName, fnArgs, user)
+	for round := 0; round < maxRounds; round++ {
+		result, err := skills.CallLLMWithTools(messages, oaiTools)
 		if err != nil {
-			skillResult = map[string]string{"error": err.Error()}
+			return "", allActions, err
 		}
 
-		resultJSON, _ := json.Marshal(skillResult)
-		actions = append(actions, map[string]interface{}{
-			"skill":  fnName,
-			"params": fnArgs,
-			"result": skillResult,
-		})
-
-		// tool_result를 messages에 추가
-		messages = append(messages, map[string]interface{}{
-			"role":         "tool",
-			"tool_call_id": tcID,
-			"content":      string(resultJSON),
-		})
-	}
-
-	// tool_result 포함하여 LLM에 최종 응답 요청
-	finalResult, err := skills.CallLLMWithTools(messages, oaiTools)
-	if err != nil {
-		return content, actions, nil // 원래 content 반환
-	}
-
-	finalChoices, _ := finalResult["choices"].([]interface{})
-	if len(finalChoices) > 0 {
-		fc, _ := finalChoices[0].(map[string]interface{})
-		fm, _ := fc["message"].(map[string]interface{})
-		finalContent, _ := fm["content"].(string)
-		if finalContent != "" {
-			return finalContent, actions, nil
+		choices, _ := result["choices"].([]interface{})
+		if len(choices) == 0 {
+			return "응답을 생성할 수 없습니다.", allActions, nil
 		}
+
+		choice, _ := choices[0].(map[string]interface{})
+		message, _ := choice["message"].(map[string]interface{})
+		content, _ := message["content"].(string)
+		toolCalls, _ := message["tool_calls"].([]interface{})
+
+		// tool_call이 없으면 최종 텍스트 응답
+		if len(toolCalls) == 0 {
+			if content == "" && len(allActions) > 0 {
+				content = "작업이 완료되었습니다."
+			}
+			return content, allActions, nil
+		}
+
+		// assistant message를 messages에 추가 (tool_calls 포함)
+		messages = append(messages, message)
+
+		// 모든 tool_call 실행
+		for _, tc := range toolCalls {
+			tcMap, ok := tc.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			fn, _ := tcMap["function"].(map[string]interface{})
+			fnName, _ := fn["name"].(string)
+			fnArgsStr, _ := fn["arguments"].(string)
+			tcID, _ := tcMap["id"].(string)
+
+			var fnArgs map[string]interface{}
+			json.Unmarshal([]byte(fnArgsStr), &fnArgs)
+
+			log.Printf("Agent round=%d skill=%s args=%v", round, fnName, fnArgs)
+
+			skillResult, err := skills.Default.Execute(ctx, fnName, fnArgs, user)
+			if err != nil {
+				skillResult = map[string]string{"error": err.Error()}
+			}
+
+			resultJSON, _ := json.Marshal(skillResult)
+			allActions = append(allActions, map[string]interface{}{
+				"skill": fnName, "params": fnArgs, "result": skillResult,
+			})
+
+			messages = append(messages, map[string]interface{}{
+				"role": "tool", "tool_call_id": tcID, "content": string(resultJSON),
+			})
+		}
+		// 다음 라운드에서 LLM이 tool_result를 보고 최종 응답 또는 추가 tool_call
 	}
 
-	return content, actions, nil
+	return "처리 라운드 초과", allActions, nil
 }
 
 func agentSystemPrompt() string {
