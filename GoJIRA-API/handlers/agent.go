@@ -63,9 +63,11 @@ func AgentChatHandler(w http.ResponseWriter, r *http.Request) {
 		"role": "user", "content": req.Message, "timestamp": time.Now(),
 	})
 
-	// 대화 이력 로드
+	// 대화 이력 로드 (현재 메시지 제외한 이전 이력)
 	session, _ := db.GetAgentSession(ctx, req.SessionID)
 	messages := buildLLMMessages(session, req.Message)
+	// 현재 사용자 메시지 명시적으로 추가
+	messages = append(messages, map[string]interface{}{"role": "user", "content": req.Message})
 
 	// Agent Router: LLM에 tools와 함께 요청
 	tools := skills.Default.ListTools()
@@ -228,15 +230,21 @@ func routeAgent(ctx context.Context, messages []map[string]interface{}, tools []
 }
 
 func agentSystemPrompt() string {
-	return `당신은 GoJIRA 프로젝트 관리 도우미입니다.
-사용자의 요청을 이해하고, 적절한 도구(tool)를 사용하여 작업을 수행합니다.
+	return `당신은 GoJIRA 프로젝트 관리 시스템의 AI 도우미입니다.
+사용자의 요청에 대해 반드시 제공된 도구(function)를 호출하여 실제 데이터를 조회하고 작업을 수행해야 합니다.
 
-규칙:
-- 항상 한국어로 응답합니다
-- 도구 실행 결과를 사용자가 이해하기 쉽게 요약합니다
-- 이슈 목록은 표 형식으로 정리합니다
-- 추가 작업이 필요하면 제안합니다
-- 프로젝트 코드가 명확하지 않으면 사용자에게 확인합니다`
+중요 규칙:
+- 사용자가 프로젝트, 이슈, 문서, 일정에 대해 질문하면 반드시 해당 도구를 호출하세요
+- 추측하거나 가정하지 마세요. 항상 도구를 통해 실제 데이터를 확인하세요
+- 도구 호출 결과를 한국어로 사용자가 이해하기 쉽게 요약하세요
+- 이슈/프로젝트 목록은 마크다운 표 형식으로 정리하세요
+- 프로젝트 코드가 불명확하면 먼저 project_query로 목록을 확인하세요
+
+사용 가능한 도구:
+- project_query: 프로젝트 목록 조회 (프로젝트 수, 이름, 상태)
+- issue_query: 프로젝트별 이슈 조회 (타입별 필터 가능)
+- doc_summarize: 설계문서 요약
+- schedule_analyze: 프로젝트 일정 분석`
 }
 
 func generateSuggestions(ctx map[string]interface{}) []string {

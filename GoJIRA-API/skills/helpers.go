@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -83,15 +84,22 @@ func CallLLM(prompt string) (string, error) {
 func CallLLMWithTools(messages []map[string]interface{}, tools []map[string]interface{}) (map[string]interface{}, error) {
 	cfg := config.LLM
 
+	maxTokens := cfg.MaxTokens
+	if maxTokens < 2000 {
+		maxTokens = 2000 // Agent는 tool_use 응답에 더 많은 토큰 필요
+	}
+
 	payload := map[string]interface{}{
 		"model":       cfg.Model,
 		"messages":    messages,
-		"max_tokens":  cfg.MaxTokens,
+		"max_tokens":  maxTokens,
 		"temperature": cfg.Temperature,
 		"tools":       tools,
 	}
 
 	b, _ := json.Marshal(payload)
+	log.Printf("LLM request tools count=%d, messages count=%d", len(tools), len(messages))
+
 	req, err := http.NewRequest("POST", cfg.Endpoint, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
@@ -115,6 +123,8 @@ func CallLLMWithTools(messages []map[string]interface{}, tools []map[string]inte
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 
+	log.Printf("LLM response status=%d, body_len=%d", resp.StatusCode, len(data))
+
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("LLM API error (%d): %s", resp.StatusCode, string(data))
 	}
@@ -123,6 +133,21 @@ func CallLLMWithTools(messages []map[string]interface{}, tools []map[string]inte
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("LLM response parse failed")
 	}
+
+	// tool_calls 디버그
+	if choices, ok := result["choices"].([]interface{}); ok && len(choices) > 0 {
+		if c, ok := choices[0].(map[string]interface{}); ok {
+			if m, ok := c["message"].(map[string]interface{}); ok {
+				if tc, ok := m["tool_calls"]; ok {
+					log.Printf("LLM tool_calls: %v", tc)
+				} else {
+					content, _ := m["content"].(string)
+					log.Printf("LLM no tool_calls, content: %.100s", content)
+				}
+			}
+		}
+	}
+
 	return result, nil
 }
 
