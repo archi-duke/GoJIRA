@@ -286,6 +286,16 @@ func DocRepoPurgeHandler(w http.ResponseWriter, r *http.Request) {
 
 // --- GitHub 프록시 API (projectCode 기반) ---
 
+var protectedFiles = map[string]bool{
+	"business.md":     true,
+	"srs.md":          true,
+	"architecture.md": true,
+}
+
+func isProtectedFile(path string) bool {
+	return protectedFiles[path]
+}
+
 func getRepoInfo(ctx context.Context, code string) (string, string, error) {
 	owner, name, _, err := db.GetProjectDocInfo(ctx, code)
 	if err != nil || name == "" {
@@ -405,6 +415,11 @@ func DocRepoFileDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	// 필수 파일 삭제 거부
+	if isProtectedFile(body.Path) {
+		respondError(w, http.StatusForbidden, "필수 파일은 삭제할 수 없습니다: "+body.Path)
 		return
 	}
 	branch := "docs/" + userId

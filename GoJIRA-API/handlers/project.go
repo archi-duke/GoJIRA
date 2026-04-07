@@ -157,5 +157,19 @@ func ensureDocRepo(jiraCode, projectName string) {
 	_, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", jiraCode), nil)
 	if sc >= 400 {
 		log.Printf("ensureDocRepo: 실패 for %s (status=%d)", jiraCode, sc)
+		return
 	}
+
+	// 필수 파일 자동 생성 (business.md, srs.md, architecture.md)
+	protectedFiles := map[string]string{
+		"business.md":     "# Business\n\n비즈니스 배경, 목표, 스테이크홀더, 범위 등을 작성합니다.\n",
+		"srs.md":          "# Software Requirements Specification\n\n요구사양서를 작성합니다.\n",
+		"architecture.md": "# Architecture Design\n\n구조설계서를 작성합니다.\n",
+	}
+	for path, content := range protectedFiles {
+		callPlatform("PUT", fmt.Sprintf("/DocRepo/%s/file", jiraCode), map[string]string{
+			"path": path, "content": content, "message": fmt.Sprintf("%s 초기 생성", path),
+		}, "gojira-system")
+	}
+	log.Printf("ensureDocRepo: 필수 파일 생성 완료 for %s", jiraCode)
 }
