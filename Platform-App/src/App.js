@@ -4,6 +4,7 @@ import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
 import DocManager from './components/DocManager';
 import AlertModal from './components/AlertModal';
+import AgentChat from './components/AgentChat';
 import { getAuthUser } from './utils/auth';
 import appRegistry from './apps/registry';
 import config from './config';
@@ -16,6 +17,7 @@ function App() {
   const [authority, setAuthority] = useState(null);
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [allUsers, setAllUsers] = useState([]);
+  const [showAgent, setShowAgent] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -91,7 +93,7 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <span className="app-logo">GoJIRA</span>
+        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)}>GoJIRA</span>
         <nav className="app-nav">
           {visibleApps.map((app) => (
             <button
@@ -121,6 +123,7 @@ function App() {
       <div className="app-body">{content}</div>
       <NoticePopup user={user} />
       <AlertModal />
+      {showAgent && <AgentChat user={user} context={{ page: activeKey }} onClose={() => setShowAgent(false)} />}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import AlertModal from './components/AlertModal';
 import AccountManager from './components/AccountManager';
 import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
+import AgentChat from './components/AgentChat';
 import { getAuthUser } from './utils/auth';
 import config from './config';
 import './App.css';
@@ -18,6 +19,7 @@ function App() {
   const [user, setUser] = useState(() => getAuthUser());
   const [authority, setAuthority] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
+  const [showAgent, setShowAgent] = useState(false);
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [selectedProject, setSelectedProject] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('gojira_project')); }
@@ -99,7 +101,7 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <span className="app-logo">GoJIRA</span>
+        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)}>GoJIRA</span>
         <nav className="app-nav">
           {navItems.map((n) => (
             <button
@@ -129,6 +131,7 @@ function App() {
       <div className="app-body">{content}</div>
       <AlertModal />
       <NoticePopup />
+      {showAgent && <AgentChat user={user} context={{ page }} onClose={() => setShowAgent(false)} />}
     </div>
   );
 }

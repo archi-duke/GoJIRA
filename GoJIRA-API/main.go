@@ -13,6 +13,7 @@ import (
 	"gojira-api/config"
 	"gojira-api/db"
 	"gojira-api/handlers"
+	_ "gojira-api/skills" // Skill init() 등록
 )
 
 func caseInsensitiveRouting(next http.Handler) http.Handler {
@@ -24,6 +25,7 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 			"project": "Project",
 			"jira":    "Jira",
 			"page":    "Page",
+			"agent":   "Agent",
 		}
 		if len(parts) >= 4 {
 			if mapped, ok := canonical[strings.ToLower(parts[3])]; ok {
@@ -99,6 +101,10 @@ func main() {
 		r.Get("/Project", handlers.ProjectGetHandler)
 		r.Put("/Project", handlers.ProjectUpdateHandler)
 		r.Get("/Project/alerts", handlers.ProjectAlertsHandler)
+
+		// Agent
+		r.Post("/Agent/chat", handlers.AgentChatHandler)
+		r.Get("/Agent/tools", handlers.AgentToolsHandler)
 	})
 
 	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)
