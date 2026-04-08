@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
+
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/github"
@@ -177,6 +179,69 @@ func handlePushEvent(payload map[string]interface{}) {
 		"ref":          ref,
 		"branchAlerts": alerts,
 	})
+}
+
+// UpdateBranchAlert 특정 사용자의 브랜치 알림 상태를 갱신 (exported — 다른 핸들러에서도 사용)
+func UpdateBranchAlert(owner, repoName, projectCode, userID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mainTree, err := github.GetTree(owner, repoName, "main")
+	if err != nil {
+		return
+	}
+	mainFiles := extractTreeFiles(mainTree)
+
+	branch := "docs/" + userID
+	userTree, err := github.GetTree(owner, repoName, branch)
+	if err != nil {
+		return // 브랜치 없으면 skip
+	}
+	userFiles := extractTreeFiles(userTree)
+
+	hasDiff := !filesEqual(mainFiles, userFiles)
+
+	// 현재 branchAlerts 배열 조회 후 업데이트
+	prj, _ := db.FindProjectByCode(ctx, projectCode)
+	if prj == nil {
+		return
+	}
+	var currentAlerts []string
+	switch v := prj["branchAlerts"].(type) {
+	case []interface{}:
+		for _, a := range v {
+			if s, ok := a.(string); ok {
+				currentAlerts = append(currentAlerts, s)
+			}
+		}
+	case bson.A:
+		for _, a := range v {
+			if s, ok := a.(string); ok {
+				currentAlerts = append(currentAlerts, s)
+			}
+		}
+	}
+
+	// 사용자 추가/제거
+	found := false
+	var newAlerts []string
+	for _, a := range currentAlerts {
+		if a == userID {
+			found = true
+			if hasDiff {
+				newAlerts = append(newAlerts, a)
+			}
+			// hasDiff가 false면 제거 (추가 안 함)
+		} else {
+			newAlerts = append(newAlerts, a)
+		}
+	}
+	if !found && hasDiff {
+		newAlerts = append(newAlerts, userID)
+	}
+
+	db.UpdateProjectField(ctx, projectCode, "branchAlerts", newAlerts)
+	log.Printf("branchAlert: %s user=%s diff=%v alerts=%v", projectCode, userID, hasDiff, newAlerts)
 }
 
 // findProjectByRepo 레포 이름으로 프로젝트 코드 찾기

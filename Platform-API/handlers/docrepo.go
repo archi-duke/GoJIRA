@@ -453,6 +453,8 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if branchExists {
+		// 기존 브랜치 — main과 비교하여 알림 갱신
+		go UpdateBranchAlert(owner, name, code, userId)
 		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": false})
 		return
 	}
@@ -465,6 +467,8 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("ensure-branch: %s/%s branch=%s 생성 (from main=%s)", owner, name, branch, mainSHA[:8])
+	// 새 브랜치 — main과 동일하므로 알림 해제
+	go UpdateBranchAlert(owner, name, code, userId)
 	respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": true})
 }
 
@@ -565,8 +569,9 @@ func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	// 프로젝트 알림: 브랜치 커밋 발생
+	// 프로젝트 알림: 브랜치 커밋 발생 → branchAlert 갱신
 	db.UpdateProjectField(ctx, code, "gitLastCommit", time.Now())
+	go UpdateBranchAlert(owner, name, code, userId)
 	respondJSON(w, http.StatusOK, result)
 }
 
