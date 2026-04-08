@@ -851,7 +851,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           } catch (e) { alert('오류: ' + e.message); }
           setAssistLoading(false);
         }}
-        assistIcon={<svg width="20" height="20" viewBox="0 0 24 24" style={{filter:'grayscale(1)',verticalAlign:'middle',marginRight:4}}><text x="2" y="17" fontSize="14" fontWeight="bold" fontFamily="Arial" fill="#555">AI</text><circle cx="18" cy="4" r="1.5" fill="#999"/><circle cx="21" cy="8" r="1" fill="#999"/><circle cx="17" cy="10" r="1.2" fill="#999"/></svg>}
+        assistIcon={<svg width="20" height="20" viewBox="0 0 24 24" style={{filter:'grayscale(1)',verticalAlign:'middle',marginLeft:4}}><text x="2" y="17" fontSize="14" fontWeight="bold" fontFamily="Arial" fill="#555">AI</text><circle cx="18" cy="4" r="1.5" fill="#999"/><circle cx="21" cy="8" r="1" fill="#999"/><circle cx="17" cy="10" r="1.2" fill="#999"/></svg>}
         assistLabel="SATAM 분석"
         assistLoading={assistLoading}
       />

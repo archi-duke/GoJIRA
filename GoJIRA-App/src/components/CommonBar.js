@@ -104,7 +104,7 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       {/* Agent Assist 버튼 */}
       {onAssist && (
         <button className="cb-assist-btn" onClick={onAssist} disabled={assistLoading}>
-          {assistIcon}{assistLoading ? '분석 중...' : (assistLabel || 'Agent 분석')}
+          {assistLoading ? '분석 중...' : (assistLabel || 'Agent 분석')}{assistIcon}
         </button>
       )}
 
