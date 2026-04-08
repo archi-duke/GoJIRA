@@ -85,7 +85,7 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       {onExport && (
         <div className="cb-export-wrap" ref={exportRef}>
           <button className="cb-icon-btn" onClick={() => setExportOpen((v) => !v)} title="Export">
-            <img src="/icons/export.png" alt="Export" width="20" height="20" />
+            <img src="/icons/export.png" alt="Export" width="16" height="16" />
           </button>
           {exportOpen && (
             <div className="cb-export-menu">
