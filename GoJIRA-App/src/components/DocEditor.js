@@ -46,13 +46,17 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
 
-  // 진입 시 필수 파일 확인 + main 트리 + 사용자 브랜치 트리 비교
+  // 진입 시 필수 파일 확인 + 사용자 브랜치 생성 + 트리 비교
   useEffect(() => {
     if (!hasRepo) return;
     const branch = `docs/${user}`;
 
-    // 필수 파일 자동 보충 (없는 것만 생성)
-    fetch(`${API}/${projectCode}/init-files`, { method: 'POST' }).catch(() => {});
+    Promise.all([
+      fetch(`${API}/${projectCode}/init-files`, { method: 'POST' }).catch(() => {}),
+      fetch(`${API}/${projectCode}/ensure-branch`, {
+        method: 'POST', headers: { 'X-User-Id': user },
+      }).catch(() => {}),
+    ]).then(() => {
 
     fetch(`${API}/${projectCode}/tree?ref=main`)
       .then(r => r.json()).then(mTree => {
@@ -85,6 +89,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           .catch(() => { setUserTree(null); setFileStatus({}); });
       })
       .catch(() => {});
+    }); // Promise.all then
   }, [projectCode, hasRepo, user]);
 
   async function handleFileClick(path) {
@@ -92,10 +97,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       if (!await modalConfirm('저장하지 않은 변경이 있습니다. 이동하시겠습니까?')) return;
     }
     const ref = activeTab === 'workspace' ? `docs/${user}` : 'main';
-    let res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
-    if (!res.ok && activeTab === 'workspace') {
-      res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
-    }
+    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
     if (res.ok) {
       const d = await res.json();
       const text = d.content ? decodeBase64(d.content) : '';

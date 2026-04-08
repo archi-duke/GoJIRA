@@ -419,6 +419,41 @@ func DocRepoInitFilesHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /DocRepo/{code}/ensure-branch — 사용자 브랜치 없으면 main에서 자동 생성
+func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	userId := r.Header.Get("X-User-Id")
+	if userId == "" {
+		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	branch := "docs/" + userId
+	// 이미 있으면 skip
+	if _, err := github.GetBranchRef(owner, name, branch); err == nil {
+		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": false})
+		return
+	}
+	// main에서 브랜치 생성
+	mainSHA, err := github.GetBranchRef(owner, name, "main")
+	if err != nil || mainSHA == "" {
+		respondError(w, http.StatusBadGateway, "main 브랜치 조회 실패")
+		return
+	}
+	if err := github.CreateBranch(owner, name, branch, mainSHA); err != nil {
+		respondError(w, http.StatusBadGateway, "브랜치 생성 실패: "+err.Error())
+		return
+	}
+	log.Printf("ensure-branch: %s/%s branch=%s 생성 (from main=%s)", owner, name, branch, mainSHA[:8])
+	respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": true})
+}
+
 func getRepoInfo(ctx context.Context, code string) (string, string, error) {
 	owner, name, _, err := db.GetProjectDocInfo(ctx, code)
 	if err != nil || name == "" {
