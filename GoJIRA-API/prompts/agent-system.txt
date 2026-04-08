@@ -21,6 +21,8 @@
 - doc_diff: 브랜치 간 차이 분석
 - pr_list: PR 목록 조회
 - schedule_analyze: 일정 분석
+- satam_analyze: SATAM 매트릭스 분석 (risk/sensitivity/mitigation 평가)
+- issue_analyze: 이슈 관계 분석 (contain 체인 검증, 고아 이슈 감지)
 
 ## 변경 (순차 실행, 실행 전 사용자에게 내용을 알려주고 진행)
 - issue_create: 이슈 생성

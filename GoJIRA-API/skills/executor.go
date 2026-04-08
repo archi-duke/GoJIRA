@@ -42,6 +42,10 @@ func executeSkill(ctx context.Context, skill *SkillDef, params map[string]interf
 		return execPRList(params)
 	case "schedule_analyze":
 		return execScheduleAnalyze(ctx, params)
+	case "satam_analyze":
+		return execSATAMAnalyze(ctx, params)
+	case "issue_analyze":
+		return execIssueAnalyze(ctx, params)
 	// 변경
 	case "issue_create":
 		return execIssueCreate(ctx, params, user)
@@ -395,6 +399,190 @@ func execPRCreate(params map[string]interface{}, user string) (interface{}, erro
 	json.Unmarshal(data, &result)
 	log.Printf("Skill: pr_create %s #%v", code, result["number"])
 	return map[string]interface{}{"projectCode": code, "prNumber": result["number"], "prURL": result["html_url"], "title": title}, nil
+}
+
+// ─── SATAM 분석 ───
+
+func execSATAMAnalyze(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	code, _ := params["projectCode"].(string)
+	if code == "" {
+		return nil, fmt.Errorf("projectCode 필수")
+	}
+	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// QA/NFR 이슈
+	qaIssues, _ := db.FindAllIssues(qCtx, bson.M{
+		"key": bson.M{"$regex": "^" + code + "-"}, "issueType": "Requirement",
+	})
+	// ADSN 이슈
+	adsnIssues, _ := db.FindAllIssues(qCtx, bson.M{
+		"key": bson.M{"$regex": "^" + code + "-"}, "issueType": "Architectural Design",
+	})
+
+	type SATAMItem struct {
+		Key         string `json:"key"`
+		Summary     string `json:"summary"`
+		ReqType     string `json:"reqType,omitempty"`
+		Risk        string `json:"risk,omitempty"`
+		Sensitivity string `json:"sensitivity,omitempty"`
+		Mitigation  string `json:"mitigation,omitempty"`
+		IssueType   string `json:"issueType"`
+	}
+
+	var items []SATAMItem
+	var riskCount, sensCount, mitigMissing int
+
+	allIssues := append(qaIssues, adsnIssues...)
+	for _, issue := range allIssues {
+		risk := str(issue, "risk")
+		sens := str(issue, "sensitivity")
+		mitig := str(issue, "mitigation")
+		if risk != "" {
+			riskCount++
+		}
+		if sens != "" {
+			sensCount++
+		}
+		if (risk != "" || sens != "") && mitig == "" {
+			mitigMissing++
+		}
+		items = append(items, SATAMItem{
+			Key: str(issue, "key"), Summary: str(issue, "summary"),
+			ReqType: str(issue, "reqtype"), Risk: risk, Sensitivity: sens,
+			Mitigation: mitig, IssueType: str(issue, "issueType"),
+		})
+	}
+
+	// LLM 분석
+	itemsJSON, _ := json.Marshal(items)
+	prompt := fmt.Sprintf(`다음 프로젝트 %s의 SATAM 분석 데이터를 한국어로 분석해주세요.
+
+데이터:
+%s
+
+분석 항목:
+1. 위험도(risk) 있는 항목 목록과 심각도
+2. 민감도(sensitivity) 있는 항목 목록
+3. 경감조치(mitigation) 미완료 항목 (위험/민감인데 경감조치 없음)
+4. 전체 커버리지 요약
+5. 개선 권고사항`, code, truncate(string(itemsJSON), 6000))
+
+	analysis, _ := CallLLM(prompt)
+
+	return map[string]interface{}{
+		"projectCode":    code,
+		"totalItems":     len(items),
+		"riskCount":      riskCount,
+		"sensitiveCount": sensCount,
+		"mitigMissing":   mitigMissing,
+		"items":          items,
+		"analysis":       analysis,
+	}, nil
+}
+
+// ─── 이슈 관계 분석 ───
+
+func execIssueAnalyze(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	code, _ := params["projectCode"].(string)
+	if code == "" {
+		return nil, fmt.Errorf("projectCode 필수")
+	}
+	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	issues, _ := db.FindAllIssues(qCtx, bson.M{"key": bson.M{"$regex": "^" + code + "-"}})
+
+	// 타입별 통계
+	typeCounts := map[string]int{}
+	keyToType := map[string]string{}
+	containedBy := map[string]string{} // 하위 → 상위
+	linkCount := map[string]int{}
+
+	for _, issue := range issues {
+		key := str(issue, "key")
+		iType := str(issue, "issueType")
+		typeCounts[iType]++
+		keyToType[key] = iType
+
+		// issueLinks 분석
+		var links []interface{}
+		switch v := issue["issueLinks"].(type) {
+		case []interface{}:
+			links = v
+		case bson.A:
+			links = []interface{}(v)
+		}
+		for _, l := range links {
+			lm := toMapI(l)
+			if lm == nil {
+				continue
+			}
+			lt, _ := lm["type"].(string)
+			linkCount[lt]++
+			if lt == "contain" {
+				if inward, ok := lm["inward"].(string); ok {
+					containedBy[key] = inward
+				}
+			}
+		}
+	}
+
+	// 고아 이슈 (contain 관계 없는 이슈, VOS 제외)
+	var orphans []map[string]string
+	for _, issue := range issues {
+		key := str(issue, "key")
+		iType := str(issue, "issueType")
+		if iType == "VOS" {
+			continue // VOS는 최상위이므로 고아가 아님
+		}
+		if _, ok := containedBy[key]; !ok {
+			orphans = append(orphans, map[string]string{
+				"key": key, "issueType": iType, "summary": str(issue, "summary"),
+			})
+		}
+	}
+
+	// contain 체인 통계
+	chainStats := map[string]int{
+		"VOS→Feature":        0,
+		"Feature→Requirement": 0,
+		"Requirement→ADSN":   0,
+	}
+	for child, parent := range containedBy {
+		pType := keyToType[parent]
+		cType := keyToType[child]
+		chain := pType + "→" + cType
+		if _, ok := chainStats[chain]; ok {
+			chainStats[chain]++
+		}
+	}
+
+	return map[string]interface{}{
+		"projectCode": code,
+		"typeCounts":  typeCounts,
+		"linkCounts":  linkCount,
+		"chainStats":  chainStats,
+		"orphanCount": len(orphans),
+		"orphans":     orphans,
+		"totalIssues": len(issues),
+	}, nil
+}
+
+func toMapI(v interface{}) map[string]interface{} {
+	switch m := v.(type) {
+	case map[string]interface{}:
+		return m
+	case bson.M:
+		return map[string]interface{}(m)
+	case bson.D:
+		r := map[string]interface{}{}
+		for _, e := range m {
+			r[e.Key] = e.Value
+		}
+		return r
+	}
+	return nil
 }
 
 // ─── 헬퍼 ───

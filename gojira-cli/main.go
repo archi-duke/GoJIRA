@@ -26,6 +26,10 @@ func main() {
 		cmd.PR(os.Args[2:])
 	case "schedule":
 		cmd.Schedule(os.Args[2:])
+	case "satam":
+		cmd.SATAM(os.Args[2:])
+	case "analyze":
+		cmd.Analyze(os.Args[2:])
 	case "version":
 		fmt.Printf("gojira-cli v%s\n", version)
 	case "help", "--help", "-h":
