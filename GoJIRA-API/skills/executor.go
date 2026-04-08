@@ -26,56 +26,41 @@ func (r *SkillRegistry) Execute(ctx context.Context, name string, params map[str
 }
 
 func executeSkill(ctx context.Context, skill *SkillDef, params map[string]interface{}, user string) (interface{}, error) {
-	// action 기반 Skill인 경우
-	if len(skill.Actions) > 0 {
-		action, _ := params["action"].(string)
-		if action == "" {
-			return nil, fmt.Errorf("action 파라미터가 필요합니다")
-		}
-		apiDef, ok := skill.Actions[action]
-		if !ok {
-			return nil, fmt.Errorf("지원하지 않는 action: %s", action)
-		}
-		return executeAction(ctx, skill, &apiDef, action, params, user)
-	}
-
-	// 단일 API Skill인 경우
-	if skill.API != nil {
-		return executeSingleAPI(ctx, skill, params, user)
-	}
-
-	return nil, fmt.Errorf("skill %s에 api 또는 actions 정의가 없습니다", skill.Name)
-}
-
-func executeAction(ctx context.Context, skill *SkillDef, api *APIDef, action string, params map[string]interface{}, user string) (interface{}, error) {
 	switch skill.Name {
-	case "issue_manage":
-		return executeIssueManage(ctx, api, action, params, user)
-	case "doc_manage":
-		return executeDocManage(ctx, api, action, params, user)
-	case "pr_manage":
-		return executePRManage(ctx, api, action, params, user)
-	default:
-		return executeGenericAPI(ctx, api, params, user)
-	}
-}
-
-func executeSingleAPI(ctx context.Context, skill *SkillDef, params map[string]interface{}, user string) (interface{}, error) {
-	switch skill.Name {
+	// 조회
 	case "project_query":
-		return executeProjectQuery(ctx, params, user)
+		return execProjectQuery(ctx, params)
 	case "issue_query":
-		return executeIssueQuery(ctx, params, user)
+		return execIssueQuery(ctx, params)
+	case "doc_list":
+		return execDocList(params)
+	case "doc_summarize":
+		return execDocSummarize(params, user)
+	case "doc_diff":
+		return execDocDiff(params, user)
+	case "pr_list":
+		return execPRList(params)
 	case "schedule_analyze":
-		return executeScheduleAnalyze(ctx, skill, params, user)
+		return execScheduleAnalyze(ctx, params)
+	// 변경
+	case "issue_create":
+		return execIssueCreate(ctx, params, user)
+	case "issue_update":
+		return execIssueUpdate(ctx, params)
+	case "issue_delete":
+		return execIssueDelete(ctx, params)
+	case "issue_link":
+		return execIssueLink(ctx, params)
+	case "pr_create":
+		return execPRCreate(params, user)
 	default:
-		return executeGenericAPI(ctx, skill.API, params, user)
+		return nil, fmt.Errorf("executor not implemented for skill: %s", skill.Name)
 	}
 }
 
-// ─── 프로젝트 조회 ───
+// ─── 조회 Skill ───
 
-func executeProjectQuery(ctx context.Context, params map[string]interface{}, user string) (interface{}, error) {
+func execProjectQuery(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	projects, err := db.FindAllProjects(qCtx, nil)
@@ -91,10 +76,7 @@ func executeProjectQuery(ctx context.Context, params map[string]interface{}, use
 	var results []P
 	for _, prj := range projects {
 		code := bsonStr(bsonDoc(bsonDoc(prj, "jiraCodes"), "main"), "jiraCode")
-		if code == "" {
-			continue
-		}
-		if filterCode != "" && code != filterCode {
+		if code == "" || (filterCode != "" && code != filterCode) {
 			continue
 		}
 		name, _ := prj["name"].(string)
@@ -107,9 +89,7 @@ func executeProjectQuery(ctx context.Context, params map[string]interface{}, use
 	return map[string]interface{}{"count": len(results), "projects": results}, nil
 }
 
-// ─── 이슈 조회 ───
-
-func executeIssueQuery(ctx context.Context, params map[string]interface{}, user string) (interface{}, error) {
+func execIssueQuery(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	code, _ := params["projectCode"].(string)
 	if code == "" {
 		return nil, fmt.Errorf("projectCode는 필수입니다")
@@ -133,139 +113,19 @@ func executeIssueQuery(ctx context.Context, params map[string]interface{}, user 
 	}
 	var results []I
 	for _, issue := range issues {
-		k, _ := issue["key"].(string)
-		t, _ := issue["issueType"].(string)
-		s, _ := issue["summary"].(string)
-		st, _ := issue["status"].(string)
-		a, _ := issue["assignee"].(string)
-		results = append(results, I{Key: k, Type: t, Summary: s, Status: st, Assignee: a})
+		results = append(results, I{
+			Key: str(issue, "key"), Type: str(issue, "issueType"),
+			Summary: str(issue, "summary"), Status: str(issue, "status"), Assignee: str(issue, "assignee"),
+		})
 	}
 	return map[string]interface{}{"projectCode": code, "count": len(results), "issues": results}, nil
 }
 
-// ─── 이슈 관리 ───
-
-func executeIssueManage(ctx context.Context, api *APIDef, action string, params map[string]interface{}, user string) (interface{}, error) {
-	switch action {
-	case "create":
-		return issueCreate(ctx, params, user)
-	case "update":
-		return issueUpdate(ctx, params)
-	case "delete":
-		return issueDelete(ctx, params)
-	case "link":
-		return issueLink(ctx, params)
-	default:
-		return nil, fmt.Errorf("지원하지 않는 action: %s", action)
-	}
-}
-
-func issueCreate(ctx context.Context, params map[string]interface{}, user string) (interface{}, error) {
-	code, _ := params["projectCode"].(string)
-	issueType, _ := params["issueType"].(string)
-	summary, _ := params["summary"].(string)
-	if code == "" || issueType == "" || summary == "" {
-		return nil, fmt.Errorf("projectCode, issueType, summary는 필수")
-	}
-	qCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	nextNum := getNextIssueNum(qCtx, code)
-	key := fmt.Sprintf("%s-%d", code, nextNum)
-	desc, _ := params["description"].(string)
-	pri, _ := params["priority"].(string)
-	if pri == "" {
-		pri = "Medium"
-	}
-	assignee, _ := params["assignee"].(string)
-	doc := bson.M{
-		"key": key, "issueType": issueType, "summary": summary, "description": desc,
-		"status": "To Do", "priority": pri, "assignee": assignee, "reporter": user,
-		"created": time.Now().Format("2006-01-02T15:04:05.000+0900"),
-		"updated": time.Now().Format("2006-01-02T15:04:05.000+0900"),
-		"labels": []string{}, "issueLinks": []interface{}{}, "_source": "gojira-agent",
-	}
-	if err := db.UpsertIssue(qCtx, key, doc); err != nil {
-		return nil, err
-	}
-	log.Printf("Skill: issue create %s", key)
-	return map[string]interface{}{"key": key, "issueType": issueType, "summary": summary, "status": "To Do"}, nil
-}
-
-func issueUpdate(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	key, _ := params["key"].(string)
-	if key == "" {
-		return nil, fmt.Errorf("key는 필수")
-	}
-	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if _, err := db.FindIssueByKey(qCtx, key); err != nil {
-		return nil, fmt.Errorf("이슈 없음: %s", key)
-	}
-	update := bson.M{"updated": time.Now().Format("2006-01-02T15:04:05.000+0900")}
-	var changed []string
-	for _, f := range []string{"summary", "description", "status", "priority", "assignee"} {
-		if v, ok := params[f].(string); ok && v != "" {
-			update[f] = v
-			changed = append(changed, f)
-		}
-	}
-	if len(changed) == 0 {
-		return map[string]interface{}{"key": key, "message": "변경 없음"}, nil
-	}
-	db.UpsertIssue(qCtx, key, update)
-	return map[string]interface{}{"key": key, "changed": changed}, nil
-}
-
-func issueDelete(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	key, _ := params["key"].(string)
-	if key == "" {
-		return nil, fmt.Errorf("key는 필수")
-	}
-	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := db.DeleteIssueByKey(qCtx, key); err != nil {
-		return nil, err
-	}
-	return map[string]interface{}{"key": key, "deleted": true}, nil
-}
-
-func issueLink(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	from, _ := params["fromKey"].(string)
-	to, _ := params["toKey"].(string)
-	lt, _ := params["linkType"].(string)
-	if from == "" || to == "" || lt == "" {
-		return nil, fmt.Errorf("fromKey, toKey, linkType 필수")
-	}
-	qCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	linkID := fmt.Sprintf("%s_%s_%s", from, lt, to)
-	db.Issues().UpdateOne(qCtx, bson.M{"key": from},
-		bson.M{"$addToSet": bson.M{"issueLinks": bson.M{"id": linkID, "type": lt, "outward": to}}})
-	db.Issues().UpdateOne(qCtx, bson.M{"key": to},
-		bson.M{"$addToSet": bson.M{"issueLinks": bson.M{"id": linkID, "type": lt, "inward": from}}})
-	return map[string]interface{}{"linkId": linkID, "fromKey": from, "toKey": to, "linkType": lt}, nil
-}
-
-// ─── 문서 관리 ───
-
-func executeDocManage(ctx context.Context, api *APIDef, action string, params map[string]interface{}, user string) (interface{}, error) {
+func execDocList(params map[string]interface{}) (interface{}, error) {
 	code, _ := params["projectCode"].(string)
 	if code == "" {
 		return nil, fmt.Errorf("projectCode 필수")
 	}
-	switch action {
-	case "list":
-		return docList(code)
-	case "summarize":
-		return docSummarize(code, params, user)
-	case "diff":
-		return docDiff(code, params, user)
-	default:
-		return nil, fmt.Errorf("지원하지 않는 action: %s", action)
-	}
-}
-
-func docList(code string) (interface{}, error) {
 	resp, err := http.Get(config.PlatformAPI + fmt.Sprintf("/DocRepo/%s/tree?ref=main", code))
 	if err != nil || resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("파일 목록 조회 실패")
@@ -286,10 +146,11 @@ func docList(code string) (interface{}, error) {
 	return map[string]interface{}{"projectCode": code, "files": files, "count": len(files)}, nil
 }
 
-func docSummarize(code string, params map[string]interface{}, user string) (interface{}, error) {
+func execDocSummarize(params map[string]interface{}, user string) (interface{}, error) {
+	code, _ := params["projectCode"].(string)
 	fp, _ := params["filePath"].(string)
-	if fp == "" {
-		return nil, fmt.Errorf("filePath 필수")
+	if code == "" || fp == "" {
+		return nil, fmt.Errorf("projectCode, filePath 필수")
 	}
 	content, err := FetchFileContent(code, fp, "main")
 	if err != nil {
@@ -303,16 +164,17 @@ func docSummarize(code string, params map[string]interface{}, user string) (inte
 	}
 	prompt := config.LoadPrompt("skill-doc-summarize.txt", map[string]string{"FilePath": fp, "Content": truncate(content, 8000)})
 	if prompt == "" {
-		prompt = fmt.Sprintf("다음 문서를 한국어로 요약:\n\n%s\n\n%s", fp, truncate(content, 8000))
+		prompt = fmt.Sprintf("다음 문서를 한국어로 요약:\n\n%s", truncate(content, 8000))
 	}
 	summary, _ := CallLLM(prompt)
 	return map[string]interface{}{"projectCode": code, "filePath": fp, "summary": summary}, nil
 }
 
-func docDiff(code string, params map[string]interface{}, user string) (interface{}, error) {
+func execDocDiff(params map[string]interface{}, user string) (interface{}, error) {
+	code, _ := params["projectCode"].(string)
 	fp, _ := params["filePath"].(string)
-	if fp == "" {
-		return nil, fmt.Errorf("filePath 필수")
+	if code == "" || fp == "" {
+		return nil, fmt.Errorf("projectCode, filePath 필수")
 	}
 	mc, _ := FetchFileContent(code, fp, "main")
 	uc, _ := FetchFileContent(code, fp, "docs/"+user)
@@ -323,55 +185,18 @@ func docDiff(code string, params map[string]interface{}, user string) (interface
 		"FilePath": fp, "MainContent": truncate(mc, 4000), "UserContent": truncate(uc, 4000),
 	})
 	if prompt == "" {
-		prompt = fmt.Sprintf("두 버전 비교:\n\n=== main ===\n%s\n\n=== user ===\n%s", truncate(mc, 4000), truncate(uc, 4000))
+		prompt = fmt.Sprintf("두 버전 비교:\n=== main ===\n%s\n=== user ===\n%s", truncate(mc, 4000), truncate(uc, 4000))
 	}
 	explanation, _ := CallLLM(prompt)
 	return map[string]interface{}{"filePath": fp, "hasDiff": true, "explanation": explanation}, nil
 }
 
-// ─── PR 관리 ───
-
-func executePRManage(ctx context.Context, api *APIDef, action string, params map[string]interface{}, user string) (interface{}, error) {
+func execPRList(params map[string]interface{}) (interface{}, error) {
 	code, _ := params["projectCode"].(string)
+	state, _ := params["state"].(string)
 	if code == "" {
 		return nil, fmt.Errorf("projectCode 필수")
 	}
-	switch action {
-	case "create":
-		return prCreate(code, params, user)
-	case "list":
-		return prList(code, params)
-	default:
-		return nil, fmt.Errorf("지원하지 않는 action: %s", action)
-	}
-}
-
-func prCreate(code string, params map[string]interface{}, user string) (interface{}, error) {
-	title, _ := params["title"].(string)
-	body, _ := params["body"].(string)
-	if title == "" {
-		title = fmt.Sprintf("[%s] 설계문서 배포 요청", code)
-	}
-	reqBody, _ := json.Marshal(map[string]string{"title": title, "body": body, "head": "docs/" + user, "base": "main"})
-	req, _ := http.NewRequest("POST", config.PlatformAPI+fmt.Sprintf("/DocRepo/%s/pr", code), strings.NewReader(string(reqBody)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-Id", user)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("PR 생성 실패: %s", string(data))
-	}
-	var result map[string]interface{}
-	json.Unmarshal(data, &result)
-	return map[string]interface{}{"projectCode": code, "prNumber": result["number"], "prURL": result["html_url"], "title": title}, nil
-}
-
-func prList(code string, params map[string]interface{}) (interface{}, error) {
-	state, _ := params["state"].(string)
 	if state == "" {
 		state = "open"
 	}
@@ -403,9 +228,7 @@ func prList(code string, params map[string]interface{}) (interface{}, error) {
 	return map[string]interface{}{"projectCode": code, "state": state, "count": len(results), "prs": results}, nil
 }
 
-// ─── 일정 분석 ───
-
-func executeScheduleAnalyze(ctx context.Context, skill *SkillDef, params map[string]interface{}, user string) (interface{}, error) {
+func execScheduleAnalyze(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	code, _ := params["projectCode"].(string)
 	if code == "" {
 		return nil, fmt.Errorf("projectCode 필수")
@@ -418,7 +241,6 @@ func executeScheduleAnalyze(ctx context.Context, skill *SkillDef, params map[str
 	}
 	name, _ := prj["name"].(string)
 	status, _ := prj["status"].(string)
-	// 이슈 통계
 	issues, _ := db.FindAllIssues(qCtx, bson.M{"key": bson.M{"$regex": "^" + code + "-"}})
 	var total, done, prog int
 	for _, i := range issues {
@@ -431,26 +253,141 @@ func executeScheduleAnalyze(ctx context.Context, skill *SkillDef, params map[str
 	}
 	info := fmt.Sprintf("프로젝트: %s (%s), 상태: %s, 이슈: 총%d 완료%d 진행%d 미착수%d, 오늘: %s",
 		name, code, status, total, done, prog, total-done-prog, time.Now().Format("2006-01-02"))
-
 	prompt := config.LoadPrompt("skill-schedule-analyze.txt", map[string]string{"ScheduleInfo": info})
 	if prompt == "" {
 		prompt = "프로젝트 일정 분석:\n" + info
 	}
 	analysis, _ := CallLLM(prompt)
-	return map[string]interface{}{
-		"projectCode": code, "projectName": name,
+	return map[string]interface{}{"projectCode": code, "projectName": name,
 		"issueStats": map[string]int{"total": total, "done": done, "inProgress": prog},
-		"analysis":   analysis,
-	}, nil
+		"analysis": analysis}, nil
 }
 
-// ─── Generic API (확장용) ───
+// ─── 변경 Skill ───
 
-func executeGenericAPI(ctx context.Context, api *APIDef, params map[string]interface{}, user string) (interface{}, error) {
-	return map[string]string{"message": "generic API execution not yet implemented"}, nil
+func execIssueCreate(ctx context.Context, params map[string]interface{}, user string) (interface{}, error) {
+	code, _ := params["projectCode"].(string)
+	issueType, _ := params["issueType"].(string)
+	summary, _ := params["summary"].(string)
+	if code == "" || issueType == "" || summary == "" {
+		return nil, fmt.Errorf("projectCode, issueType, summary 필수")
+	}
+	qCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	key := fmt.Sprintf("%s-%d", code, getNextIssueNum(qCtx, code))
+	desc, _ := params["description"].(string)
+	pri, _ := params["priority"].(string)
+	if pri == "" {
+		pri = "Medium"
+	}
+	assignee, _ := params["assignee"].(string)
+	doc := bson.M{
+		"key": key, "issueType": issueType, "summary": summary, "description": desc,
+		"status": "To Do", "priority": pri, "assignee": assignee, "reporter": user,
+		"created": time.Now().Format("2006-01-02T15:04:05.000+0900"),
+		"updated": time.Now().Format("2006-01-02T15:04:05.000+0900"),
+		"labels": []string{}, "issueLinks": []interface{}{}, "_source": "gojira-agent",
+	}
+	if err := db.UpsertIssue(qCtx, key, doc); err != nil {
+		return nil, err
+	}
+	log.Printf("Skill: issue_create %s (%s)", key, issueType)
+	return map[string]interface{}{"key": key, "issueType": issueType, "summary": summary, "status": "To Do"}, nil
 }
 
-// ─── bson 헬퍼 ───
+func execIssueUpdate(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	key, _ := params["key"].(string)
+	if key == "" {
+		return nil, fmt.Errorf("key 필수")
+	}
+	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := db.FindIssueByKey(qCtx, key); err != nil {
+		return nil, fmt.Errorf("이슈 없음: %s", key)
+	}
+	update := bson.M{"updated": time.Now().Format("2006-01-02T15:04:05.000+0900")}
+	var changed []string
+	for _, f := range []string{"summary", "description", "status", "priority", "assignee"} {
+		if v, ok := params[f].(string); ok && v != "" {
+			update[f] = v
+			changed = append(changed, f)
+		}
+	}
+	if len(changed) == 0 {
+		return map[string]interface{}{"key": key, "message": "변경 없음"}, nil
+	}
+	db.UpsertIssue(qCtx, key, update)
+	log.Printf("Skill: issue_update %s %v", key, changed)
+	return map[string]interface{}{"key": key, "changed": changed}, nil
+}
+
+func execIssueDelete(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	key, _ := params["key"].(string)
+	if key == "" {
+		return nil, fmt.Errorf("key 필수")
+	}
+	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := db.DeleteIssueByKey(qCtx, key); err != nil {
+		return nil, err
+	}
+	log.Printf("Skill: issue_delete %s", key)
+	return map[string]interface{}{"key": key, "deleted": true}, nil
+}
+
+func execIssueLink(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	from, _ := params["fromKey"].(string)
+	to, _ := params["toKey"].(string)
+	lt, _ := params["linkType"].(string)
+	if from == "" || to == "" || lt == "" {
+		return nil, fmt.Errorf("fromKey, toKey, linkType 필수")
+	}
+	qCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	linkID := fmt.Sprintf("%s_%s_%s", from, lt, to)
+	db.Issues().UpdateOne(qCtx, bson.M{"key": from},
+		bson.M{"$addToSet": bson.M{"issueLinks": bson.M{"id": linkID, "type": lt, "outward": to}}})
+	db.Issues().UpdateOne(qCtx, bson.M{"key": to},
+		bson.M{"$addToSet": bson.M{"issueLinks": bson.M{"id": linkID, "type": lt, "inward": from}}})
+	log.Printf("Skill: issue_link %s → %s (%s)", from, to, lt)
+	return map[string]interface{}{"linkId": linkID, "fromKey": from, "toKey": to, "linkType": lt}, nil
+}
+
+func execPRCreate(params map[string]interface{}, user string) (interface{}, error) {
+	code, _ := params["projectCode"].(string)
+	if code == "" {
+		return nil, fmt.Errorf("projectCode 필수")
+	}
+	title, _ := params["title"].(string)
+	body, _ := params["body"].(string)
+	if title == "" {
+		title = fmt.Sprintf("[%s] 설계문서 배포 요청", code)
+	}
+	reqBody, _ := json.Marshal(map[string]string{"title": title, "body": body, "head": "docs/" + user, "base": "main"})
+	req, _ := http.NewRequest("POST", config.PlatformAPI+fmt.Sprintf("/DocRepo/%s/pr", code), strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", user)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("PR 생성 실패: %s", string(data))
+	}
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	log.Printf("Skill: pr_create %s #%v", code, result["number"])
+	return map[string]interface{}{"projectCode": code, "prNumber": result["number"], "prURL": result["html_url"], "title": title}, nil
+}
+
+// ─── 헬퍼 ───
+
+func str(m bson.M, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
 
 func bsonDoc(doc interface{}, key string) interface{} {
 	switch d := doc.(type) {
@@ -489,17 +426,17 @@ func bsonStr(doc interface{}, key string) string {
 
 func getNextIssueNum(ctx context.Context, code string) int {
 	issues, _ := db.FindAllIssues(ctx, bson.M{"key": bson.M{"$regex": "^" + code + "-"}})
-	max := 0
+	mx := 0
 	prefix := code + "-"
 	for _, i := range issues {
 		k, _ := i["key"].(string)
 		if len(k) > len(prefix) {
 			var n int
 			fmt.Sscanf(k[len(prefix):], "%d", &n)
-			if n > max {
-				max = n
+			if n > mx {
+				mx = n
 			}
 		}
 	}
-	return max + 1
+	return mx + 1
 }

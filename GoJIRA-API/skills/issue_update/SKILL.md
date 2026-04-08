@@ -1,0 +1,37 @@
+---
+name: issue_update
+description: 기존 이슈의 필드를 수정합니다
+parameters:
+  key:
+    type: string
+    description: "이슈 키 (예: GOJIRA-1)"
+    required: true
+  summary:
+    type: string
+    description: "변경할 이슈 제목"
+  description:
+    type: string
+    description: "변경할 이슈 설명"
+  status:
+    type: string
+    description: "변경할 상태"
+    enum: [To Do, In Progress, Done]
+  priority:
+    type: string
+    description: "변경할 우선순위"
+    enum: [Highest, High, Medium, Low, Lowest]
+  assignee:
+    type: string
+    description: "변경할 담당자 ID"
+api:
+  method: PUT
+  path: /Issue
+---
+
+## 이슈 수정 규칙
+
+- key는 필수입니다
+- 변경할 필드만 전달합니다 (부분 업데이트)
+- status 변경 시 허용된 enum 값만 사용합니다
+- 수정 결과를 사용자에게 알려줍니다
+- 쓰기 작업이므로 사용자 확인이 필요합니다
