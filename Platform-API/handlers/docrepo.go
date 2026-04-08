@@ -472,6 +472,65 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": true})
 }
 
+// POST /DocRepo/{code}/sync-branch — 사용자 브랜치를 main에 동기화 (main의 내용을 merge)
+func DocRepoSyncBranchHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	userId := r.Header.Get("X-User-Id")
+	if userId == "" {
+		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	branch := "docs/" + userId
+
+	// 브랜치 목록에서 존재 확인 + main SHA 조회
+	branchList, _ := github.ListBranches(owner, name)
+	branches, _ := branchList.([]interface{})
+	branchExists := false
+	mainSHA := ""
+	for _, b := range branches {
+		bm, _ := b.(map[string]interface{})
+		bName, _ := bm["name"].(string)
+		if bName == branch {
+			branchExists = true
+		}
+		if bName == "main" {
+			if commit, ok := bm["commit"].(map[string]interface{}); ok {
+				mainSHA, _ = commit["id"].(string)
+			}
+		}
+	}
+
+	if mainSHA == "" {
+		respondError(w, http.StatusBadGateway, "main 브랜치 조회 실패")
+		return
+	}
+
+	// 브랜치가 있으면 삭제 후 재생성 (main HEAD 기준)
+	if branchExists {
+		github.DeleteBranch(owner, name, branch)
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if err := github.CreateBranch(owner, name, branch, mainSHA); err != nil {
+		respondError(w, http.StatusBadGateway, "브랜치 동기화 실패: "+err.Error())
+		return
+	}
+
+	// 알림 갱신
+	go UpdateBranchAlert(owner, name, code, userId)
+
+	log.Printf("sync-branch: %s/%s branch=%s → main(%s)", owner, name, branch, mainSHA[:8])
+	respondJSON(w, http.StatusOK, map[string]interface{}{"synced": true, "branch": branch})
+}
+
 func getRepoInfo(ctx context.Context, code string) (string, string, error) {
 	owner, name, _, err := db.GetProjectDocInfo(ctx, code)
 	if err != nil || name == "" {

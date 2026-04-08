@@ -296,14 +296,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
   async function handleGitPull() {
-    if (!await modalConfirm('main 브랜치의 최신 내용을 작업공간에 동기화하시겠습니까?')) return;
+    if (!await modalConfirm('main 브랜치의 최신 내용을 작업공간에 동기화하시겠습니까?\n(작업공간의 미커밋 변경사항은 초기화됩니다)')) return;
     try {
-      // ensure-branch로 브랜치 보장
-      await fetch(`${API}/${projectCode}/ensure-branch`, {
-        method: 'POST', headers: { 'X-User-Id': user },
-      });
-      // edit/rebase로 main 동기화
-      const res = await fetch(`${API}/${projectCode}/edit/rebase`, {
+      // sync-branch로 사용자 브랜치를 main HEAD로 동기화
+      const res = await fetch(`${API}/${projectCode}/sync-branch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
       });

@@ -668,6 +668,18 @@ func RemoveRequestedReviewer(owner, repo string, prNumber int, username string) 
 // --- Branch Protection ---
 
 // SetBranchProtection main 브랜치에 보호 규칙 설정 (모든 리뷰 완료 전 머지 불가)
+func DeleteBranch(owner, repo, branch string) error {
+	path := fmt.Sprintf("/repos/%s/%s/branches/%s", owner, repo, branch)
+	_, status, err := doRequest("DELETE", path, nil)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return fmt.Errorf("delete branch failed (%d)", status)
+	}
+	return nil
+}
+
 func DeleteBranchProtection(owner, repo, branch string) error {
 	if IsGitea() {
 		path := fmt.Sprintf("/repos/%s/%s/branch_protections/%s", owner, repo, branch)
