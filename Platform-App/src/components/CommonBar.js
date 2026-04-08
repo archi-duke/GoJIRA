@@ -15,7 +15,7 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
   }
 
   async function handlePull() {
-    if (pulling) return;
+    if (pulling || !onPull) return;
     setPulling(true);
     try {
       await onPull();
@@ -74,11 +74,13 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       <span className="cb-divider" />
 
       {/* Pull 아이콘 */}
-      <button className="cb-icon-btn" onClick={handlePull} disabled={pulling} title="Pull">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 1v9M4 6l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-        </svg>
-      </button>
+      {onPull && (
+        <button className="cb-icon-btn" onClick={handlePull} disabled={pulling} title="Pull">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1v9M4 6l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
 
       {/* Export 아이콘 */}
       {onExport && (
