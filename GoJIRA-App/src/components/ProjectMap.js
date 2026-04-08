@@ -5,7 +5,7 @@ import ProjectDialog from './ProjectDialog';
 import config from '../config';
 
 const API_BASE = config.API_BASE;
-const PLATFORM_API = config.PLATFORM_API;
+const PLATFORM_API = config.API_BASE;
 
 function getJiraCode(p) {
   return p?.jiraCodes?.main?.jiraCode || '';
@@ -739,7 +739,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
   const cls = isCompleted ? 'completed' : isOverdue ? 'overdue' : 'active';
   const hasAlert = alert && alert.branchDiff;
   const hasPR = alert && alert.hasOpenPR;
-  const alertColor = hasPR ? '#b8860b' : hasAlert ? '#e67e22' : null;
+  const alertColor = hasPR ? '#b8860b' : hasAlert ? 'tomato' : null;
 
   return (
     <g

@@ -739,7 +739,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
   const cls = isCompleted ? 'completed' : isOverdue ? 'overdue' : 'active';
   const hasAlert = alert && alert.branchDiff;
   const hasPR = alert && alert.hasOpenPR;
-  const alertColor = hasPR ? '#b8860b' : hasAlert ? '#e67e22' : null;
+  const alertColor = hasPR ? '#b8860b' : hasAlert ? 'tomato' : null;
 
   return (
     <g
