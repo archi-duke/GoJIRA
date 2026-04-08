@@ -32,6 +32,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [fileStatus, setFileStatus] = useState({}); // path → 'modified' | 'added' | 'deleted'
   const [activeTab, setActiveTab] = useState('workspace'); // 'main' | 'workspace'
   const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedMainOnly, setSelectedMainOnly] = useState(false);
   const [content, setContent] = useState('');
   const [original, setOriginal] = useState('');
   const [saving, setSaving] = useState(false);
@@ -93,16 +94,18 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }); // Promise.all then
   }, [projectCode, hasRepo, user]);
 
-  async function handleFileClick(path) {
+  async function handleFileClick(path, isMainOnly) {
     if (editMode && content !== original) {
       if (!await modalConfirm('저장하지 않은 변경이 있습니다. 이동하시겠습니까?')) return;
     }
-    const ref = activeTab === 'workspace' ? `docs/${user}` : 'main';
+    // mainOnly 파일이면 main에서 조회
+    const ref = isMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
     const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
     if (res.ok) {
       const d = await res.json();
       const text = d.content ? decodeBase64(d.content) : '';
       setSelectedFile(path);
+      setSelectedMainOnly(!!isMainOnly);
       setContent(text);
       setOriginal(text);
       setEditMode(false);
@@ -307,7 +310,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       if (res.ok) {
         // 트리 새로고침
         const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
-        if (mRes.ok) setMainTree(await mRes.json());
+        const mTree = mRes.ok ? await mRes.json() : null;
+        if (mTree) setMainTree(mTree);
         const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`);
         if (uRes.ok) {
           const uTree = await uRes.json();
@@ -315,7 +319,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           // fileStatus 재계산
           const mainShaMap = {};
           const mainPathSet = new Set();
-          ((await mRes.clone().json())?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
+          (mTree?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
           const userPathSet = new Set();
           const status = {};
           (uTree?.tree || []).forEach(f => {
@@ -326,6 +330,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
           setFileStatus(status);
         }
+        setSelectedMainOnly(false);
         modalAlert('main 동기화 완료');
       } else {
         const err = await res.json().catch(() => ({}));
@@ -479,8 +484,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             return (
               <div key={item.path}
                 className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''} ${isMainOnly ? 'de-file-main-only' : ''}`}
-                onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path); }}>
-                {activeTab === 'workspace' && !isMainOnly && statusBadge(item.path)}
+                onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path, item._mainOnly); }}>
+                {activeTab === 'workspace' && (isMainOnly
+                  ? <span className="de-file-badge de-badge-deleted">D</span>
+                  : statusBadge(item.path))}
                 <span className="de-file-name">{item.path}</span>
                 {activeTab === 'workspace' && globalEditMode && !['business.md', 'srs.md', 'architecture.md'].includes(item.path) && (
                   <span className="de-file-actions">
@@ -498,9 +505,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           ) : selectedFile ? (
             <>
               <div className="de-toolbar">
-                <span className="de-filename">{selectedFile} {modified && <span className="de-modified">●</span>}</span>
+                <span className="de-filename">
+                  {selectedFile} {modified && !selectedMainOnly && <span className="de-modified">●</span>}
+                  {selectedMainOnly && <span style={{fontSize:11,color:'#aaa',marginLeft:6}}>(main only — Pull로 동기화 필요)</span>}
+                </span>
                 <div className="de-actions">
-                  {editMode ? (
+                  {selectedMainOnly ? (
+                    <button className="de-tab de-tab-active">미리보기</button>
+                  ) : editMode ? (
                     <>
                       <button className="de-tab" onClick={() => setEditMode(false)}>미리보기</button>
                       <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
@@ -526,11 +538,11 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
               <div className="de-body">
                 {diffMode ? (
                   <DiffAnalysis oldText={mainContent} newText={content} fileName={selectedFile} activeTab={diffTab} onTabChange={setDiffTab} />
-                ) : editMode ? (
+                ) : editMode && !selectedMainOnly ? (
                   <textarea className="de-textarea" value={content}
                     onChange={e => setContent(e.target.value)} spellCheck={false} />
                 ) : (
-                  <div className="de-preview">
+                  <div className={`de-preview ${selectedMainOnly ? 'de-preview-mainonly' : ''}`}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
                   </div>
                 )}
