@@ -104,9 +104,26 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 필수 파일 생성 (브랜치 보호 전에 main에 직접 커밋)
 	requiredFiles := map[string]string{
-		"business.md":     "# Business\n\n비즈니스 배경, 목표, 스테이크홀더, 범위 등을 작성합니다.\n",
-		"srs.md":          "# Software Requirements Specification\n\n요구사양서를 작성합니다.\n",
-		"architecture.md": "# Architecture Design\n\n구조설계서를 작성합니다.\n",
+		"business.md": "# Business\n\n" +
+			"과제의 배경, 목적, 주요 사항을 기록하는 문서입니다.\n\n" +
+			"## 과제 배경\n\n(작성 필요)\n\n" +
+			"## 과제 목적\n\n(작성 필요)\n\n" +
+			"## 주요 사항\n\n(작성 필요)\n\n" +
+			"> VOS 자동생성 시 이 문서의 내용을 참조합니다. 반드시 작성해 주세요.\n",
+		"srs.md": "# Software Requirements Specification\n\n" +
+			"과제의 요구사양을 기술하는 문서입니다.\n" +
+			"과제의 Use Case 및 주요 기능/비기능 요구사양과 제약사항을 기술합니다.\n\n" +
+			"## Use Cases\n\n(작성 필요)\n\n" +
+			"## Functional Requirements (FR)\n\n(작성 필요)\n\n" +
+			"## Quality Attributes / Non-Functional Requirements (NFR)\n\n(작성 필요)\n\n" +
+			"## Constraints (CNST)\n\n(작성 필요)\n",
+		"architecture.md": "# Architecture Design\n\n" +
+			"과제의 주요 설계 사항을 기술하는 문서입니다.\n" +
+			"Architecture의 스타일과 주요 디자인 포인트의 설계, 다양한 관점의 통합 디자인 및 설계 평가(SATAM)를 포함합니다.\n\n" +
+			"## Architecture Style\n\n(작성 필요)\n\n" +
+			"## Key Design Points\n\n(작성 필요)\n\n" +
+			"## Integrated Design Views\n\n(작성 필요)\n\n" +
+			"## SATAM (Sensitivity, Architecture Tradeoff Analysis)\n\n(작성 필요)\n",
 	}
 	for path, content := range requiredFiles {
 		encoded := base64.StdEncoding.EncodeToString([]byte(content))
@@ -321,31 +338,69 @@ func DocRepoInitFilesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	required := map[string]string{
-		"business.md":     "# Business\n\n비즈니스 배경, 목표, 스테이크홀더, 범위 등을 작성합니다.\n",
-		"srs.md":          "# Software Requirements Specification\n\n요구사양서를 작성합니다.\n",
-		"architecture.md": "# Architecture Design\n\n구조설계서를 작성합니다.\n",
+		"business.md": "# Business\n\n" +
+			"과제의 배경, 목적, 주요 사항을 기록하는 문서입니다.\n\n" +
+			"## 과제 배경\n\n(작성 필요)\n\n" +
+			"## 과제 목적\n\n(작성 필요)\n\n" +
+			"## 주요 사항\n\n(작성 필요)\n\n" +
+			"> VOS 자동생성 시 이 문서의 내용을 참조합니다. 반드시 작성해 주세요.\n",
+		"srs.md": "# Software Requirements Specification\n\n" +
+			"과제의 요구사양을 기술하는 문서입니다.\n" +
+			"과제의 Use Case 및 주요 기능/비기능 요구사양과 제약사항을 기술합니다.\n\n" +
+			"## Use Cases\n\n(작성 필요)\n\n" +
+			"## Functional Requirements (FR)\n\n(작성 필요)\n\n" +
+			"## Quality Attributes / Non-Functional Requirements (NFR)\n\n(작성 필요)\n\n" +
+			"## Constraints (CNST)\n\n(작성 필요)\n",
+		"architecture.md": "# Architecture Design\n\n" +
+			"과제의 주요 설계 사항을 기술하는 문서입니다.\n" +
+			"Architecture의 스타일과 주요 디자인 포인트의 설계, 다양한 관점의 통합 디자인 및 설계 평가(SATAM)를 포함합니다.\n\n" +
+			"## Architecture Style\n\n(작성 필요)\n\n" +
+			"## Key Design Points\n\n(작성 필요)\n\n" +
+			"## Integrated Design Views\n\n(작성 필요)\n\n" +
+			"## SATAM (Sensitivity, Architecture Tradeoff Analysis)\n\n(작성 필요)\n",
 	}
 
-	// 생성이 필요한 파일 확인
-	var toCreate []string
+	// 생성 또는 업데이트가 필요한 파일 확인
+	type fileAction struct {
+		path   string
+		action string // "create" or "update"
+		sha    string
+	}
+	var actions []fileAction
 	for path := range required {
-		if _, err := github.GetFileContent(owner, name, path, "main"); err != nil {
-			toCreate = append(toCreate, path)
+		existing, err := github.GetFileContent(owner, name, path, "main")
+		if err != nil {
+			actions = append(actions, fileAction{path: path, action: "create"})
+		} else {
+			// 기존 파일이 이전 간단 템플릿이면 업데이트
+			sha, _ := existing["sha"].(string)
+			content, _ := existing["content"].(string)
+			decoded, _ := base64.StdEncoding.DecodeString(content)
+			text := strings.TrimSpace(string(decoded))
+			if len(text) < 100 || strings.Contains(text, "작성합니다.\n") && !strings.Contains(text, "작성 필요") {
+				actions = append(actions, fileAction{path: path, action: "update", sha: sha})
+			}
 		}
 	}
 
 	var created []string
-	if len(toCreate) > 0 {
+	if len(actions) > 0 {
 		// 브랜치 보호 임시 해제
 		github.DeleteBranchProtection(owner, name, "main")
 
-		for _, path := range toCreate {
-			encoded := base64.StdEncoding.EncodeToString([]byte(required[path]))
-			if _, err := github.CreateFile(owner, name, path, encoded, fmt.Sprintf("%s 초기 생성", path), "main"); err != nil {
-				log.Printf("init-files: %s 생성 실패: %v", path, err)
+		for _, a := range actions {
+			encoded := base64.StdEncoding.EncodeToString([]byte(required[a.path]))
+			var err error
+			if a.action == "create" {
+				_, err = github.CreateFile(owner, name, a.path, encoded, fmt.Sprintf("%s 초기 생성", a.path), "main")
+			} else {
+				_, err = github.CreateOrUpdateFile(owner, name, a.path, encoded, fmt.Sprintf("%s 목적 설명 추가", a.path), "main", a.sha)
+			}
+			if err != nil {
+				log.Printf("init-files: %s %s 실패: %v", a.path, a.action, err)
 				continue
 			}
-			created = append(created, path)
+			created = append(created, a.path)
 		}
 
 		// 브랜치 보호 복원
