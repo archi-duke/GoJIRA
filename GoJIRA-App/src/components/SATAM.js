@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import CommonBar from './CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
-import { exportContent } from '../utils/exportUtils';
+import { exportContent } from '../../utils/exportUtils';
 import config from '../config';
 import './SATAM.css';
 
@@ -538,10 +538,11 @@ const NAV_ITEMS = [
   { key: 'satam', label: 'SATAM' },
 ];
 
-export default function SATAM({ project, onBack, currentPage, onNavigate }) {
+export default function SATAM({ project, user, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [assistLoading, setAssistLoading] = useState(false);
   const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_sa_A') === 'true');
   const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_sa_R') !== 'false');
   const [showFR, setShowFR] = useState(() => sessionStorage.getItem('gojira_sa_F') !== 'false');
@@ -1060,7 +1061,26 @@ export default function SATAM({ project, onBack, currentPage, onNavigate }) {
 
       {/* 상태바 */}
       <div className="satam-statusbar">
-        Design {designIssues.length}건 × Requirement {reqIssues.length}건
+        <span>Design {designIssues.length}건 × Requirement {reqIssues.length}건</span>
+        {editMode && (
+          <div className="satam-assist-btns">
+            <button className="satam-assist-btn" disabled={assistLoading}
+              onClick={async () => {
+                setAssistLoading(true);
+                try {
+                  const res = await fetch(`${API_BASE}/Agent/chat`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+                    body: JSON.stringify({ message: `${projectCode} 프로젝트의 SATAM 분석해줘`, context: { page: 'satam', projectCode } }),
+                  });
+                  const d = await res.json();
+                  alert(d.reply || '분석 완료');
+                } catch (e) { alert('오류: ' + e.message); }
+                setAssistLoading(false);
+              }}>
+              {assistLoading ? '분석 중...' : 'SATAM 분석'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 편집 팝업 */}
