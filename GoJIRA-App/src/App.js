@@ -101,6 +101,7 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
+        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)} />
         <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)}>GoJIRA</span>
         <nav className="app-nav">
           {navItems.map((n) => (
