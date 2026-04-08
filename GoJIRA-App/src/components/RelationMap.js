@@ -131,7 +131,9 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   useEffect(() => { sessionStorage.setItem('gojira_rm_R', String(showReserved)); }, [showReserved]);
   useEffect(() => { sessionStorage.setItem('gojira_rm_T', String(showTest)); }, [showTest]);
   const [selectedKey, setSelectedKey] = useState(null);
-  const [assistLoading, setAssistLoading] = useState(false);
+  const [assistLoading, setAssistLoading] = useState(null); // 로딩 중인 컬럼 id
+  const [assistResult, setAssistResult] = useState(null); // { columnId, suggestions: [{action, ...}] }
+  const [assistChecked, setAssistChecked] = useState({}); // { index: bool }
   const [sortByHighlight, setSortByHighlight] = useState(false);
   const [positions, setPositions] = useState({});
   const [linking, setLinking] = useState(null);   // { fromKey }
@@ -348,6 +350,86 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     return prefix + String(maxNum + 1).padStart(3, '0');
   }
 
+  async function handleColumnAssist(col) {
+    if (assistLoading) return;
+    setAssistLoading(col.id);
+    setAssistResult(null);
+    setAssistChecked({});
+    try {
+      const existingIssues = col.issues.map(i => ({
+        key: i.key, issueType: i.issueType, reqtype: i.reqtype, subkey: i.subkey,
+        summary: i.summary, description: i.description || '',
+      }));
+      const res = await fetch(`${API_BASE}/Agent/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+        body: JSON.stringify({
+          message: `${projectCode} 프로젝트의 ${col.label} 컬럼 이슈를 분석해줘.
+기존 이슈: ${JSON.stringify(existingIssues)}
+규칙:
+- 기존 이슈는 삭제하지 마
+- 추가가 필요한 이슈가 있으면 action: "add"로 제안
+- 수정이 필요한 이슈가 있으면 action: "update", key와 변경 내용 포함
+- 삭제 권고가 있으면 action: "delete", key와 이유 포함
+- 순수 JSON 배열만 응답: [{"action":"add|update|delete", "issueType":"...", "summary":"...", "reason":"...", "key":"..."}]`,
+          context: { page: 'relationMap', projectCode, columnId: col.id },
+        }),
+      });
+      const data = await res.json();
+      // reply에서 JSON 배열 파싱
+      let suggestions = [];
+      try {
+        const text = data.reply || '';
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (jsonMatch) suggestions = JSON.parse(jsonMatch[0]);
+      } catch {}
+      if (suggestions.length > 0) {
+        setAssistResult({ columnId: col.id, columnLabel: col.label, suggestions });
+        setAssistChecked(Object.fromEntries(suggestions.map((s, i) => [i, s.action === 'add'])));
+      } else {
+        alert(`${col.label} 컬럼: 추가/수정/삭제 제안이 없습니다.`);
+      }
+    } catch (e) {
+      alert('Agent Assist 오류: ' + e.message);
+    }
+    setAssistLoading(null);
+  }
+
+  async function handleAssistApply() {
+    if (!assistResult) return;
+    const selected = assistResult.suggestions.filter((_, i) => assistChecked[i]);
+    if (selected.length === 0) { setAssistResult(null); return; }
+    setAssistLoading(assistResult.columnId);
+    for (const s of selected) {
+      try {
+        if (s.action === 'add') {
+          await fetch(`${API_BASE}/Agent/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+            body: JSON.stringify({
+              message: `${projectCode}에 ${s.issueType || 'Requirement'} 이슈를 생성해줘. 제목: ${s.summary}`,
+            }),
+          });
+        } else if (s.action === 'update' && s.key) {
+          await fetch(`${API_BASE}/Agent/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+            body: JSON.stringify({ message: `${s.key} 이슈의 요약을 "${s.summary}"로 수정해줘` }),
+          });
+        } else if (s.action === 'delete' && s.key) {
+          await fetch(`${API_BASE}/Agent/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+            body: JSON.stringify({ message: `${s.key} 이슈를 삭제해줘` }),
+          });
+        }
+      } catch {}
+    }
+    setAssistResult(null);
+    setAssistLoading(null);
+    handlePull(); // 새로고침
+  }
+
   async function addIssue(subtype) {
     let issueType, reqtype = '';
     switch (subtype) {
@@ -479,20 +561,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
         ]}
         onExport={editMode ? undefined : handleExport}
-        onAssist={editMode ? undefined : async () => {
-          setAssistLoading(true);
-          try {
-            const res = await fetch(`${API_BASE}/Agent/chat`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-              body: JSON.stringify({ message: `${projectCode} 프로젝트의 이슈 관계를 분석해줘`, context: { page: 'relationMap', projectCode } }),
-            });
-            const d = await res.json();
-            alert(d.reply || '분석 완료');
-          } catch (e) { alert('오류: ' + e.message); }
-          setAssistLoading(false);
-        }}
-        assistLabel="관계 분석"
-        assistLoading={assistLoading}
       />
 
       {/* content area */}
@@ -507,7 +575,23 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           <div className="rm-columns">
             {columns.map((col) => (
               <div key={col.id} className="rm-column">
-                <div className="rm-column-header">{col.label}</div>
+                <div className="rm-column-header">
+                  {col.label}
+                  {editMode && (
+                    <button className="rm-ai-btn" title={`${col.label} AI 자동생성`}
+                      disabled={assistLoading === col.id}
+                      onClick={() => handleColumnAssist(col)}>
+                      {assistLoading === col.id ? '...' : (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                          <text x="2" y="17" fontSize="14" fontWeight="bold" fontFamily="Arial">AI</text>
+                          <circle cx="18" cy="4" r="1.5" fill="#f4b400" />
+                          <circle cx="21" cy="8" r="1" fill="#f4b400" />
+                          <circle cx="17" cy="10" r="1.2" fill="#f4b400" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
+                </div>
 
                 {col.issues.map((issue) => {
                   const subtype = getSubtype(issue);
@@ -713,6 +797,39 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         {selectedKey && ` | 선택: ${selectedKey}`}
         {linking && ' | 연결 그리기 중 (ESC 취소)'}
       </div>
+
+      {/* AI Assist 승인 모달 */}
+      {assistResult && (
+        <div className="rm-assist-overlay" onClick={() => setAssistResult(null)}>
+          <div className="rm-assist-modal" onClick={e => e.stopPropagation()}>
+            <div className="rm-assist-modal-header">
+              <span>AI 제안: {assistResult.columnLabel}</span>
+              <button className="rm-assist-modal-close" onClick={() => setAssistResult(null)}>&times;</button>
+            </div>
+            <div className="rm-assist-modal-body">
+              {assistResult.suggestions.map((s, i) => (
+                <label key={i} className={`rm-assist-item rm-assist-${s.action}`}>
+                  <input type="checkbox" checked={!!assistChecked[i]}
+                    onChange={e => setAssistChecked(prev => ({ ...prev, [i]: e.target.checked }))} />
+                  <span className="rm-assist-action">{s.action === 'add' ? '추가' : s.action === 'update' ? '수정' : '삭제'}</span>
+                  <span className="rm-assist-summary">
+                    {s.key && <strong>[{s.key}] </strong>}
+                    {s.summary}
+                  </span>
+                  {s.reason && <span className="rm-assist-reason">{s.reason}</span>}
+                </label>
+              ))}
+            </div>
+            <div className="rm-assist-modal-footer">
+              <button className="rm-assist-apply" onClick={handleAssistApply}
+                disabled={!Object.values(assistChecked).some(Boolean)}>
+                선택 항목 적용 ({Object.values(assistChecked).filter(Boolean).length}건)
+              </button>
+              <button className="rm-assist-cancel" onClick={() => setAssistResult(null)}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Issue Detail Dialog */}
       {detailIssue && (
