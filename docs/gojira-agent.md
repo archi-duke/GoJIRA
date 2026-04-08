@@ -234,19 +234,35 @@ Agent가 자동 생성하는 문서는 우선 2종류를 지원한다.
 
 ### 4.2.1 필수 파일 (Protected Files)
 
-아래 3개 파일은 **필수 파일**로, 과제 생성 시 빈 내용으로 자동 생성되며 **이름 변경 및 삭제가 불가능**하다.
+아래 3개 파일은 **필수 파일**로, 과제 생성 시 자동 생성되며 **이름 변경 및 삭제가 불가능**하다.
 
-| 파일 | 용도 |
-|------|------|
-| `business.md` | 비즈니스 배경, 목표, 스테이크홀더, 범위 등 과제 기본 정보 |
-| `srs.md` | 요구사양서 (VOS → Feature → Requirement) |
-| `architecture.md` | 구조설계서 (ADSN, 후보안 포함) |
+| 파일 | 용도 | 초기 템플릿 |
+|------|------|------------|
+| `business.md` | 과제의 배경, 목적, 주요 사항을 기록하는 문서. VOS 자동생성 시 이 문서를 참조함 | 과제 배경 / 과제 목적 / 주요 사항 섹션 |
+| `srs.md` | 과제의 요구사양을 기술하는 문서. Use Case 및 주요 기능/비기능 요구사양과 제약사항 포함 | Use Cases / FR / NFR / CNST 섹션 |
+| `architecture.md` | 과제의 주요 설계 사항을 기술하는 문서. Architecture 스타일, 디자인 포인트, 통합 디자인, SATAM 포함 | Architecture Style / Key Design Points / Integrated Design Views / SATAM 섹션 |
 
-**규칙:**
-- 과제(프로젝트) 생성 시 DocRepo에 위 3개 파일이 자동으로 생성된다
+**생성 시점:**
+- **프로젝트 생성 시**: Platform-API `DocRepoCreateHandler`에서 브랜치 보호 설정 전에 main에 직접 생성 (Gitea Contents API POST)
+- **Docs 진입 시**: DocEditor `useEffect`에서 `POST /DocRepo/{code}/init-files` 호출 → 없는 파일만 보충, 이전 간단 템플릿은 상세 템플릿으로 자동 업데이트
+- init-files는 브랜치 보호를 임시 해제 → 파일 생성/업데이트 → 보호 복원
+
+**사용자 브랜치 자동 생성:**
+- Docs 진입 시 `POST /DocRepo/{code}/ensure-branch`를 호출
+- 사용자 브랜치(`docs/{user}`)가 없으면 현재 main에서 자동 생성
+- init-files + ensure-branch 완료 후 트리 로드 (Promise.all로 순서 보장)
+
+**보호 규칙:**
 - UI에서 해당 파일의 이름 변경(✎) 및 삭제(✕) 버튼을 비활성화한다
-- API에서도 해당 파일에 대한 DELETE 및 이름 변경(rename) 요청을 거부한다
+- Platform-API에서 해당 파일에 대한 DELETE 요청을 거부한다 (`isProtectedFile` 체크)
 - 내용 편집은 자유롭게 가능하다
+
+**관련 API:**
+| API | 설명 |
+|-----|------|
+| `POST /DocRepo/{code}/init-files` | 필수 파일 자동 보충 (없으면 생성, 간단 템플릿이면 업데이트) |
+| `POST /DocRepo/{code}/ensure-branch` | 사용자 브랜치 없으면 main에서 자동 생성 |
+| `DELETE /DocRepo/{code}/file` | 필수 파일이면 403 거부 |
 
 ### 4.3 메뉴별 Assist 기능
 
@@ -573,11 +589,18 @@ MongoDB: agent_sessions
 - [x] 기본 Skill: project_query, issue_query, schedule_analyze
 
 ### Phase 2: 핵심 Skill + 필수 파일 — ✅ 완료
-- [x] issue_manage (create/update/delete/link) — 도메인 통합
-- [x] doc_manage (list/summarize/diff) — 도메인 통합
-- [x] pr_manage (create/list) — 도메인 통합
+- [x] issue_manage (create/update/delete/link) → CRUD 개별 분리 (Phase 2.5)
+- [x] doc_manage (list/summarize/diff) → CRUD 개별 분리 (Phase 2.5)
+- [x] pr_manage (create/list) → CRUD 개별 분리 (Phase 2.5)
 - [x] 필수 파일 정책 (business.md, srs.md, architecture.md)
+  - [x] 프로젝트 생성 시 브랜치 보호 전 자동 생성
+  - [x] Docs 진입 시 init-files로 자동 보충 + 템플릿 업데이트
+  - [x] ensure-branch: 사용자 브랜치 없으면 main에서 자동 생성
+  - [x] 파일 목적 설명 포함 템플릿 (섹션 구조)
+  - [x] Gitea Contents API 호환 (POST=생성, PUT=수정 분리)
+  - [x] 브랜치 보호 임시 해제 → 파일 생성 → 보호 복원
 - [x] 멀티턴 대화 + 멀티 tool_call 정상 동작
+- [x] issue_query에 reqType 필터 추가 (NFR/FR/CNST)
 - [ ] 문서 생성/수정 Skill (doc_generate_srs, doc_generate_design) — 가이드 대기
 
 ### Phase 2.5: 표준화 리팩터링 — ✅ 완료
@@ -586,11 +609,15 @@ MongoDB: agent_sessions
 - [x] .claude/skills/ 표준 위치에 SKILL.md 배치
 - [x] MCP 대신 CLI + 쉘 실행 방식 채택
 - [x] Agent를 Claude Code 패턴으로 리팩터링 (에러 복원, 재귀 tool_call)
+- [x] CRUD 개별 분리: 6개 → 12개(+분석 2개 = 14개) Skill
 
 ### Phase 3: Agent Assist UI — 🔧 진행 중
 - [x] POST /Agent/assist API
 - [x] Issues 편집모드 자동생성 버튼 (VOS/Feature/Req/ADSN)
 - [x] Assist 결과 미리보기 패널
+- [x] RelationMap 컬럼별 AI 자동생성 버튼 + 승인 모달
+- [x] SATAM 분석 버튼 (편집모드 무관 항상 표시)
+- [x] CommonBar: Pull/Export 아이콘화, Back 버튼 제거, Project 클릭으로 Map 이동
 - [ ] Docs 화면 Agent Assist 버튼
 - [ ] 각 Assist 결과 확인 후 적용 흐름 개선
 
@@ -691,6 +718,21 @@ Agent용 max_tokens는 코드에서 2000 이상으로 자동 조정.
 - **결정:** gpt-4o-mini에서 gpt-4o로 변경
 - **근거:** gpt-4o-mini는 tool_use를 무시하고 텍스트만 응답하는 문제 빈발
 - **트레이드오프:** 비용 증가, 응답 속도 약간 느림
+
+### ADR-007: 필수 파일 생성 — 브랜치 보호 전 생성 + Docs 진입 시 보충
+- **결정:** 프로젝트 생성 시 브랜치 보호 설정 전에 main에 직접 생성, Docs 진입 시 init-files로 보충
+- **근거:** 브랜치 보호가 걸린 후에는 main에 직접 커밋 불가 (403). 보호 전에 생성하거나, 임시 해제 → 생성 → 복원 필요
+- **대안 검토:** GoJIRA-API에서 callPlatform PUT으로 생성 시도 → 사용자 브랜치에 생성되는 문제. Gitea Contents API POST(새 파일)와 PUT(기존 파일 수정)이 다르다는 점도 발견
+
+### ADR-008: 사용자 브랜치 자동 생성 — Docs 진입 시 ensure-branch
+- **결정:** Docs 진입 시 `ensure-branch` API로 사용자 브랜치 없으면 main에서 자동 생성
+- **근거:** 사용자 브랜치가 없으면 workspace 탭에서 파일 조회 실패 (502). 기존에는 파일 수정(PUT) 시에만 브랜치가 생성되어, 조회만 하는 경우 문제 발생
+- **Gitea 호환:** `GetBranchRef`(`/git/ref/heads/`) 대신 `ListBranches`(`/branches`)로 확인, `CreateBranch`도 Gitea API(`POST /branches`)로 분기 처리
+
+### ADR-009: CommonBar UI 정리
+- **결정:** Back 버튼 제거, 타이틀바 Project 클릭으로 ProjectMap 이동
+- **근거:** 컴포넌트 내 Back 버튼과 타이틀바 네비게이션 중복. 타이틀바가 항상 보이므로 하나로 통합
+- **구현:** GoJIRAApp에서 `resetKey` 카운터로 Project 클릭 감지 → 내부 page='map' 리셋
 
 ---
 
