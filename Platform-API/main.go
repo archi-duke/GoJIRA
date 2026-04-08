@@ -122,6 +122,7 @@ func main() {
 			r.Post("/{code}", handlers.DocRepoCreateHandler)
 			r.Delete("/{code}/purge", handlers.DocRepoPurgeHandler)
 			r.Delete("/{code}/github", handlers.DocRepoGHDeleteHandler)
+			r.Post("/{code}/init-files", handlers.DocRepoInitFilesHandler)
 			r.Get("/{code}/tree", handlers.DocRepoTreeHandler)
 			r.Get("/{code}/file", handlers.DocRepoFileHandler)
 			r.Put("/{code}/file", handlers.DocRepoFileUpdateHandler)

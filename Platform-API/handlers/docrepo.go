@@ -102,6 +102,19 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 			[]string{"pull_request", "pull_request_review", "push"})
 	}
 
+	// 필수 파일 생성 (브랜치 보호 전에 main에 직접 커밋)
+	requiredFiles := map[string]string{
+		"business.md":     "# Business\n\n비즈니스 배경, 목표, 스테이크홀더, 범위 등을 작성합니다.\n",
+		"srs.md":          "# Software Requirements Specification\n\n요구사양서를 작성합니다.\n",
+		"architecture.md": "# Architecture Design\n\n구조설계서를 작성합니다.\n",
+	}
+	for path, content := range requiredFiles {
+		encoded := base64.StdEncoding.EncodeToString([]byte(content))
+		if _, err := github.CreateFile(owner, req.RepoName, path, encoded, path+" 초기 생성", "main"); err != nil {
+			log.Printf("필수 파일 생성 실패 (%s): %v", path, err)
+		}
+	}
+
 	// Branch protection: 모든 리뷰 완료 전 머지 불가
 	auditors := toStringSlice(prj["auditors"])
 	reviewCount := len(auditors)
@@ -294,6 +307,61 @@ var protectedFiles = map[string]bool{
 
 func isProtectedFile(path string) bool {
 	return protectedFiles[path]
+}
+
+// POST /DocRepo/{code}/init-files — 필수 파일 자동 생성 (main 브랜치, 없는 것만)
+func DocRepoInitFilesHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	required := map[string]string{
+		"business.md":     "# Business\n\n비즈니스 배경, 목표, 스테이크홀더, 범위 등을 작성합니다.\n",
+		"srs.md":          "# Software Requirements Specification\n\n요구사양서를 작성합니다.\n",
+		"architecture.md": "# Architecture Design\n\n구조설계서를 작성합니다.\n",
+	}
+
+	// 생성이 필요한 파일 확인
+	var toCreate []string
+	for path := range required {
+		if _, err := github.GetFileContent(owner, name, path, "main"); err != nil {
+			toCreate = append(toCreate, path)
+		}
+	}
+
+	var created []string
+	if len(toCreate) > 0 {
+		// 브랜치 보호 임시 해제
+		github.DeleteBranchProtection(owner, name, "main")
+
+		for _, path := range toCreate {
+			encoded := base64.StdEncoding.EncodeToString([]byte(required[path]))
+			if _, err := github.CreateFile(owner, name, path, encoded, fmt.Sprintf("%s 초기 생성", path), "main"); err != nil {
+				log.Printf("init-files: %s 생성 실패: %v", path, err)
+				continue
+			}
+			created = append(created, path)
+		}
+
+		// 브랜치 보호 복원
+		prj, _ := db.FindProjectByCode(ctx, code)
+		auditors := toStringSlice(prj["auditors"])
+		reviewCount := len(auditors)
+		if reviewCount == 0 {
+			reviewCount = 1
+		}
+		github.SetBranchProtection(owner, name, "main", reviewCount)
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"created": created,
+		"count":   len(created),
+	})
 }
 
 func getRepoInfo(ctx context.Context, code string) (string, string, error) {

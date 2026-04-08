@@ -332,6 +332,27 @@ func CreateWebhook(owner, repo, webhookURL, secret string, events []string) erro
 
 // CreateOrUpdateFile creates or updates a file in a repo.
 // sha is required for updates (empty for new files).
+func CreateFile(owner, repo, filePath, content, message, branch string) (map[string]interface{}, error) {
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
+	body := map[string]interface{}{
+		"message": message,
+		"content": content, // base64 encoded
+	}
+	if branch != "" {
+		body["branch"] = branch
+	}
+	data, status, err := doRequest("POST", u, body)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("create file failed (%d): %s", status, string(data))
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
 func CreateOrUpdateFile(owner, repo, filePath, content, message, branch, sha string) (map[string]interface{}, error) {
 	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
 	body := map[string]interface{}{
@@ -630,6 +651,17 @@ func RemoveRequestedReviewer(owner, repo string, prNumber int, username string) 
 // --- Branch Protection ---
 
 // SetBranchProtection main 브랜치에 보호 규칙 설정 (모든 리뷰 완료 전 머지 불가)
+func DeleteBranchProtection(owner, repo, branch string) error {
+	if IsGitea() {
+		path := fmt.Sprintf("/repos/%s/%s/branch_protections/%s", owner, repo, branch)
+		_, _, _ = doRequest("DELETE", path, nil)
+		return nil
+	}
+	path := fmt.Sprintf("/repos/%s/%s/branches/%s/protection", owner, repo, branch)
+	_, _, _ = doRequest("DELETE", path, nil)
+	return nil
+}
+
 func SetBranchProtection(owner, repo, branch string, requiredReviewers int) error {
 	if IsGitea() {
 		return setBranchProtectionGitea(owner, repo, branch, requiredReviewers)

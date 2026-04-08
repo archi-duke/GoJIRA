@@ -46,10 +46,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
 
-  // 진입 시 main 트리 + 사용자 브랜치 트리 비교
+  // 진입 시 필수 파일 확인 + main 트리 + 사용자 브랜치 트리 비교
   useEffect(() => {
     if (!hasRepo) return;
     const branch = `docs/${user}`;
+
+    // 필수 파일 자동 보충 (없는 것만 생성)
+    fetch(`${API}/${projectCode}/init-files`, { method: 'POST' }).catch(() => {});
 
     fetch(`${API}/${projectCode}/tree?ref=main`)
       .then(r => r.json()).then(mTree => {
