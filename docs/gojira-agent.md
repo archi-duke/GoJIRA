@@ -142,27 +142,32 @@ allowed-tools: Bash
 - 비개발자도 Skill 작성 가능 (프롬프트 튜닝)
 - 서버 재시작으로 핫 리로드
 
-### 2.5 Skill 도메인 통합 원칙
+### 2.5 Skill 분리 원칙 — CRUD 단위 개별 분리
 
-**설계 결정:** 개별 CRUD Skill 대신 **도메인 단위**로 통합 (action 파라미터).
+**설계 결정:** LLM이 직접 tool을 선택하는 구조이므로, **CRUD 단위로 개별 Skill**을 정의.
 
-| 방식 | 예시 | Skill 수 |
-|------|------|---------|
-| ~~개별~~ | issue_create, issue_update, issue_delete, issue_link | 4개 |
-| **도메인 (채택)** | issue_manage(action=create/update/delete/link) | 1개 |
+| 분류 | Skill | 설명 | 안전 등급 |
+|------|-------|------|----------|
+| **조회** | `project_query` | 프로젝트 목록 조회 | 자동 |
+| | `issue_query` | 이슈 목록 조회/필터 | 자동 |
+| | `doc_list` | 문서 파일 목록 | 자동 |
+| | `pr_list` | PR 목록 조회 | 자동 |
+| **분석** | `doc_summarize` | 문서 요약 (LLM) | 자동 |
+| | `doc_diff` | 브랜치 Diff 해석 (LLM) | 자동 |
+| | `schedule_analyze` | 일정 분석 (LLM) | 자동 |
+| **변경** | `issue_create` | 이슈 생성 | 확인 요청 |
+| | `issue_update` | 이슈 수정 | 확인 요청 |
+| | `issue_delete` | 이슈 삭제 | 확인 요청 |
+| | `issue_link` | 이슈 관계 설정 | 확인 요청 |
+| | `pr_create` | PR 생성 | 확인 요청 |
 
-최종 6개 Skill:
+총 12개 (OpenAI 권장 10~20개 범위 내)
 
-| Skill | action | 설명 |
-|-------|--------|------|
-| `project_query` | — | 프로젝트 조회 |
-| `issue_query` | — | 이슈 조회/검색 |
-| `issue_manage` | create/update/delete/link | 이슈 CRUD + 관계 설정 |
-| `doc_manage` | list/summarize/diff | 문서 조회/요약/diff |
-| `pr_manage` | create/list | PR 관리 |
-| `schedule_analyze` | — | 일정 분석 |
-
-**채택 근거:** OpenAI/Anthropic 권장 — tool은 10~20개 이내가 최적. 많아지면 LLM 선택 정확도 하락. 도메인별 1개로 묶으면 LLM이 도메인을 먼저 선택하고 action으로 세분화하여 정확도 유지.
+**채택 근거:**
+- 사용자 의도가 CRUD 단위로 갈림 → LLM이 1단계에서 정확 선택
+- description이 구체적 → "이슈를 생성합니다" vs "이슈를 관리합니다"
+- 조회(자동)/변경(확인 요청) 안전 정책을 Skill 단위로 분리
+- 이전 도메인 통합 방식(action 파라미터)은 LLM이 action을 잘못 고르는 문제 발생
 
 ---
 
@@ -349,22 +354,22 @@ Agent가 자동 생성하는 문서는 우선 2종류를 지원한다.
 
 ### 5.1 현행 Skill 목록 (구현 완료)
 
-도메인 단위 6개 Skill, SKILL.md 선언형 + gojira-cli 실행:
+CRUD 단위 12개 Skill, SKILL.md 선언형 + gojira-cli 실행:
 
-| Skill | action | CLI 명령 | 설명 |
-|-------|--------|---------|------|
-| `project_query` | — | `gojira-cli project list` | 프로젝트 조회 |
-| `issue_query` | — | `gojira-cli issue list --project CODE` | 이슈 조회/필터링 |
-| `issue_manage` | create | `gojira-cli issue create --project CODE --type TYPE --summary "..."` | 이슈 생성 |
-| | update | `gojira-cli issue update --key KEY --status "..."` | 이슈 수정 |
-| | delete | `gojira-cli issue delete --key KEY` | 이슈 삭제 |
-| | link | `gojira-cli issue link --from KEY --to KEY --type contain` | 이슈 관계 설정 |
-| `doc_manage` | list | `gojira-cli doc list --project CODE` | 문서 파일 목록 |
-| | summarize | `gojira-cli doc summarize --project CODE --file FILE` | 문서 요약 (LLM) |
-| | diff | `gojira-cli doc diff --project CODE --file FILE` | 브랜치 Diff 해석 (LLM) |
-| `pr_manage` | create | `gojira-cli pr create --project CODE` | PR 생성 |
-| | list | `gojira-cli pr list --project CODE` | PR 목록 조회 |
-| `schedule_analyze` | — | `gojira-cli schedule analyze --project CODE` | 일정 분석 (LLM) |
+| Skill | CLI 명령 | 설명 | 안전 |
+|-------|---------|------|------|
+| `project_query` | `gojira-cli project list` | 프로젝트 조회 | 자동 |
+| `issue_query` | `gojira-cli issue list --project CODE [--type TYPE]` | 이슈 조회/필터 | 자동 |
+| `issue_create` | `gojira-cli issue create --project CODE --type TYPE --summary "..."` | 이슈 생성 | 확인 |
+| `issue_update` | `gojira-cli issue update --key KEY --status "..."` | 이슈 수정 | 확인 |
+| `issue_delete` | `gojira-cli issue delete --key KEY` | 이슈 삭제 | 확인 |
+| `issue_link` | `gojira-cli issue link --from KEY --to KEY --type contain` | 이슈 관계 설정 | 확인 |
+| `doc_list` | `gojira-cli doc list --project CODE` | 문서 파일 목록 | 자동 |
+| `doc_summarize` | `gojira-cli doc summarize --project CODE --file FILE` | 문서 요약 (LLM) | 자동 |
+| `doc_diff` | `gojira-cli doc diff --project CODE --file FILE` | Diff 해석 (LLM) | 자동 |
+| `pr_create` | `gojira-cli pr create --project CODE` | PR 생성 | 확인 |
+| `pr_list` | `gojira-cli pr list --project CODE` | PR 목록 조회 | 자동 |
+| `schedule_analyze` | `gojira-cli schedule analyze --project CODE` | 일정 분석 (LLM) | 자동 |
 
 ### 5.2 향후 추가 예정 Skill (문서 가이드 제공 후)
 
@@ -384,16 +389,22 @@ Agent가 자동 생성하는 문서는 우선 2종류를 지원한다.
 .claude/skills/
 ├── project-query/SKILL.md      # !`gojira-cli project list`
 ├── issue-query/SKILL.md        # !`gojira-cli issue list ...`
-├── issue-manage/SKILL.md       # !`gojira-cli issue create/update/delete/link`
-├── doc-manage/SKILL.md         # !`gojira-cli doc list/get/summarize/diff`
-├── pr-manage/SKILL.md          # !`gojira-cli pr create/list`
-└── schedule-analyze/SKILL.md   # !`gojira-cli schedule analyze`
+├── issue-create/SKILL.md       # !`gojira-cli issue create ...`
+├── issue-update/SKILL.md       # !`gojira-cli issue update ...`
+├── issue-delete/SKILL.md       # !`gojira-cli issue delete ...`
+├── issue-link/SKILL.md         # !`gojira-cli issue link ...`
+├── doc-list/SKILL.md           # !`gojira-cli doc list ...`
+├── doc-summarize/SKILL.md      # !`gojira-cli doc summarize ...`
+├── doc-diff/SKILL.md           # !`gojira-cli doc diff ...`
+├── pr-create/SKILL.md          # !`gojira-cli pr create ...`
+├── pr-list/SKILL.md            # !`gojira-cli pr list ...`
+└── schedule-analyze/SKILL.md   # !`gojira-cli schedule analyze ...`
 ```
 
 **서버 내장용 (웹 Agent Chat):**
 ```
 GoJIRA-API/skills/
-├── */SKILL.md                  # 동일 정의
+├── */SKILL.md                  # 동일 정의 (12개)
 ├── registry.go                 # SKILL.md 자동 로더 (YAML frontmatter 파싱)
 ├── executor.go                 # 범용 실행 엔진 (SKILL.md → API 호출)
 └── helpers.go                  # LLM/API 호출 공통
@@ -660,10 +671,16 @@ Agent용 max_tokens는 코드에서 2000 이상으로 자동 조정.
 - **근거:** 이식성 (다른 Agent에 그대로 사용), 코드 변경 없이 Skill 추가, 비개발자 편집 가능
 - **대안:** Go 코드로 각 Skill 구현 — 초기 구현은 빨랐으나 이식성 없음
 
-### ADR-004: 도메인 단위 Skill 통합
-- **결정:** CRUD별 개별 Skill 대신 도메인별 1개 + action 파라미터
-- **근거:** LLM tool 선택 정확도 최적화 (10~20개 이내 권장), 관리 편의
-- **대안:** 개별 Skill (issue_create, issue_update, ...) — tool 수 증가 시 정확도 하락
+### ADR-004: Skill 분리 단위 — CRUD 개별 분리 (수정)
+- **결정:** 도메인 통합(action 파라미터) 대신 **CRUD 단위 개별 Skill**로 분리
+- **근거:**
+  1. LLM이 직접 tool을 선택하는 구조에서는 개별 Skill이 유리
+  2. 사용자 의도가 CRUD 단위로 갈리는 경우가 많음 ("생성해줘" vs "삭제해줘")
+  3. description이 명확해져 LLM 선택 정확도 향상 ("이슈를 생성합니다" vs "이슈를 관리합니다")
+  4. 권한/안전 정책 분리 용이 (읽기 Skill은 자동, 쓰기 Skill은 확인 요청)
+  5. 12개는 OpenAI 권장 범위(10~20개) 내
+- **이전 결정:** 도메인 통합 6개 — LLM이 action 파라미터를 잘못 선택하는 문제 발생
+- **대안 검토:** 도메인 통합은 사람이 UI에서 선택하는 경우에 적합
 
 ### ADR-005: 시스템 프롬프트 외부화
 - **결정:** Go 코드 하드코딩 대신 prompts/agent-system.txt 파일
