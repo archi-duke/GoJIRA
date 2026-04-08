@@ -10,9 +10,11 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
 
   // 타이틀바 Project 클릭 시 map으로 리셋
   useEffect(() => {
-    if (resetKey === 'map' && page !== 'map') {
+    if (resetKey > 0) {
       setPage('map');
+      setSelectedProject(null);
       sessionStorage.setItem('gojira_page', 'map');
+      sessionStorage.removeItem('gojira_project');
     }
   }, [resetKey]); // eslint-disable-line
   const [selectedProject, setSelectedProject] = useState(() => {

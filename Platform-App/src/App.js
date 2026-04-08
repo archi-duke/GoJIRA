@@ -18,6 +18,7 @@ function App() {
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [allUsers, setAllUsers] = useState([]);
   const [showAgent, setShowAgent] = useState(false);
+  const [mapResetCount, setMapResetCount] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -45,6 +46,7 @@ function App() {
   const navigate = useCallback((p) => {
     setPage(p);
     sessionStorage.setItem('gojira_page', p);
+    if (p === 'map') setMapResetCount(c => c + 1);
   }, []);
 
   if (!user) return null;
@@ -82,7 +84,7 @@ function App() {
       const AppComponent = appEntry.component;
       content = (
         <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
-          <AppComponent user={user} authority={authority} resetKey={page} />
+          <AppComponent user={user} authority={authority} resetKey={mapResetCount} />
         </Suspense>
       );
     } else {
