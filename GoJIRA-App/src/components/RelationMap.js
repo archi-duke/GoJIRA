@@ -478,8 +478,8 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
           { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
         ]}
-        onExport={handleExport}
-        onAssist={async () => {
+        onExport={editMode ? undefined : handleExport}
+        onAssist={editMode ? undefined : async () => {
           setAssistLoading(true);
           try {
             const res = await fetch(`${API_BASE}/Agent/chat`, {
