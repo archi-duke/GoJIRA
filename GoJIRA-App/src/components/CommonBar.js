@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import './CommonBar.css';
 
-export default function CommonBar({ title, onBack, onPull, onEditChange, options, nav, onExport }) {
+export default function CommonBar({ title, onBack, onPull, onEditChange, options, nav, onExport, onAssist, assistLabel, assistLoading }) {
   const [editMode, setEditMode] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -35,7 +35,6 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
     }
   }
 
-  // 드롭다운 외부 클릭 시 닫기
   useEffect(() => {
     if (!exportOpen) return;
     function close(e) {
@@ -50,15 +49,11 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       <button className="cb-back-btn" onClick={onBack}>&larr; Back</button>
       <span className="cb-title">{title}</span>
 
-      {/* 컴포넌트 네비게이션 */}
+      {/* 네비게이션 */}
       {(nav || []).length > 0 && (
         <>
           {nav.map((item) => (
-            <button
-              key={item.key}
-              className={`cb-nav-btn ${item.active ? 'cb-nav-active' : ''}`}
-              onClick={item.handler}
-            >
+            <button key={item.key} className={`cb-nav-btn ${item.active ? 'cb-nav-active' : ''}`} onClick={item.handler}>
               {item.label}
             </button>
           ))}
@@ -66,16 +61,11 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
         </>
       )}
 
-      {/* 컴포넌트별 옵션 버튼 */}
+      {/* 옵션 버튼 */}
       {(options || []).length > 0 && (
         <>
-          <span className="cb-options-label">Options:</span>
           {options.map((opt, i) => (
-            <button
-              key={i}
-              className={`cb-opt-btn ${opt.active ? 'cb-opt-btn-active' : ''}`}
-              onClick={opt.handler}
-            >
+            <button key={i} className={`cb-opt-btn ${opt.active ? 'cb-opt-btn-active' : ''}`} onClick={opt.handler}>
               {opt.label}
             </button>
           ))}
@@ -83,13 +73,22 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       )}
 
       <span className="cb-divider" />
-      <button className="cb-btn" onClick={handlePull} disabled={pulling}>
-        {pulling ? 'Pulling...' : 'Pull'}
+
+      {/* Pull 아이콘 */}
+      <button className="cb-icon-btn" onClick={handlePull} disabled={pulling} title="Pull">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 1v9M4 6l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+        </svg>
       </button>
 
+      {/* Export 아이콘 */}
       {onExport && (
         <div className="cb-export-wrap" ref={exportRef}>
-          <button className="cb-btn" onClick={() => setExportOpen((v) => !v)}>Export</button>
+          <button className="cb-icon-btn" onClick={() => setExportOpen((v) => !v)} title="Export">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1v9M4 6l4-4 4 4M2 13h12" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+            </svg>
+          </button>
           {exportOpen && (
             <div className="cb-export-menu">
               <button className="cb-export-item" onClick={() => handleExport('html')}>HTML 파일</button>
@@ -100,10 +99,15 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
         </div>
       )}
 
-      <button
-        className={`cb-edit-toggle ${editMode ? 'cb-edit-active' : ''}`}
-        onClick={handleEditToggle}
-      >
+      {/* Agent Assist 버튼 (편집모드 ON 좌측) */}
+      {onAssist && editMode && (
+        <button className="cb-assist-btn" onClick={onAssist} disabled={assistLoading}>
+          {assistLoading ? '분석 중...' : (assistLabel || 'Agent 분석')}
+        </button>
+      )}
+
+      {/* 편집모드 */}
+      <button className={`cb-edit-toggle ${editMode ? 'cb-edit-active' : ''}`} onClick={handleEditToggle}>
         {editMode ? '편집모드 ON' : '편집모드'}
       </button>
 

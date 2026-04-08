@@ -479,6 +479,20 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
         ]}
         onExport={handleExport}
+        onAssist={async () => {
+          setAssistLoading(true);
+          try {
+            const res = await fetch(`${API_BASE}/Agent/chat`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+              body: JSON.stringify({ message: `${projectCode} 프로젝트의 이슈 관계를 분석해줘`, context: { page: 'relationMap', projectCode } }),
+            });
+            const d = await res.json();
+            alert(d.reply || '분석 완료');
+          } catch (e) { alert('오류: ' + e.message); }
+          setAssistLoading(false);
+        }}
+        assistLabel="관계 분석"
+        assistLoading={assistLoading}
       />
 
       {/* content area */}
@@ -695,28 +709,9 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
 
       {/* status bar */}
       <div className="rm-statusbar">
-        <span>총 {issues.length}건
+        총 {issues.length}건
         {selectedKey && ` | 선택: ${selectedKey}`}
-        {linking && ' | 연결 그리기 중 (ESC 취소)'}</span>
-        {editMode && (
-          <div className="rm-assist-btns">
-            <button className="rm-assist-btn" disabled={assistLoading}
-              onClick={async () => {
-                setAssistLoading(true);
-                try {
-                  const res = await fetch(`${API_BASE}/Agent/chat`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-                    body: JSON.stringify({ message: `${projectCode} 프로젝트의 이슈 관계를 분석해줘`, context: { page: 'relationMap', projectCode } }),
-                  });
-                  const d = await res.json();
-                  alert(d.reply || '분석 완료');
-                } catch (e) { alert('오류: ' + e.message); }
-                setAssistLoading(false);
-              }}>
-              {assistLoading ? '분석 중...' : '관계 분석'}
-            </button>
-          </div>
-        )}
+        {linking && ' | 연결 그리기 중 (ESC 취소)'}
       </div>
 
       {/* Issue Detail Dialog */}

@@ -839,6 +839,20 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
         ]}
         onExport={handleExport}
+        onAssist={async () => {
+          setAssistLoading(true);
+          try {
+            const res = await fetch(`${API_BASE}/Agent/chat`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+              body: JSON.stringify({ message: `${projectCode} 프로젝트의 SATAM 분석해줘`, context: { page: 'satam', projectCode } }),
+            });
+            const d = await res.json();
+            alert(d.reply || '분석 완료');
+          } catch (e) { alert('오류: ' + e.message); }
+          setAssistLoading(false);
+        }}
+        assistLabel="SATAM 분석"
+        assistLoading={assistLoading}
       />
 
       <div className="satam-content" ref={contentRef}>
@@ -1061,26 +1075,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
 
       {/* 상태바 */}
       <div className="satam-statusbar">
-        <span>Design {designIssues.length}건 × Requirement {reqIssues.length}건</span>
-        {editMode && (
-          <div className="satam-assist-btns">
-            <button className="satam-assist-btn" disabled={assistLoading}
-              onClick={async () => {
-                setAssistLoading(true);
-                try {
-                  const res = await fetch(`${API_BASE}/Agent/chat`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-                    body: JSON.stringify({ message: `${projectCode} 프로젝트의 SATAM 분석해줘`, context: { page: 'satam', projectCode } }),
-                  });
-                  const d = await res.json();
-                  alert(d.reply || '분석 완료');
-                } catch (e) { alert('오류: ' + e.message); }
-                setAssistLoading(false);
-              }}>
-              {assistLoading ? '분석 중...' : 'SATAM 분석'}
-            </button>
-          </div>
-        )}
+        Design {designIssues.length}건 × Requirement {reqIssues.length}건
       </div>
 
       {/* 편집 팝업 */}
