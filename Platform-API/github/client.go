@@ -455,6 +455,23 @@ func GetBranchRef(owner, repo, branch string) (string, error) {
 
 // CreateBranch creates a new branch from a source branch SHA.
 func CreateBranch(owner, repo, newBranch, fromSHA string) error {
+	if IsGitea() {
+		// Gitea API: POST /repos/{owner}/{repo}/branches
+		path := fmt.Sprintf("/repos/%s/%s/branches", owner, repo)
+		body := map[string]string{
+			"new_branch_name": newBranch,
+			"old_branch_name": "main",
+		}
+		data, status, err := doRequest("POST", path, body)
+		if err != nil {
+			return err
+		}
+		if status >= 400 {
+			return fmt.Errorf("create branch failed (%d): %s", status, string(data))
+		}
+		return nil
+	}
+	// GitHub API
 	path := fmt.Sprintf("/repos/%s/%s/git/refs", owner, repo)
 	body := map[string]string{
 		"ref": "refs/heads/" + newBranch,

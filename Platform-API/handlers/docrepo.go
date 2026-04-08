@@ -435,14 +435,28 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	branch := "docs/" + userId
-	// 이미 있으면 skip
-	if _, err := github.GetBranchRef(owner, name, branch); err == nil {
+	// 이미 있는지 브랜치 목록에서 확인
+	branchList, _ := github.ListBranches(owner, name)
+	branches, _ := branchList.([]interface{})
+	branchExists := false
+	mainSHA := ""
+	for _, b := range branches {
+		bm, _ := b.(map[string]interface{})
+		bName, _ := bm["name"].(string)
+		if bName == branch {
+			branchExists = true
+		}
+		if bName == "main" {
+			if commit, ok := bm["commit"].(map[string]interface{}); ok {
+				mainSHA, _ = commit["id"].(string)
+			}
+		}
+	}
+	if branchExists {
 		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": false})
 		return
 	}
-	// main에서 브랜치 생성
-	mainSHA, err := github.GetBranchRef(owner, name, "main")
-	if err != nil || mainSHA == "" {
+	if mainSHA == "" {
 		respondError(w, http.StatusBadGateway, "main 브랜치 조회 실패")
 		return
 	}
