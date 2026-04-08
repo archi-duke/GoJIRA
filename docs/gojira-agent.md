@@ -618,19 +618,37 @@ MongoDB: agent_sessions
 - [x] RelationMap 컬럼별 AI 자동생성 버튼 + 승인 모달
 - [x] SATAM 분석 버튼 (편집모드 무관 항상 표시)
 - [x] CommonBar: Pull/Export 아이콘화, Back 버튼 제거, Project 클릭으로 Map 이동
-- [ ] Docs 화면 Agent Assist 버튼
+- [x] 대화 이력 유지 + 세션 목록/검색 (TTL 7일)
+- [x] DocEditor: SSE 구독으로 main 변경 시 실시간 트리 갱신
+- [x] DocEditor: mainOnly 파일 표시 (D 배지 + gray italic + 미리보기 흐림)
+- [x] DocEditor: Git Pull (sync-branch — 사용자 브랜치를 main HEAD로 동기화)
+- [x] DocEditor: main 미동기화 시 과제명 옆 알림 아이콘
+- [x] 파일 생성 시 POST 사용 (Gitea SHA 필수 에러 수정)
+- [ ] Docs 화면 Agent Assist 버튼 (요약/리뷰)
 - [ ] 각 Assist 결과 확인 후 적용 흐름 개선
 
-### Phase 4: 분석 Skill + 고도화
-- [ ] satam_analyze Skill 추가
-- [ ] issue_analyze (관계 분석, contain 체인 검증)
+### Phase 4: 분석 Skill + 고도화 — ✅ Skill 완료, UI 일부 완료
+- [x] satam_analyze Skill
+- [x] issue_analyze Skill (관계 분석, contain 체인 검증, 고아 이슈 감지)
+- [x] SATAM CommonBar Assist 버튼
+- [x] RelationMap 컬럼별 AI Assist 버튼
 - [ ] 멀티턴 대화 고도화 (컨텍스트 요약, 후속 질문 자동 생성)
-- [ ] Relation Map / SATAM 화면 Assist 버튼
+
+### Phase 4.5: 프로젝트 알림 + 문서 동기화 — ✅ 완료
+- [x] 프로젝트 알림 양방향: 웹훅(main push) + 로컬(ensure-branch/file update)
+- [x] branchAlerts DB 플래그 기반 (실시간 갱신)
+- [x] Gitea 웹훅 자동 트리거 (ALLOWED_HOST_LIST 설정)
+- [x] sync-branch API (사용자 브랜치 삭제 후 main HEAD에서 재생성)
+- [x] ensure-branch API (Gitea 호환 — ListBranches + CreateBranch)
+- [x] init-files API (필수 파일 보충 + 간단 템플릿 업데이트)
+- [x] ProjectMap 알림 색상 tomato (지연 과제와 통일)
+- [x] 타이틀바 GoJIRA 로고 아이콘 추가
 
 ### Phase 5: 확장
 - [ ] 외부 MCP 서버 연동 (필요 시 gojira-cli mcp-server 모드)
 - [ ] Skill 핫 리로드 (서버 재시작 없이)
 - [ ] Slack 등 외부 시스템 Skill
+- [ ] 문서 생성/수정 Skill (doc_generate_srs, doc_generate_design) — 가이드 대기
 
 ---
 
