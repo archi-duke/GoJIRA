@@ -81,12 +81,13 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
         </svg>
       </button>
 
-      {/* Export 아이콘 */}
+      {/* Export 아이콘 (문서에서 우측 화살표) */}
       {onExport && (
         <div className="cb-export-wrap" ref={exportRef}>
           <button className="cb-icon-btn" onClick={() => setExportOpen((v) => !v)} title="Export">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8 1v9M4 6l4-4 4 4M2 13h12" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="8" height="12" rx="1" />
+              <path d="M10 6h4M12 4l2 2-2 2" />
             </svg>
           </button>
           {exportOpen && (
