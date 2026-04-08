@@ -19,7 +19,7 @@
 .app-logo-icon {
   height: 28px;
   margin-right: 4px;
-  vertical-align: bottom;
+  align-self: flex-end;
 }
 .app-logo {
   font-size: 16px;
