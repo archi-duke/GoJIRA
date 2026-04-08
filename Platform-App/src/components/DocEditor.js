@@ -391,7 +391,18 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 
   const modified = content !== original;
   const currentTree = activeTab === 'main' ? mainTree : (userTree || mainTree);
-  const items = (currentTree?.tree || []).filter(i => i.type !== 'tree').sort((a, b) => a.path.localeCompare(b.path));
+  const baseItems = (currentTree?.tree || []).filter(i => i.type !== 'tree');
+  // workspace 탭에서 main에만 있는 파일도 표시 (gray italic)
+  let items;
+  if (activeTab === 'workspace' && mainTree && userTree) {
+    const userPaths = new Set(baseItems.map(i => i.path));
+    const mainOnly = (mainTree?.tree || [])
+      .filter(i => i.type !== 'tree' && !userPaths.has(i.path))
+      .map(i => ({ ...i, _mainOnly: true }));
+    items = [...baseItems, ...mainOnly].sort((a, b) => a.path.localeCompare(b.path));
+  } else {
+    items = baseItems.sort((a, b) => a.path.localeCompare(b.path));
+  }
   const hasChanges = Object.keys(fileStatus).length > 0;
 
   const statusBadge = (path) => {
@@ -464,11 +475,12 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           </div>
           {items.map(item => {
             const st = activeTab === 'workspace' ? fileStatus[item.path] : null;
+            const isMainOnly = item._mainOnly;
             return (
               <div key={item.path}
-                className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''}`}
+                className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''} ${isMainOnly ? 'de-file-main-only' : ''}`}
                 onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path); }}>
-                {activeTab === 'workspace' && statusBadge(item.path)}
+                {activeTab === 'workspace' && !isMainOnly && statusBadge(item.path)}
                 <span className="de-file-name">{item.path}</span>
                 {activeTab === 'workspace' && globalEditMode && !['business.md', 'srs.md', 'architecture.md'].includes(item.path) && (
                   <span className="de-file-actions">

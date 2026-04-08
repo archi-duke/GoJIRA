@@ -20,6 +20,7 @@
 .de-file-act:hover { color: #333; }
 .de-file-act-del:hover { color: #e74c3c; }
 .de-file-active { background: #d6eaf8; font-weight: 600; }
+.de-file-main-only { color: #aaa; font-style: italic; }
 .de-file-modified { color: #e67e22; }
 .de-file-added { color: #27ae60; }
 .de-file-deleted { color: #e74c3c; text-decoration: line-through; }
