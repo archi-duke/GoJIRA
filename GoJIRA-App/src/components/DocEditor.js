@@ -92,7 +92,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       if (!await modalConfirm('저장하지 않은 변경이 있습니다. 이동하시겠습니까?')) return;
     }
     const ref = activeTab === 'workspace' ? `docs/${user}` : 'main';
-    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
+    let res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
+    if (!res.ok && activeTab === 'workspace') {
+      res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
+    }
     if (res.ok) {
       const d = await res.json();
       const text = d.content ? decodeBase64(d.content) : '';
