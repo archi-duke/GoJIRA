@@ -582,7 +582,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
                       disabled={assistLoading === col.id}
                       onClick={() => handleColumnAssist(col)}>
                       {assistLoading === col.id ? '...' : (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                           <text x="2" y="17" fontSize="14" fontWeight="bold" fontFamily="Arial">AI</text>
                           <circle cx="18" cy="4" r="1.5" fill="#f4b400" />
                           <circle cx="21" cy="8" r="1" fill="#f4b400" />

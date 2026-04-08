@@ -56,15 +56,18 @@
   gap: 6px;
 }
 .rm-ai-btn {
-  border: none;
-  background: none;
+  border: 1px solid #ccc;
+  background: #fff;
   cursor: pointer;
-  padding: 2px;
+  padding: 3px 5px;
   color: #2980b9;
   line-height: 1;
-  border-radius: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.rm-ai-btn:hover { background: #e8f4ff; }
+.rm-ai-btn:hover { background: #e8f4ff; border-color: #2980b9; }
 .rm-ai-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* AI Assist 승인 모달 */
