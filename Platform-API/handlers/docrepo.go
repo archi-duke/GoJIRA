@@ -623,7 +623,14 @@ func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	userToken := getUserToken(r)
 	// content를 base64로 인코딩
 	encoded := base64.StdEncoding.EncodeToString([]byte(body.Content))
-	result, err := github.CreateOrUpdateFileAs(owner, name, body.Path, encoded, body.Message, branch, sha, userToken)
+	var result map[string]interface{}
+	if sha == "" {
+		// 새 파일: POST (Gitea는 PUT에 SHA 필수)
+		result, err = github.CreateFileOnBranch(owner, name, body.Path, encoded, body.Message, branch, userToken)
+	} else {
+		// 기존 파일 수정: PUT
+		result, err = github.CreateOrUpdateFileAs(owner, name, body.Path, encoded, body.Message, branch, sha, userToken)
+	}
 	if err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return

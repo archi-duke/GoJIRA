@@ -353,6 +353,33 @@ func CreateFile(owner, repo, filePath, content, message, branch string) (map[str
 	return result, nil
 }
 
+// CreateFileOnBranch creates a new file on a specific branch with user token.
+func CreateFileOnBranch(owner, repo, filePath, content, message, branch, userToken string) (map[string]interface{}, error) {
+	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
+	body := map[string]interface{}{
+		"message": message,
+		"content": content,
+		"branch":  branch,
+	}
+	var data []byte
+	var status int
+	var err error
+	if userToken != "" {
+		data, status, err = doRequestAs("POST", u, body, userToken)
+	} else {
+		data, status, err = doRequest("POST", u, body)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("create file failed (%d): %s", status, string(data))
+	}
+	result := map[string]interface{}{}
+	json.Unmarshal(data, &result)
+	return result, nil
+}
+
 func CreateOrUpdateFile(owner, repo, filePath, content, message, branch, sha string) (map[string]interface{}, error) {
 	u := fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, filePath)
 	body := map[string]interface{}{
