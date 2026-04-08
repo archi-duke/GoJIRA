@@ -71,9 +71,15 @@ func TransformToCache(issue map[string]interface{}) bson.M {
 	for cfID, cacheName := range customFieldMap {
 		if val, ok := fields[cfID]; ok {
 			if cacheName == "reqtype" {
-				// Extract just the "name" if it's a map
+				// Extract "value" or "name" from map (JIRA returns {"value":"NFR"} or {"name":"NFR"})
 				if m := toMap(val); m != nil {
-					doc[cacheName] = m["name"]
+					if v, ok := m["value"]; ok {
+						doc[cacheName] = v
+					} else if v, ok := m["name"]; ok {
+						doc[cacheName] = v
+					} else {
+						doc[cacheName] = val
+					}
 				} else {
 					doc[cacheName] = val
 				}
