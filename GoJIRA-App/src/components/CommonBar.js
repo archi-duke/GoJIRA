@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import './CommonBar.css';
 
-export default function CommonBar({ title, onBack, onPull, onEditChange, options, nav, onExport, onAssist, assistLabel, assistLoading, assistIcon }) {
+export default function CommonBar({ title, onBack, onPull, pullIcon, onEditChange, options, nav, onExport, onAssist, assistLabel, assistLoading, assistIcon }) {
   const [editMode, setEditMode] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -76,9 +76,11 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       {/* Pull 아이콘 */}
       {onPull && (
         <button className="cb-icon-btn" onClick={handlePull} disabled={pulling} title="Pull">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1v9M4 6l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-          </svg>
+          {pullIcon || (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1v9M4 6l4 4 4-4M2 13h12" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+            </svg>
+          )}
         </button>
       )}
 

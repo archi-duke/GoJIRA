@@ -292,6 +292,50 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  async function handleGitPull() {
+    if (!await modalConfirm('main 브랜치의 최신 내용을 작업공간에 동기화하시겠습니까?')) return;
+    try {
+      // ensure-branch로 브랜치 보장
+      await fetch(`${API}/${projectCode}/ensure-branch`, {
+        method: 'POST', headers: { 'X-User-Id': user },
+      });
+      // edit/rebase로 main 동기화
+      const res = await fetch(`${API}/${projectCode}/edit/rebase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      });
+      if (res.ok) {
+        // 트리 새로고침
+        const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
+        if (mRes.ok) setMainTree(await mRes.json());
+        const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`);
+        if (uRes.ok) {
+          const uTree = await uRes.json();
+          setUserTree(uTree);
+          // fileStatus 재계산
+          const mainShaMap = {};
+          const mainPathSet = new Set();
+          ((await mRes.clone().json())?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
+          const userPathSet = new Set();
+          const status = {};
+          (uTree?.tree || []).forEach(f => {
+            userPathSet.add(f.path);
+            if (!mainPathSet.has(f.path)) status[f.path] = 'added';
+            else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
+          });
+          mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
+          setFileStatus(status);
+        }
+        modalAlert('main 동기화 완료');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        modalAlert(err.error || '동기화 실패');
+      }
+    } catch (e) {
+      modalAlert('동기화 오류: ' + e.message);
+    }
+  }
+
   async function handleEditModeChange(isEdit) {
     setGlobalEditMode(isEdit);
     if (isEdit && hasRepo) {
@@ -373,7 +417,16 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <CommonBar title={barTitle} onBack={onBack} nav={nav} onEditChange={handleEditModeChange} />
+      <CommonBar title={barTitle} onBack={onBack} nav={nav} onEditChange={handleEditModeChange}
+        onPull={handleGitPull}
+        pullIcon={
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="6" cy="4" r="2" /><circle cx="6" cy="20" r="2" /><circle cx="18" cy="12" r="2" />
+            <line x1="6" y1="6" x2="6" y2="18" />
+            <path d="M18 14v4c0 1-1 2-2 2H8" />
+          </svg>
+        }
+      />
       <div className="de-editor">
         <div className="de-sidebar">
           <div className="de-sidebar-tabs">

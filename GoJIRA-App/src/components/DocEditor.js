@@ -51,6 +51,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     if (!hasRepo) return;
     const branch = `docs/${user}`;
 
+    // 1. 필수 파일 보충 + 사용자 브랜치 생성 완료 후 트리 로드
     Promise.all([
       fetch(`${API}/${projectCode}/init-files`, { method: 'POST' }).catch(() => {}),
       fetch(`${API}/${projectCode}/ensure-branch`, {
@@ -154,6 +155,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     if (!name || !name.trim()) return;
     let fileName = name.trim();
     if (!fileName.endsWith('.md')) fileName += '.md';
+    // 중복 확인
     if (items.some(i => i.path === fileName)) {
       modalAlert(`"${fileName}" 파일이 이미 존재합니다.`);
       return;
@@ -166,8 +168,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     });
     if (res.ok) {
       setFileStatus(prev => ({ ...prev, [fileName]: 'added' }));
+      // 사용자 트리 새로고침
       fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`)
         .then(r => r.json()).then(d => setUserTree(d)).catch(() => {});
+      // 새 파일 바로 열기
       setSelectedFile(fileName);
       setContent(template);
       setOriginal(template);
@@ -182,6 +186,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
   async function handleRenameFile(oldPath) {
+    const ext = oldPath.endsWith('.md') ? '' : '.md';
     const base = oldPath.replace(/\.md$/, '');
     const newName = window.prompt('새 파일 이름', base);
     if (!newName || !newName.trim()) return;
@@ -192,22 +197,26 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       modalAlert(`"${newPath}" 파일이 이미 존재합니다.`);
       return;
     }
+    // 기존 파일 내용 읽기
     const ref = `docs/${user}`;
     const getRes = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(oldPath)}&ref=${encodeURIComponent(ref)}`);
     if (!getRes.ok) { modalAlert('파일 읽기 실패'); return; }
     const fileData = await getRes.json();
     const fileContent = fileData.content ? decodeBase64(fileData.content) : '';
+    // 새 파일 생성
     const createRes = await fetch(`${API}/${projectCode}/file`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
       body: JSON.stringify({ path: newPath, content: fileContent, message: `${oldPath} → ${newPath} 이름 변경` }),
     });
     if (!createRes.ok) { modalAlert('파일 생성 실패'); return; }
+    // 기존 파일 삭제
     await fetch(`${API}/${projectCode}/file`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
       body: JSON.stringify({ path: oldPath, message: `${oldPath} 삭제 (이름 변경)` }),
     });
+    // 상태 갱신
     setFileStatus(prev => {
       const next = { ...prev };
       delete next[oldPath];
@@ -280,6 +289,50 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     } else {
       const err = await res.json().catch(() => ({}));
       modalAlert(err.error || 'PR 생성 실패');
+    }
+  }
+
+  async function handleGitPull() {
+    if (!await modalConfirm('main 브랜치의 최신 내용을 작업공간에 동기화하시겠습니까?')) return;
+    try {
+      // ensure-branch로 브랜치 보장
+      await fetch(`${API}/${projectCode}/ensure-branch`, {
+        method: 'POST', headers: { 'X-User-Id': user },
+      });
+      // edit/rebase로 main 동기화
+      const res = await fetch(`${API}/${projectCode}/edit/rebase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+      });
+      if (res.ok) {
+        // 트리 새로고침
+        const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
+        if (mRes.ok) setMainTree(await mRes.json());
+        const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`);
+        if (uRes.ok) {
+          const uTree = await uRes.json();
+          setUserTree(uTree);
+          // fileStatus 재계산
+          const mainShaMap = {};
+          const mainPathSet = new Set();
+          ((await mRes.clone().json())?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
+          const userPathSet = new Set();
+          const status = {};
+          (uTree?.tree || []).forEach(f => {
+            userPathSet.add(f.path);
+            if (!mainPathSet.has(f.path)) status[f.path] = 'added';
+            else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
+          });
+          mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
+          setFileStatus(status);
+        }
+        modalAlert('main 동기화 완료');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        modalAlert(err.error || '동기화 실패');
+      }
+    } catch (e) {
+      modalAlert('동기화 오류: ' + e.message);
     }
   }
 
@@ -364,7 +417,16 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <CommonBar title={barTitle} onBack={onBack} nav={nav} onEditChange={handleEditModeChange} />
+      <CommonBar title={barTitle} onBack={onBack} nav={nav} onEditChange={handleEditModeChange}
+        onPull={handleGitPull}
+        pullIcon={
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="6" cy="4" r="2" /><circle cx="6" cy="20" r="2" /><circle cx="18" cy="12" r="2" />
+            <line x1="6" y1="6" x2="6" y2="18" />
+            <path d="M18 14v4c0 1-1 2-2 2H8" />
+          </svg>
+        }
+      />
       <div className="de-editor">
         <div className="de-sidebar">
           <div className="de-sidebar-tabs">
@@ -506,7 +568,6 @@ function DocGitGraph({ projectCode }) {
   if (!data) return <div className="de-graph-wrap">로딩 중...</div>;
   const { branches = [], commits = [], hasMore = false } = data;
 
-  // Lane 계산
   const shaMap = {};
   commits.forEach(c => { shaMap[c.sha] = c; });
   const mainHead = commits.find(c => c.refs?.includes('main'));
