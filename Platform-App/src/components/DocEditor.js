@@ -389,7 +389,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
-  const barTitle = `${project?.name || ''} (${projectCode})`;
+  const barTitleText = `${project?.name || ''} (${projectCode})`;
   const nav = onNavigate ? NAV_ITEMS.map(n => ({
     ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
   })) : [];
@@ -418,6 +418,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     items = baseItems.sort((a, b) => a.path.localeCompare(b.path));
   }
   const hasChanges = Object.keys(fileStatus).length > 0;
+  const hasMainOnly = items.some(i => i._mainOnly);
+  const barTitle = hasMainOnly ? (
+    <>{barTitleText} <svg width="16" height="16" viewBox="0 0 16 16" style={{verticalAlign:'middle',marginLeft:4}}>
+      <path d="M8 1L15 14H1L8 1Z" fill="tomato" stroke="#333" strokeWidth="0.8" />
+      <text x="8" y="12" textAnchor="middle" fontSize="9" fontWeight="bold" fill="#fff">!</text>
+    </svg></>
+  ) : barTitleText;
 
   const statusBadge = (path) => {
     const diffMain = fileStatus[path]; // main과 차이
