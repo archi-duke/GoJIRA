@@ -1,6 +1,6 @@
 ---
 name: issue_update
-description: 기존 이슈의 필드를 수정합니다
+description: 기존 이슈의 필드를 수정합니다. Requirement 이슈의 경우 reqType도 변경할 수 있습니다.
 parameters:
   key:
     type: string
@@ -23,6 +23,10 @@ parameters:
   assignee:
     type: string
     description: "변경할 담당자 ID"
+  reqType:
+    type: string
+    description: "Requirement 세부 타입 변경. NFR(QA/품질속성), FR(기능), CNST(제약)"
+    enum: [NFR, FR, CNST]
 api:
   method: PUT
   path: /Issue
@@ -32,6 +36,6 @@ api:
 
 - key는 필수입니다
 - 변경할 필드만 전달합니다 (부분 업데이트)
+- Requirement 이슈의 reqType 변경: NFR(QA), FR(기능), CNST(제약)
 - status 변경 시 허용된 enum 값만 사용합니다
-- 수정 결과를 사용자에게 알려줍니다
 - 쓰기 작업이므로 사용자 확인이 필요합니다

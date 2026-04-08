@@ -15,7 +15,7 @@
 
 ## 조회 (읽기 전용 — 여러 개 동시 호출 가능)
 - project_query: 프로젝트 목록/수/상태 조회
-- issue_query: 이슈 목록 조회 (타입별 필터 가능)
+- issue_query: 이슈 목록 조회 (issueType + reqType 필터. QA/NFR→reqType=NFR, FR→FR, CNST→CNST)
 - doc_list: 문서 파일 목록
 - doc_summarize: 문서 요약 (LLM 기반)
 - doc_diff: 브랜치 간 차이 분석

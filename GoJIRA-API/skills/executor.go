@@ -100,6 +100,11 @@ func execIssueQuery(ctx context.Context, params map[string]interface{}) (interfa
 	if t, ok := params["issueType"].(string); ok && t != "" {
 		filter["issueType"] = t
 	}
+	// reqType이 지정되면 issueType을 Requirement로 자동 설정하고 reqtype 필터 추가
+	if rt, ok := params["reqType"].(string); ok && rt != "" {
+		filter["issueType"] = "Requirement"
+		filter["reqtype"] = rt
+	}
 	issues, err := db.FindAllIssues(qCtx, filter)
 	if err != nil {
 		return nil, err
@@ -107,6 +112,7 @@ func execIssueQuery(ctx context.Context, params map[string]interface{}) (interfa
 	type I struct {
 		Key      string `json:"key"`
 		Type     string `json:"issueType"`
+		ReqType  string `json:"reqType,omitempty"`
 		Summary  string `json:"summary"`
 		Status   string `json:"status"`
 		Assignee string `json:"assignee"`
@@ -114,7 +120,7 @@ func execIssueQuery(ctx context.Context, params map[string]interface{}) (interfa
 	var results []I
 	for _, issue := range issues {
 		results = append(results, I{
-			Key: str(issue, "key"), Type: str(issue, "issueType"),
+			Key: str(issue, "key"), Type: str(issue, "issueType"), ReqType: str(issue, "reqtype"),
 			Summary: str(issue, "summary"), Status: str(issue, "status"), Assignee: str(issue, "assignee"),
 		})
 	}
@@ -281,12 +287,16 @@ func execIssueCreate(ctx context.Context, params map[string]interface{}, user st
 		pri = "Medium"
 	}
 	assignee, _ := params["assignee"].(string)
+	reqType, _ := params["reqType"].(string)
 	doc := bson.M{
 		"key": key, "issueType": issueType, "summary": summary, "description": desc,
 		"status": "To Do", "priority": pri, "assignee": assignee, "reporter": user,
 		"created": time.Now().Format("2006-01-02T15:04:05.000+0900"),
 		"updated": time.Now().Format("2006-01-02T15:04:05.000+0900"),
 		"labels": []string{}, "issueLinks": []interface{}{}, "_source": "gojira-agent",
+	}
+	if reqType != "" {
+		doc["reqtype"] = reqType
 	}
 	if err := db.UpsertIssue(qCtx, key, doc); err != nil {
 		return nil, err
@@ -307,6 +317,11 @@ func execIssueUpdate(ctx context.Context, params map[string]interface{}) (interf
 	}
 	update := bson.M{"updated": time.Now().Format("2006-01-02T15:04:05.000+0900")}
 	var changed []string
+	// reqType은 별도 처리 (MongoDB 필드명이 reqtype)
+	if rt, ok := params["reqType"].(string); ok && rt != "" {
+		update["reqtype"] = rt
+		changed = append(changed, "reqType")
+	}
 	for _, f := range []string{"summary", "description", "status", "priority", "assignee"} {
 		if v, ok := params[f].(string); ok && v != "" {
 			update[f] = v

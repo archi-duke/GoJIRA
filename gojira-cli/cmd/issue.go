@@ -29,6 +29,7 @@ func issueList(args []string) {
 		fatal("--project is required")
 	}
 	issueType := parseFlag(args, "type")
+	reqType := parseFlag(args, "reqtype")
 	xbody := fmt.Sprintf(`{"jiraCode":"%s"}`, project)
 	result, err := apiGet("/Issue", map[string]string{"XBody": xbody})
 	if err != nil {
@@ -42,6 +43,7 @@ func issueList(args []string) {
 	type I struct {
 		Key      string `json:"key"`
 		Type     string `json:"issueType"`
+		ReqType  string `json:"reqType,omitempty"`
 		Summary  string `json:"summary"`
 		Status   string `json:"status"`
 		Priority string `json:"priority"`
@@ -54,10 +56,14 @@ func issueList(args []string) {
 		if issueType != "" && t != issueType {
 			continue
 		}
+		rt, _ := im["reqtype"].(string)
+		if reqType != "" && rt != reqType {
+			continue
+		}
 		s, _ := im["summary"].(string)
 		st, _ := im["status"].(string)
 		p, _ := im["priority"].(string)
-		out = append(out, I{Key: k, Type: t, Summary: s, Status: st, Priority: p})
+		out = append(out, I{Key: k, Type: t, ReqType: rt, Summary: s, Status: st, Priority: p})
 	}
 	outputJSON(map[string]interface{}{"count": len(out), "issues": out})
 }
@@ -68,12 +74,13 @@ func issueCreate(args []string) {
 	summary := parseFlag(args, "summary")
 	description := parseFlag(args, "description")
 	priority := parseFlag(args, "priority")
+	reqType := parseFlag(args, "reqtype")
 	if project == "" || issueType == "" || summary == "" {
 		fatal("--project, --type, --summary are required")
 	}
 	body := map[string]interface{}{
 		"key": project, "issueType": issueType, "summary": summary,
-		"description": description, "priority": priority,
+		"description": description, "priority": priority, "reqtype": reqType,
 	}
 	result, err := apiPost("/Issue", body)
 	if err != nil {
