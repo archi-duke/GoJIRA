@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import './CommonBar.css';
 
-export default function CommonBar({ title, onBack, onPull, onEditChange, options, nav, onExport, onAssist, assistLabel, assistLoading }) {
+export default function CommonBar({ title, onBack, onPull, onEditChange, options, nav, onExport, onAssist, assistLabel, assistLoading, assistIcon }) {
   const [editMode, setEditMode] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -104,7 +104,7 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
       {/* Agent Assist 버튼 */}
       {onAssist && (
         <button className="cb-assist-btn" onClick={onAssist} disabled={assistLoading}>
-          {assistLoading ? '분석 중...' : (assistLabel || 'Agent 분석')}
+          {assistIcon}{assistLoading ? '분석 중...' : (assistLabel || 'Agent 분석')}
         </button>
       )}
 
