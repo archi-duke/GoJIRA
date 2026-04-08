@@ -1,12 +1,20 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import ProjectMap from './gojira/ProjectMap';
 import IssueList from './gojira/IssueList';
 import RelationMap from './gojira/RelationMap';
 import SATAM from './gojira/SATAM';
 import DocEditor from '../components/DocEditor';
 
-export default function GoJIRAApp({ user, authority }) {
+export default function GoJIRAApp({ user, authority, resetKey }) {
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
+
+  // 타이틀바 Project 클릭 시 map으로 리셋
+  useEffect(() => {
+    if (resetKey === 'map' && page !== 'map') {
+      setPage('map');
+      sessionStorage.setItem('gojira_page', 'map');
+    }
+  }, [resetKey]); // eslint-disable-line
   const [selectedProject, setSelectedProject] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('gojira_project')); }
     catch { return null; }

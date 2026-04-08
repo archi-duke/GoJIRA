@@ -46,7 +46,6 @@ export default function CommonBar({ title, onBack, onPull, onEditChange, options
 
   return (
     <div className="cb-topbar">
-      <button className="cb-back-btn" onClick={onBack}>&larr; Back</button>
       <span className="cb-title">{title}</span>
 
       {/* 네비게이션 */}

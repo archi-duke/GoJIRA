@@ -82,7 +82,7 @@ function App() {
       const AppComponent = appEntry.component;
       content = (
         <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
-          <AppComponent user={user} authority={authority} />
+          <AppComponent user={user} authority={authority} resetKey={page} />
         </Suspense>
       );
     } else {
