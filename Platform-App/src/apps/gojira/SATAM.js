@@ -838,7 +838,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           { label: 'D', active: showDDSN, handler: () => setShowDDSN((v) => !v) },
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
         ]}
-        onExport={handleExport}
+        onExport={editMode ? undefined : handleExport}
         onAssist={async () => {
           setAssistLoading(true);
           try {
