@@ -5,7 +5,7 @@ import ProjectDialog from './ProjectDialog';
 import config from '../config';
 
 const API_BASE = config.API_BASE;
-const PLATFORM_API = config.API_BASE;
+const PLATFORM_API = config.PLATFORM_API;
 
 function getJiraCode(p) {
   return p?.jiraCodes?.main?.jiraCode || '';
