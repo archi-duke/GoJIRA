@@ -8,6 +8,7 @@ import config from '../config';
 import './DocEditor.css';
 
 const API = config.PLATFORM_API + '/DocRepo';
+const PLATFORM_API = config.PLATFORM_API;
 
 const NAV_ITEMS = [
   { key: 'docs', label: 'Docs' },
@@ -47,51 +48,63 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
 
-  // 진입 시 필수 파일 확인 + 사용자 브랜치 생성 + 트리 비교
-  useEffect(() => {
-    if (!hasRepo) return;
+  // 트리 로드 함수 (재사용)
+  function loadTrees() {
     const branch = `docs/${user}`;
-
-    // 1. 필수 파일 보충 + 사용자 브랜치 생성 완료 후 트리 로드
-    Promise.all([
-      fetch(`${API}/${projectCode}/init-files`, { method: 'POST' }).catch(() => {}),
-      fetch(`${API}/${projectCode}/ensure-branch`, {
-        method: 'POST', headers: { 'X-User-Id': user },
-      }).catch(() => {}),
-    ]).then(() => {
-
     fetch(`${API}/${projectCode}/tree?ref=main`)
       .then(r => r.json()).then(mTree => {
         setMainTree(mTree);
-
         fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`)
           .then(r => { if (!r.ok) throw new Error(); return r.json(); })
           .then(uTree => {
             setUserTree(uTree);
-
             const mainShaMap = {};
             const mainPathSet = new Set();
             (mTree?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
-
             const userPathSet = new Set();
             const status = {};
             (uTree?.tree || []).forEach(f => {
               userPathSet.add(f.path);
-              if (!mainPathSet.has(f.path)) {
-                status[f.path] = 'added';
-              } else if (mainShaMap[f.path] !== f.sha) {
-                status[f.path] = 'modified';
-              }
+              if (!mainPathSet.has(f.path)) status[f.path] = 'added';
+              else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
             });
-            mainPathSet.forEach(p => {
-              if (!userPathSet.has(p)) status[p] = 'deleted';
-            });
+            mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
             setFileStatus(status);
           })
           .catch(() => { setUserTree(null); setFileStatus({}); });
       })
       .catch(() => {});
-    }); // Promise.all then
+  }
+
+  // 진입 시 필수 파일 확인 + 사용자 브랜치 생성 + 트리 비교
+  useEffect(() => {
+    if (!hasRepo) return;
+    Promise.all([
+      fetch(`${API}/${projectCode}/init-files`, { method: 'POST' }).catch(() => {}),
+      fetch(`${API}/${projectCode}/ensure-branch`, {
+        method: 'POST', headers: { 'X-User-Id': user },
+      }).catch(() => {}),
+    ]).then(() => loadTrees());
+  }, [projectCode, hasRepo, user]);
+
+  // SSE 구독 — main 변경 시 실시간 트리 갱신
+  useEffect(() => {
+    if (!hasRepo) return;
+    const es = new EventSource(`${PLATFORM_API}/Notice/stream`);
+    es.addEventListener('doc_update', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        // 현재 프로젝트의 main push 이벤트
+        if (data.type === 'project_alert' && data.projectCode === projectCode) {
+          loadTrees(); // 트리 새로고침
+        }
+        if (data.type === 'push' && data.repo) {
+          // repo 이름으로 매칭이 필요하면 여기서 처리
+          loadTrees();
+        }
+      } catch {}
+    });
+    return () => es.close();
   }, [projectCode, hasRepo, user]);
 
   async function handleFileClick(path, isMainOnly) {
