@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -103,12 +106,24 @@ func main() {
 		r.Put("/Project", handlers.ProjectUpdateHandler)
 		r.Get("/Project/alerts", handlers.ProjectAlertsHandler)
 
-		// Agent
-		r.Post("/Agent/chat", handlers.AgentChatHandler)
-		r.Post("/Agent/assist", handlers.AgentAssistHandler)
-		r.Get("/Agent/tools", handlers.AgentToolsHandler)
-		r.Get("/Agent/sessions", handlers.AgentSessionsHandler)
-		r.Get("/Agent/session/{id}", handlers.AgentSessionDetailHandler)
+		// Agent — 프록시 모드 또는 기존 Go 핸들러
+		if proxyURL := os.Getenv("GOJIRA_AGENT_PROXY"); proxyURL != "" {
+			target, err := url.Parse(proxyURL)
+			if err != nil {
+				log.Fatalf("GOJIRA_AGENT_PROXY URL 파싱 실패: %v", err)
+			}
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			log.Printf("Agent 프록시 활성화: %s → %s", "/Agent/*", proxyURL)
+			r.HandleFunc("/Agent/*", func(w http.ResponseWriter, req *http.Request) {
+				proxy.ServeHTTP(w, req)
+			})
+		} else {
+			r.Post("/Agent/chat", handlers.AgentChatHandler)
+			r.Post("/Agent/assist", handlers.AgentAssistHandler)
+			r.Get("/Agent/tools", handlers.AgentToolsHandler)
+			r.Get("/Agent/sessions", handlers.AgentSessionsHandler)
+			r.Get("/Agent/session/{id}", handlers.AgentSessionDetailHandler)
+		}
 	})
 
 	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)

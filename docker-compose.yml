@@ -18,5 +18,22 @@ services:
       - "3300:3000"
     restart: unless-stopped
 
+  agent-service:
+    build: ./Agent-Service
+    container_name: gojira-agent
+    environment:
+      - GOJIRA_MONGO_URI=mongodb://host.docker.internal:27017
+      - GOJIRA_MONGO_DB=gojira
+      - GOJIRA_API_URL=http://host.docker.internal:9001/api/v2
+      - GOJIRA_PLATFORM_API=http://host.docker.internal:9000/api/v2
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AGENT_SERVICE_PORT=9002
+      - GOJIRA_SKILLS_DIR=/app/skills_data
+    volumes:
+      - ./GoJIRA-API/skills:/app/skills_data:ro
+    ports:
+      - "9002:9002"
+    restart: unless-stopped
+
 volumes:
   gitea-data:
