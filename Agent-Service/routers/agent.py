@@ -11,7 +11,7 @@ from fastapi import APIRouter, Header
 from core.models import ChatRequest, ChatResponse, AssistRequest, AssistResponse
 from core.database import agent_sessions
 from skills.registry import get_registry
-from agents.orchestrator import agent_loop
+from agents.orchestrator import agent_loop, staged_orchestrate, classify_intent
 
 log = logging.getLogger("agent.router")
 
@@ -85,8 +85,14 @@ async def chat(req: ChatRequest, x_user_id: str = Header(default="anonymous")):
     # LLM messages 구성
     messages = _build_messages(session)
 
-    # 에이전트 루프 실행
-    reply, actions = await agent_loop(messages, x_user_id)
+    # 의도 분류 → 하이브리드 실행
+    intent = classify_intent(req.message)
+    log.info("intent=%s message=%.50s", intent, req.message)
+
+    if intent == "complex":
+        reply, actions = await staged_orchestrate(req.message, messages, x_user_id, session_id)
+    else:
+        reply, actions = await agent_loop(messages, x_user_id)
 
     # assistant 메시지 저장
     assistant_msg = {"role": "assistant", "content": reply, "timestamp": datetime.now(timezone.utc)}
