@@ -221,7 +221,7 @@ git reset --hard origin/main
 
 #### 실시간 알림
 
-* PR 생성/머지/닫기 시 Gitea webhook → Platform-API → SSE broadcast
+* PR 생성/머지/닫기 시 Gitea webhook → Platform-API → WebSocket broadcast
 * ProjectMap: 프로젝트에 PR 알림 아이콘 (gold)
 * 컴포넌트 뷰: CommonBar 타이틀 옆 알림 아이콘
 * 브랜치 diff: 알림 아이콘 (tomato)

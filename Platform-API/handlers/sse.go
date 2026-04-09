@@ -3,8 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
 type sseMessage struct {
@@ -65,10 +68,60 @@ func broadcast(event string, data interface{}) {
 
 	sseMu.Lock()
 	defer sseMu.Unlock()
+	sent := 0
 	for ch := range sseClients {
 		select {
 		case ch <- msg:
+			sent++
 		default:
+		}
+	}
+	log.Printf("SSE broadcast: event=%s clients=%d sent=%d", event, len(sseClients), sent)
+}
+
+// --- WebSocket 지원 ---
+
+var wsUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// GET /Notice/ws — WebSocket 연결 (SSE 대체)
+func NoticeWSHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade failed: %v", err)
+		return
+	}
+
+	ch := make(chan sseMessage, 10)
+	sseMu.Lock()
+	sseClients[ch] = true
+	sseMu.Unlock()
+
+	// connected 메시지 전송
+	conn.WriteJSON(map[string]string{"event": "connected", "data": "ok"})
+
+	// 클라이언트 → 서버 메시지 읽기 (ping/pong 유지용)
+	go func() {
+		defer func() {
+			sseMu.Lock()
+			delete(sseClients, ch)
+			sseMu.Unlock()
+			close(ch)
+			conn.Close()
+		}()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// 서버 → 클라이언트 브로드캐스트 전달
+	for msg := range ch {
+		payload := map[string]string{"event": msg.Event, "data": msg.Data}
+		if err := conn.WriteJSON(payload); err != nil {
+			return
 		}
 	}
 }

@@ -109,6 +109,7 @@ func main() {
 
 		// Notice
 		r.Get("/Notice/stream", handlers.NoticeStreamHandler)
+		r.Get("/Notice/ws", handlers.NoticeWSHandler)
 		r.Get("/Notice/active", handlers.NoticeActiveHandler)
 		r.Get("/Notice", handlers.NoticeListHandler)
 		r.Get("/Notice/{id}", handlers.NoticeGetHandler)

@@ -72,13 +72,14 @@ func handlePREvent(payload map[string]interface{}) {
 
 	log.Printf("webhook PR: action=%s #%v %s state=%s merged=%v repo=%s", action, number, title, state, merged, repoName)
 
-	mergeable, _ := pr["mergeable"].(bool)
-	mergeableState, _ := pr["mergeable_state"].(string)
-
 	// DB 프로젝트 알림 갱신
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	projectCode := findProjectByRepo(ctx, repoName)
+	log.Printf("webhook PR: projectCode=%s reviewers lookup...", projectCode)
+
+	mergeable, _ := pr["mergeable"].(bool)
+	mergeableState, _ := pr["mergeable_state"].(string)
 
 	// requested_reviewers 추출
 	var reviewers []string

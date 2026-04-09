@@ -945,11 +945,17 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 			childCount[p]++
 		}
 	}
-	// 자식이 없는(=HEAD) 커밋부터 시작
+	// 자식이 없는(=HEAD) 커밋부터 시작 — commitMap에 있는 것만
 	var queue []string
 	for sha := range commitMap {
 		if childCount[sha] == 0 {
 			queue = append(queue, sha)
+		}
+	}
+	// childCount에만 있고 commitMap에 없는 parent는 제거
+	for i := len(queue) - 1; i >= 0; i-- {
+		if commitMap[queue[i]] == nil {
+			queue = append(queue[:i], queue[i+1:]...)
 		}
 	}
 	// 같은 깊이에서는 main 브랜치 우선, 그 다음 날짜순
@@ -960,6 +966,7 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i < len(queue); i++ {
 			for j := i + 1; j < len(queue); j++ {
 				ci, cj := commitMap[queue[i]], commitMap[queue[j]]
+				if ci == nil || cj == nil { continue }
 				// main ref가 있으면 우선
 				iMain := hasRef(ci.Refs, "main")
 				jMain := hasRef(cj.Refs, "main")
@@ -977,10 +984,13 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		visited[sha] = true
 		c := commitMap[sha]
+		if c == nil {
+			continue
+		}
 		allCommits = append(allCommits, c)
 		for _, p := range c.Parents {
 			childCount[p]--
-			if childCount[p] == 0 {
+			if childCount[p] == 0 && commitMap[p] != nil {
 				queue = append(queue, p)
 			}
 		}

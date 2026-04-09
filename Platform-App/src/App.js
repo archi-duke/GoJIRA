@@ -6,7 +6,7 @@ import DocManager from './components/DocManager';
 import AlertModal from './components/AlertModal';
 import AgentChat from './components/AgentChat';
 import { getAuthUser } from './utils/auth';
-import { subscribe } from './utils/sseManager';
+import { subscribe, onStatus } from './utils/sseManager';
 import { modalAlert, modalConfirm } from './components/AlertModal';
 import appRegistry from './apps/registry';
 import config from './config';
@@ -21,6 +21,12 @@ function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [showAgent, setShowAgent] = useState(false);
   const [mapResetCount, setMapResetCount] = useState(0);
+  const [sseConnected, setSseConnected] = useState(false);
+
+  // SSE 연결 상태 모니터링
+  useEffect(() => {
+    return onStatus(setSseConnected);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -167,6 +173,8 @@ function App() {
             </button>
           ))}
         </nav>
+        <span className="app-sse-indicator" title={sseConnected ? 'SSE 연결됨' : 'SSE 연결 끊김'}
+          style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:sseConnected?'#27ae60':'#aaa',marginRight:6,verticalAlign:'middle'}} />
         {allUsers.length > 0 ? (
           <select
             className="app-user-switch"

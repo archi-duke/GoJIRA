@@ -49,37 +49,39 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
 
-  // 트리 로드 함수 (재사용)
-  function loadTrees(retry = 0) {
+  // 문서 상태 갱신 통합 함수 — 트리 로드 + fileStatus 재계산
+  // 모든 문서 변경 포인트에서 이 함수를 호출
+  async function refreshDocState(retry = 0) {
     const branch = `docs/${user}`;
-    fetch(`${API}/${projectCode}/tree?ref=main`)
-      .then(r => { if (!r.ok) throw new Error(`main tree ${r.status}`); return r.json(); })
-      .then(mTree => {
-        if (!mTree?.tree) throw new Error('invalid main tree');
-        setMainTree(mTree);
-        fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`)
-          .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-          .then(uTree => {
-            setUserTree(uTree);
-            const mainShaMap = {};
-            const mainPathSet = new Set();
-            (mTree?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
-            const userPathSet = new Set();
-            const status = {};
-            (uTree?.tree || []).forEach(f => {
-              userPathSet.add(f.path);
-              if (!mainPathSet.has(f.path)) status[f.path] = 'added';
-              else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
-            });
-            mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
-            setFileStatus(status);
-          })
-          .catch(() => { setUserTree(null); setFileStatus({}); });
-      })
-      .catch(() => {
-        // 트리 로드 실패 시 1회 재시도 (1초 후)
-        if (retry < 1) setTimeout(() => loadTrees(retry + 1), 1000);
+    try {
+      const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
+      if (!mRes.ok) throw new Error(`main tree ${mRes.status}`);
+      const mTree = await mRes.json();
+      if (!mTree?.tree) throw new Error('invalid main tree');
+      setMainTree(mTree);
+
+      const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`);
+      if (!uRes.ok) throw new Error('user tree failed');
+      const uTree = await uRes.json();
+      setUserTree(uTree);
+
+      // fileStatus 재계산
+      const mainShaMap = {};
+      const mainPathSet = new Set();
+      (mTree.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
+      const userPathSet = new Set();
+      const status = {};
+      (uTree.tree || []).forEach(f => {
+        userPathSet.add(f.path);
+        if (!mainPathSet.has(f.path)) status[f.path] = 'added';
+        else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
       });
+      mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
+      setFileStatus(status);
+    } catch {
+      if (retry < 1) setTimeout(() => refreshDocState(retry + 1), 1000);
+      else { setUserTree(null); setFileStatus({}); }
+    }
   }
 
   // 진입 시 필수 파일 확인 → 사용자 브랜치 생성 → 트리 비교 (순차 실행)
@@ -91,7 +93,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       .then(() => fetch(`${API}/${projectCode}/ensure-branch`, {
         method: 'POST', headers: { 'X-User-Id': user },
       }).catch(() => {}))
-      .then(() => loadTrees());
+      .then(() => refreshDocState());
   }, [projectCode, hasRepo, user]);
 
   // SSE 구독 — main 변경 시 실시간 트리 갱신
@@ -101,10 +103,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'project_alert' && data.projectCode === projectCode) {
-          loadTrees();
+          refreshDocState();
         }
         if (data.type === 'push' && data.repo) {
-          loadTrees();
+          refreshDocState();
         }
       } catch {}
     });
@@ -140,7 +142,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     if (res.ok) {
       setOriginal(content);
       setEditMode(false);
-      setFileStatus(prev => ({ ...prev, [selectedFile]: 'modified' }));
+      refreshDocState();
       modalAlert('저장 완료');
     } else {
       const err = await res.json().catch(() => ({}));
@@ -160,8 +162,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       setContent('');
       setOriginal('');
       setEditMode(false);
-      fetch(`${API}/${projectCode}/tree?ref=main`)
-        .then(r => r.json()).then(d => setMainTree(d)).catch(() => {});
+      refreshDocState();
       modalAlert('삭제 완료');
     } else {
       const err = await res.json().catch(() => ({}));
@@ -186,10 +187,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       body: JSON.stringify({ path: fileName, content: template, message: `${fileName} 생성` }),
     });
     if (res.ok) {
-      setFileStatus(prev => ({ ...prev, [fileName]: 'added' }));
-      // 사용자 트리 새로고침
-      fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`)
-        .then(r => r.json()).then(d => setUserTree(d)).catch(() => {});
+      refreshDocState();
       // 새 파일 바로 열기
       setSelectedFile(fileName);
       setContent(template);
@@ -236,14 +234,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       body: JSON.stringify({ path: oldPath, message: `${oldPath} 삭제 (이름 변경)` }),
     });
     // 상태 갱신
-    setFileStatus(prev => {
-      const next = { ...prev };
-      delete next[oldPath];
-      next[newPath] = prev[oldPath] || 'added';
-      return next;
-    });
-    fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(ref)}`)
-      .then(r => r.json()).then(d => setUserTree(d)).catch(() => {});
+    refreshDocState();
     setSelectedFile(newPath);
     setContent(fileContent);
     setOriginal(fileContent);
@@ -264,9 +255,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         setOriginal('');
         setEditMode(false);
       }
-      setFileStatus(prev => { const next = { ...prev }; next[path] = 'deleted'; return next; });
-      fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`)
-        .then(r => r.json()).then(d => setUserTree(d)).catch(() => {});
+      refreshDocState();
       modalAlert('삭제 완료');
     } else {
       const err = await res.json().catch(() => ({}));
@@ -314,34 +303,12 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   async function handleGitPull() {
     if (!await modalConfirm('main 브랜치의 최신 내용을 작업공간에 동기화하시겠습니까?\n(작업공간의 미커밋 변경사항은 초기화됩니다)')) return;
     try {
-      // sync-branch로 사용자 브랜치를 main HEAD로 동기화
       const res = await fetch(`${API}/${projectCode}/sync-branch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
       });
       if (res.ok) {
-        // 트리 새로고침
-        const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
-        const mTree = mRes.ok ? await mRes.json() : null;
-        if (mTree) setMainTree(mTree);
-        const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(`docs/${user}`)}`);
-        if (uRes.ok) {
-          const uTree = await uRes.json();
-          setUserTree(uTree);
-          // fileStatus 재계산
-          const mainShaMap = {};
-          const mainPathSet = new Set();
-          (mTree?.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
-          const userPathSet = new Set();
-          const status = {};
-          (uTree?.tree || []).forEach(f => {
-            userPathSet.add(f.path);
-            if (!mainPathSet.has(f.path)) status[f.path] = 'added';
-            else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
-          });
-          mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
-          setFileStatus(status);
-        }
+        await refreshDocState();
         setSelectedMainOnly(false);
         modalAlert('main 동기화 완료');
       } else {

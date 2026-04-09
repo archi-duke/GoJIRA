@@ -1,61 +1,92 @@
 import config from '../config';
 
-const SSE_URL = config.API_BASE + '/Notice/stream';
+// SSE → WebSocket 전환 (HTTP/1.1 연결 한도 문제 해결)
+const WS_URL = config.API_BASE.replace(/^http/, 'ws') + '/Notice/ws';
+const WIN_KEY = '__gojira_ws__';
 
-let es = null;
-let listeners = {}; // event → Set<callback>
-let refCount = 0;
-
-function ensureConnection() {
-  if (es && es.readyState !== EventSource.CLOSED) return;
-
-  es = new EventSource(SSE_URL);
-
-  es.addEventListener('connected', () => {});
-
-  // 등록된 모든 이벤트 타입에 대해 리스너 연결
-  Object.keys(listeners).forEach(event => {
-    attachEvent(event);
-  });
-
-  es.onerror = () => {
-    // EventSource는 자동 재연결됨 — 별도 처리 불필요
-  };
+function getState() {
+  if (!window[WIN_KEY]) window[WIN_KEY] = {};
+  const s = window[WIN_KEY];
+  if (!s.listeners) s.listeners = {};
+  if (!s.statusCbs) s.statusCbs = new Set();
+  if (s.connected === undefined) s.connected = false;
+  return s;
 }
 
-function attachEvent(event) {
-  if (!es) return;
-  es.addEventListener(event, (e) => {
-    const cbs = listeners[event];
-    if (cbs) cbs.forEach(cb => cb(e));
-  });
+function notifyStatus(connected) {
+  const state = getState();
+  state.connected = connected;
+  state.statusCbs.forEach(cb => { try { cb(connected); } catch {} });
+}
+
+function ensureConnection() {
+  if (typeof WebSocket === 'undefined') return;
+  const state = getState();
+  if (state.ws && state.ws.readyState <= WebSocket.OPEN) return;
+
+  const ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    notifyStatus(true);
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.event === 'connected') return;
+      // SSE 호환: event명으로 라우팅, data는 JSON 문자열
+      const cbs = state.listeners[msg.event];
+      if (cbs) {
+        // SSE Event 객체와 동일한 형태로 콜백 호출
+        const fakeEvent = { data: msg.data };
+        cbs.forEach(cb => { try { cb(fakeEvent); } catch {} });
+      }
+    } catch {}
+  };
+
+  ws.onclose = () => {
+    notifyStatus(false);
+    state.ws = null;
+    // 3초 후 자동 재연결
+    setTimeout(() => ensureConnection(), 3000);
+  };
+
+  ws.onerror = () => {
+    notifyStatus(false);
+  };
+
+  state.ws = ws;
+}
+
+// 앱 시작 시 즉시 연결
+if (typeof window !== 'undefined') {
+  ensureConnection();
 }
 
 /**
- * SSE 이벤트 구독. 창 하나당 EventSource 1개만 공유.
- * @param {string} event - 이벤트 이름 (예: 'doc_update', 'emergency')
- * @param {function} callback - 이벤트 핸들러
- * @returns {function} unsubscribe 함수
+ * 이벤트 구독 (SSE subscribe와 동일한 인터페이스)
  */
 export function subscribe(event, callback) {
-  if (!listeners[event]) {
-    listeners[event] = new Set();
-    // 이미 연결이 있으면 새 이벤트 타입 등록
-    if (es && es.readyState !== EventSource.CLOSED) {
-      attachEvent(event);
-    }
+  const state = getState();
+  if (!state.listeners[event]) {
+    state.listeners[event] = new Set();
   }
-  listeners[event].add(callback);
-  refCount++;
+  state.listeners[event].add(callback);
   ensureConnection();
 
   return () => {
-    listeners[event]?.delete(callback);
-    if (listeners[event]?.size === 0) delete listeners[event];
-    refCount--;
-    if (refCount <= 0) {
-      refCount = 0;
-      if (es) { es.close(); es = null; }
-    }
+    const s = getState();
+    s.listeners[event]?.delete(callback);
+    if (s.listeners[event]?.size === 0) delete s.listeners[event];
   };
+}
+
+/**
+ * 연결 상태 구독
+ */
+export function onStatus(cb) {
+  const state = getState();
+  state.statusCbs.add(cb);
+  try { cb(state.connected); } catch {}
+  return () => { getState().statusCbs.delete(cb); };
 }

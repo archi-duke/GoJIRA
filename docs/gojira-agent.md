@@ -757,15 +757,15 @@ Agent용 max_tokens는 코드에서 2000 이상으로 자동 조정.
 - **근거:** 여러 사용자가 동시에 PR을 생성하면, 첫 PR 머지 후 main이 변경되어 후속 PR에 충돌 발생. 자동 해결을 시도하되 실패 시 명확한 안내 제공
 - **구현:** merge 핸들러에서 선행 open PR 체크 → Gitea update-branch API(rebase/merge) → force_merge. 실패 시 "PR 닫고 Git Pull 후 재작업" 안내
 
-### ADR-011: SSE 연결 공유 — 전역 sseManager
-- **결정:** 브라우저 창당 EventSource 1개만 유지, 컴포넌트는 subscribe() 함수로 구독
-- **근거:** 각 컴포넌트(NoticePopup, DocEditor, ProjectMap, DocManager)가 개별 EventSource 생성 → 3창 × 2개 = 6개로 HTTP/1.1 연결 한도 소진 → API 호출 차단
-- **구현:** `sseManager.js` — 창당 1개 EventSource 공유, refCount 기반 자동 연결/해제. 4개 컴포넌트 모두 전환
+### ADR-011: SSE → WebSocket 전환 — 전역 sseManager
+- **결정:** SSE(EventSource) 대신 WebSocket으로 서버 푸시 구현. 브라우저 창당 WebSocket 1개 유지, 컴포넌트는 subscribe() 함수로 구독
+- **근거:** SSE는 HTTP/1.1 연결 한도(6개/origin)를 점유하여 다중 창 환경에서 API 호출 차단. WebSocket은 HTTP upgrade 후 별도 프로토콜로 동작하여 연결 한도에 영향 없음. 서버 리소스 차이(goroutine 2개 vs 1개)는 사내 시스템 규모에서 무의미
+- **구현:** `sseManager.js` — WebSocket 기반, window 객체에 상태 저장(HMR 안정), 자동 재연결(3초). 서버: `gorilla/websocket` 사용, SSE broadcast 채널 공유. SSE 엔드포인트는 하위 호환용으로 유지
 
-### ADR-012: PR/문서 변경 실시간 알림 — webhook + SSE + CommonBar
-- **결정:** Gitea webhook 이벤트(PR 생성/닫기/머지, push)를 DB 갱신 + SSE broadcast하여 모든 접속 사용자에게 실시간 반영
+### ADR-012: PR/문서 변경 실시간 알림 — webhook + WebSocket + CommonBar
+- **결정:** Gitea webhook 이벤트(PR 생성/닫기/머지, push)를 DB 갱신 + WebSocket broadcast하여 모든 접속 사용자에게 실시간 반영
 - **근거:** PR 상태나 문서 변경이 즉시 반영되지 않으면 사용자 간 충돌 및 혼동 발생
-- **구현:** GoJIRAApp에서 SSE 구독 → projectAlert 상태 관리 → CommonBar에 알림 아이콘 전달. ProjectMap은 기존 방식 유지
+- **구현:** GoJIRAApp에서 WebSocket 구독 → projectAlert 상태 관리 → CommonBar에 알림 아이콘 전달. ProjectMap은 기존 방식 유지
 
 ### ADR-013: branchDiff 판정 — ancestor 체크로 변경
 - **결정:** `filesEqual`(파일 SHA 전수 비교) 대신 `git merge-base --is-ancestor` 기반으로 판정
