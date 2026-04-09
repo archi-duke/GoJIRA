@@ -25,7 +25,7 @@ function decodeBase64(base64) {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
-export default function DocEditor({ project, user, onBack, currentPage, onNavigate, projectAlert }) {
+export default function DocEditor({ project, user, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
   const projectCode = project?.jiraCodes?.main?.jiraCode || '';
   const hasRepo = !!project?.documents?.repoName;
 
@@ -78,6 +78,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       });
       mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
       setFileStatus(status);
+      // 부모(GoJIRAApp)에 문서 상태 변경 알림 → projectAlert 재계산
+      if (onDocStateChange) onDocStateChange();
     } catch {
       if (retry < 1) setTimeout(() => refreshDocState(retry + 1), 1000);
       else { setUserTree(null); setFileStatus({}); }

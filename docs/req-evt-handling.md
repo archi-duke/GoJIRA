@@ -61,6 +61,44 @@ webhook.go handlePushEvent()
 
 ---
 
+### A-2. 프론트엔드 문서 변경 (Git Pull, 파일 저장/생성/삭제/이름변경)
+
+Gitea webhook이 아닌 **사용자 조작에 의한 문서 상태 변경**. 프론트엔드 내부에서 처리.
+
+```
+사용자 조작 (Git Pull / 파일 저장 / 파일 생성 / 파일 삭제 / 이름 변경)
+    ↓
+DocEditor 해당 핸들러 (handleGitPull / handleSave / handleNewFile / handleDelete / handleRenameFile)
+    ├─ API 호출 (sync-branch / PUT file / DELETE file)
+    └─ refreshDocState()
+        ├─ main 트리 + user 트리 재로드
+        ├─ fileStatus 재계산
+        └─ onDocStateChange() 콜백 호출
+            ↓
+        GoJIRAApp.refreshAlert()
+            ├─ compareTree(main, docs/user) → branchDiff 재계산
+            └─ setProjectAlert({branchDiff}) → CommonBar 배지 갱신
+```
+
+**호출 포인트 (7곳):**
+
+| 조작 | 핸들러 | API | UI 변화 |
+|------|--------|-----|---------|
+| Git Pull | `handleGitPull` | `POST /sync-branch` | 브랜치 리셋 → diff 해소 → 배지 제거 |
+| 파일 저장 | `handleSave` | `PUT /file` | 변경 발생 → diff 배지 표시 |
+| 파일 생성 | `handleNewFile` | `PUT /file` | 추가 파일 → diff 배지 표시 |
+| 파일 삭제 (toolbar) | `handleDelete` | `DELETE /file` | 파일 제거 → diff 재계산 |
+| 파일 삭제 (sidebar) | `handleDeleteFile` | `DELETE /file` | 파일 제거 → diff 재계산 |
+| 이름 변경 | `handleRenameFile` | `PUT + DELETE /file` | 파일명 변경 → diff 재계산 |
+| SSE/WS 수신 | SSE 핸들러 | — | 외부 변경 반영 |
+
+**핵심 구조:**
+- `refreshDocState()` — DocEditor 내부 상태 갱신 (mainTree, userTree, fileStatus)
+- `onDocStateChange()` — GoJIRAApp 콜백 → `projectAlert` 재계산 (CommonBar 배지)
+- 모든 문서 변경 포인트에서 `refreshDocState()` 1회 호출로 양쪽 모두 갱신
+
+---
+
 ### B. PR 생성
 
 ```
@@ -246,6 +284,7 @@ webhook.go handlePREvent()
 | 이벤트 큐 | `Platform-App/src/utils/eventQueue.js` |
 | 컴포넌트뷰 이벤트 | `Platform-App/src/apps/GoJIRAApp.js` |
 | 프로젝트맵 이벤트 | `Platform-App/src/apps/gojira/ProjectMap.js` |
-| Docs 트리 갱신 | `Platform-App/src/components/DocEditor.js` |
+| Docs 트리 갱신 + refreshDocState | `Platform-App/src/components/DocEditor.js` |
+| GoJIRAApp refreshAlert 콜백 | `Platform-App/src/apps/GoJIRAApp.js` (refreshAlert → onDocStateChange) |
 | 반려 알림 팝업 | `Platform-App/src/App.js` |
 | Alerts API (트리 비교) | `GoJIRA-API/handlers/project_alerts.go` |

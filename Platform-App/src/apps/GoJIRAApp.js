@@ -133,8 +133,19 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     return () => { unsub(); queue.clear(); };
   }, [projectCode, page, user]);
 
+  // 문서 상태 변경 후 알림 재계산 콜백 (Pull, 저장 등에서 호출)
+  async function refreshAlert() {
+    if (!projectCode) return;
+    const hasDiff = await compareTree(projectCode, user);
+    setProjectAlert(prev => {
+      const next = { ...prev, jiraCode: projectCode, branchDiff: hasDiff };
+      if (!next.branchDiff && !next.hasOpenPR) return null;
+      return next;
+    });
+  }
+
   if (page === 'docs' && selectedProject) {
-    return <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} projectAlert={projectAlert} />;
+    return <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} projectAlert={projectAlert} onDocStateChange={refreshAlert} />;
   }
   if (page === 'issues' && selectedProject) {
     return <IssueList project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
