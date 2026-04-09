@@ -1,10 +1,11 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ProjectMap from './gojira/ProjectMap';
 import IssueList from './gojira/IssueList';
 import RelationMap from './gojira/RelationMap';
 import SATAM from './gojira/SATAM';
 import DocEditor from '../components/DocEditor';
 import { subscribe } from '../utils/sseManager';
+import { createEventQueue } from '../utils/eventQueue';
 import config from '../config';
 
 export default function GoJIRAApp({ user, authority, resetKey }) {
@@ -76,53 +77,60 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     });
   }, [projectCode, page, user]);
 
-  // SSE: 프로젝트 알림 실시간 갱신
+  // 이벤트 큐 — 비동기 이벤트를 순차 처리 (경쟁 조건 방지)
+  const queueRef = useRef(null);
+  if (!queueRef.current) queueRef.current = createEventQueue();
+
+  // 트리 비교 유틸
+  async function compareTree(code, userId) {
+    const API = config.API_BASE + '/DocRepo';
+    const [mainTree, userTree] = await Promise.all([
+      fetch(`${API}/${code}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${API}/${code}/tree?ref=${encodeURIComponent('docs/' + userId)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    if (!mainTree?.tree || !userTree?.tree) return false;
+    const mainMap = {};
+    mainTree.tree.forEach(f => { if (f.type !== 'tree') mainMap[f.path] = f.sha; });
+    const userMap = {};
+    userTree.tree.forEach(f => { if (f.type !== 'tree') userMap[f.path] = f.sha; });
+    const mk = Object.keys(mainMap), uk = Object.keys(userMap);
+    return mk.length !== uk.length || mk.some(p => mainMap[p] !== userMap[p]);
+  }
+
+  // WebSocket: 프로젝트 알림 실시간 갱신 (이벤트 큐로 순차 처리)
   useEffect(() => {
     if (!projectCode || page === 'map') return;
+    const queue = queueRef.current;
+
     const unsub = subscribe('doc_update', (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === 'project_alert' && data.projectCode === projectCode) {
-          // main 변경 → 트리 재비교
-          const API = config.API_BASE + '/DocRepo';
-          Promise.all([
-            fetch(`${API}/${projectCode}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
-            fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent('docs/' + user)}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          ]).then(([mainTree, userTree]) => {
-            let hasDiff = false;
-            if (mainTree?.tree && userTree?.tree) {
-              const mainMap = {};
-              mainTree.tree.forEach(f => { if (f.type !== 'tree') mainMap[f.path] = f.sha; });
-              const userPaths = {};
-              userTree.tree.forEach(f => { if (f.type !== 'tree') userPaths[f.path] = f.sha; });
-              const mk = Object.keys(mainMap), uk = Object.keys(userPaths);
-              hasDiff = mk.length !== uk.length || mk.some(p => mainMap[p] !== userPaths[p]);
+
+        if (data.type === 'pr_update' && data.projectCode === projectCode) {
+          queue.push(async () => {
+            const isReviewer = (data.reviewers || []).includes(user);
+            if (['opened', 'reopened', 'review_requested'].includes(data.action) && isReviewer) {
+              setProjectAlert(prev => ({ ...prev, jiraCode: projectCode, hasOpenPR: true }));
+            } else if (data.action === 'closed' || data.state === 'closed') {
+              setProjectAlert(prev => ({ ...prev, jiraCode: projectCode, hasOpenPR: false }));
             }
+          });
+        }
+
+        if (data.type === 'project_alert' && data.projectCode === projectCode) {
+          queue.push(async () => {
+            const hasDiff = await compareTree(projectCode, user);
             setProjectAlert(prev => {
               const next = { ...prev, jiraCode: projectCode, branchDiff: hasDiff };
               if (!next.branchDiff && !next.hasOpenPR) return null;
               return next;
             });
-          }).catch(() => {});
-        }
-        if (data.type === 'pr_update' && data.projectCode === projectCode) {
-          const isReviewer = (data.reviewers || []).includes(user);
-          if (['opened', 'reopened', 'review_requested'].includes(data.action) && isReviewer) {
-            setProjectAlert(prev => ({ ...prev, jiraCode: projectCode, hasOpenPR: true }));
-          } else if (data.action === 'closed' || data.state === 'closed') {
-            // 리뷰어만 해제
-            if (!isReviewer || data.action === 'closed') {
-              setProjectAlert(prev => {
-                const next = { ...prev, hasOpenPR: false };
-                if (!next.branchDiff && !next.hasOpenPR) return null;
-                return next;
-              });
-            }
-          }
+          });
         }
       } catch {}
     });
-    return unsub;
+
+    return () => { unsub(); queue.clear(); };
   }, [projectCode, page, user]);
 
   if (page === 'docs' && selectedProject) {

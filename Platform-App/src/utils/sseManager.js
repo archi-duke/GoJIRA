@@ -34,6 +34,8 @@ function ensureConnection() {
     try {
       const msg = JSON.parse(e.data);
       if (msg.event === 'connected') return;
+      // 디버그: 수신 메시지 표시 (테스트 시 주석 해제)
+      // try { const d = JSON.parse(msg.data); window.alert(`[WS] ${msg.event}: ${d.type || ''} ${d.projectCode || ''} ${d.action || ''}`); } catch {}
       // SSE 호환: event명으로 라우팅, data는 JSON 문자열
       const cbs = state.listeners[msg.event];
       if (cbs) {

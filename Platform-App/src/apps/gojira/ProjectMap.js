@@ -104,24 +104,24 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       .catch(() => {});
 
     // SSE 구독 — main 머지 시 실시간 알림 갱신
+    function reloadAlerts() {
+      fetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
+        .then(res => res.json())
+        .then(arr => {
+          if (Array.isArray(arr)) {
+            const map = {};
+            arr.forEach(a => { map[a.jiraCode] = a; });
+            setAlerts(map);
+          }
+        }).catch(() => {});
+    }
+
     const unsub = subscribe('doc_update', (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === 'project_alert' && data.branchAlerts) {
-          setAlerts((prev) => {
-            const next = { ...prev };
-            const code = data.projectCode;
-            const hasDiff = (data.branchAlerts || []).includes(user);
-            if (hasDiff) {
-              next[code] = { ...next[code], jiraCode: code, branchDiff: true };
-            } else {
-              if (next[code]) {
-                next[code] = { ...next[code], branchDiff: false };
-                if (!next[code].hasOpenPR) delete next[code];
-              }
-            }
-            return next;
-          });
+        if (data.type === 'project_alert') {
+          // main 변경 → alerts API 재조회 (트리 비교 기반)
+          reloadAlerts();
         } else if (data.type === 'pr_update' && data.projectCode) {
           const code = data.projectCode;
           const isReviewer = (data.reviewers || []).includes(user);
@@ -131,14 +131,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
               [code]: { ...prev[code], jiraCode: code, hasOpenPR: true }
             }));
           } else if (data.action === 'closed') {
-            setAlerts(prev => {
-              const next = { ...prev };
-              if (next[code]) {
-                next[code] = { ...next[code], hasOpenPR: false };
-                if (!next[code].branchDiff && !next[code].hasOpenPR) delete next[code];
-              }
-              return next;
-            });
+            reloadAlerts();
           }
         }
       } catch {}
