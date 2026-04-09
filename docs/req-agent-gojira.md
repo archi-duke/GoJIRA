@@ -906,6 +906,53 @@ Step 3 — Evaluation Agent
 | `PUT /Issue/relations` | 이슈 관계 일괄 설정 | issue_relations_batch |
 | `GET /Project/alerts` | 프로젝트 알림 조회 | project_alerts |
 
+**Git/Gitea 운영 스킬 (신규 필요):**
+
+문서 커밋이 꼬이거나 브랜치 상태가 비정상일 때 자동으로 진단하고 해결하는 스킬.
+
+| 스킬 | 용도 | API / 방식 |
+|------|------|-----------|
+| **git_status** | 브랜치 상태 진단 (main vs user diff, 커밋 수, 충돌 여부) | Gitea compare API + branches API |
+| **git_sync** | 사용자 브랜치를 main과 동기화 (sync-branch) | `POST /DocRepo/{code}/sync-branch` |
+| **git_conflict_resolve** | 충돌 자동 해결 (변경 보관 → sync → 재반영) | `POST /DocRepo/{code}/conflict-resolve` |
+| **git_branch_list** | 전체 브랜치 목록 + 상태 (ahead/behind) | Gitea branches API |
+| **git_branch_cleanup** | 머지 완료된 stale 브랜치 정리 | Gitea delete branch API |
+| **git_commit_log** | 커밋 이력 조회 + 분석 (누가, 언제, 무엇) | `GET /DocRepo/{code}/commits` |
+| **git_revert** | 특정 커밋 되돌리기 | Gitea worktree + git revert |
+| **git_diff_analyze** | 두 브랜치/커밋 간 변경 분석 (LLM 요약) | Gitea compare API + LLM |
+| **git_pr_status** | PR 상태 종합 진단 (리뷰 현황, mergeable, 충돌) | Gitea PR API + reviews API |
+| **git_pr_review** | PR 승인/반려 처리 | `POST /DocRepo/{code}/pr/{num}/review` |
+| **git_pr_merge** | PR 머지 (선행 PR 체크 + 자동 충돌 해결 포함) | `POST /DocRepo/{code}/pr/{num}/merge` |
+| **git_repair** | 브랜치 꼬임 자동 진단 + 복구 (LLM 기반 판단) | 복합: status → 원인 분석 → sync/revert/cleanup 조합 |
+
+**git_repair 흐름 예시:**
+```
+사용자: "batman 브랜치가 이상해요"
+  ↓
+git_status(GOJIRA, batman)
+  → ahead: 3, behind: 5, conflict: true, stale_files: [test2.md]
+  ↓
+LLM 판단: "main보다 뒤처지고 충돌 있음. conflict_resolve 추천"
+  ↓
+git_conflict_resolve(GOJIRA, batman)
+  → 변경 3개 파일 보관 → sync → 재반영
+  → "3개 파일 재반영 완료. 충돌 해결됨."
+```
+
+**git_repair 복잡한 케이스:**
+```
+사용자: "커밋이 꼬여서 되돌리고 싶어"
+  ↓
+git_commit_log(GOJIRA, batman, limit=10)
+  → 최근 10개 커밋 표시
+  ↓
+사용자: "3번째 커밋으로 돌려줘"
+  ↓
+git_revert(GOJIRA, batman, commit_sha)
+  → revert 커밋 생성
+  → "커밋 abc1234가 되돌려졌습니다."
+```
+
 ---
 
 ### 8.2 Phase 1 상세 — 기반 구축
@@ -1133,33 +1180,45 @@ Orchestrator Plan:
 #### 8.5.2 전체 스킬 맵 (최종)
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Orchestration Agent                                          │
-│  - job_create, job_status, job_resume, agent_dispatch         │
-├──────────────────────────────────────────────────────────────┤
-│  REQ Agent           │  DSN Agent          │  EVL Agent       │
-│  - project_query     │  - doc_list         │  - satam_analyze │
-│  - issue_query       │  - doc_write        │  - issue_analyze │
-│  - issue_create      │  - doc_summarize    │  - eval_quality  │
-│  - issue_update      │  - doc_diff         │  - eval_trace    │
-│  - issue_delete      │  - doc_history      │  - eval_consist  │
-│  - issue_link        │  - pr_create        │  - eval_comply   │
-│  - req_extract       │  - pr_list          │  - schedule_anal │
-│  - req_classify      │  - design_draft     │                  │
-│  - req_trace         │  - design_review    │                  │
-│  - req_gap_analysis  │  - design_decision  │                  │
-├──────────────────────┼─────────────────────┼──────────────────┤
-│  CDA Agent           │  TST Agent          │                  │
-│  - code_structure    │  - test_design      │                  │
-│  - code_dependencies │  - test_generate    │                  │
-│  - code_extract_reqs │  - test_coverage    │                  │
-│  - code_patterns     │  - test_priority    │                  │
-│  - code_compare_dsn  │                     │                  │
-│  - code_impact       │                     │                  │
-└──────────────────────┴─────────────────────┴──────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  Orchestration Agent                                              │
+│  - job_create, job_status, job_resume, agent_dispatch             │
+├──────────────────────────────────────────────────────────────────┤
+│  REQ Agent           │  DSN Agent          │  EVL Agent           │
+│  - project_query     │  - doc_list         │  - satam_analyze     │
+│  - issue_query       │  - doc_write        │  - issue_analyze     │
+│  - issue_create      │  - doc_summarize    │  - eval_quality      │
+│  - issue_update      │  - doc_diff         │  - eval_trace        │
+│  - issue_delete      │  - doc_history      │  - eval_consist      │
+│  - issue_link        │  - pr_create        │  - eval_comply       │
+│  - req_extract       │  - pr_list          │  - schedule_analyze  │
+│  - req_classify      │  - design_draft     │                      │
+│  - req_trace         │  - design_review    │                      │
+│  - req_gap_analysis  │  - design_decision  │                      │
+├──────────────────────┼─────────────────────┼──────────────────────┤
+│  CDA Agent           │  TST Agent          │  Git Ops (공용)      │
+│  - code_structure    │  - test_design      │  - git_status        │
+│  - code_dependencies │  - test_generate    │  - git_sync          │
+│  - code_extract_reqs │  - test_coverage    │  - git_conflict_rslv │
+│  - code_patterns     │  - test_priority    │  - git_branch_list   │
+│  - code_compare_dsn  │                     │  - git_branch_clean  │
+│  - code_impact       │                     │  - git_commit_log    │
+│                      │                     │  - git_revert        │
+│                      │                     │  - git_diff_analyze  │
+│                      │                     │  - git_pr_status     │
+│                      │                     │  - git_pr_review     │
+│                      │                     │  - git_pr_merge      │
+│                      │                     │  - git_repair        │
+└──────────────────────┴─────────────────────┴──────────────────────┘
 
-총 스킬 수: 14(기존) + 4(Phase1) + 8(Phase2) + 10(Phase3) + 4(Phase4) = 약 40개
+총 스킬 수: 14(기존) + 4(Phase1) + 12(Git) + 8(Phase2) + 10(Phase3) + 4(Phase4) = 약 52개
 ```
+
+**Git Ops 스킬은 모든 에이전트가 공용으로 사용:**
+- Orchestrator: git_repair (자동 진단 + 복구 지시)
+- DSN Agent: git_sync, git_pr_create, git_pr_merge (문서 등록 흐름)
+- EVL Agent: git_diff_analyze, git_commit_log (변경 분석)
+- CDA Agent: git_branch_list, git_commit_log (코드 저장소 접근)
 
 ---
 
@@ -1167,7 +1226,7 @@ Orchestrator Plan:
 
 | Phase | 기간 | 핵심 산출물 | 스킬 추가 |
 |-------|------|-----------|----------|
-| **1** | 2~3주 | jobState, 오케스트레이터, 검증기, 역할 프롬프트 | +4 (doc_write, doc_history, doc_sync, project_alerts) |
+| **1** | 3~4주 | Python 서비스, jobState, 오케스트레이터, API 래퍼 | +4 (doc_write, doc_history, doc_sync, project_alerts) + **12 (git_*)** |
 | **2** | 2~3주 | REQ Agent, DSN Agent, 에이전트 프로토콜 | +8 (req_*, design_*) |
 | **3** | 3~4주 | EVL Agent, CDA Agent, 준수 분석 파이프라인 | +10 (eval_*, code_*) |
 | **4** | 2~3주 | TST Agent, 전체 통합, 대시보드 | +4 (test_*) |
