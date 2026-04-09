@@ -40,6 +40,8 @@ func executeSkill(ctx context.Context, skill *SkillDef, params map[string]interf
 		return execDocDiff(params, user)
 	case "pr_list":
 		return execPRList(params)
+	case "doc_history":
+		return execDocHistory(params)
 	case "schedule_analyze":
 		return execScheduleAnalyze(ctx, params)
 	case "satam_analyze":
@@ -236,6 +238,52 @@ func execPRList(params map[string]interface{}) (interface{}, error) {
 		results = append(results, PR{Num: int(n), Title: t, State: s, User: u})
 	}
 	return map[string]interface{}{"projectCode": code, "state": state, "count": len(results), "prs": results}, nil
+}
+
+func execDocHistory(params map[string]interface{}) (interface{}, error) {
+	code, _ := params["projectCode"].(string)
+	if code == "" {
+		return nil, fmt.Errorf("projectCode 필수")
+	}
+	branch, _ := params["branch"].(string)
+	if branch == "" {
+		branch = "main"
+	}
+	limit := "20"
+	if l, ok := params["limit"].(string); ok && l != "" {
+		limit = l
+	}
+	resp, err := http.Get(config.PlatformAPI + fmt.Sprintf("/DocRepo/%s/commits?branch=%s&perPage=%s", code, branch, limit))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var commits []interface{}
+	json.NewDecoder(resp.Body).Decode(&commits)
+	type C struct {
+		SHA     string `json:"sha"`
+		Message string `json:"message"`
+		Author  string `json:"author"`
+		Date    string `json:"date"`
+	}
+	var results []C
+	for _, c := range commits {
+		cm, _ := c.(map[string]interface{})
+		commit, _ := cm["commit"].(map[string]interface{})
+		author, _ := commit["author"].(map[string]interface{})
+		sha, _ := cm["sha"].(string)
+		if len(sha) > 7 {
+			sha = sha[:7]
+		}
+		msg, _ := commit["message"].(string)
+		if idx := strings.Index(msg, "\n"); idx > 0 {
+			msg = msg[:idx]
+		}
+		name, _ := author["name"].(string)
+		date, _ := author["date"].(string)
+		results = append(results, C{SHA: sha, Message: msg, Author: name, Date: date})
+	}
+	return map[string]interface{}{"projectCode": code, "branch": branch, "count": len(results), "commits": results}, nil
 }
 
 func execScheduleAnalyze(ctx context.Context, params map[string]interface{}) (interface{}, error) {

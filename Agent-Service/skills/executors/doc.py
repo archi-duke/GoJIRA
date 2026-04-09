@@ -38,6 +38,33 @@ async def exec_doc_summarize(params: dict, user: str) -> dict:
     return {"projectCode": code, "filePath": fp, "summary": summary}
 
 
+async def exec_doc_history(params: dict, user: str) -> dict:
+    code = params.get("projectCode", "")
+    if not code:
+        raise ValueError("projectCode 필수")
+
+    branch = params.get("branch", "main")
+    limit = int(params.get("limit", "20"))
+
+    client = PlatformClient()
+    commits = await client.list_commits(code, branch=branch, per_page=limit)
+
+    results = []
+    if isinstance(commits, list):
+        for c in commits:
+            # Gitea 커밋 응답 형식 파싱
+            commit_info = c.get("commit", {})
+            author_info = commit_info.get("author", {})
+            results.append({
+                "sha": (c.get("sha", "") or "")[:7],
+                "message": commit_info.get("message", "").strip().split("\n")[0],
+                "author": author_info.get("name", ""),
+                "date": author_info.get("date", ""),
+            })
+
+    return {"projectCode": code, "branch": branch, "count": len(results), "commits": results}
+
+
 async def exec_doc_diff(params: dict, user: str) -> dict:
     code = params.get("projectCode", "")
     fp = params.get("filePath", "")

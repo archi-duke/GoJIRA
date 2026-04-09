@@ -17,7 +17,7 @@ from skills.executors.issue import (
 from skills.executors.analysis import (
     exec_satam_analyze, exec_issue_analyze, exec_schedule_analyze,
 )
-from skills.executors.doc import exec_doc_list, exec_doc_summarize, exec_doc_diff
+from skills.executors.doc import exec_doc_list, exec_doc_summarize, exec_doc_diff, exec_doc_history
 from skills.executors.pr import exec_pr_list, exec_pr_create
 
 # 스킬 → 실행 함수 매핑
@@ -37,6 +37,7 @@ _ASYNC_EXECUTORS = {
     "doc_list": exec_doc_list,
     "doc_summarize": exec_doc_summarize,
     "doc_diff": exec_doc_diff,
+    "doc_history": exec_doc_history,
     "pr_list": exec_pr_list,
     "pr_create": exec_pr_create,
 }

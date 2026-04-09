@@ -46,6 +46,15 @@ class PlatformClient:
                 return []
             return resp.json()
 
+    async def list_commits(self, code: str, branch: str = "main", per_page: int = 20) -> list:
+        """커밋 이력 조회 — GET /DocRepo/{code}/commits."""
+        url = f"{self.base_url}/DocRepo/{code}/commits?branch={quote(branch)}&perPage={per_page}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=10)
+            if resp.status_code >= 400:
+                return []
+            return resp.json()
+
     async def create_pr(self, code: str, title: str, body: str, head: str, base: str, user: str) -> dict:
         url = f"{self.base_url}/DocRepo/{code}/pr"
         payload = {"title": title, "body": body, "head": head, "base": base}
