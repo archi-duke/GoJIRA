@@ -22,7 +22,8 @@
 - doc_list: 문서 파일 목록
 - doc_summarize: 문서 요약 (LLM 기반)
 - doc_diff: 브랜치 간 차이 분석
-- pr_list: PR 목록 조회
+- pr_list: PR 목록 조회 (state 파라미터: open/closed/all. "이전 PR", "PR 히스토리" → state="all" 사용)
+- doc_history: 커밋 이력 조회 (branch 파라미터로 브랜치 지정 가능)
 - schedule_analyze: 일정 분석
 - satam_analyze: SATAM 매트릭스 분석 (risk/sensitivity/mitigation 평가)
 - issue_analyze: 이슈 관계 분석 (contain 체인 검증, 고아 이슈 감지)
