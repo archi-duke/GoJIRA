@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-	"os/exec"
 	"net/url"
+	"os/exec"
 	"strings"
+	"time"
 
 	"platform-api/config"
 )
@@ -651,23 +653,84 @@ func CreateReview(owner, repo string, prNumber int, event, body string, userToke
 func MergePR(owner, repo string, prNumber int, mergeMethod string, userToken ...string) error {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, prNumber)
 	method := "PUT"
-	payload := map[string]string{"merge_method": mergeMethod}
+	var payload interface{} = map[string]string{"merge_method": mergeMethod}
 	if IsGitea() {
 		method = "POST"
-		payload = map[string]string{"Do": mergeMethod}
+		// force_merge: branch protection 우회 (admin 권한 필요)
+		payload = map[string]interface{}{
+			"Do":          mergeMethod,
+			"force_merge": true,
+		}
 	}
 	token := ""
 	if len(userToken) > 0 {
 		token = userToken[0]
 	}
-	data, status, err := doRequestAs(method, path, payload, token)
+
+	// Gitea 405 (repo lock) 재시도
+	maxRetries := 5
+	for i := 0; i <= maxRetries; i++ {
+		data, status, err := doRequestAs(method, path, payload, token)
+		if err != nil {
+			return err
+		}
+		if status == 405 && i < maxRetries {
+			log.Printf("MergePR: repo locked (405), retry %d/%d after 2s", i+1, maxRetries)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		if status >= 400 {
+			return fmt.Errorf("merge PR failed (%d): %s", status, string(data))
+		}
+		return nil
+	}
+	return fmt.Errorf("merge PR failed: repo locked after %d retries", maxRetries)
+}
+
+// UpdatePRBranch PR 브랜치를 base(main)와 동기화 (rebase 또는 merge)
+func UpdatePRBranch(owner, repo string, prNumber int, style string) error {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/update", owner, repo, prNumber)
+	if style == "" {
+		style = "rebase"
+	}
+	payload := map[string]string{"style": style}
+	data, status, err := doRequest("POST", path, payload)
 	if err != nil {
 		return err
 	}
 	if status >= 400 {
-		return fmt.Errorf("merge PR failed (%d): %s", status, string(data))
+		return fmt.Errorf("update branch failed (%d): %s", status, string(data))
 	}
 	return nil
+}
+
+// HasUserCommits 사용자 브랜치에 main에 없는 커밋이 있는지 확인
+// main...head 비교에서 total_commits > 0이면 사용자 변경 있음
+func HasUserCommits(owner, repo, base, head string) bool {
+	result, err := CompareBranches(owner, repo, base, head)
+	if err != nil {
+		return false
+	}
+	if tc, ok := result["total_commits"].(float64); ok {
+		return tc > 0
+	}
+	return false
+}
+
+// CompareBranches 두 브랜치 간 diff 비교
+func CompareBranches(owner, repo, base, head string) (map[string]interface{}, error) {
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", owner, repo,
+		url.PathEscape(base), url.PathEscape(head))
+	data, status, err := doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("compare failed (%d): %s", status, string(data))
+	}
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	return result, nil
 }
 
 // --- Reviewers ---

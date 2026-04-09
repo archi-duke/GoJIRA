@@ -6,6 +6,8 @@ import DocManager from './components/DocManager';
 import AlertModal from './components/AlertModal';
 import AgentChat from './components/AgentChat';
 import { getAuthUser } from './utils/auth';
+import { subscribe } from './utils/sseManager';
+import { modalAlert, modalConfirm } from './components/AlertModal';
 import appRegistry from './apps/registry';
 import config from './config';
 import './App.css';
@@ -36,7 +38,64 @@ function App() {
       .catch(() => setAuthority({}));
   }, [user]);
 
+  // 접속 시 미읽은 알림 확인 (반려 등)
+  useEffect(() => {
+    if (!user) return;
+    fetch(`${API_BASE}/Notification/unread?user=${encodeURIComponent(user)}`)
+      .then(r => r.json())
+      .then(async (notifs) => {
+        if (!Array.isArray(notifs) || notifs.length === 0) return;
+        for (const n of notifs) {
+          if (n.type === 'pr_rejected') {
+            const ok = await modalConfirm(
+              `${n.message}\n\n변경 내용을 보관하고 동기화 후 재반영하시겠습니까?`
+            );
+            if (ok && n.projectCode) {
+              const res = await fetch(`${API_BASE}/DocRepo/${n.projectCode}/conflict-resolve`, {
+                method: 'POST', headers: { 'X-User-Id': user },
+              });
+              const result = await res.json().catch(() => ({}));
+              if (result.resolved) {
+                modalAlert(`${result.applied?.length || 0}개 파일이 재반영되었습니다.`);
+              } else {
+                modalAlert(result.message || '재반영할 변경사항이 없습니다.');
+              }
+            }
+          }
+        }
+        // 알림 읽음 처리
+        fetch(`${API_BASE}/Notification/read?user=${encodeURIComponent(user)}`, { method: 'POST' });
+      }).catch(() => {});
+  }, [user]);
+
+  // SSE: PR 반려 실시간 수신
+  useEffect(() => {
+    if (!user) return;
+    return subscribe('doc_update', async (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'pr_review' && data.state === 'changes_requested' && data.prCreator === user) {
+          const ok = await modalConfirm(
+            `PR #${data.prNumber}이 ${data.reviewer}님에 의해 반려되었습니다.\n사유: ${data.body || '(없음)'}\n\n변경 내용을 보관하고 동기화 후 재반영하시겠습니까?`
+          );
+          if (ok && data.projectCode) {
+            const res = await fetch(`${API_BASE}/DocRepo/${data.projectCode}/conflict-resolve`, {
+              method: 'POST', headers: { 'X-User-Id': user },
+            });
+            const result = await res.json().catch(() => ({}));
+            if (result.resolved) {
+              modalAlert(`${result.applied?.length || 0}개 파일이 재반영되었습니다.`);
+            } else {
+              modalAlert(result.message || '재반영할 변경사항이 없습니다.');
+            }
+          }
+        }
+      } catch {}
+    });
+  }, [user]);
+
   function switchUser(knoxId) {
+    document.cookie = `ADSSO_USER=${encodeURIComponent(knoxId)}; path=/; max-age=${60*60*24*365}`;
     setUser(knoxId);
     setAuthority(null);
     setPage('map');

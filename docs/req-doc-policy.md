@@ -173,7 +173,8 @@ git reset --hard origin/main
 
 ### 조건
 
-* main 대비 변경 존재
+* main 대비 변경 존재 (diff가 없으면 PR 생성 차단)
+* 브랜치가 main의 ancestor인 경우 → "변경사항이 없습니다. 파일을 수정한 후 발행 신청해주세요." 안내
 
 ### PR 포함 내용
 
@@ -181,11 +182,56 @@ git reset --hard origin/main
 * 변경 파일
 * LLM 요약
 
+### 다중 PR 처리 정책
+
+여러 사용자가 동시에 PR을 생성한 경우, 머지 순서에 따라 충돌이 발생할 수 있다.
+
+#### 머지 순서
+
+* **선입선출 (FIFO)**: PR 번호가 낮은 것(먼저 생성된 것)을 우선 처리
+* 머지 시도 시 선행 open PR이 존재하면 → "PR #N이 먼저 대기 중입니다. 선행 PR을 먼저 처리해주세요." 안내
+* 선행 PR이 닫히거나 머지되면 다음 PR 머지 가능
+
+#### 충돌 자동 해결
+
+첫 번째 PR 머지 후 후속 PR에 충돌이 발생할 수 있다.
+
+```
+머지 요청
+  ├─ mergeable 확인
+  ├─ 충돌 있음 → 자동 동기화 시도
+  │     1) rebase 시도 (히스토리 깔끔)
+  │     2) rebase 실패 → merge 방식 시도
+  │     3) merge도 실패 → 사용자에게 수동 해결 안내
+  └─ 충돌 없음 → 머지 진행
+```
+
+| 단계 | 동작 | 설명 |
+|------|------|------|
+| 1. 자동 rebase | Gitea update-branch API (style=rebase) | 히스토리 선형 유지 |
+| 2. 자동 merge | Gitea update-branch API (style=merge) | rebase 실패 시 fallback |
+| 3. 수동 해결 | "PR을 닫고 Git Pull로 동기화한 후 다시 작업해주세요." | 자동 해결 불가한 충돌 |
+
+#### 수동 해결 절차
+
+1. 충돌 PR 닫기
+2. Docs 화면에서 Git Pull (sync-branch) 실행 → 브랜치가 main 최신으로 동기화
+3. 파일 재수정
+4. 새 PR 생성
+
+#### 실시간 알림
+
+* PR 생성/머지/닫기 시 Gitea webhook → Platform-API → SSE broadcast
+* ProjectMap: 프로젝트에 PR 알림 아이콘 (gold)
+* 컴포넌트 뷰: CommonBar 타이틀 옆 알림 아이콘
+* 브랜치 diff: 알림 아이콘 (tomato)
+
 ### Merge 후 처리
 
 * 사용자 브랜치(docs/{userId})는 **유지**
 * Workspace는 삭제
 * 다음 접속 시 worktree를 사용자 브랜치 기준으로 재생성 (rebase는 사용자가 명시적으로 요청할 때만 수행)
+* 프로젝트 알림 플래그(gitOpenPR) 해제 — open PR이 0개가 되면 자동 해제
 
 ---
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../config';
+import { subscribe } from '../utils/sseManager';
 import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
 import './DocManager.css';
 
@@ -532,8 +533,8 @@ function PRList({ repo, user }) {
               const approved = latest.filter(rv => rv.state === 'APPROVED');
               const rejected = latest.filter(rv => rv.state === 'CHANGES_REQUESTED');
               // pending = requested_reviewers 중 아직 승인/반려하지 않은 사용자
-              const reviewed = new Set(Object.keys(byUser));
-              const pending = (pr.requested_reviewers || []).filter(r => !reviewed.has(r.login));
+              const reviewedLogins = new Set(Object.keys(byUser));
+              const pending = (pr.requested_reviewers || []).filter(r => !reviewedLogins.has(r.login));
               setReviewMap(prev => ({
                 ...prev,
                 [pr.number]: { reviews: latest, approved, rejected, pending }
@@ -545,13 +546,11 @@ function PRList({ repo, user }) {
 
   useEffect(() => { fetchPRs(); }, [fetchPRs]);
 
-  // SSE: doc_update 이벤트 수신
+  // SSE: doc_update / doc_review 이벤트 수신
   useEffect(() => {
-    const streamUrl = config.API_BASE.replace('/DocRepo', '') + '/Notice/stream';
-    const es = new EventSource(streamUrl);
-    es.addEventListener('doc_update', () => { fetchPRs(); });
-    es.addEventListener('doc_review', () => { fetchPRs(); });
-    return () => es.close();
+    const unsub1 = subscribe('doc_update', () => { fetchPRs(); });
+    const unsub2 = subscribe('doc_review', () => { fetchPRs(); });
+    return () => { unsub1(); unsub2(); };
   }, [fetchPRs]);
 
   async function handleReview(prNum, event) {
@@ -582,7 +581,29 @@ function PRList({ repo, user }) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || '머지 실패');
+      const errMsg = err.error || '머지 실패';
+      // 충돌 시 선택 다이얼로그
+      if (res.status === 409 && errMsg.includes('충돌')) {
+        const choice = await modalConfirm(
+          `${errMsg}\n\n[확인] 반려 (PR 생성자에게 알림)\n[취소] 닫기`,
+        );
+        if (choice) {
+          // 반려 처리 — review로 CHANGES_REQUESTED
+          const reason = await modalPrompt('반려 사유', '충돌로 인한 반려');
+          if (reason !== null) {
+            await fetch(`${API}/${repo.projectCode}/pr/${prNum}/review`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+              body: JSON.stringify({ event: 'REQUEST_CHANGES', body: reason || '충돌로 인한 반려' }),
+            });
+            modalAlert('반려 처리 완료. PR 생성자에게 알림이 전송됩니다.');
+          }
+        }
+      } else {
+        modalAlert(errMsg);
+      }
+    } else {
+      modalAlert('머지 완료');
     }
     fetchPRs();
   }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,6 +19,15 @@ import (
 	"platform-api/db"
 	"platform-api/github"
 )
+
+// repo별 init-files 동시 실행 방지 뮤텍스
+var initFilesMu sync.Map // key: "owner/repo" → *sync.Mutex
+
+func getRepoMutex(owner, name string) *sync.Mutex {
+	key := owner + "/" + name
+	v, _ := initFilesMu.LoadOrStore(key, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
 
 // GET /DocRepo/git-users — Git 플랫폼 사용자 목록
 func GitUsersHandler(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +347,11 @@ func DocRepoInitFilesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 동일 repo에 대한 동시 init-files 호출 직렬화
+	mu := getRepoMutex(owner, name)
+	mu.Lock()
+	defer mu.Unlock()
+
 	required := map[string]string{
 		"business.md": "# Business\n\n" +
 			"과제의 배경, 목적, 주요 사항을 기록하는 문서입니다.\n\n" +
@@ -529,6 +544,123 @@ func DocRepoSyncBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("sync-branch: %s/%s branch=%s → main(%s)", owner, name, branch, mainSHA[:8])
 	respondJSON(w, http.StatusOK, map[string]interface{}{"synced": true, "branch": branch})
+}
+
+// POST /DocRepo/{code}/conflict-resolve — 변경 보관 → sync → 재반영
+// 사용자 브랜치의 변경 파일을 보관하고, main으로 동기화한 뒤, 변경 내용을 다시 적용
+func DocRepoConflictResolveHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	userId := r.Header.Get("X-User-Id")
+	if userId == "" {
+		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	branch := "docs/" + userId
+
+	// 1. main과 user branch 트리 비교 → 다른 파일 찾기
+	mainTree, err := github.GetTree(owner, name, "main")
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "main 트리 조회 실패")
+		return
+	}
+	userTree, err := github.GetTree(owner, name, branch)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "사용자 브랜치 트리 조회 실패")
+		return
+	}
+
+	mainFiles := extractTreeFiles(mainTree)
+	userFiles := extractTreeFiles(userTree)
+
+	// user에만 있거나 SHA가 다른 파일의 내용을 보관
+	type savedFile struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	var saved []savedFile
+	for path, sha := range userFiles {
+		if mainFiles[path] != sha {
+			// 사용자 파일 내용 다운로드
+			fileData, err := github.GetFileContent(owner, name, path, branch)
+			if err != nil {
+				continue
+			}
+			content, _ := fileData["content"].(string)
+			if content != "" {
+				saved = append(saved, savedFile{Path: path, Content: content})
+			}
+		}
+	}
+
+	if len(saved) == 0 {
+		respondJSON(w, http.StatusOK, map[string]interface{}{"resolved": false, "message": "변경 파일 없음"})
+		return
+	}
+
+	log.Printf("conflict-resolve: %s/%s branch=%s 보관 파일 %d개", owner, name, branch, len(saved))
+
+	// 2. 브랜치 삭제 → main에서 재생성 (sync)
+	github.DeleteBranch(owner, name, branch)
+	time.Sleep(500 * time.Millisecond)
+
+	branchList, _ := github.ListBranches(owner, name)
+	branches, _ := branchList.([]interface{})
+	mainSHA := ""
+	for _, b := range branches {
+		bm, _ := b.(map[string]interface{})
+		if bName, _ := bm["name"].(string); bName == "main" {
+			if commit, ok := bm["commit"].(map[string]interface{}); ok {
+				mainSHA, _ = commit["id"].(string)
+			}
+		}
+	}
+	if mainSHA == "" {
+		respondError(w, http.StatusBadGateway, "main SHA 조회 실패")
+		return
+	}
+	if err := github.CreateBranch(owner, name, branch, mainSHA); err != nil {
+		respondError(w, http.StatusBadGateway, "브랜치 재생성 실패: "+err.Error())
+		return
+	}
+
+	// 3. 보관된 변경 파일을 user branch에 다시 적용
+	var applied []string
+	for _, f := range saved {
+		// 브랜치 보호 우회를 위해 직접 API 호출
+		existingFile, _ := github.GetFileContent(owner, name, f.Path, branch)
+		if existingFile != nil {
+			// 파일이 이미 존재 (main에서 온 것) → SHA로 업데이트
+			sha, _ := existingFile["sha"].(string)
+			_, err = github.CreateOrUpdateFile(owner, name, f.Path, f.Content,
+				fmt.Sprintf("%s 충돌 해결 재반영", f.Path), branch, sha)
+		} else {
+			// 새 파일
+			_, err = github.CreateFileOnBranch(owner, name, f.Path, f.Content,
+				fmt.Sprintf("%s 충돌 해결 재반영", f.Path), branch, "")
+		}
+		if err != nil {
+			log.Printf("conflict-resolve: %s 재반영 실패: %v", f.Path, err)
+			continue
+		}
+		applied = append(applied, f.Path)
+	}
+
+	go UpdateBranchAlert(owner, name, code, userId)
+
+	log.Printf("conflict-resolve: %s 완료 — %d/%d 파일 재반영", branch, len(applied), len(saved))
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"resolved": true,
+		"saved":    len(saved),
+		"applied":  applied,
+	})
 }
 
 func getRepoInfo(ctx context.Context, code string) (string, string, error) {
@@ -970,6 +1102,19 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 		req.Base = "main"
 	}
 
+	// PR 생성 전 diff 확인 — head가 base의 ancestor이면 변경사항 없음
+	compare, _ := github.CompareBranches(owner, name, req.Base, req.Head)
+	if compare != nil {
+		if files, ok := compare["files"].([]interface{}); ok && len(files) == 0 {
+			respondError(w, http.StatusConflict, "변경사항이 없습니다. 파일을 수정한 후 발행 신청해주세요.")
+			return
+		}
+		if totalCommits, ok := compare["total_commits"].(float64); ok && totalCommits == 0 {
+			respondError(w, http.StatusConflict, "변경사항이 없습니다. 파일을 수정한 후 발행 신청해주세요.")
+			return
+		}
+	}
+
 	userToken := getUserToken(r)
 	pr, err := github.CreatePR(owner, name, req.Title, req.Body, req.Head, req.Base, userToken)
 	if err != nil {
@@ -987,8 +1132,8 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 	// 승인자에게 메일 알림
 	notifyPRCreated(name, prNum, prTitle, prURL, auditors)
 
-	// 프로젝트 알림: PR 생성
-	db.UpdateProjectField(ctx, code, "gitOpenPR", true)
+	// 프로젝트 알림: PR 생성 (리뷰어 목록 저장)
+	db.UpdateProjectField(ctx, code, "gitOpenPRReviewers", auditors)
 
 	respondJSON(w, http.StatusOK, pr)
 }
@@ -1063,7 +1208,7 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	num, _ := strconv.Atoi(chi.URLParam(r, "num"))
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	owner, name, err := getRepoInfo(ctx, code)
 	if err != nil {
@@ -1107,14 +1252,56 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// admin 토큰으로 머지 (branch protection 우회)
+	// 선행 PR 확인 — 현재 PR보다 먼저 생성된 open PR이 있으면 안내
+	openPRs, _ := github.ListPRs(owner, name, "open")
+	if prList, ok := openPRs.([]interface{}); ok {
+		for _, p := range prList {
+			pm, _ := p.(map[string]interface{})
+			prNum, _ := pm["number"].(float64)
+			if int(prNum) < num {
+				prTitle, _ := pm["title"].(string)
+				respondError(w, http.StatusConflict,
+					fmt.Sprintf("PR #%d (%s)이 먼저 대기 중입니다. 선행 PR을 먼저 처리해주세요.", int(prNum), prTitle))
+				return
+			}
+		}
+	}
+
+	// 현재 PR의 mergeable 상태 확인
+	prInfo, _ := github.GetPR(owner, name, num)
+	mergeable := true
+	if prInfo != nil {
+		if m, ok := prInfo["mergeable"].(bool); ok {
+			mergeable = m
+		}
+	}
+
+	// 충돌 시 자동 동기화 시도
+	if !mergeable {
+		log.Printf("merge: PR #%d 충돌 감지, 자동 동기화 시도", num)
+		// rebase 시도 → 실패하면 merge 방식 시도
+		if err := github.UpdatePRBranch(owner, name, num, "rebase"); err != nil {
+			if err2 := github.UpdatePRBranch(owner, name, num, "merge"); err2 != nil {
+				respondError(w, http.StatusConflict,
+					"충돌을 자동으로 해결할 수 없습니다. PR을 닫고 Git Pull로 동기화한 후 다시 작업해주세요.")
+				return
+			}
+		}
+		log.Printf("merge: PR #%d 자동 동기화 성공", num)
+	}
+
+	// force_merge로 branch protection 우회하여 머지
 	if err := github.MergePR(owner, name, num, "merge"); err != nil {
+		if strings.Contains(err.Error(), "405") {
+			respondError(w, http.StatusConflict, "머지할 수 없습니다. 변경사항이 없거나 충돌이 있습니다. PR을 확인해주세요.")
+			return
+		}
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
 	// 프로젝트 알림: PR 머지 완료 → 플래그 해제
-	db.UpdateProjectField(ctx, code, "gitOpenPR", false)
+	db.UpdateProjectField(ctx, code, "gitOpenPRReviewers", []string{})
 	db.UpdateProjectField(ctx, code, "gitLastCommit", nil)
 
 	// merge 후 처리: workspace 삭제 + 세션 해제 (브랜치는 유지)
@@ -1501,6 +1688,19 @@ func DocRepoEditPRHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Body == "" {
 		req.Body = fmt.Sprintf("%s의 설계문서 변경 사항을 main에 반영합니다.", code)
+	}
+
+	// PR 생성 전 diff 확인
+	compare, _ := github.CompareBranches(owner, name, "main", branch)
+	if compare != nil {
+		if files, ok := compare["files"].([]interface{}); ok && len(files) == 0 {
+			respondError(w, http.StatusConflict, "변경사항이 없습니다. 파일을 수정한 후 발행 신청해주세요.")
+			return
+		}
+		if totalCommits, ok := compare["total_commits"].(float64); ok && totalCommits == 0 {
+			respondError(w, http.StatusConflict, "변경사항이 없습니다. 파일을 수정한 후 발행 신청해주세요.")
+			return
+		}
 	}
 
 	userToken := getUserToken(r)

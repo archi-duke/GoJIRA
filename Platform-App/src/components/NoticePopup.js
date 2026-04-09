@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
+import { subscribe } from '../utils/sseManager';
 import './NoticePopup.css';
 
 const API = config.API_BASE + '/Notice';
@@ -33,15 +34,12 @@ export default function NoticePopup({ user }) {
 
   // SSE: 비상 공지 실시간 수신
   useEffect(() => {
-    const es = new EventSource(`${API}/stream`);
-    es.addEventListener('emergency', (e) => {
+    return subscribe('emergency', (e) => {
       try {
         const notice = JSON.parse(e.data);
-        // 비상 공지는 3일 보지 않기와 무관하게 즉시 표시
         showNotices([notice]);
       } catch {}
     });
-    return () => es.close();
   }, [showNotices]);
 
   function handleClose() {

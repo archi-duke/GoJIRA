@@ -12,11 +12,13 @@ function getCookie(name) {
  * @returns {string|null} 인증된 사용자 ID, 리다이렉트 시 null
  */
 export function getAuthUser() {
+  const uinfo = getCookie('ADSSO_USER');
+
   if (!config.USE_SSO) {
-    return config.DEV_USER;
+    // dev 모드: 쿠키에 저장된 사용자 우선, 없으면 DEV_USER
+    return uinfo || config.DEV_USER;
   }
 
-  const uinfo = getCookie('ADSSO_USER');
   if (!uinfo) {
     window.location.href = `${config.SSO_URL}/Account/ADFSLogin?client=${window.location.origin}`;
     return null;

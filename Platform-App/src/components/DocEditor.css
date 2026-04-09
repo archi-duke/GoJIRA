@@ -2,6 +2,7 @@
 .de-start p { margin-bottom: 12px; font-size: 14px; color: #555; }
 .de-btn { padding: 6px 16px; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; margin: 0 4px; background: lightgray; color: #000; }
 .de-btn-primary { background: #2c3e50; color: #fff; }
+.de-btn:disabled { background: #e0e0e0; color: #aaa; cursor: default; }
 .de-btn-danger { background: #e74c3c; color: #fff; }
 
 .de-editor { display: flex; flex: 1; overflow: hidden; }
@@ -20,7 +21,7 @@
 .de-file-act:hover { color: #333; }
 .de-file-act-del:hover { color: #e74c3c; }
 .de-file-active { background: #d6eaf8; font-weight: 600; }
-.de-file-main-only { color: #aaa; font-style: italic; }
+.de-file-main-only { color: #bbb; font-style: italic; }
 .de-file-modified { color: #e67e22; }
 .de-file-added { color: #27ae60; }
 .de-file-deleted { color: #e74c3c; text-decoration: line-through; }
@@ -28,9 +29,11 @@
 .de-badge-modified { background: #e67e22; }
 .de-badge-added { background: #27ae60; }
 .de-badge-deleted { background: #e74c3c; }
+.de-badge-mainonly { background: #bbb; }
 .de-badge-pending { background: orange; }
 .de-badge-both { background: tomato; }
 
+.de-sync-notice { padding: 6px 12px; font-size: 11px; color: #888; background: #f5f5f5; border-bottom: 1px solid #eee; }
 .de-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .de-toolbar { display: flex; align-items: center; padding: 6px 12px; border-bottom: 1px solid #eee; gap: 8px; }
 .de-filename { font-size: 13px; font-weight: 600; flex: 1; }

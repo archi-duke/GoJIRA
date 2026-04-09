@@ -538,7 +538,7 @@ const NAV_ITEMS = [
   { key: 'satam', label: 'SATAM' },
 ];
 
-export default function SATAM({ project, user, onBack, currentPage, onNavigate }) {
+export default function SATAM({ project, user, onBack, currentPage, onNavigate, projectAlert }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -810,6 +810,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           onPull={handlePull}
           onEditChange={setEditMode}
           nav={nav}
+          projectAlert={projectAlert}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
             { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
@@ -831,6 +832,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         onPull={handlePull}
         onEditChange={(mode) => { setEditMode(mode); if (!mode) setEditCell(null); }}
         nav={nav}
+        projectAlert={projectAlert}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
           { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },

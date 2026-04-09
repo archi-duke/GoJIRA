@@ -5,6 +5,7 @@ import { modalAlert, modalConfirm } from './AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
 import config from '../config';
+import { subscribe } from '../utils/sseManager';
 import './DocEditor.css';
 
 const API = config.API_BASE + '/DocRepo';
@@ -24,7 +25,7 @@ function decodeBase64(base64) {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
-export default function DocEditor({ project, user, onBack, currentPage, onNavigate }) {
+export default function DocEditor({ project, user, onBack, currentPage, onNavigate, projectAlert }) {
   const projectCode = project?.jiraCodes?.main?.jiraCode || '';
   const hasRepo = !!project?.documents?.repoName;
 
@@ -49,10 +50,12 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [loadingDiff, setLoadingDiff] = useState(false);
 
   // 트리 로드 함수 (재사용)
-  function loadTrees() {
+  function loadTrees(retry = 0) {
     const branch = `docs/${user}`;
     fetch(`${API}/${projectCode}/tree?ref=main`)
-      .then(r => r.json()).then(mTree => {
+      .then(r => { if (!r.ok) throw new Error(`main tree ${r.status}`); return r.json(); })
+      .then(mTree => {
+        if (!mTree?.tree) throw new Error('invalid main tree');
         setMainTree(mTree);
         fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`)
           .then(r => { if (!r.ok) throw new Error(); return r.json(); })
@@ -73,38 +76,38 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           })
           .catch(() => { setUserTree(null); setFileStatus({}); });
       })
-      .catch(() => {});
+      .catch(() => {
+        // 트리 로드 실패 시 1회 재시도 (1초 후)
+        if (retry < 1) setTimeout(() => loadTrees(retry + 1), 1000);
+      });
   }
 
-  // 진입 시 필수 파일 확인 + 사용자 브랜치 생성 + 트리 비교
+  // 진입 시 필수 파일 확인 → 사용자 브랜치 생성 → 트리 비교 (순차 실행)
   useEffect(() => {
     if (!hasRepo) return;
-    Promise.all([
-      fetch(`${API}/${projectCode}/init-files`, { method: 'POST' }).catch(() => {}),
-      fetch(`${API}/${projectCode}/ensure-branch`, {
+    // init-files 완료 후 ensure-branch 실행 (main 최신 상태에서 브랜치 생성)
+    fetch(`${API}/${projectCode}/init-files`, { method: 'POST' })
+      .catch(() => {})
+      .then(() => fetch(`${API}/${projectCode}/ensure-branch`, {
         method: 'POST', headers: { 'X-User-Id': user },
-      }).catch(() => {}),
-    ]).then(() => loadTrees());
+      }).catch(() => {}))
+      .then(() => loadTrees());
   }, [projectCode, hasRepo, user]);
 
   // SSE 구독 — main 변경 시 실시간 트리 갱신
   useEffect(() => {
     if (!hasRepo) return;
-    const es = new EventSource(`${PLATFORM_API}/Notice/stream`);
-    es.addEventListener('doc_update', (e) => {
+    return subscribe('doc_update', (e) => {
       try {
         const data = JSON.parse(e.data);
-        // 현재 프로젝트의 main push 이벤트
         if (data.type === 'project_alert' && data.projectCode === projectCode) {
-          loadTrees(); // 트리 새로고침
+          loadTrees();
         }
         if (data.type === 'push' && data.repo) {
-          // repo 이름으로 매칭이 필요하면 여기서 처리
           loadTrees();
         }
       } catch {}
     });
-    return () => es.close();
   }, [projectCode, hasRepo, user]);
 
   async function handleFileClick(path, isMainOnly) {
@@ -417,8 +420,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   } else {
     items = baseItems.sort((a, b) => a.path.localeCompare(b.path));
   }
-  const hasChanges = Object.keys(fileStatus).length > 0;
   const hasMainOnly = items.some(i => i._mainOnly);
+  const mainOnlyPaths = new Set(items.filter(i => i._mainOnly).map(i => i.path));
+  // mainOnly(main에만 있는 파일)는 사용자 변경이 아니므로 제외
+  const hasChanges = Object.keys(fileStatus).some(p => !mainOnlyPaths.has(p));
   const barTitle = hasMainOnly ? (
     <>{barTitleText} <svg width="16" height="16" viewBox="0 0 16 16" style={{verticalAlign:'middle',marginLeft:4}}>
       <path d="M8 1L15 14H1L8 1Z" fill="tomato" stroke="#333" strokeWidth="0.8" />
@@ -451,7 +456,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <CommonBar title={barTitle} onBack={onBack} nav={nav} onEditChange={handleEditModeChange}
         onPull={handleGitPull}
-        pullIcon={<img src="/icons/git-pull.svg" alt="Git Pull" width="18" height="18" />}
+        pullIcon={<img src="/icons/git-fetch.svg" alt="Git Fetch" width="18" height="18" />}
+        projectAlert={projectAlert}
       />
       <div className="de-editor">
         <div className="de-sidebar">
@@ -488,21 +494,26 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 style={{ marginLeft: globalEditMode ? '4px' : 'auto', padding: '3px 10px', fontSize: '11px' }}
                 onClick={handleCreatePR}
                 disabled={!hasChanges}
-                title={hasChanges ? `${Object.keys(fileStatus).length}개 파일 변경됨` : '변경사항 없음'}
               >
+                <img src="/icons/git-pull.svg" alt="" width="12" height="12" style={{marginRight:4,verticalAlign:'middle',filter:hasChanges?'invert(1)':'invert(0.6)'}} />
                 발행신청
               </button>
             )}
           </div>
+          {activeTab === 'workspace' && !hasChanges && hasMainOnly && (
+            <div className="de-sync-notice">
+              main에 새 파일이 추가되었습니다. Git Pull로 동기화 후 작업하세요.
+            </div>
+          )}
           {items.map(item => {
-            const st = activeTab === 'workspace' ? fileStatus[item.path] : null;
             const isMainOnly = item._mainOnly;
+            const st = (activeTab === 'workspace' && !isMainOnly) ? fileStatus[item.path] : null;
             return (
               <div key={item.path}
                 className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''} ${isMainOnly ? 'de-file-main-only' : ''}`}
                 onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path, item._mainOnly); }}>
                 {activeTab === 'workspace' && (isMainOnly
-                  ? <span className="de-file-badge de-badge-deleted">D</span>
+                  ? <span className="de-file-badge de-badge-mainonly">M</span>
                   : statusBadge(item.path))}
                 <span className="de-file-name">{item.path}</span>
                 {activeTab === 'workspace' && globalEditMode && !['business.md', 'srs.md', 'architecture.md'].includes(item.path) && (
@@ -577,7 +588,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 function DocGitGraph({ projectCode }) {
   const [data, setData] = useState(null);
   const [offset, setOffset] = useState(0);
-  const limit = 30;
+  const limit = 20;
 
   useEffect(() => {
     fetch(`${API}/${projectCode}/graph?offset=${offset}&limit=${limit}`)

@@ -45,6 +45,7 @@ func main() {
 	db.InitNoticeIndexes()
 	db.InitDocRepoIndexes()
 	db.InitEditSessionIndexes()
+	db.InitNotificationIndexes()
 	db.SeedAccountData()
 
 	// Workspace TTL worker 시작
@@ -102,6 +103,10 @@ func main() {
 			r.Put("/connections/{id}", handlers.ConnectionUpdateHandler)
 		})
 
+		// Notifications (사용자별 알림)
+		r.Get("/Notification/unread", handlers.NotificationUnreadHandler)
+		r.Post("/Notification/read", handlers.NotificationReadHandler)
+
 		// Notice
 		r.Get("/Notice/stream", handlers.NoticeStreamHandler)
 		r.Get("/Notice/active", handlers.NoticeActiveHandler)
@@ -150,6 +155,7 @@ func main() {
 			r.Post("/{code}/edit/heartbeat", handlers.DocRepoEditHeartbeatHandler)
 			r.Post("/{code}/edit/release", handlers.DocRepoEditReleaseHandler)
 			r.Post("/{code}/edit/rebase", handlers.DocRepoEditRebaseHandler)
+			r.Post("/{code}/conflict-resolve", handlers.DocRepoConflictResolveHandler)
 		})
 
 		// DocLink — 향후 구현

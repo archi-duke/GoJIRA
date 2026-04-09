@@ -25,7 +25,7 @@ const TYPE_FILTER = {
   D: ['Detailed Design'],
 };
 
-export default function IssueList({ project, user, onBack, currentPage, onNavigate }) {
+export default function IssueList({ project, user, onBack, currentPage, onNavigate, projectAlert }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -240,6 +240,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
         onPull={handlePull}
         onEditChange={setEditMode}
         nav={nav}
+        projectAlert={projectAlert}
         options={[
           { label: 'V', active: showV, handler: () => setShowV((v) => !v) },
           { label: 'F', active: showF, handler: () => setShowF((v) => !v) },

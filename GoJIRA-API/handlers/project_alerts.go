@@ -2,12 +2,16 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	"gojira-api/config"
 	"gojira-api/db"
 )
 
@@ -17,7 +21,7 @@ import (
 func ProjectAlertsHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user")
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	projects, err := db.FindAllProjects(ctx, nil)
@@ -47,27 +51,21 @@ func ProjectAlertsHandler(w http.ResponseWriter, r *http.Request) {
 
 		alert := AlertInfo{JiraCode: code}
 
-		// 1. 브랜치 차이: branchAlerts 배열에 사용자가 포함되어 있거나 gitLastCommit 플래그
+		// 1. 브랜치 차이: main과 사용자 브랜치 트리 비교 (파일 SHA 기반)
 		if userID != "" {
-			if users := bsonGetStrArray(prj, "branchAlerts"); len(users) > 0 {
-				for _, u := range users {
-					if u == userID {
-						alert.BranchDiff = true
+			alert.BranchDiff = checkTreeDiff(code, userID)
+		}
+
+		// 2. 열린 PR — 리뷰어로 지정된 경우만
+		if userID != "" {
+			if reviewers := bsonGetStrArray(prj, "gitOpenPRReviewers"); len(reviewers) > 0 {
+				for _, rv := range reviewers {
+					if rv == userID {
+						alert.HasOpenPR = true
 						break
 					}
 				}
 			}
-		}
-		if !alert.BranchDiff {
-			gitLastCommit := getTime(prj, "gitLastCommit")
-			if !gitLastCommit.IsZero() {
-				alert.BranchDiff = true
-			}
-		}
-
-		// 2. 열린 PR
-		if openPR, ok := prj["gitOpenPR"].(bool); ok && openPR {
-			alert.HasOpenPR = true
 		}
 
 		if alert.BranchDiff || alert.HasOpenPR {
@@ -76,6 +74,51 @@ func ProjectAlertsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, alerts)
+}
+
+// checkTreeDiff Platform-API를 통해 main과 사용자 브랜치 트리를 비교
+func checkTreeDiff(projectCode, userID string) bool {
+	type treeFile struct {
+		Path string `json:"path"`
+		SHA  string `json:"sha"`
+		Type string `json:"type"`
+	}
+	type treeResp struct {
+		Tree []treeFile `json:"tree"`
+	}
+
+	fetchTree := func(ref string) map[string]string {
+		resp, err := http.Get(fmt.Sprintf("%s/DocRepo/%s/tree?ref=%s",
+			config.PlatformAPI, projectCode, url.QueryEscape(ref)))
+		if err != nil || resp.StatusCode >= 400 {
+			return nil
+		}
+		defer resp.Body.Close()
+		var t treeResp
+		json.NewDecoder(resp.Body).Decode(&t)
+		m := map[string]string{}
+		for _, f := range t.Tree {
+			if f.Type != "tree" {
+				m[f.Path] = f.SHA
+			}
+		}
+		return m
+	}
+
+	mainFiles := fetchTree("main")
+	userFiles := fetchTree("docs/" + userID)
+	if mainFiles == nil || userFiles == nil {
+		return false
+	}
+	if len(mainFiles) != len(userFiles) {
+		return true
+	}
+	for p, sha := range mainFiles {
+		if userFiles[p] != sha {
+			return true
+		}
+	}
+	return false
 }
 
 func bsonGetStrArray(doc bson.M, key string) []string {

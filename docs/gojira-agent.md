@@ -752,6 +752,26 @@ Agent용 max_tokens는 코드에서 2000 이상으로 자동 조정.
 - **근거:** 컴포넌트 내 Back 버튼과 타이틀바 네비게이션 중복. 타이틀바가 항상 보이므로 하나로 통합
 - **구현:** GoJIRAApp에서 `resetKey` 카운터로 Project 클릭 감지 → 내부 page='map' 리셋
 
+### ADR-010: 다중 PR 머지 정책 — 선입선출 + 자동 충돌 해결
+- **결정:** PR은 생성 순서(FIFO) 기준으로 머지. 충돌 시 자동 동기화(rebase→merge) 시도 후 실패하면 수동 해결 안내
+- **근거:** 여러 사용자가 동시에 PR을 생성하면, 첫 PR 머지 후 main이 변경되어 후속 PR에 충돌 발생. 자동 해결을 시도하되 실패 시 명확한 안내 제공
+- **구현:** merge 핸들러에서 선행 open PR 체크 → Gitea update-branch API(rebase/merge) → force_merge. 실패 시 "PR 닫고 Git Pull 후 재작업" 안내
+
+### ADR-011: SSE 연결 공유 — 전역 sseManager
+- **결정:** 브라우저 창당 EventSource 1개만 유지, 컴포넌트는 subscribe() 함수로 구독
+- **근거:** 각 컴포넌트(NoticePopup, DocEditor, ProjectMap, DocManager)가 개별 EventSource 생성 → 3창 × 2개 = 6개로 HTTP/1.1 연결 한도 소진 → API 호출 차단
+- **구현:** `sseManager.js` — 창당 1개 EventSource 공유, refCount 기반 자동 연결/해제. 4개 컴포넌트 모두 전환
+
+### ADR-012: PR/문서 변경 실시간 알림 — webhook + SSE + CommonBar
+- **결정:** Gitea webhook 이벤트(PR 생성/닫기/머지, push)를 DB 갱신 + SSE broadcast하여 모든 접속 사용자에게 실시간 반영
+- **근거:** PR 상태나 문서 변경이 즉시 반영되지 않으면 사용자 간 충돌 및 혼동 발생
+- **구현:** GoJIRAApp에서 SSE 구독 → projectAlert 상태 관리 → CommonBar에 알림 아이콘 전달. ProjectMap은 기존 방식 유지
+
+### ADR-013: branchDiff 판정 — ancestor 체크로 변경
+- **결정:** `filesEqual`(파일 SHA 전수 비교) 대신 `git merge-base --is-ancestor` 기반으로 판정
+- **근거:** 사용자가 변경하지 않고 단순히 뒤처진 브랜치도 diff로 판정하여 false positive 발생. ancestor 체크는 "사용자가 실제 커밋했는가"를 정확히 판별
+- **구현:** webhook의 `compareAllBranches` + alerts API 모두 ancestor 체크 방식으로 전환. Gitea API `GET /repos/{owner}/{repo}/compare/{base}...{head}` 의 `total_commits` 활용
+
 ---
 
 ## 부록 B: 용어 정의

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -45,8 +46,8 @@ func GitHubWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	switch event {
 	case "pull_request":
 		handlePREvent(payload)
-	case "pull_request_review":
-		handlePRReviewEvent(payload)
+	case "pull_request_review", "pull_request_rejected", "pull_request_approved":
+		handlePRReviewEvent(payload, event)
 	case "push":
 		handlePushEvent(payload)
 	}
@@ -74,52 +75,133 @@ func handlePREvent(payload map[string]interface{}) {
 	mergeable, _ := pr["mergeable"].(bool)
 	mergeableState, _ := pr["mergeable_state"].(string)
 
+	// DB 프로젝트 알림 갱신
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	projectCode := findProjectByRepo(ctx, repoName)
+
+	// requested_reviewers 추출
+	var reviewers []string
+	if rr, ok := pr["requested_reviewers"].([]interface{}); ok {
+		for _, r := range rr {
+			if rm, ok := r.(map[string]interface{}); ok {
+				if login, ok := rm["login"].(string); ok {
+					reviewers = append(reviewers, login)
+				}
+			}
+		}
+	}
+
+	if projectCode != "" {
+		switch {
+		case action == "opened" || action == "reopened" || action == "review_requested":
+			if len(reviewers) > 0 {
+				db.UpdateProjectField(ctx, projectCode, "gitOpenPRReviewers", reviewers)
+			}
+		case state == "closed" && !merged:
+			owner := ""
+			if o, ok := repo["owner"].(map[string]interface{}); ok {
+				owner, _ = o["login"].(string)
+			}
+			prs, _ := github.ListPRs(owner, repoName, "open")
+			if prList, ok := prs.([]interface{}); ok && len(prList) == 0 {
+				db.UpdateProjectField(ctx, projectCode, "gitOpenPRReviewers", []string{})
+			}
+		case merged:
+			owner := ""
+			if o, ok := repo["owner"].(map[string]interface{}); ok {
+				owner, _ = o["login"].(string)
+			}
+			prs, _ := github.ListPRs(owner, repoName, "open")
+			if prList, ok := prs.([]interface{}); ok && len(prList) == 0 {
+				db.UpdateProjectField(ctx, projectCode, "gitOpenPRReviewers", []string{})
+			}
+		}
+	}
+
 	// SSE 브로드캐스트 — PR 상태 변경 알림
 	BroadcastDocEvent(map[string]interface{}{
 		"type":           "pr_update",
 		"action":         action,
 		"repo":           repoName,
+		"projectCode":    projectCode,
 		"prNumber":       number,
 		"title":          title,
 		"state":          state,
 		"merged":         merged,
 		"mergeable":      mergeable,
 		"mergeableState": mergeableState,
+		"reviewers":      reviewers,
 	})
 }
 
-func handlePRReviewEvent(payload map[string]interface{}) {
+func handlePRReviewEvent(payload map[string]interface{}, webhookEvent string) {
 	action, _ := payload["action"].(string)
 	review, _ := payload["review"].(map[string]interface{})
 	pr, _ := payload["pull_request"].(map[string]interface{})
 	repo, _ := payload["repository"].(map[string]interface{})
-	if review == nil || pr == nil {
+	if pr == nil {
 		return
 	}
 
 	repoName, _ := repo["name"].(string)
 	number := pr["number"]
-	reviewState, _ := review["state"].(string)
-	reviewer, _ := review["user"].(map[string]interface{})
-	reviewerLogin, _ := reviewer["login"].(string)
-	reviewBody, _ := review["body"].(string)
+	reviewState := ""
+	reviewerLogin := ""
+	reviewBody := ""
+	if review != nil {
+		reviewState, _ = review["state"].(string)
+		if reviewer, ok := review["user"].(map[string]interface{}); ok {
+			reviewerLogin, _ = reviewer["login"].(string)
+		}
+		reviewBody, _ = review["body"].(string)
+	}
+
+	// Gitea 이벤트명으로 state 보정
+	if webhookEvent == "pull_request_rejected" {
+		reviewState = "changes_requested"
+	} else if webhookEvent == "pull_request_approved" {
+		reviewState = "approved"
+	}
 
 	prURL, _ := pr["html_url"].(string)
 	prTitle, _ := pr["title"].(string)
 	prUser, _ := pr["user"].(map[string]interface{})
 	prCreator, _ := prUser["login"].(string)
 
-	log.Printf("webhook PR review: action=%s #%v reviewer=%s state=%s repo=%s", action, number, reviewerLogin, reviewState, repoName)
+	log.Printf("webhook PR review: event=%s action=%s #%v reviewer=%s state=%s repo=%s", webhookEvent, action, number, reviewerLogin, reviewState, repoName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	projectCode := findProjectByRepo(ctx, repoName)
+
+	prNum := 0
+	if n, ok := number.(float64); ok {
+		prNum = int(n)
+	}
 
 	BroadcastDocEvent(map[string]interface{}{
-		"type":     "pr_review",
-		"action":   action,
-		"repo":     repoName,
-		"prNumber": number,
-		"reviewer": reviewerLogin,
-		"state":    reviewState,
-		"body":     reviewBody,
+		"type":        "pr_review",
+		"action":      action,
+		"repo":        repoName,
+		"projectCode": projectCode,
+		"prNumber":    number,
+		"reviewer":    reviewerLogin,
+		"state":       reviewState,
+		"body":        reviewBody,
+		"prCreator":   prCreator,
 	})
+
+	// 반려 시 PR 생성자에게 알림 저장 (미접속 사용자용)
+	if reviewState == "rejected" || reviewState == "changes_requested" {
+		msg := fmt.Sprintf("[%s] PR #%d이 %s님에 의해 반려되었습니다: %s", projectCode, prNum, reviewerLogin, reviewBody)
+		db.SaveNotification(ctx, prCreator, "pr_rejected", projectCode, msg, bson.M{
+			"prNumber": prNum,
+			"prTitle":  prTitle,
+			"reviewer": reviewerLogin,
+			"body":     reviewBody,
+		})
+	}
 
 	// 승인 리뷰이고, 대기 중인 리뷰어가 없으면 머지 가능 알림
 	if reviewState == "approved" {
@@ -186,20 +268,9 @@ func UpdateBranchAlert(owner, repoName, projectCode, userID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	mainTree, err := github.GetTree(owner, repoName, "main")
-	if err != nil {
-		return
-	}
-	mainFiles := extractTreeFiles(mainTree)
-
 	branch := "docs/" + userID
-	userTree, err := github.GetTree(owner, repoName, branch)
-	if err != nil {
-		return // 브랜치 없으면 skip
-	}
-	userFiles := extractTreeFiles(userTree)
-
-	hasDiff := !filesEqual(mainFiles, userFiles)
+	// ancestor 체크: 사용자 브랜치에 main에 없는 커밋이 있는지 확인
+	hasDiff := github.HasUserCommits(owner, repoName, "main", branch)
 
 	// 현재 branchAlerts 배열 조회 후 업데이트
 	prj, _ := db.FindProjectByCode(ctx, projectCode)
@@ -262,7 +333,8 @@ func findProjectByRepo(ctx context.Context, repoName string) string {
 	return ""
 }
 
-// compareAllBranches 모든 docs/* 브랜치를 main과 비교, 차이 있는 사용자 목록 반환
+// compareAllBranches 모든 docs/* 브랜치를 main과 비교, 사용자가 실제 커밋한 경우만 반환
+// ancestor 체크: 사용자 브랜치가 main의 ancestor이면 변경 없음 (단순 뒤처짐)
 func compareAllBranches(owner, repoName, projectCode string) []string {
 	branchesRaw, err := github.ListBranches(owner, repoName)
 	if err != nil {
@@ -274,12 +346,6 @@ func compareAllBranches(owner, repoName, projectCode string) []string {
 	if !ok {
 		return nil
 	}
-
-	mainTree, err := github.GetTree(owner, repoName, "main")
-	if err != nil {
-		return nil
-	}
-	mainFiles := extractTreeFiles(mainTree)
 
 	var diffUsers []string
 	for _, b := range branches {
@@ -293,13 +359,8 @@ func compareAllBranches(owner, repoName, projectCode string) []string {
 		}
 		userID := strings.TrimPrefix(branchName, "docs/")
 
-		userTree, err := github.GetTree(owner, repoName, branchName)
-		if err != nil {
-			continue
-		}
-		userFiles := extractTreeFiles(userTree)
-
-		if !filesEqual(mainFiles, userFiles) {
+		// main...docs/user 비교: 사용자 커밋이 있으면 diff
+		if github.HasUserCommits(owner, repoName, "main", branchName) {
 			diffUsers = append(diffUsers, userID)
 		}
 	}

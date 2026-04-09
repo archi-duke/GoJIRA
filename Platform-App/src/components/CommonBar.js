@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import './CommonBar.css';
 
-export default function CommonBar({ title, onBack, onPull, pullIcon, onEditChange, options, nav, onExport, onAssist, assistLabel, assistLoading, assistIcon }) {
+export default function CommonBar({ title, onBack, onPull, pullIcon, onEditChange, options, nav, onExport, onAssist, assistLabel, assistLoading, assistIcon, projectAlert }) {
   const [editMode, setEditMode] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -46,7 +46,16 @@ export default function CommonBar({ title, onBack, onPull, pullIcon, onEditChang
 
   return (
     <div className="cb-topbar">
-      <span className="cb-title">{title}</span>
+      <span className="cb-title">{title}
+        {projectAlert && projectAlert.hasOpenPR && (
+          <img src="/icons/alert-pr.svg" alt="PR" width="16" height="16"
+            style={{verticalAlign:'middle',marginLeft:6}} />
+        )}
+        {projectAlert && projectAlert.branchDiff && (
+          <img src="/icons/alert-diff.svg" alt="Diff" width="16" height="16"
+            style={{verticalAlign:'middle',marginLeft:4}} />
+        )}
+      </span>
 
       {/* 네비게이션 */}
       {(nav || []).length > 0 && (

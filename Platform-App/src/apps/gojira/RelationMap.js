@@ -120,7 +120,7 @@ const NAV_ITEMS = [
   { key: 'satam', label: 'SATAM' },
 ];
 
-export default function RelationMap({ project, user, onBack, currentPage, onNavigate }) {
+export default function RelationMap({ project, user, onBack, currentPage, onNavigate, projectAlert }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -536,6 +536,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           onPull={handlePull}
           onEditChange={setEditMode}
           nav={nav}
+          projectAlert={projectAlert}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
             { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },

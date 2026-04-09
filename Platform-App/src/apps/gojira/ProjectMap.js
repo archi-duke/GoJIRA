@@ -3,6 +3,7 @@ import './ProjectMap.css';
 import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
 import config from '../../config';
+import { subscribe } from '../../utils/sseManager';
 
 const API_BASE = config.GOJIRA_API;
 const PLATFORM_API = config.API_BASE;
@@ -103,12 +104,10 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       .catch(() => {});
 
     // SSE 구독 — main 머지 시 실시간 알림 갱신
-    const es = new EventSource(`${PLATFORM_API}/Notice/stream`);
-    es.addEventListener('doc_update', (e) => {
+    const unsub = subscribe('doc_update', (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'project_alert' && data.branchAlerts) {
-          // 웹훅으로 갱신된 브랜치 알림 반영
           setAlerts((prev) => {
             const next = { ...prev };
             const code = data.projectCode;
@@ -116,7 +115,6 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
             if (hasDiff) {
               next[code] = { ...next[code], jiraCode: code, branchDiff: true };
             } else {
-              // 차이 해소됨
               if (next[code]) {
                 next[code] = { ...next[code], branchDiff: false };
                 if (!next[code].hasOpenPR) delete next[code];
@@ -124,21 +122,28 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
             }
             return next;
           });
-        } else if (data.type === 'pr_update') {
-          // PR 상태 변경 시 alerts 재조회
-          fetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
-            .then((res) => res.json())
-            .then((arr) => {
-              if (Array.isArray(arr)) {
-                const map = {};
-                arr.forEach((a) => { map[a.jiraCode] = a; });
-                setAlerts(map);
+        } else if (data.type === 'pr_update' && data.projectCode) {
+          const code = data.projectCode;
+          const isReviewer = (data.reviewers || []).includes(user);
+          if (['opened', 'reopened', 'review_requested'].includes(data.action) && isReviewer) {
+            setAlerts(prev => ({
+              ...prev,
+              [code]: { ...prev[code], jiraCode: code, hasOpenPR: true }
+            }));
+          } else if (data.action === 'closed') {
+            setAlerts(prev => {
+              const next = { ...prev };
+              if (next[code]) {
+                next[code] = { ...next[code], hasOpenPR: false };
+                if (!next[code].branchDiff && !next[code].hasOpenPR) delete next[code];
               }
-            }).catch(() => {});
+              return next;
+            });
+          }
         }
       } catch {}
     });
-    return () => es.close();
+    return unsub;
   }, [user]);
 
   function handleContextMenu(e, project) {
@@ -739,7 +744,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
   const cls = isCompleted ? 'completed' : isOverdue ? 'overdue' : 'active';
   const hasAlert = alert && alert.branchDiff;
   const hasPR = alert && alert.hasOpenPR;
-  const alertColor = hasPR ? '#b8860b' : hasAlert ? 'tomato' : null;
+  const alertColor = hasPR ? '#27ae60' : hasAlert ? 'tomato' : null;
 
   return (
     <g
@@ -800,7 +805,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
       {/* Project name (rendered last = on top) with white background + alert icon */}
       {(() => {
         const nameX = firstX - MILESTONE_R - 10;
-        const nameW = (project.name || '').length * 8 + 8;
+        const nameW = (project.name || '').length * 6.5;
         const iconW = alertColor ? 20 : 0;
         return (
           <>
@@ -815,10 +820,13 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
               onClick={() => onProjectClick && onProjectClick(project)}
             />
             {alertColor && (
-              <g transform={`translate(${nameX - nameW + 23}, ${y - 15}) scale(-1.3, 1.3)`}>
-                <path d="M7 1C3.1 1 0 3.6 0 6.8c0 1.8 1 3.4 2.5 4.4L1.5 13.5l3.2-1.6c.7.2 1.5.3 2.3.3 3.9 0 7-2.6 7-5.8S10.9 1 7 1z" fill={alertColor} />
-                <text x="7" y="9.5" textAnchor="middle" fontSize="7" fontWeight="bold" fill="#fff">!</text>
-              </g>
+              <image
+                href={hasPR ? '/icons/alert-pr.svg' : '/icons/alert-diff.svg'}
+                x={nameX - nameW - iconW}
+                y={y - 11}
+                width="20"
+                height="20"
+              />
             )}
             <text
               x={nameX}
