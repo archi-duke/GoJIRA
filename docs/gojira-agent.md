@@ -772,6 +772,16 @@ Agent용 max_tokens는 코드에서 2000 이상으로 자동 조정.
 - **근거:** 사용자가 변경하지 않고 단순히 뒤처진 브랜치도 diff로 판정하여 false positive 발생. ancestor 체크는 "사용자가 실제 커밋했는가"를 정확히 판별
 - **구현:** webhook의 `compareAllBranches` + alerts API 모두 ancestor 체크 방식으로 전환. Gitea API `GET /repos/{owner}/{repo}/compare/{base}...{head}` 의 `total_commits` 활용
 
+### ADR-014: 이벤트 순차 처리 — eventQueue FIFO
+- **결정:** WebSocket 이벤트를 비동기 큐(FIFO)로 순차 처리하여 경쟁 조건 방지
+- **근거:** PR 종료(pr_update)와 main 변경(project_alert)이 동시 수신 시, pr_update가 먼저 처리되어 알람을 null로 만들면 후속 project_alert의 트리 비교 결과가 씹힘
+- **구현:** `eventQueue.js` — `queue.push(async task)`, 이전 task 완료 후 다음 실행. GoJIRAApp에서 모든 WebSocket 이벤트를 큐에 넣어 처리
+
+### ADR-015: conflict-resolve — 변경 보관 + sync + 재반영 자동화
+- **결정:** PR 반려 또는 충돌 시, 사용자 변경을 보관하고 main 동기화 후 자동 재반영
+- **근거:** 수동으로 "PR 닫기 → Git Pull → 파일 재수정"하는 번거로움 해소. 반려 알림에서 OK 클릭 한 번으로 자동 처리
+- **구현:** `POST /DocRepo/{code}/conflict-resolve` — 트리 비교 → 파일 다운로드 → 브랜치 삭제/재생성 → 파일 PUT. Notification API(unread/read)로 미접속 사용자 알림 저장
+
 ---
 
 ## 부록 B: 용어 정의
@@ -786,3 +796,7 @@ Agent용 max_tokens는 코드에서 2000 이상으로 자동 조정.
 | Agent Assist | 각 메뉴 내에서 컨텍스트 기반으로 동작하는 AI 보조 기능 |
 | Session | 사용자와 Agent 간 대화 세션 (MongoDB, TTL 1시간) |
 | Protected Files | business.md, srs.md, architecture.md — 삭제/이름변경 불가 필수 파일 |
+| EventQueue | 비동기 이벤트 큐 — WebSocket 이벤트를 FIFO 순차 처리하여 경쟁 조건 방지 |
+| conflict-resolve | 변경 보관 → main 동기화 → 재반영 자동화 API |
+| mainOnly | main에 있지만 사용자 브랜치에 없는 파일 — M 뱃지(gray)로 표시, 읽기 전용 |
+| sseManager | WebSocket 기반 서버 푸시 관리자 — 창당 1개 연결, subscribe/onStatus 인터페이스 |

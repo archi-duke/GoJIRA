@@ -109,6 +109,18 @@ UI:
 | 추가    | A | 초록 |
 | 삭제    | D | 빨강 |
 
+### mainOnly 파일 표시 (main에만 존재)
+
+main에 있지만 사용자 브랜치에 없는 파일을 작업공간 탭에서 별도 표시한다.
+
+| 상태 | 뱃지 | 텍스트 | 동작 |
+| --- | --- | --- | --- |
+| main에만 있는 파일 | M (gray `#bbb`) | gray italic | 읽기 전용 미리보기 (opacity 0.4) |
+
+* mainOnly 파일은 사용자 변경이 아니므로 발행신청 변경 카운트에서 제외
+* mainOnly 파일만 존재하고 실제 변경이 없으면 발행신청 버튼 비활성화
+* 비활성화 시 안내 메시지 표시: "main에 새 파일이 추가되었습니다. Git Pull로 동기화 후 작업하세요."
+
 ### 미커밋 상태 표시 (워크스페이스 로컬 변경)
 
 | 상태 | 뱃지 | 색상 |
@@ -153,19 +165,24 @@ git fetch origin
 git rebase origin/main
 ```
 
-### 충돌 발생 시
+### 충돌 발생 시 (자동 해결 — conflict-resolve)
 
-1. `git rebase --abort` 수행
-2. 사용자에게 충돌 발생 알림
-3. 사용자의 변경 내용을 diff로 표시
-4. main 기준으로 reset 후 사용자가 변경 내용을 참고하여 재작업
+`POST /DocRepo/{code}/conflict-resolve` API로 자동 처리:
 
-```bash
-git rebase --abort
-git diff origin/main..HEAD > /tmp/changes.diff
-git reset --hard origin/main
-# 사용자에게 diff 내용을 UI에서 표시하여 재작업 유도
+1. 사용자 브랜치에서 main과 다른 파일의 내용을 보관
+2. 사용자 브랜치를 삭제하고 main HEAD에서 재생성 (sync)
+3. 보관된 파일을 새 브랜치에 재반영 (커밋)
+
 ```
+conflict-resolve 흐름:
+  1. main vs user 트리 비교 → 다른 파일 목록
+  2. 각 파일 내용 다운로드 (보관)
+  3. 브랜치 삭제 → main에서 재생성
+  4. 보관된 파일을 새 브랜치에 PUT (재반영)
+  → "N개 파일이 재반영되었습니다"
+```
+
+이 기능은 PR 반려 시 생성자가 OK하면 자동 실행되며, 수동으로도 호출 가능하다.
 
 ---
 

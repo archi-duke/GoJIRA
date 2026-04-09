@@ -42,11 +42,38 @@
    - false → 사용자 실제 변경, 알람 발생
 
    이 판정은 두 경로에서 수행한다:
-   - **초기 로드**: `GET /Project/alerts?user={userId}` API에서 서버가 판정하여 반환
-   - **실시간**: Gitea main push webhook → SSE push → 프론트엔드가 트리 비교하여 알람 갱신
+   - **초기 로드**: `GET /Project/alerts?user={userId}` API에서 서버가 트리 비교하여 반환
+   - **실시간**: Gitea main push webhook → WebSocket push → 프론트엔드가 트리 비교하여 알람 갱신
+   - **프로젝트 진입 시**: 프론트엔드가 main/user 브랜치 트리를 직접 비교하여 판정
 
 7. **PR 알림 대상 제한**
 
    PR 알림은 해당 PR의 리뷰어(Auditor)로 지정된 사용자에게만 표시한다.
    - webhook 이벤트의 `requested_reviewers` 목록 기준
    - DB에 `gitOpenPRReviewers` 배열로 저장하여 alerts API에서 필터링
+
+8. **PR 반려 시 생성자 알림**
+
+   리뷰어가 PR을 반려(CHANGES_REQUESTED)하면 PR 생성자에게 알림을 전달한다.
+   - **접속 중**: WebSocket으로 즉시 팝업 ("PR이 반려되었습니다. 재반영하시겠습니까?")
+   - **미접속**: DB(notifications 컬렉션)에 저장, 다음 접속 시 팝업 표시
+   - 생성자가 확인(OK) 시: `conflict-resolve` API로 변경 보관 → main 동기화 → 재반영 자동 수행
+
+   관련 API:
+   - `GET /Notification/unread?user={userId}` — 미읽은 알림 조회
+   - `POST /Notification/read?user={userId}` — 알림 읽음 처리
+   - `POST /DocRepo/{code}/conflict-resolve` — 변경 보관 + sync + 재반영
+
+9. **이벤트 순차 처리 (EventQueue)**
+
+   다중 WebSocket 이벤트(PR 종료 + main 변경 등)가 동시에 수신될 때 경쟁 조건을 방지한다.
+   - 비동기 이벤트 큐(FIFO)로 순차 처리: 이전 작업 완료 후 다음 작업 실행
+   - 예: pr_update(hasOpenPR 해제) → project_alert(트리 비교) 순서 보장
+   - 구현: `eventQueue.js` — `queue.push(async task)` 인터페이스
+
+10. **WebSocket 연결 상태 표시**
+
+    사용자 ID 왼쪽에 연결 상태 인디케이터를 표시한다.
+    - 녹색 원 (`#27ae60`): WebSocket 연결됨
+    - 회색 원 (`#aaa`): WebSocket 연결 끊김
+    - 자동 재연결: 연결 끊김 시 3초 후 재연결 시도
