@@ -284,42 +284,118 @@
 
 ## 4. 최종 목표 아키텍처: 멀티 에이전트 시스템
 
-### 4.1 전체 구조
+### 4.1 서비스 분리 구조
+
+Agent는 **Python 독립 서비스**로 구현한다. 기존 Go API 서버는 데이터 API로 유지하고, 에이전트 레이어만 분리하여 **다른 프로젝트에서도 재사용** 가능하게 한다.
+
+#### 언어 선택 근거: Python
+
+| 항목 | Go (현재) | Python (전환) |
+|------|----------|--------------|
+| LLM 생태계 | 라이브러리 빈약 | LangChain, CrewAI, AutoGen 풍부 |
+| 멀티에이전트 프레임워크 | 없음 (직접 구현) | 검증된 프레임워크 다수 |
+| 코드 분석 도구 | AST 파싱 제한적 | ast, tree-sitter, jedi 풍부 |
+| 프로토타이핑 속도 | 느림 | 빠름 |
+| 재사용성 | GoJIRA API 종속 | API 래퍼만 교체하면 이식 가능 |
+| 배포 | 단일 바이너리 | 컨테이너 (Docker) |
+
+#### 서비스 구성도
+
+```
+┌──────────────────┐
+│  Frontend        │
+│  (React, :3000)  │
+└────────┬─────────┘
+         │
+         ├─────────────────────────────────────────────────┐
+         │                                                  │
+         ▼                                                  ▼
+┌──────────────────┐                            ┌──────────────────┐
+│  GoJIRA-API      │◀── REST ──────────────────│  Agent Service   │
+│  (Go, :9001)     │                            │  (Python, :9002) │
+│                  │                            │                  │
+│  - Issue CRUD    │                            │  Orchestrator    │
+│  - Project CRUD  │                            │  ├─ REQ Agent    │
+│  - 기존 API 유지 │                            │  ├─ DSN Agent    │
+│                  │                            │  ├─ EVL Agent    │
+└──────┬───────────┘                            │  ├─ CDA Agent    │
+       │                                        │  └─ TST Agent    │
+       │                                        │                  │
+       ▼                                        │  Job State Mgr   │
+┌──────────────────┐                            │  Skill Registry  │
+│  Platform-API    │◀── REST ──────────────────│  Validator       │
+│  (Go, :9000)     │                            │  Logger          │
+│                  │                            └──────────────────┘
+│  - DocRepo       │                                    │
+│  - WebSocket     │                                    ▼
+│  - Webhook       │                            ┌──────────────────┐
+│  - Account       │                            │  MongoDB         │
+└──────────────────┘                            │  - agent_jobs    │
+                                                │  - agent_logs    │
+                                                └──────────────────┘
+```
+
+#### 마이그레이션 전략
+
+현재 GoJIRA-API에 있는 에이전트 관련 코드를 Python 서비스로 이전:
+
+| 현재 (Go) | 전환 후 (Python) | 비고 |
+|-----------|-----------------|------|
+| `handlers/agent.go` agentLoop | Agent Service Orchestrator | 핵심 루프 |
+| `handlers/agent_assist.go` | Agent Service Assist API | 페이지별 보조 |
+| `skills/*.go` executor | Python Skill Registry + API 래퍼 | 스킬 실행 |
+| `skills/*/SKILL.md` | 그대로 사용 (파싱만 Python) | 스킬 정의 |
+| `prompts/agent-system.txt` | Python prompts/ 디렉토리 | 프롬프트 |
+| `db/agent_session.go` | Python Agent Service DB | 세션 관리 |
+
+GoJIRA-API의 `/Agent/*` 라우트는 Python 서비스로 **프록시**하거나, 프론트엔드가 직접 Python 서비스(:9002)를 호출.
+
+#### 다른 프로젝트 재사용 시
+
+```
+Agent Service (Python) — 공통 코어
+  ├─ Orchestrator, Agents, Job State, Validator — 그대로
+  ├─ Skill Registry — 그대로
+  └─ API Wrapper (교체 대상)
+       ├─ GoJIRA용: GoJIRA-API + Platform-API 호출
+       ├─ Jira Cloud용: Jira REST API 호출
+       └─ Azure DevOps용: Azure API 호출
+```
+
+### 4.2 에이전트 구성도
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        사용자 (Web / CLI)                        │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-┌────────────────────────────▼────────────────────────────────────┐
-│              Orchestration Agent (오케스트레이션)                 │
+│              Agent Service (Python, :9002)                        │
 │                                                                   │
-│  - 사용자 인터페이스 (대화, 명령 수신)                            │
-│  - 작업 분석 → 실행 계획 수립                                     │
-│  - 하위 에이전트 할당 및 조율                                      │
-│  - 상태 관리 (Job State Machine)                                  │
-│  - 승인 게이트 / 사람 개입 관리                                    │
-│  - 최종 결과 취합 및 보고                                         │
-│                                                                   │
-│  ┌──────────┬──────────┬──────────┬──────────┬──────────┐       │
-│  │          │          │          │          │          │       │
-│  ▼          ▼          ▼          ▼          ▼          │       │
-│                                                                   │
-│  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐              │       │
-│  │ REQ │ │ DSN │ │ EVL │ │ CDA │ │ TST │              │       │
-│  │Agent│ │Agent│ │Agent│ │Agent│ │Agent│              │       │
-│  └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘              │       │
-│     │       │       │       │       │                   │       │
-└─────┼───────┼───────┼───────┼───────┼───────────────────┘       │
-      │       │       │       │       │                            │
-      ▼       ▼       ▼       ▼       ▼                            │
-┌─────────────────────────────────────────────────────────────────┐
-│  공유 인프라                                                      │
-│  - Job State Store (MongoDB)                                     │
-│  - Skill Registry (SKILL.md)                                     │
-│  - Tool Executor (GoJIRA API, Gitea, JIRA)                      │
-│  - 로그/평가 시스템                                               │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Orchestration Agent                                      │    │
+│  │  - 사용자 인터페이스 (대화, 명령 수신)                     │    │
+│  │  - 작업 분석 → 실행 계획 수립                              │    │
+│  │  - 하위 에이전트 할당 및 조율                               │    │
+│  │  - 상태 관리 (Job State Machine)                           │    │
+│  │  - 승인 게이트 / 사람 개입 관리                             │    │
+│  │  - 최종 결과 취합 및 보고                                  │    │
+│  └───────┬──────┬──────┬──────┬──────┬─────────────────────┘    │
+│          │      │      │      │      │                           │
+│          ▼      ▼      ▼      ▼      ▼                           │
+│       ┌─────┐┌─────┐┌─────┐┌─────┐┌─────┐                     │
+│       │ REQ ││ DSN ││ EVL ││ CDA ││ TST │                     │
+│       │Agent││Agent││Agent││Agent││Agent│                     │
+│       └──┬──┘└──┬──┘└──┬──┘└──┬──┘└──┬──┘                     │
+│          │      │      │      │      │                           │
+│  ┌───────┴──────┴──────┴──────┴──────┴─────────────────────┐    │
+│  │  공유 인프라                                               │    │
+│  │  - Job State Store (MongoDB agent_jobs)                    │    │
+│  │  - Skill Registry (SKILL.md 파싱 + API Wrapper)           │    │
+│  │  - Validator (코드 검증 + LLM 검증)                        │    │
+│  │  - Logger (단계별 로그 + 평가 지표)                         │    │
+│  └────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
+         │                    │
+         ▼                    ▼
+  GoJIRA-API (:9001)   Platform-API (:9000)
+  (데이터 API)          (문서/WebSocket)
 ```
 
 ### 4.2 에이전트 정의
@@ -477,39 +553,96 @@
 
 ## 5. 단계별 진행 계획
 
-### Phase 1: 기반 구축 — 단일 오케스트레이터 강화
+### Phase 1: 기반 구축 — Python Agent Service + 단일 오케스트레이터
 
-> 현재 ReACT 루프 위에 상태관리/검증/복구를 올려 안정화
+> Python 서비스 신규 생성 + 기존 Go agentLoop를 Python으로 이전 + 상태관리/검증/복구
 
 | 항목 | 내용 |
 |------|------|
-| **목표** | 단일 에이전트의 복잡 작업 안정성 확보 |
-| **기간** | 2~3주 |
-| **산출물** | jobState 스키마, 오케스트레이터 코드, 검증기 |
+| **목표** | Python Agent Service 런칭 + 단일 에이전트 복잡 작업 안정성 확보 |
+| **기간** | 3~4주 |
+| **산출물** | Python 서비스, jobState, 오케스트레이터, 검증기, API 래퍼 |
 
 **작업:**
-1. Job State Store 구현 (MongoDB `agent_jobs` 컬렉션)
+1. **Python 프로젝트 초기 구성** (`Agent-Service/`)
+   - FastAPI 기반 REST 서버 (:9002)
+   - MongoDB 연결 (pymongo)
+   - LLM 호출 모듈 (OpenAI SDK)
+   - Docker 컨테이너 설정
+2. **기존 Go 에이전트 기능 이전**
+   - `agentLoop` → Python Orchestrator
+   - `skills/executor.go` → Python Skill Registry + API Wrapper
+   - `SKILL.md` 파싱 → Python YAML 파서
+   - `prompts/agent-system.txt` → Python prompts/
+   - GoJIRA-API `/Agent/*` → 프록시 또는 프론트 직접 호출
+3. **API Wrapper 구현** (GoJIRA-API + Platform-API 호출)
+   - `GoJIRAClient`: issue, project, doc 조회/생성/수정/삭제
+   - `PlatformClient`: docrepo, pr, file, sync-branch
+   - 재사용 시 이 래퍼만 교체
+4. **Job State Store** (MongoDB `agent_jobs`)
    - jobId, stage, inputs, artifacts, toolResults, nextAction
-2. 코드 기반 오케스트레이터 (상태 머신)
-   - 단계 정의, 전이 조건, entry/exit condition
-3. 단계별 검증기
-   - 코드 검증 (스키마, 필수값)
+5. **코드 기반 오케스트레이터** (상태 머신)
+   - Stage 정의, 전이 조건, entry/exit condition
+6. **단계별 검증기**
+   - Pydantic 스키마 검증 (코드)
    - LLM 검증 (타당성, 누락)
-4. 역할별 프롬프트 템플릿
+7. **역할별 프롬프트 템플릿** (Jinja2)
    - Planner, Researcher, Author, Reviewer, Registrar 모드
-5. 실패 복구 경로
+8. **실패 복구 경로**
    - 재시도, 롤백, 회귀 로직
 
+**Python 프로젝트 구조:**
+```
+Agent-Service/
+  ├─ main.py                  # FastAPI 앱
+  ├─ config.py                # 환경 설정
+  ├─ requirements.txt
+  ├─ Dockerfile
+  ├─ agents/
+  │   ├─ orchestrator.py      # 오케스트레이터 (상태 머신)
+  │   ├─ base.py              # 에이전트 기본 클래스
+  │   └─ roles/               # 역할별 모드 (Phase 1)
+  │       ├─ planner.py
+  │       ├─ researcher.py
+  │       ├─ author.py
+  │       ├─ reviewer.py
+  │       └─ registrar.py
+  ├─ skills/
+  │   ├─ registry.py          # 스킬 레지스트리
+  │   ├─ loader.py            # SKILL.md 파서
+  │   └─ executors/           # 스킬 실행기
+  │       ├─ issue.py
+  │       ├─ doc.py
+  │       ├─ project.py
+  │       └─ pr.py
+  ├─ clients/
+  │   ├─ gojira_api.py        # GoJIRA-API 래퍼 (교체 가능)
+  │   └─ platform_api.py      # Platform-API 래퍼 (교체 가능)
+  ├─ state/
+  │   ├─ job_store.py         # Job State CRUD
+  │   └─ models.py            # Pydantic 모델
+  ├─ validators/
+  │   ├─ schema.py            # 코드 검증 (Pydantic)
+  │   └─ llm.py               # LLM 검증
+  ├─ prompts/
+  │   ├─ system.txt
+  │   └─ roles/               # 역할별 프롬프트 (Jinja2)
+  └─ logs/
+      └─ logger.py            # 단계별 로그
+```
+
 **Phase 1 완료 기준:**
+- Python Agent Service가 기존 Go agentLoop과 동일 기능 수행
 - "설계서 작성해줘" 5단계 파이프라인이 중단 없이 완주
 - 중간 끊김 후 재시작 가능
 - 실패 시 이전 단계로 복구
+- 프론트엔드에서 Python 서비스(:9002) 직접 호출 동작 확인
 
 ---
 
 ### Phase 2: 에이전트 분리 — Requirement + Design
 
-> 단일 에이전트를 역할별로 분리 시작
+> 역할별 모드를 독립 에이전트 클래스로 분리
 
 | 항목 | 내용 |
 |------|------|
@@ -517,10 +650,19 @@
 | **기간** | 2~3주 |
 | **산출물** | REQ Agent, DSN Agent, 에이전트 간 메시지 프로토콜 |
 
+**Python 구조 추가:**
+```
+Agent-Service/
+  └─ agents/
+      ├─ req_agent.py         # Requirement Agent (BaseAgent 상속)
+      ├─ dsn_agent.py         # Design Agent (BaseAgent 상속)
+      └─ base.py              # run(), plan(), validate() 인터페이스
+```
+
 **작업:**
-1. 에이전트 프로토콜 정의
-   - 요청 형식: `{agent, task, inputs, jobContext}`
-   - 응답 형식: `{status, artifacts, errors, nextSuggestion}`
+1. 에이전트 프로토콜 정의 (Pydantic 모델)
+   - 요청: `AgentRequest(agent, task, inputs, jobContext)`
+   - 응답: `AgentResponse(status, artifacts, errors, nextSuggestion)`
 2. Requirement Agent 분리
    - 전용 프롬프트 + 도구 세트 (issue_query, issue_create 등)
    - 요구사항 구조화 출력 스키마
@@ -563,6 +705,19 @@
    - 교차 비교 → 준수율 리포트 (EVL Agent)
 4. 병렬 실행 패턴
    - REQ + CDA 동시 수행 → DSN에 합류
+
+**Python 구조 추가:**
+```
+Agent-Service/
+  ├─ agents/
+  │   ├─ evl_agent.py         # Evaluation Agent
+  │   └─ cda_agent.py         # Code Analysis Agent
+  ├─ skills/executors/
+  │   ├─ eval.py              # eval_quality, eval_trace, eval_compliance
+  │   └─ code_analysis.py     # code_structure, code_dependencies, code_patterns
+  └─ clients/
+      └─ gitea_api.py         # Gitea 코드 저장소 직접 접근 (tree/blob API)
+```
 
 **Phase 3 완료 기준:**
 - REQ + CDA 병렬 → DSN → EVL 파이프라인 실행
@@ -627,14 +782,14 @@
 
 ## 6. 진행 상태 요약
 
-| Phase | 내용 | 상태 |
-|-------|------|------|
-| 현재 | ReACT 단일 루프 + 14 Skills | **완료** |
-| Phase 1 | 상태관리 + 검증 + 복구 (단일 강화) | 미착수 |
-| Phase 2 | REQ + DSN 에이전트 분리 | 미착수 |
-| Phase 3 | EVL + CDA 에이전트 추가 | 미착수 |
-| Phase 4 | TST + 전체 통합 | 미착수 |
-| Phase 5 | 자율 개선 + 외부 확장 | 미착수 |
+| Phase | 내용 | 언어 | 상태 |
+|-------|------|------|------|
+| 현재 | ReACT 단일 루프 + 14 Skills | Go | **완료** |
+| Phase 1 | Python 서비스 + 오케스트레이터 + 상태관리 | Python | 미착수 |
+| Phase 2 | REQ + DSN 에이전트 분리 | Python | 미착수 |
+| Phase 3 | EVL + CDA 에이전트 추가 | Python | 미착수 |
+| Phase 4 | TST + 전체 통합 | Python | 미착수 |
+| Phase 5 | 자율 개선 + 외부 확장 | Python | 미착수 |
 
 ---
 
@@ -801,39 +956,35 @@ Step 3 — Evaluation Agent
 
 #### 8.2.2 오케스트레이터 (상태 머신)
 
-**파일: `GoJIRA-API/agent/orchestrator.go`**
+**파일: `Agent-Service/agents/orchestrator.py`**
 
-```go
-type Stage struct {
-    ID          string
-    Role        string  // planner|researcher|author|reviewer|registrar
-    EntryCheck  func(job *Job) error
-    Execute     func(ctx context.Context, job *Job) (*StageResult, error)
-    ExitCheck   func(result *StageResult) error
-    OnFailure   string  // 실패 시 이동할 stage ID ("" = 재시도)
-    MaxRetries  int
-}
+```python
+class Stage:
+    id: str
+    role: str  # planner|researcher|author|reviewer|registrar
+    entry_check: Callable  # 진입 조건 검증
+    execute: Callable       # 실행 (역할별 프롬프트 + 도구)
+    exit_check: Callable    # 탈출 조건 검증
+    on_failure: str         # 실패 시 이동할 stage ID
+    max_retries: int = 2
 
-type Orchestrator struct {
-    Stages    []Stage
-    JobStore  *db.JobStore
-}
+class Orchestrator:
+    stages: list[Stage]
+    job_store: JobStore
 
-func (o *Orchestrator) Run(ctx context.Context, job *Job) error {
-    for job.CurrentStageIdx < len(o.Stages) {
-        stage := o.Stages[job.CurrentStageIdx]
-        // entry check
-        // execute (역할별 프롬프트 + 도구)
-        // exit check
-        // 성공 → 다음 단계 / 실패 → 재시도 or 회귀
-        // jobState 저장
-    }
-}
+    async def run(self, job: Job) -> JobResult:
+        while job.current_stage_idx < len(self.stages):
+            stage = self.stages[job.current_stage_idx]
+            # entry check
+            # execute (역할별 프롬프트 + 도구)
+            # exit check
+            # 성공 → 다음 단계 / 실패 → 재시도 or 회귀
+            # jobState 저장
 ```
 
 #### 8.2.3 역할별 프롬프트 템플릿
 
-**디렉토리: `GoJIRA-API/prompts/roles/`**
+**디렉토리: `Agent-Service/prompts/roles/`**
 
 | 파일 | 역할 | 핵심 지시 |
 |------|------|----------|
@@ -845,15 +996,17 @@ func (o *Orchestrator) Run(ctx context.Context, job *Job) error {
 
 #### 8.2.4 검증기
 
-**파일: `GoJIRA-API/agent/validator.go`**
+**파일: `Agent-Service/validators/schema.py` + `Agent-Service/validators/llm.py`**
 
-```go
-// 코드 검증
-func ValidateSchema(result *StageResult, schema JSONSchema) error
-func ValidateRequiredFields(result *StageResult, fields []string) error
+```python
+# 코드 검증 (Pydantic)
+class StageResultValidator:
+    def validate_schema(self, result: StageResult, model: BaseModel) -> None: ...
+    def validate_required(self, result: StageResult, fields: list[str]) -> None: ...
 
-// LLM 검증
-func ValidateWithLLM(ctx context.Context, result *StageResult, criteria string) (*ValidationResult, error)
+# LLM 검증
+class LLMValidator:
+    async def validate(self, result: StageResult, criteria: str) -> ValidationResult: ...
 ```
 
 #### 8.2.5 추가 스킬 (Phase 1)
