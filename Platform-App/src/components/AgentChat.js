@@ -5,6 +5,8 @@ import config from '../config';
 import './AgentChat.css';
 
 const API = config.GOJIRA_API || config.API_BASE;
+// Python Agent Service 스트리밍 엔드포인트
+const STREAM_API = config.AGENT_API || API;
 
 export default function AgentChat({ user, context, onClose }) {
   const [messages, setMessages] = useState([]);
@@ -14,14 +16,15 @@ export default function AgentChat({ user, context, onClose }) {
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [scratchpad, setScratchpad] = useState([]);
+  const [scratchOpen, setScratchOpen] = useState(true);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, scratchpad]);
 
-  // 세션 ID가 있으면 이전 대화 복원
   const loadSession = useCallback(async (sid) => {
     if (!sid) return;
     try {
@@ -38,7 +41,6 @@ export default function AgentChat({ user, context, onClose }) {
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
       } else {
-        // 세션 만료됨
         setSessionId(null);
         sessionStorage.removeItem('agent_sessionId');
       }
@@ -62,24 +64,97 @@ export default function AgentChat({ user, context, onClose }) {
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setLoading(true);
+    setScratchpad([]);
+    setScratchOpen(true);
+
+    let contentBuf = '';
+    let finalActions = [];
+
+    function handleSSE(type, data) {
+      const ts = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      switch (type) {
+        case 'session':
+          if (data.sessionId) {
+            setSessionId(data.sessionId);
+            sessionStorage.setItem('agent_sessionId', data.sessionId);
+          }
+          break;
+        case 'thinking':
+          setScratchpad(prev => [...prev, { type: 'thinking', data, ts }]);
+          break;
+        case 'tool_call':
+          setScratchpad(prev => [...prev, { type: 'tool_call', data, ts }]);
+          break;
+        case 'tool_result':
+          setScratchpad(prev => [...prev, { type: 'tool_result', data, ts }]);
+          break;
+        case 'content':
+          contentBuf += data.text;
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last && last._streaming) {
+              return [...prev.slice(0, -1), { ...last, content: contentBuf }];
+            }
+            return [...prev, { role: 'assistant', content: contentBuf, _streaming: true }];
+          });
+          break;
+        case 'done':
+          finalActions = data.actions || [];
+          setMessages(prev => {
+            const filtered = prev.filter(m => !m._streaming);
+            return [...filtered, {
+              role: 'assistant',
+              content: data.reply || contentBuf,
+              actions: finalActions,
+            }];
+          });
+          setScratchpad(prev => [...prev, { type: 'done', data: { message: '완료' }, ts }]);
+          break;
+        case 'error':
+          setScratchpad(prev => [...prev, { type: 'error', data, ts }]);
+          break;
+        default: break;
+      }
+    }
+
     try {
-      const res = await fetch(`${API}/Agent/chat`, {
+      const res = await fetch(`${STREAM_API}/Agent/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
         body: JSON.stringify({ sessionId, message: text, context }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        if (data.sessionId) {
-          setSessionId(data.sessionId);
-          sessionStorage.setItem('agent_sessionId', data.sessionId);
+
+      if (!res.ok || !res.body) {
+        // fallback: 기존 방식
+        const fb = await fetch(`${API}/Agent/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
+          body: JSON.stringify({ sessionId, message: text, context }),
+        });
+        const data = await fb.json();
+        if (data.sessionId) { setSessionId(data.sessionId); sessionStorage.setItem('agent_sessionId', data.sessionId); }
+        setMessages(prev => [...prev, { role: 'assistant', content: data.reply, actions: data.actions, suggestions: data.suggestions }]);
+        setLoading(false);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        let eventType = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) { eventType = line.slice(7).trim(); }
+          else if (line.startsWith('data: ') && eventType) {
+            try { handleSSE(eventType, JSON.parse(line.slice(6))); } catch {}
+            eventType = '';
+          }
         }
-        setMessages(prev => [...prev, {
-          role: 'assistant', content: data.reply,
-          actions: data.actions, suggestions: data.suggestions,
-        }]);
-      } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: `오류: ${data.error || res.statusText}` }]);
       }
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `연결 오류: ${err.message}` }]);
@@ -88,8 +163,7 @@ export default function AgentChat({ user, context, onClose }) {
   }
 
   function handleNewChat() {
-    setSessionId(null);
-    setMessages([]);
+    setSessionId(null); setMessages([]); setScratchpad([]);
     sessionStorage.removeItem('agent_sessionId');
     setShowHistory(false);
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -98,37 +172,56 @@ export default function AgentChat({ user, context, onClose }) {
   async function loadSessions(query) {
     const q = query ? `?q=${encodeURIComponent(query)}` : '';
     try {
-      const res = await fetch(`${API}/Agent/sessions${q}`, {
-        headers: { 'X-User-Id': user || '' },
-      });
+      const res = await fetch(`${API}/Agent/sessions${q}`, { headers: { 'X-User-Id': user || '' } });
       if (res.ok) setSessions(await res.json());
     } catch {}
   }
 
-  function handleShowHistory() {
-    setShowHistory(true);
-    setSearchQuery('');
-    loadSessions();
-  }
+  function handleShowHistory() { setShowHistory(true); setSearchQuery(''); loadSessions(); }
+  function handleSelectSession(sid) { setShowHistory(false); setScratchpad([]); loadSession(sid); }
+  function handleSearch(e) { const q = e.target.value; setSearchQuery(q); loadSessions(q); }
+  function handleKeyDown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }
+  function handleSuggestion(text) { setInput(text); setTimeout(() => inputRef.current?.focus(), 0); }
 
-  function handleSelectSession(sid) {
-    setShowHistory(false);
-    loadSession(sid);
-  }
-
-  function handleSearch(e) {
-    const q = e.target.value;
-    setSearchQuery(q);
-    loadSessions(q);
-  }
-
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  }
-
-  function handleSuggestion(text) {
-    setInput(text);
-    setTimeout(() => inputRef.current?.focus(), 0);
+  function renderScratchpad() {
+    if (scratchpad.length === 0 && !loading) return null;
+    return (
+      <div className="ac-scratch">
+        <div className="ac-scratch-header" onClick={() => setScratchOpen(!scratchOpen)}>
+          <span className="ac-scratch-arrow">{scratchOpen ? '\u25BC' : '\u25B6'}</span>
+          <span className="ac-scratch-title">Agent 동작 과정</span>
+          <span className="ac-scratch-count">{scratchpad.length}</span>
+        </div>
+        {scratchOpen && (
+          <div className="ac-scratch-body">
+            {scratchpad.map((item, i) => (
+              <div key={i} className={`ac-scratch-item ac-si-${item.type}`}>
+                <span className="ac-scratch-ts">{item.ts}</span>
+                {item.type === 'thinking' && <span className="ac-si-text">{item.data.message}</span>}
+                {item.type === 'tool_call' && (
+                  <span className="ac-si-text">
+                    <strong>{item.data.tool}</strong>
+                    <span className="ac-si-params">({Object.entries(item.data.params || {}).map(([k,v]) => `${k}=${v}`).join(', ')})</span>
+                  </span>
+                )}
+                {item.type === 'tool_result' && (
+                  <span className="ac-si-text">
+                    <span className={item.data.status === 'success' ? 'ac-si-ok' : 'ac-si-err'}>{item.data.status === 'success' ? 'OK' : 'ERR'}</span>
+                    {' '}{item.data.tool} &rarr; {item.data.summary}
+                    <span className="ac-si-dur">{item.data.duration_ms}ms</span>
+                  </span>
+                )}
+                {item.type === 'done' && <span className="ac-si-text ac-si-done">{item.data.message}</span>}
+                {item.type === 'error' && <span className="ac-si-text ac-si-err">{item.data.message}</span>}
+              </div>
+            ))}
+            {loading && scratchpad.length === 0 && (
+              <div className="ac-scratch-item ac-si-thinking"><span className="ac-si-text">처리 시작...</span></div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -157,8 +250,8 @@ export default function AgentChat({ user, context, onClose }) {
               {sessions.length === 0 ? (
                 <div className="ac-empty">대화 이력이 없습니다</div>
               ) : sessions.map(s => (
-                <div key={s.id} className={`ac-session-item ${s.id === sessionId ? 'ac-session-active' : ''}`}
-                  onClick={() => handleSelectSession(s.id)}>
+                <div key={s.sessionId || s.id} className={`ac-session-item ${(s.sessionId || s.id) === sessionId ? 'ac-session-active' : ''}`}
+                  onClick={() => handleSelectSession(s.sessionId || s.id)}>
                   <div className="ac-session-title">{s.title}</div>
                   <div className="ac-session-date">{s.updatedAt}</div>
                 </div>
@@ -168,7 +261,7 @@ export default function AgentChat({ user, context, onClose }) {
         ) : (
           <>
             <div className="ac-messages">
-              {messages.length === 0 && (
+              {messages.length === 0 && !loading && (
                 <div className="ac-welcome">
                   <p>안녕하세요! GoJIRA Agent입니다.</p>
                   <p>프로젝트 관리, 이슈 조회, 문서 분석 등을 도와드립니다.</p>
@@ -193,7 +286,7 @@ export default function AgentChat({ user, context, onClose }) {
                       {msg.actions.map((a, j) => (
                         <div key={j} className="ac-action-card">
                           <span className="ac-action-skill">{a.skill}</span>
-                          <span className="ac-action-status">완료</span>
+                          <span className="ac-action-status">{a.error ? '실패' : '완료'}</span>
                         </div>
                       ))}
                     </div>
@@ -207,13 +300,14 @@ export default function AgentChat({ user, context, onClose }) {
                   )}
                 </div>
               ))}
-              {loading && (
+              {loading && !messages.some(m => m._streaming) && (
                 <div className="ac-msg ac-msg-assistant">
                   <div className="ac-msg-content ac-typing">생각하는 중...</div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
+            {renderScratchpad()}
             <div className="ac-input-area">
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}

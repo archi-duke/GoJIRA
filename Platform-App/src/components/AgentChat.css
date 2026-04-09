@@ -54,3 +54,25 @@
 .ac-session-title { font-size: 13px; color: #2c3e50; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ac-session-date { font-size: 11px; color: #999; margin-top: 3px; }
 .ac-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 13px; }
+
+/* Scratchpad */
+.ac-scratch { border-top: 1px solid #e0e0e0; background: #fafafa; max-height: 200px; display: flex; flex-direction: column; flex-shrink: 0; }
+.ac-scratch-header { display: flex; align-items: center; gap: 6px; padding: 6px 16px; cursor: pointer; user-select: none; font-size: 12px; color: #666; background: #f0f0f0; }
+.ac-scratch-header:hover { background: #e8e8e8; }
+.ac-scratch-arrow { font-size: 9px; width: 12px; }
+.ac-scratch-title { font-weight: 600; flex: 1; }
+.ac-scratch-count { background: #2c3e50; color: #fff; border-radius: 8px; padding: 1px 6px; font-size: 10px; min-width: 16px; text-align: center; }
+.ac-scratch-body { overflow-y: auto; padding: 4px 12px 6px; flex: 1; }
+.ac-scratch-item { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 11px; line-height: 1.5; font-family: 'SF Mono', 'Menlo', monospace; }
+.ac-scratch-ts { color: #aaa; font-size: 10px; flex-shrink: 0; }
+.ac-si-text { color: #555; }
+.ac-si-text strong { color: #2c3e50; }
+.ac-si-params { color: #888; font-size: 10px; }
+.ac-si-dur { color: #999; font-size: 10px; margin-left: 4px; }
+.ac-si-ok { color: #27ae60; font-weight: 600; font-size: 10px; }
+.ac-si-err { color: #e74c3c; font-weight: 600; font-size: 10px; }
+.ac-si-done { color: #27ae60; }
+.ac-si-thinking .ac-si-text { color: #888; font-style: italic; }
+.ac-si-tool_call { border-left: 2px solid #3498db; padding-left: 6px; }
+.ac-si-tool_result { border-left: 2px solid #27ae60; padding-left: 6px; }
+.ac-si-error { border-left: 2px solid #e74c3c; padding-left: 6px; }

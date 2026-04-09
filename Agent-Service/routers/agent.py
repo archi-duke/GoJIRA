@@ -6,12 +6,14 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Dict
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Request
+from fastapi.responses import StreamingResponse
 
 from core.models import ChatRequest, ChatResponse, AssistRequest, AssistResponse
 from core.database import agent_sessions
 from skills.registry import get_registry
 from agents.orchestrator import agent_loop, staged_orchestrate, classify_intent
+from agents.streaming import agent_loop_stream
 
 log = logging.getLogger("agent.router")
 
@@ -102,6 +104,74 @@ async def chat(req: ChatRequest, x_user_id: str = Header(default="anonymous")):
     )
 
     return ChatResponse(sessionId=session_id, reply=reply, actions=actions, suggestions=[])
+
+
+@router.post("/chat/stream")
+async def chat_stream(req: ChatRequest, x_user_id: str = Header(default="anonymous")):
+    """스트리밍 채팅 — SSE로 진행 과정 실시간 전송."""
+    session_id = req.session_id or str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+
+    session = agent_sessions().find_one({"_id": session_id})
+    if not session:
+        session = {
+            "_id": session_id,
+            "userId": x_user_id,
+            "messages": [],
+            "context": req.context,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        agent_sessions().insert_one(session)
+
+    user_msg = {"role": "user", "content": req.message, "timestamp": now}
+    agent_sessions().update_one(
+        {"_id": session_id},
+        {"$push": {"messages": user_msg}, "$set": {"updatedAt": now}},
+    )
+    session["messages"].append(user_msg)
+    messages = _build_messages(session)
+
+    import json as _json
+
+    async def event_generator():
+        # 세션 ID 전송
+        yield f"event: session\ndata: {_json.dumps({'sessionId': session_id})}\n\n"
+
+        full_reply = ""
+        all_actions = []
+
+        async for chunk in agent_loop_stream(messages, x_user_id):
+            yield chunk
+            # done 이벤트에서 최종 결과 캡처
+            if chunk.startswith("event: done"):
+                data_line = chunk.split("data: ", 1)[1].split("\n")[0]
+                done_data = _json.loads(data_line)
+                full_reply = done_data.get("reply", "")
+                all_actions = done_data.get("actions", [])
+
+        # assistant 메시지 DB 저장
+        if full_reply:
+            agent_sessions().update_one(
+                {"_id": session_id},
+                {
+                    "$push": {"messages": {
+                        "role": "assistant",
+                        "content": full_reply,
+                        "timestamp": datetime.now(timezone.utc),
+                    }},
+                    "$set": {"updatedAt": datetime.now(timezone.utc)},
+                },
+            )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/assist", response_model=AssistResponse)
