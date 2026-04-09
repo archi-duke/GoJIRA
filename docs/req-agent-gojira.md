@@ -701,3 +701,321 @@ Step 3 — Evaluation Agent
     - 구조 위반: [ServiceA → DB 직접 접근 (설계: Repository 패턴)]
     - 개선 제안: [...]
 ```
+
+---
+
+## 8. 상세 구현 계획
+
+### 8.1 현재 자산 현황
+
+**기존 인프라:**
+- GoJIRA-API (9001): Agent 서버 + 이슈/프로젝트 관리
+- Platform-API (9000): 문서 저장소 + WebSocket + Webhook
+- MongoDB: 세션, 프로젝트, 이슈, 알림 저장
+- gojira-cli: 14개 서브커맨드
+
+**기존 스킬 (14개):**
+
+| 분류 | 스킬 | API |
+|------|------|-----|
+| 프로젝트 | project_query | MongoDB 직접 |
+| 이슈 조회 | issue_query | MongoDB 직접 |
+| 이슈 생성 | issue_create | MongoDB 직접 |
+| 이슈 수정 | issue_update | MongoDB 직접 |
+| 이슈 삭제 | issue_delete | MongoDB 직접 |
+| 이슈 관계 | issue_link | MongoDB 직접 |
+| 문서 목록 | doc_list | Platform-API /DocRepo/{code}/tree |
+| 문서 요약 | doc_summarize | Platform-API /DocRepo/{code}/file + LLM |
+| 문서 비교 | doc_diff | Platform-API /DocRepo/{code}/file × 2 + LLM |
+| PR 목록 | pr_list | Platform-API /DocRepo/{code}/prs |
+| PR 생성 | pr_create | Platform-API /DocRepo/{code}/pr |
+| 일정 분석 | schedule_analyze | MongoDB 이슈 통계 + LLM |
+| SATAM 분석 | satam_analyze | MongoDB QA/ADSN 이슈 + LLM |
+| 이슈 분석 | issue_analyze | MongoDB contain 체인 + LLM |
+
+**미활용 API (스킬 미구현):**
+
+| API | 설명 | 스킬 후보 |
+|-----|------|----------|
+| `PUT /DocRepo/{code}/file` | 파일 수정/생성 | doc_write |
+| `DELETE /DocRepo/{code}/file` | 파일 삭제 | doc_delete |
+| `POST /DocRepo/{code}/conflict-resolve` | 충돌 해결 | doc_conflict_resolve |
+| `GET /DocRepo/{code}/commits` | 커밋 이력 | doc_history |
+| `GET /DocRepo/{code}/branches` | 브랜치 목록 | doc_branches |
+| `POST /DocRepo/{code}/sync-branch` | 브랜치 동기화 | doc_sync |
+| `POST /DocRepo/{code}/pr/{num}/review` | PR 리뷰 | pr_review |
+| `POST /DocRepo/{code}/pr/{num}/merge` | PR 머지 | pr_merge |
+| `GET /DocRepo/{code}/graph` | 커밋 그래프 | doc_graph |
+| `POST /Issue/docgen` | 문서 생성 | doc_generate |
+| `PUT /Issue/field` | 이슈 필드 업데이트 | issue_field_update |
+| `PUT /Issue/relations` | 이슈 관계 일괄 설정 | issue_relations_batch |
+| `GET /Project/alerts` | 프로젝트 알림 조회 | project_alerts |
+
+---
+
+### 8.2 Phase 1 상세 — 기반 구축
+
+#### 8.2.1 Job State Store
+
+**컬렉션: `agent_jobs`**
+
+```json
+{
+  "_id": "ObjectId",
+  "jobId": "JOB-GOJIRA-20260410-001",
+  "sessionId": "agent_session_id",
+  "userId": "batman",
+  "status": "running|paused|completed|failed",
+  "plan": {
+    "goal": "초기 설계서 작성",
+    "stages": [
+      {"id": "parse_input", "status": "completed", "result": {...}},
+      {"id": "gather_data", "status": "running", "result": null},
+      {"id": "draft_doc", "status": "pending"},
+      {"id": "validate", "status": "pending"},
+      {"id": "approve", "status": "pending"},
+      {"id": "register", "status": "pending"}
+    ]
+  },
+  "context": {
+    "projectCode": "GOJIRA",
+    "inputs": {"goal": "initial_design", "docType": "architecture"}
+  },
+  "artifacts": [
+    {"stage": "gather_data", "type": "requirements", "data": [...]},
+    {"stage": "draft_doc", "type": "markdown", "data": "..."}
+  ],
+  "toolLog": [
+    {"tool": "issue_query", "status": "success", "duration": 120},
+    {"tool": "doc_summarize", "status": "success", "duration": 2500}
+  ],
+  "errors": [],
+  "createdAt": "2026-04-10T...",
+  "updatedAt": "2026-04-10T..."
+}
+```
+
+**구현 파일:**
+- `GoJIRA-API/db/agent_job.go` — CRUD + 상태 전이
+- `GoJIRA-API/handlers/agent.go` — agentLoop에서 jobState 연동
+
+#### 8.2.2 오케스트레이터 (상태 머신)
+
+**파일: `GoJIRA-API/agent/orchestrator.go`**
+
+```go
+type Stage struct {
+    ID          string
+    Role        string  // planner|researcher|author|reviewer|registrar
+    EntryCheck  func(job *Job) error
+    Execute     func(ctx context.Context, job *Job) (*StageResult, error)
+    ExitCheck   func(result *StageResult) error
+    OnFailure   string  // 실패 시 이동할 stage ID ("" = 재시도)
+    MaxRetries  int
+}
+
+type Orchestrator struct {
+    Stages    []Stage
+    JobStore  *db.JobStore
+}
+
+func (o *Orchestrator) Run(ctx context.Context, job *Job) error {
+    for job.CurrentStageIdx < len(o.Stages) {
+        stage := o.Stages[job.CurrentStageIdx]
+        // entry check
+        // execute (역할별 프롬프트 + 도구)
+        // exit check
+        // 성공 → 다음 단계 / 실패 → 재시도 or 회귀
+        // jobState 저장
+    }
+}
+```
+
+#### 8.2.3 역할별 프롬프트 템플릿
+
+**디렉토리: `GoJIRA-API/prompts/roles/`**
+
+| 파일 | 역할 | 핵심 지시 |
+|------|------|----------|
+| `planner.txt` | Planner | 작업 분해, 출력: 구조화된 명세 JSON |
+| `researcher.txt` | Researcher | 자료 수집만, 생성 금지, 출력: 수집 결과 |
+| `author.txt` | Author | 문서 작성, 추측 금지, 출력: markdown |
+| `reviewer.txt` | Reviewer | 검증만, 수정 금지, 출력: 통과/실패 + 사유 |
+| `registrar.txt` | Registrar | 등록/실행만, 출력: 등록 결과 |
+
+#### 8.2.4 검증기
+
+**파일: `GoJIRA-API/agent/validator.go`**
+
+```go
+// 코드 검증
+func ValidateSchema(result *StageResult, schema JSONSchema) error
+func ValidateRequiredFields(result *StageResult, fields []string) error
+
+// LLM 검증
+func ValidateWithLLM(ctx context.Context, result *StageResult, criteria string) (*ValidationResult, error)
+```
+
+#### 8.2.5 추가 스킬 (Phase 1)
+
+| 스킬 | 용도 | API |
+|------|------|-----|
+| **doc_write** | 문서 파일 생성/수정 | `PUT /DocRepo/{code}/file` |
+| **doc_history** | 커밋 이력 조회 | `GET /DocRepo/{code}/commits` |
+| **doc_sync** | 브랜치 동기화 | `POST /DocRepo/{code}/sync-branch` |
+| **project_alerts** | 프로젝트 알림 상태 | `GET /Project/alerts` |
+
+---
+
+### 8.3 Phase 2 상세 — REQ + DSN 분리
+
+#### 8.3.1 에이전트 프로토콜
+
+**메시지 형식:**
+
+```json
+// 요청
+{
+  "agent": "REQ",
+  "task": "gather_requirements",
+  "jobId": "JOB-001",
+  "inputs": {
+    "projectCode": "GOJIRA",
+    "scope": "all_requirements"
+  },
+  "context": {
+    "previousArtifacts": [...]
+  }
+}
+
+// 응답
+{
+  "status": "success|failed|needs_input",
+  "artifacts": [
+    {"type": "requirements_json", "data": {...}}
+  ],
+  "errors": [],
+  "metrics": {"duration": 3200, "toolCalls": 4},
+  "nextSuggestion": "proceed_to_design"
+}
+```
+
+#### 8.3.2 Requirement Agent 스킬 세트
+
+| 기존 스킬 | 추가 스킬 | 용도 |
+|----------|----------|------|
+| issue_query | **req_extract** | 문서에서 요구사항 추출 (LLM) |
+| issue_create | **req_classify** | FR/NFR/CNST 자동 분류 |
+| issue_update | **req_trace** | 요구사항 추적 매트릭스 생성 |
+| issue_analyze | **req_gap_analysis** | 누락 요구사항 탐지 |
+| doc_summarize | | 비즈니스 문서 요약 |
+
+#### 8.3.3 Design Agent 스킬 세트
+
+| 기존 스킬 | 추가 스킬 | 용도 |
+|----------|----------|------|
+| doc_list | **design_draft** | 설계 초안 생성 (LLM) |
+| doc_write | **design_review** | 설계 자체 검증 (LLM) |
+| doc_diff | **design_decision** | 설계 결정 기록 (ADR) 생성 |
+| pr_create | | 설계 문서 PR |
+| doc_summarize | | 기존 설계 요약 |
+
+---
+
+### 8.4 Phase 3 상세 — EVL + CDA
+
+#### 8.4.1 Evaluation Agent 스킬 세트
+
+| 기존 스킬 | 추가 스킬 | 용도 |
+|----------|----------|------|
+| satam_analyze | **eval_quality** | 산출물 품질 점수 산정 |
+| issue_analyze | **eval_trace** | 요구사항-설계 추적성 검증 |
+| schedule_analyze | **eval_consistency** | 산출물 간 일관성 체크 |
+| | **eval_compliance** | 설계-코드 준수율 산정 |
+
+#### 8.4.2 Code Analysis Agent 스킬 세트
+
+모두 신규 — 코드 분석 전용 도구 필요
+
+| 스킬 | 용도 | 구현 방식 |
+|------|------|----------|
+| **code_structure** | 모듈/패키지 구조 추출 | AST 파싱 또는 LLM + 파일 목록 |
+| **code_dependencies** | 의존성 그래프 생성 | import/require 분석 |
+| **code_extract_reqs** | 코드에서 암묵적 요구사항 역추출 | LLM 기반 |
+| **code_patterns** | 아키텍처 패턴 인식 | LLM + 구조 분석 |
+| **code_compare_design** | 설계 vs 코드 구조 비교 | 양쪽 모델 교차 비교 |
+| **code_impact** | 변경 영향 분석 | 의존성 그래프 + 호출 체인 |
+
+**코드 접근 방식:**
+- 저장소가 Gitea에 있으므로 Gitea API로 파일 목록/내용 조회
+- 기존 `doc_list` + `doc_summarize` 패턴 활용
+- 대규모 코드는 파일 단위로 LLM에 분할 전달
+
+#### 8.4.3 설계 준수 분석 파이프라인
+
+```
+Orchestrator Plan:
+  Step 1 (병렬):
+    CDA.code_structure(repo) → codeModel
+    DSN.design_parse(architecture.md) → designModel
+  Step 2:
+    EVL.eval_compliance(codeModel, designModel) → complianceReport
+  Step 3:
+    EVL.eval_quality(complianceReport) → 점수 + 개선 제안
+```
+
+---
+
+### 8.5 Phase 4 상세 — TST + 통합
+
+#### 8.5.1 Test Agent 스킬 세트
+
+| 스킬 | 용도 | 입력 |
+|------|------|------|
+| **test_design** | 테스트 전략 수립 | 요구사항 + 설계서 |
+| **test_generate** | 테스트 케이스 자동 생성 | 요구사항 + 코드 분석 |
+| **test_coverage** | 커버리지 분석 | 테스트 케이스 + 요구사항 |
+| **test_priority** | 리스크 기반 우선순위 | SATAM 결과 + 테스트 목록 |
+
+#### 8.5.2 전체 스킬 맵 (최종)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Orchestration Agent                                          │
+│  - job_create, job_status, job_resume, agent_dispatch         │
+├──────────────────────────────────────────────────────────────┤
+│  REQ Agent           │  DSN Agent          │  EVL Agent       │
+│  - project_query     │  - doc_list         │  - satam_analyze │
+│  - issue_query       │  - doc_write        │  - issue_analyze │
+│  - issue_create      │  - doc_summarize    │  - eval_quality  │
+│  - issue_update      │  - doc_diff         │  - eval_trace    │
+│  - issue_delete      │  - doc_history      │  - eval_consist  │
+│  - issue_link        │  - pr_create        │  - eval_comply   │
+│  - req_extract       │  - pr_list          │  - schedule_anal │
+│  - req_classify      │  - design_draft     │                  │
+│  - req_trace         │  - design_review    │                  │
+│  - req_gap_analysis  │  - design_decision  │                  │
+├──────────────────────┼─────────────────────┼──────────────────┤
+│  CDA Agent           │  TST Agent          │                  │
+│  - code_structure    │  - test_design      │                  │
+│  - code_dependencies │  - test_generate    │                  │
+│  - code_extract_reqs │  - test_coverage    │                  │
+│  - code_patterns     │  - test_priority    │                  │
+│  - code_compare_dsn  │                     │                  │
+│  - code_impact       │                     │                  │
+└──────────────────────┴─────────────────────┴──────────────────┘
+
+총 스킬 수: 14(기존) + 4(Phase1) + 8(Phase2) + 10(Phase3) + 4(Phase4) = 약 40개
+```
+
+---
+
+### 8.6 구현 일정 요약
+
+| Phase | 기간 | 핵심 산출물 | 스킬 추가 |
+|-------|------|-----------|----------|
+| **1** | 2~3주 | jobState, 오케스트레이터, 검증기, 역할 프롬프트 | +4 (doc_write, doc_history, doc_sync, project_alerts) |
+| **2** | 2~3주 | REQ Agent, DSN Agent, 에이전트 프로토콜 | +8 (req_*, design_*) |
+| **3** | 3~4주 | EVL Agent, CDA Agent, 준수 분석 파이프라인 | +10 (eval_*, code_*) |
+| **4** | 2~3주 | TST Agent, 전체 통합, 대시보드 | +4 (test_*) |
+| **5** | 지속 | 자율 개선, 외부 연동 | 필요시 |
