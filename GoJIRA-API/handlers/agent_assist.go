@@ -129,12 +129,12 @@ func generateIssues(ctx context.Context, projectCode, issueType, instruction, us
 		return nil, nil, err
 	}
 
-	// business.md 내용 조회 (VOS 생성 시 참고)
+	// project-description.md 내용 조회 (VOS 생성 시 참고)
 	businessContent := ""
 	if issueType == "VOS" || issueType == "" {
-		bc, _ := skills.FetchFileContent(projectCode, "business.md", "main")
+		bc, _ := skills.FetchFileContent(projectCode, "business/project-description.md", "main")
 		if bc == "" {
-			bc, _ = skills.FetchFileContent(projectCode, "business.md", "docs/"+user)
+			bc, _ = skills.FetchFileContent(projectCode, "business/project-description.md", "docs/"+user)
 		}
 		businessContent = bc
 	}
@@ -197,7 +197,7 @@ func businessContextStr(content string) string {
 	if content == "" {
 		return ""
 	}
-	return fmt.Sprintf("비즈니스 문서(business.md):\n%s", truncateStr(content, 2000))
+	return fmt.Sprintf("비즈니스 문서(project-description.md):\n%s", truncateStr(content, 2000))
 }
 
 func instructionStr(inst string) string {

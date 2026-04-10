@@ -52,7 +52,6 @@ gantt
     이슈 CRUD Skill (create/update/delete/link)  :done, p2a, 2025-11, 2025-12
     문서 Skill (list/summarize/diff)              :done, p2b, 2025-11, 2025-12
     PR Skill (list/create)                        :done, p2c, 2025-12, 2026-01
-    필수 파일 정책                                :done, p2d, 2025-12, 2026-01
 
     section Agent Phase 2.5 - 표준화
     Go→SKILL.md 선언형 전환              :done, p25a, 2026-01, 2026-01
@@ -116,7 +115,6 @@ pie title 구현 진행 상태
 - [x] **문서 저장소**: Gitea 연동, PR/Merge, 브랜치 보호
 - [x] **실시간 통신**: SSE → WebSocket 전환, sseManager
 - [x] **프로젝트 알람**: webhook + WebSocket, branchAlerts
-- [x] **필수 파일**: business.md, srs.md, architecture.md 자동 생성/보호
 - [x] **편집 세션**: git worktree 기반, TTL 30분
 - [x] **CommonBar**: Pull/Export 아이콘화, 네비게이션 탭
 - [x] **이벤트 큐**: eventQueue FIFO 순차 처리
@@ -137,7 +135,6 @@ pie title 구현 진행 상태
 - [x] CRUD 개별 분리: issue_create / issue_update / issue_delete / issue_link
 - [x] doc_list / doc_summarize / doc_diff
 - [x] pr_list / pr_create
-- [x] 필수 파일 정책 (생성/보호)
 - [x] 멀티턴 + 멀티 tool_call 지원
 - [x] issue_query reqType 필터 (NFR/FR/CNST)
 

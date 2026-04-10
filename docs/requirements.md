@@ -122,14 +122,13 @@ graph LR
         UC08[RelationMap 시각화]
         UC09[SATAM 매트릭스]
         UC10[설계문서 자동 생성]
-        UC11[필수 파일 정책 관리]
     end
 
     subgraph AI 에이전트 기능
-        UC12[자연어 대화]
-        UC13[SSE 스트리밍 응답]
-        UC14[독립 채팅 창]
-        UC15[Agent Assist]
+        UC11[자연어 대화]
+        UC12[SSE 스트리밍 응답]
+        UC13[독립 채팅 창]
+        UC14[Agent Assist]
     end
 
     U --> UC01
@@ -138,18 +137,17 @@ graph LR
     U --> UC08
     U --> UC09
     U --> UC10
-    U --> UC12
-    U --> UC14
+    U --> UC11
+    U --> UC13
 
     A --> UC02
     A --> UC03
     A --> UC04
-    A --> UC11
 
     AG --> UC06
     AG --> UC10
-    AG --> UC13
-    AG --> UC15
+    AG --> UC12
+    AG --> UC14
 
     J -->|Pull/Push| UC06
 
@@ -170,11 +168,10 @@ graph LR
 | UC-08 | RelationMap | 사용자 | 이슈 관계 시각화 (contains/relates) |
 | UC-09 | SATAM 매트릭스 | 사용자 | Risk/Sensitivity/Mitigation 평가 |
 | UC-10 | 설계문서 생성 | 사용자, AI | 이슈 기반 Markdown 문서 자동 생성 |
-| UC-11 | 필수 파일 정책 | 관리자 | business.md, srs.md, architecture.md 정책 |
-| UC-12 | 자연어 대화 | 사용자 | 멀티턴 AI 대화 (16개 스킬) |
-| UC-13 | SSE 스트리밍 | AI 에이전트 | ReACT 2-pass 추론 + 실시간 스트리밍 |
-| UC-14 | 독립 채팅 창 | 사용자 | BroadcastChannel 기반 네비게이션 |
-| UC-15 | Agent Assist | AI 에이전트 | 각 메뉴별 보조 기능 제공 |
+| UC-11 | 자연어 대화 | 사용자 | 멀티턴 AI 대화 (16개 스킬) |
+| UC-12 | SSE 스트리밍 | AI 에이전트 | ReACT 2-pass 추론 + 실시간 스트리밍 |
+| UC-13 | 독립 채팅 창 | 사용자 | BroadcastChannel 기반 네비게이션 |
+| UC-14 | Agent Assist | AI 에이전트 | 각 메뉴별 보조 기능 제공 |
 
 ---
 
@@ -319,28 +316,15 @@ graph LR
 - Gitea 저장소에 자동 커밋
 - 템플릿 기반 문서 구조화
 
-#### FR-11: 필수 파일 정책
-
-| 항목 | 내용 |
-|------|------|
-| ID | FR-11 |
-| 우선순위 | 높음 |
-| 담당 서비스 | Platform-API |
-| 설명 | 프로젝트별 필수 설계문서 파일 정책 관리 |
-
-- 필수 파일 목록: `business.md`, `srs.md`, `architecture.md`
-- 필수 파일 존재 여부 검증
-- 누락 시 경고 표시
-
 ---
 
 ### 4.3 AI 에이전트
 
-#### FR-12: 자연어 대화형 에이전트
+#### FR-11: 자연어 대화형 에이전트
 
 | 항목 | 내용 |
 |------|------|
-| ID | FR-12 |
+| ID | FR-11 |
 | 우선순위 | 필수 |
 | 담당 서비스 | Agent-Service |
 | 설명 | 멀티턴 자연어 대화 및 16개 스킬 실행 |
@@ -350,11 +334,11 @@ graph LR
   - 이슈 조회/생성/수정, 프로젝트 조회, 문서 관리, 관계 분석, 일정 분석, SATAM 분석 등
 - 스킬 실행 결과를 자연어로 요약 응답
 
-#### FR-13: SSE 스트리밍 + ReACT 2-pass 추론
+#### FR-12: SSE 스트리밍 + ReACT 2-pass 추론
 
 | 항목 | 내용 |
 |------|------|
-| ID | FR-13 |
+| ID | FR-12 |
 | 우선순위 | 필수 |
 | 담당 서비스 | Agent-Service |
 | 설명 | 실시간 SSE 스트리밍 및 ReACT 2-pass 추론 |
@@ -364,11 +348,11 @@ graph LR
 - 2-pass 추론: 1차 스킬 실행 → 2차 결과 종합 응답
 - 디버그 뷰를 통한 추론 과정 시각화
 
-#### FR-14: 독립 채팅 창 + BroadcastChannel 네비게이션
+#### FR-13: 독립 채팅 창 + BroadcastChannel 네비게이션
 
 | 항목 | 내용 |
 |------|------|
-| ID | FR-14 |
+| ID | FR-13 |
 | 우선순위 | 높음 |
 | 담당 서비스 | GoJIRA-App |
 | 설명 | 독립 팝업 채팅 창 및 메인 앱과의 네비게이션 연동 |
@@ -377,11 +361,11 @@ graph LR
 - BroadcastChannel API를 통한 메인 앱과의 네비게이션 명령 교환
 - AI 응답 내 링크 클릭 시 메인 앱 화면 자동 전환
 
-#### FR-15: Agent Assist
+#### FR-14: Agent Assist
 
 | 항목 | 내용 |
 |------|------|
-| ID | FR-15 |
+| ID | FR-14 |
 | 우선순위 | 보통 |
 | 담당 서비스 | Agent-Service, GoJIRA-App |
 | 설명 | 각 메뉴(화면)별 AI 보조 기능 |
@@ -609,11 +593,10 @@ flowchart TB
 | FR-08 | GoJIRA-App | 필수 | UC-08 |
 | FR-09 | GoJIRA-App | 필수 | UC-09 |
 | FR-10 | Agent-Service | 높음 | UC-10 |
-| FR-11 | Platform-API | 높음 | UC-11 |
+| FR-11 | Agent-Service | 필수 | UC-11 |
 | FR-12 | Agent-Service | 필수 | UC-12 |
-| FR-13 | Agent-Service | 필수 | UC-13 |
-| FR-14 | GoJIRA-App | 높음 | UC-14 |
-| FR-15 | Agent-Service | 보통 | UC-15 |
+| FR-13 | GoJIRA-App | 높음 | UC-13 |
+| FR-14 | Agent-Service | 보통 | UC-14 |
 | NFR-01 | 전체 | 필수 | - |
 | NFR-02 | Platform-API | 필수 | - |
 | NFR-03 | 전체 | 필수 | - |

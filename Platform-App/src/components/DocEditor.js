@@ -485,7 +485,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                   ? <span className="de-file-badge de-badge-mainonly">M</span>
                   : statusBadge(item.path))}
                 <span className="de-file-name">{item.path}</span>
-                {activeTab === 'workspace' && globalEditMode && !['business.md', 'srs.md', 'architecture.md'].includes(item.path) && (
+                {activeTab === 'workspace' && globalEditMode && (
                   <span className="de-file-actions">
                     <button className="de-file-act" title="이름 변경" onClick={e => { e.stopPropagation(); handleRenameFile(item.path); }}>✎</button>
                     <button className="de-file-act de-file-act-del" title="삭제" onClick={e => { e.stopPropagation(); handleDeleteFile(item.path); }}>✕</button>

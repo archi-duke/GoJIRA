@@ -302,15 +302,20 @@ Git 기반 마크다운 문서 편집기.
 | deleted | 삭제됨 배지 |
 | mainOnly | D 배지, gray italic |
 
-**필수 파일 (삭제/이름변경 금지):**
+**초기 폴더 구조 (프로젝트 생성 시 자동 생성):**
 
-- `business.md`
-- `srs.md`
-- `architecture.md`
+```
+business/
+  project-description.md    # 과제 배경, 목적, 주요 사항
+  use-cases.md              # 유즈케이스 정의
+  requirements.md           # FR/NFR/CNST 요구사양
+architecture/
+  architecture.md           # 아키텍처 설계
+```
 
 **편집 흐름:**
 
-1. 진입 시 필수 파일 초기화 (`init-files`)
+1. 초기 파일 생성 (`init-files` — 없는 파일만 생성)
 2. 사용자 브랜치 자동 생성 (`ensure-branch`)
 3. 트리 비교 (main vs workspace)
 4. 파일 편집 → 저장 → commit/push
