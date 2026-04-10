@@ -64,8 +64,12 @@ async def call_llm_with_tools(
     messages: List[Dict],
     tools: List[Dict],
     max_tokens: Optional[int] = None,
+    tool_choice: Optional[str] = None,
 ) -> dict:
     """Tool-use LLM 호출. Go CallLLMWithTools() 대응.
+
+    Args:
+        tool_choice: "none"이면 도구 호출 없이 텍스트만, "auto"(기본)이면 자동 판단
 
     Returns:
         {"message": ChatCompletionMessage, "finish_reason": str}
@@ -73,15 +77,20 @@ async def call_llm_with_tools(
     client = _get_client()
     mt = max_tokens or max(llm_config.max_tokens, 2000)
 
-    log.info("LLM call (tools): model=%s, tools=%d, messages=%d", llm_config.model, len(tools), len(messages))
+    kwargs = {
+        "model": llm_config.model,
+        "messages": messages,
+        "tools": tools,
+        "max_tokens": mt,
+        "temperature": llm_config.temperature,
+    }
+    if tool_choice:
+        kwargs["tool_choice"] = tool_choice
 
-    resp = await client.chat.completions.create(
-        model=llm_config.model,
-        messages=messages,
-        tools=tools,
-        max_tokens=mt,
-        temperature=llm_config.temperature,
-    )
+    log.info("LLM call (tools): model=%s, tools=%d, messages=%d, tool_choice=%s",
+             llm_config.model, len(tools), len(messages), tool_choice or "auto")
+
+    resp = await client.chat.completions.create(**kwargs)
 
     choice = resp.choices[0]
     msg = choice.message

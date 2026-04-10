@@ -34,9 +34,23 @@ async def agent_loop_stream(
     all_actions = []
 
     for turn in range(max_turns):
-        # LLM 추론 시작
         yield _sse("thinking", {"turn": turn, "message": "추론 중..."})
 
+        # ── Pass 1: 추론 (tool_choice="none") ──
+        # LLM에게 도구 호출 없이 사고 과정만 출력하도록 요청
+        try:
+            think_result = await call_llm_with_tools(messages, tools, tool_choice="none")
+            thought = think_result["message"].content or ""
+        except Exception:
+            thought = ""
+
+        if thought:
+            yield _sse("reasoning", {"turn": turn, "content": thought})
+            # 추론 내용을 대화에 추가 (도구 호출 판단에 활용)
+            messages.append({"role": "assistant", "content": thought})
+            messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구를 호출하세요. 추가 설명 없이 도구만 호출하세요."})
+
+        # ── Pass 2: 도구 호출 (tool_choice="auto") ──
         try:
             result = await call_llm_with_tools(messages, tools)
         except Exception as e:
@@ -50,17 +64,15 @@ async def agent_loop_stream(
         content = msg.content or ""
         tool_calls = msg.tool_calls or []
 
-        # LLM 추론 내용 전송 — 도구 호출 여부와 무관하게 content가 있으면 전송
-        if content and tool_calls:
-            yield _sse("reasoning", {"turn": turn, "content": content})
-
         # 도구 호출 없으면 최종 응답
         if not tool_calls or finish_reason == "stop":
-            if not content and all_actions:
-                content = "작업이 완료되었습니다."
-            for chunk in _split_chunks(content, 80):
+            # pass 1에서 추가한 보조 메시지 정리
+            final_content = content or thought
+            if not final_content and all_actions:
+                final_content = "작업이 완료되었습니다."
+            for chunk in _split_chunks(final_content, 80):
                 yield _sse("content", {"text": chunk})
-            yield _sse("done", {"reply": content, "actions": all_actions})
+            yield _sse("done", {"reply": final_content, "actions": all_actions})
             return
 
         # assistant message 기록
@@ -155,6 +167,34 @@ def _split_chunks(text: str, size: int) -> List[str]:
     if buf:
         chunks.append(buf)
     return chunks
+
+
+_TOOL_DESCRIPTIONS = {
+    "project_query": "프로젝트 목록 확인",
+    "issue_query": "{projectCode} 이슈 조회",
+    "issue_create": "{projectCode}에 {issueType} 이슈 생성",
+    "issue_update": "{key} 이슈 수정",
+    "issue_delete": "{key} 이슈 삭제",
+    "issue_link": "{fromKey}와 {toKey} 관계 설정",
+    "issue_analyze": "{projectCode} 이슈 관계 분석",
+    "satam_analyze": "{projectCode} SATAM 분석 수행",
+    "schedule_analyze": "{projectCode} 일정 분석",
+    "doc_list": "{projectCode} 문서 목록 조회",
+    "doc_summarize": "{projectCode}/{filePath} 문서 요약",
+    "doc_diff": "{projectCode}/{filePath} 변경 비교",
+    "doc_history": "{projectCode} 커밋 이력 조회",
+    "pr_list": "{projectCode} PR 목록 조회",
+    "pr_create": "{projectCode} PR 생성",
+}
+
+
+def _describe_tool_call(name: str, args: dict) -> str:
+    """도구 호출을 자연스러운 한국어 설명으로 변환."""
+    template = _TOOL_DESCRIPTIONS.get(name, f"{name} 실행")
+    try:
+        return template.format(**{k: v for k, v in args.items() if isinstance(v, str)})
+    except KeyError:
+        return template.split("{")[0].strip() or f"{name} 실행"
 
 
 def _truncate_detail(result, max_len=500) -> str:
