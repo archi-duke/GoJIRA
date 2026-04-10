@@ -41,6 +41,30 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     else sessionStorage.removeItem('gojira_project');
   }, []);
 
+  // Agent 독립 창에서 보낸 네비게이션 명령 수신 (cross-origin postMessage + same-origin BroadcastChannel)
+  useEffect(() => {
+    function handleMessage(e) {
+      if (e.data?.type === 'gojira-navigate' && e.data.projectCode && e.data.page) {
+        navigate(e.data.page, {
+          name: e.data.projectName || e.data.projectCode,
+          jiraCodes: { main: { jiraCode: e.data.projectCode } },
+        });
+      }
+    }
+    window.addEventListener('message', handleMessage);
+    const ch = new BroadcastChannel('gojira-navigate');
+    ch.onmessage = (evt) => {
+      const { projectCode, projectName, page: targetPage } = evt.data;
+      if (projectCode && targetPage) {
+        navigate(targetPage, {
+          name: projectName || projectCode,
+          jiraCodes: { main: { jiraCode: projectCode } },
+        });
+      }
+    };
+    return () => { window.removeEventListener('message', handleMessage); ch.close(); };
+  }, [navigate]);
+
   const onNavigate = useCallback((target) => {
     navigate(target, selectedProject);
   }, [navigate, selectedProject]);

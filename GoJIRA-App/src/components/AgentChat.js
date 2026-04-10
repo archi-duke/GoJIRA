@@ -103,9 +103,12 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           addStep({ type: 'tool_result', data, ts });
           // ui_navigate 등 _action이 있으면 메인 앱에 전달
           if (data._action === 'navigate' && data._payload) {
-            const ch = new BroadcastChannel('gojira-navigate');
-            ch.postMessage(data._payload);
-            ch.close();
+            // 같은 origin → BroadcastChannel
+            try { const ch = new BroadcastChannel('gojira-navigate'); ch.postMessage(data._payload); ch.close(); } catch {}
+            // 다른 origin (Platform-App↔GoJIRA-App) → window.opener.postMessage
+            if (window.opener) {
+              window.opener.postMessage({ type: 'gojira-navigate', ...data._payload }, '*');
+            }
           }
           break;
         case 'content':

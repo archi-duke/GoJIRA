@@ -133,6 +133,17 @@ function App() {
     if (p === 'map') setMapResetCount(c => c + 1);
   }, []);
 
+  // Agent 독립 창(GoJIRA-App :3001)에서 보낸 네비게이션 명령 수신
+  useEffect(() => {
+    function handleMessage(e) {
+      if (e.data?.type === 'gojira-navigate' && e.data.projectCode && e.data.page) {
+        navigate(e.data.page);
+      }
+    }
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [navigate]);
+
   if (!user) return null;
 
   // 권한 기반 메뉴 필터링
