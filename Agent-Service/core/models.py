@@ -1,12 +1,12 @@
 """공통 Pydantic 모델 — Go handlers/agent.go의 요청/응답 구조와 동일."""
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
     """POST /Agent/chat 요청. Go chatRequest 대응."""
-    session_id: str = Field(default="", alias="sessionId")
+    session_id: Optional[str] = Field(default="", alias="sessionId")
     message: str
     context: Dict = Field(default_factory=dict)
 

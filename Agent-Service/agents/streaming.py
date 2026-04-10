@@ -48,7 +48,7 @@ async def agent_loop_stream(
             yield _sse("reasoning", {"turn": turn, "content": thought})
             # 추론 내용을 대화에 추가 (도구 호출 판단에 활용)
             messages.append({"role": "assistant", "content": thought})
-            messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구를 호출하세요. 추가 설명 없이 도구만 호출하세요."})
+            messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구가 있으면 호출하세요. 더 이상 도구가 필요 없다면 최종 답변을 마크다운으로 정리하여 제공하세요."})
 
         # ── Pass 2: 도구 호출 (tool_choice="auto") ──
         try:
@@ -66,8 +66,9 @@ async def agent_loop_stream(
 
         # 도구 호출 없으면 최종 응답
         if not tool_calls or finish_reason == "stop":
-            # pass 1에서 추가한 보조 메시지 정리
-            final_content = content or thought
+            # thought(Pass 1 분석)이 있으면 그것이 최종 답변.
+            # Pass 2는 도구 호출용이므로, 도구 없이 나온 텍스트는 부산물.
+            final_content = thought or content
             if not final_content and all_actions:
                 final_content = "작업이 완료되었습니다."
             for chunk in _split_chunks(final_content, 80):

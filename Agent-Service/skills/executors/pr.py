@@ -12,7 +12,7 @@ async def exec_pr_list(params: dict, user: str) -> dict:
     if not code:
         raise ValueError("projectCode 필수")
 
-    state = params.get("state", "open")
+    state = params.get("state", "all")
     client = PlatformClient()
     prs = await client.list_prs(code, state=state)
 
