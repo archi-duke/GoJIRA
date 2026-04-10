@@ -51,38 +51,6 @@ function App() {
     );
   }
 
-  // Agent 창에서 보내는 navigate 메시지 수신
-  useEffect(() => {
-    function handleMessage(e) {
-      if (e.origin !== window.location.origin) return;
-      const { type, projectCode, page: targetPage } = e.data || {};
-      if (type !== 'agent_navigate' || !projectCode || !targetPage) return;
-
-      // GoJIRAApp 내부 네비게이션을 위해 sessionStorage에 저장 후 페이지 이동
-      // GoJIRAApp은 sessionStorage에서 gojira_page, gojira_project를 읽어서 초기 상태를 결정
-      // project 정보를 찾아야 함
-      fetch(`${config.GOJIRA_API}/Project?jiraCode=${encodeURIComponent(projectCode)}`)
-        .then(r => r.json())
-        .then(projects => {
-          const prj = Array.isArray(projects) ? projects[0] : projects;
-          if (prj) {
-            sessionStorage.setItem('gojira_page', targetPage);
-            sessionStorage.setItem('gojira_project', JSON.stringify(prj));
-            // App.js의 page가 GoJIRA 앱이 아닐 수 있으므로 먼저 GoJIRA 앱으로 이동
-            navigate('map');
-            // 약간의 지연 후 GoJIRAApp 내부 페이지로 이동
-            setTimeout(() => {
-              setPage(targetPage);
-              sessionStorage.setItem('gojira_page', targetPage);
-            }, 100);
-          }
-        })
-        .catch(() => {});
-    }
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [navigate]);
-
   useEffect(() => {
     if (!user) return;
     fetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}`)
@@ -168,6 +136,33 @@ function App() {
     sessionStorage.setItem('gojira_page', p);
     if (p === 'map') setMapResetCount(c => c + 1);
   }, []);
+
+  // Agent 창에서 보내는 navigate 메시지 수신
+  useEffect(() => {
+    function handleMessage(e) {
+      if (e.origin !== window.location.origin) return;
+      const { type, projectCode, page: targetPage } = e.data || {};
+      if (type !== 'agent_navigate' || !projectCode || !targetPage) return;
+
+      fetch(`${config.GOJIRA_API}/Project?jiraCode=${encodeURIComponent(projectCode)}`)
+        .then(r => r.json())
+        .then(projects => {
+          const prj = Array.isArray(projects) ? projects[0] : projects;
+          if (prj) {
+            sessionStorage.setItem('gojira_page', targetPage);
+            sessionStorage.setItem('gojira_project', JSON.stringify(prj));
+            navigate('map');
+            setTimeout(() => {
+              setPage(targetPage);
+              sessionStorage.setItem('gojira_page', targetPage);
+            }, 100);
+          }
+        })
+        .catch(() => {});
+    }
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [navigate]);
 
   if (!user) return null;
 
