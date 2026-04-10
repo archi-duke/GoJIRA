@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, Component } from 'react';
 import AccountManager from './components/AccountManager';
 import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
@@ -13,6 +13,27 @@ import config from './config';
 import './App.css';
 
 const API_BASE = config.API_BASE;
+
+class RemoteErrorBoundary extends Component {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', gap: 12 }}>
+          <span style={{ fontSize: 40 }}>⚠</span>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>GoJIRA-App에 연결할 수 없습니다</span>
+          <span style={{ fontSize: 13 }}>GoJIRA-App (:3001)이 실행 중인지 확인해주세요</span>
+          <button onClick={() => this.setState({ hasError: false })}
+            style={{ marginTop: 8, padding: '6px 16px', border: 'none', background: '#ddd', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>
+            다시 시도
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function App() {
   const [user, setUser] = useState(() => getAuthUser());
@@ -148,9 +169,11 @@ function App() {
     if (appEntry && appEntry.component) {
       const AppComponent = appEntry.component;
       content = (
-        <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
-          <AppComponent user={user} authority={authority} resetKey={mapResetCount} />
-        </Suspense>
+        <RemoteErrorBoundary>
+          <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
+            <AppComponent user={user} authority={authority} resetKey={mapResetCount} />
+          </Suspense>
+        </RemoteErrorBoundary>
       );
     } else {
       content = <div className="app-placeholder">페이지를 찾을 수 없습니다</div>;
