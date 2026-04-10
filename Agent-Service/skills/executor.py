@@ -32,6 +32,7 @@ _SYNC_EXECUTORS = {
     "ui_navigate": lambda params, user: {
         "_action": "navigate",
         "projectCode": params.get("projectCode", ""),
+        "projectName": params.get("projectName", params.get("projectCode", "")),
         "page": params.get("page", ""),
         "message": f"{params.get('projectCode', '')} {params.get('page', '')} 화면을 열었습니다.",
     },

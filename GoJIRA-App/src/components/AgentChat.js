@@ -7,7 +7,7 @@ import './AgentChat.css';
 const API = config.GOJIRA_API || config.API_BASE;
 const STREAM_API = config.AGENT_API || API;
 
-export default function AgentChat({ user, authority, context, onClose }) {
+export default function AgentChat({ user, authority, context, onClose, standalone }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -101,6 +101,12 @@ export default function AgentChat({ user, authority, context, onClose }) {
           break;
         case 'tool_result':
           addStep({ type: 'tool_result', data, ts });
+          // ui_navigate 등 _action이 있으면 메인 앱에 전달
+          if (data._action === 'navigate' && data._payload) {
+            const ch = new BroadcastChannel('gojira-navigate');
+            ch.postMessage(data._payload);
+            ch.close();
+          }
           break;
         case 'content':
           contentBuf += data.text;
@@ -305,8 +311,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
   }
 
   return (
-    <div className="ac-overlay" onClick={onClose}>
-      <div className="ac-panel" onClick={e => e.stopPropagation()}>
+    <div className={standalone ? "ac-standalone" : "ac-panel"}>
         <div className="ac-header">
           <span className="ac-title">GoJIRA Agent</span>
           <div className="ac-header-btns">
@@ -316,7 +321,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
             <button className="ac-header-btn" onClick={handleNewChat} title="새 대화">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1v6H2v2h6v6h2V9h6V7H10V1H8z"/></svg>
             </button>
-            <button className="ac-close" onClick={onClose}>&times;</button>
+            {!standalone && <button className="ac-close" onClick={onClose}>&times;</button>}
           </div>
         </div>
 
@@ -401,7 +406,6 @@ export default function AgentChat({ user, authority, context, onClose }) {
             </div>
           </>
         )}
-      </div>
     </div>
   );
 }

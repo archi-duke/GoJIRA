@@ -19,7 +19,6 @@ function App() {
   const [user, setUser] = useState(() => getAuthUser());
   const [authority, setAuthority] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
-  const [showAgent, setShowAgent] = useState(false);
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [selectedProject, setSelectedProject] = useState(() => {
     try { return JSON.parse(sessionStorage.getItem('gojira_project')); }
@@ -59,6 +58,21 @@ function App() {
     else sessionStorage.removeItem('gojira_project');
   }, []);
 
+  // Agent 독립 창에서 보낸 네비게이션 명령 수신
+  useEffect(() => {
+    const ch = new BroadcastChannel('gojira-navigate');
+    ch.onmessage = (e) => {
+      const { projectCode, projectName, page: targetPage } = e.data;
+      if (projectCode && targetPage) {
+        navigate(targetPage, {
+          name: projectName || projectCode,
+          jiraCodes: { main: { jiraCode: projectCode } },
+        });
+      }
+    };
+    return () => ch.close();
+  }, [navigate]);
+
   const onNavigate = useCallback((target) => {
     navigate(target, selectedProject);
   }, [navigate, selectedProject]);
@@ -70,6 +84,12 @@ function App() {
   const hasNoticeAdmin = authority && (authority.NOTICE || 0) >= 15;
 
   if (!user) return null;
+
+  // Agent 독립 모드: ?mode=agent 로 열린 경우
+  const urlMode = new URLSearchParams(window.location.search).get('mode');
+  if (urlMode === 'agent') {
+    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} />;
+  }
 
   // 권한 없이 접근 시도 시 map으로 리다이렉트
   if (page === 'account' && authority !== null && !hasAccountAdmin) navigate('map');
@@ -101,8 +121,8 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)} />
-        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)}>GoJIRA</span>
+        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')} />
+        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')}>GoJIRA</span>
         <nav className="app-nav">
           {navItems.map((n) => (
             <button
@@ -132,7 +152,6 @@ function App() {
       <div className="app-body">{content}</div>
       <AlertModal />
       <NoticePopup />
-      {showAgent && <AgentChat user={user} context={{ page }} onClose={() => setShowAgent(false)} />}
     </div>
   );
 }

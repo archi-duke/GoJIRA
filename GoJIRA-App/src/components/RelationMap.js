@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import CommonBar from './CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
-import { exportContent } from '../../utils/exportUtils';
+import { exportContent } from '../utils/exportUtils';
 import config from '../config';
 import './RelationMap.css';
 

@@ -1,5 +1,8 @@
+/* Overlay 모드 (인라인) */
 .ac-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); z-index: 1000; display: flex; justify-content: flex-end; }
 .ac-panel { width: 420px; height: 100%; background: #fff; display: flex; flex-direction: column; box-shadow: -4px 0 20px rgba(0,0,0,0.15); }
+/* Standalone 모드 (독립 창) */
+.ac-standalone { width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #fff; }
 .ac-header { display: flex; align-items: center; padding: 12px 16px; background: #2c3e50; color: #fff; }
 .ac-title { flex: 1; font-size: 15px; font-weight: 600; }
 .ac-header-btns { display: flex; align-items: center; gap: 6px; }

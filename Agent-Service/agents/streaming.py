@@ -119,13 +119,18 @@ async def agent_loop_stream(
                 all_actions.append(action)
 
                 # 도구 결과 알림
-                yield _sse("tool_result", {
+                tool_result_data = {
                     "tool": fn_name,
                     "status": "success",
                     "duration_ms": duration,
                     "summary": _summarize_result(skill_result),
                     "detail": _truncate_detail(skill_result),
-                })
+                }
+                # _action이 있으면 프론트엔드에 전달 (ui_navigate 등)
+                if isinstance(skill_result, dict) and "_action" in skill_result:
+                    tool_result_data["_action"] = skill_result["_action"]
+                    tool_result_data["_payload"] = {k: v for k, v in skill_result.items() if k != "_action"}
+                yield _sse("tool_result", tool_result_data)
 
             except Exception as e:
                 duration = int(time.time() * 1000) - start_ms
