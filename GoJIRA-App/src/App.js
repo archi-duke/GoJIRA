@@ -5,8 +5,6 @@ import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
 import AlertModal from './components/AlertModal';
-import AccountManager from './components/AccountManager';
-import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
 import AgentChat from './components/AgentChat';
 import { getAuthUser } from './utils/auth';
@@ -77,12 +75,6 @@ function App() {
     navigate(target, selectedProject);
   }, [navigate, selectedProject]);
 
-  const activeNav = ['map', 'issues', 'docs', 'relationMap', 'satam'].includes(page) ? 'map' : page;
-
-  // USR 권한 15 = CRUD 전체 → Account/Notice 메뉴 접근 허용
-  const hasAccountAdmin = authority && (authority.USR || 0) >= 15;
-  const hasNoticeAdmin = authority && (authority.NOTICE || 0) >= 15;
-
   if (!user) return null;
 
   // Agent 독립 모드: ?mode=agent 로 열린 경우
@@ -90,16 +82,6 @@ function App() {
   if (urlMode === 'agent') {
     return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} />;
   }
-
-  // 권한 없이 접근 시도 시 map으로 리다이렉트
-  if (page === 'account' && authority !== null && !hasAccountAdmin) navigate('map');
-  if (page === 'notice' && authority !== null && !hasNoticeAdmin) navigate('map');
-
-  const navItems = [
-    { key: 'map', label: 'Project' },
-    ...(hasAccountAdmin ? [{ key: 'account', label: 'Account' }] : []),
-    ...(hasNoticeAdmin ? [{ key: 'notice', label: 'Notice' }] : []),
-  ];
 
   let content;
   if (page === 'docs' && selectedProject) {
@@ -110,10 +92,6 @@ function App() {
     content = <RelationMap project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
   } else if (page === 'satam' && selectedProject) {
     content = <SATAM project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
-  } else if (page === 'account' && hasAccountAdmin) {
-    content = <AccountManager user={user} />;
-  } else if (page === 'notice' && hasNoticeAdmin) {
-    content = <NoticeManager user={user} />;
   } else {
     content = <ProjectMap onProjectClick={(p) => navigate('issues', p)} onRelationMap={(p) => navigate('relationMap', p)} onSATAM={(p) => navigate('satam', p)} user={user} />;
   }
@@ -124,15 +102,7 @@ function App() {
         <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')} />
         <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')}>GoJIRA</span>
         <nav className="app-nav">
-          {navItems.map((n) => (
-            <button
-              key={n.key}
-              className={`app-nav-btn ${activeNav === n.key ? 'app-nav-active' : ''}`}
-              onClick={() => navigate(n.key)}
-            >
-              {n.label}
-            </button>
-          ))}
+          <button className={`app-nav-btn app-nav-active`} onClick={() => navigate('map')}>Project</button>
         </nav>
         {allUsers.length > 0 ? (
           <select

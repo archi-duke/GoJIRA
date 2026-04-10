@@ -37,13 +37,44 @@ graph TB
         GOJIRA_ALONE["GoJIRA-App :3000<br/>(단독 실행 가능)"]
     end
     
-    GOJIRA_ALONE -.->|"동일 컴포넌트"| GOJIRA
+    GOJIRA_ALONE -.->|"동일 컴포넌트<br/>(정적 바인딩)"| GOJIRA
 ```
 
 **구조 설명:**
-- **Platform-App**: 앱 레지스트리를 통해 서브앱들을 동적으로 등록하고 렌더링
-- **GoJIRA-App**: 프로젝트/이슈 관리 도메인 앱. Platform-App 없이도 `:3000`에서 독립 실행 가능
+- **Platform-App** (`:3000`): 앱 레지스트리를 통해 서브앱들을 렌더링하는 통합 컨테이너
+- **GoJIRA-App** (`:3001`): 프로젝트/이슈 관리 도메인 앱. Platform-App 없이도 단독 실행 가능
 - **Account/Notice/Repository**: Platform-App 전용 앱. `authCode + authLevel`로 접근 제어
+
+### 앱 통합 방식: Module Federation 동적 로딩 (런타임)
+
+Platform-App은 GoJIRA-App의 컴포넌트를 **Webpack 5 Module Federation**으로 런타임에 동적 로딩합니다.
+
+```
+GoJIRA-App (:3001) — Remote
+├── craco.config.js          ← ModuleFederationPlugin (expose)
+├── src/GoJIRAApp.js         ← expose되는 래퍼 컴포넌트
+├── src/bootstrap.js         ← 비동기 부트스트랩
+└── src/components/          ← 실제 컴포넌트 (원본)
+
+Platform-App (:3000) — Host
+├── craco.config.js          ← ModuleFederationPlugin (remotes)
+├── src/bootstrap.js         ← 비동기 부트스트랩
+└── src/apps/
+    └── registry.js          ← import('gojiraApp/GoJIRAApp')
+```
+
+**동적 로딩 흐름:**
+1. Platform-App 로드 → `bootstrap.js` 비동기 실행
+2. Project 메뉴 클릭 → `React.lazy(() => import('gojiraApp/GoJIRAApp'))`
+3. Webpack이 `http://localhost:3001/remoteEntry.js` 로드
+4. GoJIRA-App의 GoJIRAApp 컴포넌트를 런타임에 가져와 렌더링
+5. React, react-dom은 singleton으로 공유 (중복 로딩 방지)
+
+**장점:**
+- 컴포넌트 중복 완전 제거 (GoJIRA-App 한 곳에서만 관리)
+- GoJIRA-App 수정 → Platform-App 새로고침만으로 반영
+- 독립 배포 가능 (각각 빌드/배포)
+- GoJIRA-App 단독 실행도 가능 (`:3001`)
 
 ---
 
@@ -396,15 +427,16 @@ ContextMenu       █                                              46
 | **근거** | Context의 리렌더링 범위 제어 부담 대비 이점이 적음. 데이터 흐름 추적이 명확 |
 | **결과** | 깊이 증가 시 재검토 필요. 현재 구조에서는 최적 |
 
-### ADR-3: 앱 레지스트리 패턴 (Module Federation 미사용)
+### ADR-3: Module Federation 동적 로딩 (Webpack 5)
 
 | 항목 | 내용 |
 |------|------|
 | **상태** | 채택 |
-| **맥락** | 현재 등록된 앱이 2~3개이며, 단일 빌드로 통합 가능 |
-| **결정** | 배열 기반 앱 레지스트리 + 조건부 렌더링 |
-| **근거** | Module Federation은 5개 이상 앱, 독립 배포 필요 시 도입. 현재는 과도한 복잡도 |
-| **전환 조건** | 앱 5개 이상 또는 독립 팀 배포 필요 시 Module Federation 검토 |
+| **맥락** | GoJIRA 컴포넌트를 Platform-App에 복사하여 정적 바인딩하면 양쪽 수동 동기화 필요 |
+| **결정** | Webpack 5 Module Federation으로 GoJIRA-App을 Remote, Platform-App을 Host로 구성. 런타임에 동적 로딩 |
+| **근거** | 컴포넌트 중복 제거, GoJIRA-App 수정 시 Platform-App 자동 반영, 독립 배포 가능 |
+| **구현** | craco로 CRA webpack 오버라이드. GoJIRA-App이 `remoteEntry.js` expose, Platform-App이 `gojiraApp/GoJIRAApp`으로 import |
+| **트레이드오프** | 개발 시 양쪽 앱 모두 실행 필요. Remote 앱 다운 시 Host 앱에서 해당 기능 미동작 (Suspense fallback 표시) |
 
 ### ADR-4: WebSocket 래퍼 (SSE 대체)
 

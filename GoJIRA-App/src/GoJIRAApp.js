@@ -1,18 +1,25 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import ProjectMap from './gojira/ProjectMap';
-import IssueList from './gojira/IssueList';
-import RelationMap from './gojira/RelationMap';
-import SATAM from './gojira/SATAM';
-import DocEditor from '../components/DocEditor';
-import { subscribe } from '../utils/sseManager';
-import { createEventQueue } from '../utils/eventQueue';
-import config from '../config';
+import ProjectMap from './components/ProjectMap';
+import IssueList from './components/IssueList';
+import RelationMap from './components/RelationMap';
+import SATAM from './components/SATAM';
+import DocEditor from './components/DocEditor';
+import config from './config';
+
+// Platform-App의 sseManager/eventQueue가 없으면 noop
+let subscribe, createEventQueue;
+try {
+  ({ subscribe } = require('./utils/sseManager'));
+  ({ createEventQueue } = require('./utils/eventQueue'));
+} catch {
+  subscribe = () => () => {};
+  createEventQueue = () => ({ push: () => {}, clear: () => {} });
+}
 
 export default function GoJIRAApp({ user, authority, resetKey }) {
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
-  const [projectAlert, setProjectAlert] = useState(null); // { branchDiff, hasOpenPR }
+  const [projectAlert, setProjectAlert] = useState(null);
 
-  // 타이틀바 Project 클릭 시 map으로 리셋
   useEffect(() => {
     if (resetKey > 0) {
       setPage('map');
@@ -39,21 +46,20 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
   }, [navigate, selectedProject]);
 
   const projectCode = selectedProject?.jiraCodes?.main?.jiraCode || '';
+  const API_BASE = config.API_BASE || config.PLATFORM_API;
+  const GOJIRA_API = config.GOJIRA_API || config.API_BASE;
 
-  // 선택된 프로젝트의 alert 초기 로드 (서버 alerts + 프론트 트리 비교)
   useEffect(() => {
     if (!projectCode || page === 'map') { setProjectAlert(null); return; }
-    const API = config.API_BASE + '/DocRepo';
+    const API = API_BASE + '/DocRepo';
 
-    // 1. 서버 alerts (PR 리뷰어 등)
-    const p1 = fetch(`${config.GOJIRA_API}/Project/alerts?user=${encodeURIComponent(user || '')}`)
+    const p1 = fetch(`${GOJIRA_API}/Project/alerts?user=${encodeURIComponent(user || '')}`)
       .then(r => r.json())
       .then(arr => {
         if (Array.isArray(arr)) return arr.find(a => a.jiraCode === projectCode) || null;
         return null;
       }).catch(() => null);
 
-    // 2. 프론트 트리 비교 (main vs user branch)
     const p2 = Promise.all([
       fetch(`${API}/${projectCode}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent('docs/' + user)}`).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -63,7 +69,6 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
       mainTree.tree.forEach(f => { if (f.type !== 'tree') mainMap[f.path] = f.sha; });
       const userMap = {};
       userTree.tree.forEach(f => { if (f.type !== 'tree') userMap[f.path] = f.sha; });
-      // 파일 수가 다르거나 SHA가 다르면 diff
       const mainPaths = Object.keys(mainMap);
       const userPaths = Object.keys(userMap);
       if (mainPaths.length !== userPaths.length) return true;
@@ -75,15 +80,13 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
       if (!alert.branchDiff && !alert.hasOpenPR) setProjectAlert(null);
       else setProjectAlert(alert);
     });
-  }, [projectCode, page, user]);
+  }, [projectCode, page, user, API_BASE, GOJIRA_API]);
 
-  // 이벤트 큐 — 비동기 이벤트를 순차 처리 (경쟁 조건 방지)
   const queueRef = useRef(null);
   if (!queueRef.current) queueRef.current = createEventQueue();
 
-  // 트리 비교 유틸
   async function compareTree(code, userId) {
-    const API = config.API_BASE + '/DocRepo';
+    const API = API_BASE + '/DocRepo';
     const [mainTree, userTree] = await Promise.all([
       fetch(`${API}/${code}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch(`${API}/${code}/tree?ref=${encodeURIComponent('docs/' + userId)}`).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -97,7 +100,6 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     return mk.length !== uk.length || mk.some(p => mainMap[p] !== userMap[p]);
   }
 
-  // WebSocket: 프로젝트 알림 실시간 갱신 (이벤트 큐로 순차 처리)
   useEffect(() => {
     if (!projectCode || page === 'map') return;
     const queue = queueRef.current;
@@ -105,7 +107,6 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     const unsub = subscribe('doc_update', (e) => {
       try {
         const data = JSON.parse(e.data);
-
         if (data.type === 'pr_update' && data.projectCode === projectCode) {
           queue.push(async () => {
             const isReviewer = (data.reviewers || []).includes(user);
@@ -116,7 +117,6 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
             }
           });
         }
-
         if (data.type === 'project_alert' && data.projectCode === projectCode) {
           queue.push(async () => {
             const hasDiff = await compareTree(projectCode, user);
@@ -131,9 +131,8 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     });
 
     return () => { unsub(); queue.clear(); };
-  }, [projectCode, page, user]);
+  }, [projectCode, page, user]); // eslint-disable-line
 
-  // 문서 상태 변경 후 알림 재계산 콜백 (Pull, 저장 등에서 호출)
   async function refreshAlert() {
     if (!projectCode) return;
     const hasDiff = await compareTree(projectCode, user);

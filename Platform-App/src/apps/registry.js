@@ -1,7 +1,7 @@
 import React from 'react';
 
-// GoJIRA 앱 컴포넌트 (동적 import)
-const GoJIRAApp = React.lazy(() => import('./GoJIRAApp'));
+// GoJIRA 앱 — Module Federation 동적 로딩 (Remote: gojiraApp@:3001)
+const GoJIRAApp = React.lazy(() => import('gojiraApp/GoJIRAApp'));
 
 const appRegistry = [
   {
