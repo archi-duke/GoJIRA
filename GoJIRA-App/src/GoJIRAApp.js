@@ -46,12 +46,12 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
   }, [navigate, selectedProject]);
 
   const projectCode = selectedProject?.jiraCodes?.main?.jiraCode || '';
-  const API_BASE = config.API_BASE || config.PLATFORM_API;
+  const PLATFORM_API = config.PLATFORM_API || config.API_BASE;
   const GOJIRA_API = config.GOJIRA_API || config.API_BASE;
 
   useEffect(() => {
     if (!projectCode || page === 'map') { setProjectAlert(null); return; }
-    const API = API_BASE + '/DocRepo';
+    const API = PLATFORM_API + '/DocRepo';
 
     const p1 = fetch(`${GOJIRA_API}/Project/alerts?user=${encodeURIComponent(user || '')}`)
       .then(r => r.json())
@@ -80,13 +80,13 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
       if (!alert.branchDiff && !alert.hasOpenPR) setProjectAlert(null);
       else setProjectAlert(alert);
     });
-  }, [projectCode, page, user, API_BASE, GOJIRA_API]);
+  }, [projectCode, page, user, PLATFORM_API, GOJIRA_API]);
 
   const queueRef = useRef(null);
   if (!queueRef.current) queueRef.current = createEventQueue();
 
   async function compareTree(code, userId) {
-    const API = API_BASE + '/DocRepo';
+    const API = PLATFORM_API + '/DocRepo';
     const [mainTree, userTree] = await Promise.all([
       fetch(`${API}/${code}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
       fetch(`${API}/${code}/tree?ref=${encodeURIComponent('docs/' + userId)}`).then(r => r.ok ? r.json() : null).catch(() => null),
