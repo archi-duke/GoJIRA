@@ -68,33 +68,24 @@
 .ac-proc-body { padding: 2px 10px 6px; border-top: 1px solid #e9ecef; }
 .ac-proc-step { padding: 1px 0; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; }
 
-/* Debug 뷰 (Master 전용) */
-.ac-process-debug { background: #1e1e2e; border-color: #333; }
-.ac-process-debug .ac-proc-header { color: #aaa; }
-.ac-process-debug .ac-proc-header:hover { background: #2a2a3e; }
-.ac-process-debug .ac-proc-arrow { color: #666; }
-.ac-process-debug .ac-proc-label { color: #ccc; }
-.ac-process-debug .ac-proc-body { border-top-color: #333; }
-
+/* 단계별 라인 */
 .ac-ps-line { display: flex; align-items: baseline; gap: 6px; padding: 1px 0; line-height: 1.6; }
-.ac-ps-tag { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 2px; flex-shrink: 0; text-transform: uppercase; }
-.ac-tag-think { background: #333; color: #888; }
-.ac-tag-reason { background: #2d2352; color: #a78bfa; }
-.ac-tag-call { background: #1a3a5c; color: #60a5fa; }
-.ac-tag-ok { background: #1a3c2a; color: #4ade80; }
-.ac-tag-err { background: #3c1a1a; color: #f87171; }
-.ac-ps-text { color: #ccc; font-size: 11px; }
-.ac-ps-text strong { color: #60a5fa; }
-.ac-ps-dim { color: #666; font-style: italic; }
+.ac-ps-tag { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 2px; flex-shrink: 0; }
+.ac-tag-reason { background: #ede9fe; color: #6d28d9; }
+.ac-tag-call { background: #dbeafe; color: #1d4ed8; }
+.ac-tag-ok { background: #d1fae5; color: #065f46; }
+.ac-tag-err { background: #fee2e2; color: #991b1b; }
+.ac-ps-text { color: #444; font-size: 11px; }
+.ac-ps-text strong { color: #1d4ed8; }
 .ac-ps-params { color: #888; font-size: 10px; margin-left: 4px; }
-.ac-ps-dur { color: #666; font-size: 10px; margin-left: auto; flex-shrink: 0; }
-.ac-ps-ts { color: #555; font-size: 9px; margin-left: auto; flex-shrink: 0; }
-.ac-ps-reasoning { background: #2d2352; border-radius: 4px; padding: 4px 8px; margin: 2px 0; }
-.ac-ps-reasoning .ac-ps-text { color: #c4b5fd; font-style: italic; }
-.ac-ps-expand { color: #666; font-size: 10px; margin-left: 4px; cursor: pointer; }
+.ac-ps-dur { color: #999; font-size: 10px; margin-left: auto; flex-shrink: 0; }
+.ac-ps-ts { color: #aaa; font-size: 9px; margin-left: auto; flex-shrink: 0; }
+.ac-ps-reasoning { background: #f5f3ff; border-radius: 4px; padding: 4px 8px; margin: 2px 0; }
+.ac-ps-reasoning .ac-ps-text { color: #5b21b6; font-style: italic; }
+.ac-ps-expand { color: #999; font-size: 10px; margin-left: 4px; cursor: pointer; }
 .ac-ps-result-wrap { margin: 1px 0; }
-.ac-ps-detail { background: #151520; color: #8b8b9e; border: 1px solid #2a2a3e; border-radius: 4px; padding: 6px 8px; margin: 2px 0 2px 28px; font-size: 10px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; }
+.ac-ps-detail { background: #f9fafb; color: #555; border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px 8px; margin: 2px 0 2px 28px; font-size: 10px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow-y: auto; }
 
 /* tool_call / tool_result 좌측 보더 */
-.ac-ps-tool_call { border-left: 2px solid #3498db; padding-left: 6px; margin-left: 2px; }
-.ac-ps-tool_result { border-left: 2px solid #27ae60; padding-left: 6px; margin-left: 2px; }
+.ac-ps-tool_call { border-left: 2px solid #3b82f6; padding-left: 6px; margin-left: 2px; }
+.ac-ps-tool_result { border-left: 2px solid #10b981; padding-left: 6px; margin-left: 2px; }

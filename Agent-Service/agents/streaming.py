@@ -34,8 +34,8 @@ async def agent_loop_stream(
     all_actions = []
 
     for turn in range(max_turns):
-        # LLM 호출 시작 알림
-        yield _sse("thinking", {"turn": turn, "message": "생각하는 중..."})
+        # LLM 추론 시작
+        yield _sse("thinking", {"turn": turn, "message": "추론 중..."})
 
         try:
             result = await call_llm_with_tools(messages, tools)
@@ -50,7 +50,7 @@ async def agent_loop_stream(
         content = msg.content or ""
         tool_calls = msg.tool_calls or []
 
-        # LLM 추론 내용 전송 (도구 호출 전 reasoning)
+        # LLM 추론 내용 전송 — 도구 호출 여부와 무관하게 content가 있으면 전송
         if content and tool_calls:
             yield _sse("reasoning", {"turn": turn, "content": content})
 

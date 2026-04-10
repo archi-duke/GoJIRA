@@ -91,7 +91,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
           }
           break;
         case 'thinking':
-          addStep({ type: 'thinking', data, ts });
+          // thinking은 스피너 상태 유지 용도 (step에 추가하지 않음)
           break;
         case 'reasoning':
           addStep({ type: 'reasoning', data, ts });
@@ -238,7 +238,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
 
     // Master: 전체 디버그 뷰
     return (
-      <div className="ac-process ac-process-debug">
+      <div className="ac-process">
         <div className="ac-proc-header" onClick={() => toggleProcess(idx)}>
           {isRunning
             ? <span className="ac-proc-spinner" />
@@ -251,16 +251,9 @@ export default function AgentChat({ user, authority, context, onClose }) {
           <div className="ac-proc-body">
             {steps.map((step, i) => (
               <div key={i} className={`ac-proc-step ac-ps-${step.type}`}>
-                {step.type === 'thinking' && (
-                  <div className="ac-ps-line">
-                    <span className="ac-ps-tag ac-tag-think">THINK</span>
-                    <span className="ac-ps-text ac-ps-dim">{step.data.message}</span>
-                    <span className="ac-ps-ts">{step.ts}</span>
-                  </div>
-                )}
                 {step.type === 'reasoning' && (
                   <div className="ac-ps-line ac-ps-reasoning">
-                    <span className="ac-ps-tag ac-tag-reason">REASON</span>
+                    <span className="ac-ps-tag ac-tag-reason">추론</span>
                     <span className="ac-ps-text">{step.data.content}</span>
                   </div>
                 )}
