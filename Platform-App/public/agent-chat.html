@@ -259,13 +259,25 @@
       }
     }
 
-    // ─── navigate 액션 처리: 부모 창에 postMessage ───
+    // ─── navigate 액션 처리: 부모 창의 sessionStorage에 직접 설정 후 reload ───
     function handleActions(actions) {
       for (const action of actions) {
         if (action.result && action.result._action === 'navigate') {
           const { projectCode, page } = action.result;
-          if (window.opener && projectCode && page) {
-            window.opener.postMessage({ type: 'agent_navigate', projectCode, page }, window.location.origin);
+          if (window.opener && !window.opener.closed && projectCode && page) {
+            // 부모 창에서 프로젝트 정보 조회 → sessionStorage 설정 → reload
+            fetch(`${cfg.API}/Project`)
+              .then(r => r.json())
+              .then(projects => {
+                const arr = Array.isArray(projects) ? projects : [];
+                const prj = arr.find(p => p.jiraCodes?.main?.jiraCode === projectCode);
+                if (prj && window.opener && !window.opener.closed) {
+                  window.opener.sessionStorage.setItem('gojira_page', page);
+                  window.opener.sessionStorage.setItem('gojira_project', JSON.stringify(prj));
+                  window.opener.location.reload();
+                }
+              })
+              .catch(err => console.error('navigate failed:', err));
           }
         }
       }
