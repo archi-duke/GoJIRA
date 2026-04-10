@@ -5,7 +5,6 @@ import config from '../config';
 import './AgentChat.css';
 
 const API = config.GOJIRA_API || config.API_BASE;
-// Python Agent Service 스트리밍 엔드포인트
 const STREAM_API = config.AGENT_API || API;
 
 export default function AgentChat({ user, context, onClose }) {
@@ -16,14 +15,12 @@ export default function AgentChat({ user, context, onClose }) {
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [scratchpad, setScratchpad] = useState([]);
-  const [scratchOpen, setScratchOpen] = useState(true);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, scratchpad]);
+  }, [messages]);
 
   const loadSession = useCallback(async (sid) => {
     if (!sid) return;
@@ -62,13 +59,25 @@ export default function AgentChat({ user, context, onClose }) {
     const text = input.trim();
     if (!text || loading) return;
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
+    // user 메시지 + 빈 process 메시지 삽입
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: text },
+      { role: 'process', steps: [], open: true },
+    ]);
     setLoading(true);
-    setScratchpad([]);
-    setScratchOpen(true);
 
     let contentBuf = '';
     let finalActions = [];
+
+    function addStep(step) {
+      setMessages(prev => {
+        const idx = prev.findLastIndex(m => m.role === 'process');
+        if (idx === -1) return prev;
+        const proc = { ...prev[idx], steps: [...prev[idx].steps, step] };
+        return [...prev.slice(0, idx), proc, ...prev.slice(idx + 1)];
+      });
+    }
 
     function handleSSE(type, data) {
       const ts = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -80,13 +89,13 @@ export default function AgentChat({ user, context, onClose }) {
           }
           break;
         case 'thinking':
-          setScratchpad(prev => [...prev, { type: 'thinking', data, ts }]);
+          addStep({ type: 'thinking', data, ts });
           break;
         case 'tool_call':
-          setScratchpad(prev => [...prev, { type: 'tool_call', data, ts }]);
+          addStep({ type: 'tool_call', data, ts });
           break;
         case 'tool_result':
-          setScratchpad(prev => [...prev, { type: 'tool_result', data, ts }]);
+          addStep({ type: 'tool_result', data, ts });
           break;
         case 'content':
           contentBuf += data.text;
@@ -102,16 +111,19 @@ export default function AgentChat({ user, context, onClose }) {
           finalActions = data.actions || [];
           setMessages(prev => {
             const filtered = prev.filter(m => !m._streaming);
-            return [...filtered, {
+            // process 접기
+            const updated = filtered.map(m =>
+              m.role === 'process' && m.steps.length > 0 ? { ...m, open: false } : m
+            );
+            return [...updated, {
               role: 'assistant',
               content: data.reply || contentBuf,
               actions: finalActions,
             }];
           });
-          setScratchpad(prev => [...prev, { type: 'done', data: { message: '완료' }, ts }]);
           break;
         case 'error':
-          setScratchpad(prev => [...prev, { type: 'error', data, ts }]);
+          addStep({ type: 'error', data, ts });
           break;
         default: break;
       }
@@ -125,7 +137,6 @@ export default function AgentChat({ user, context, onClose }) {
       });
 
       if (!res.ok || !res.body) {
-        // fallback: 기존 방식
         const fb = await fetch(`${API}/Agent/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
@@ -133,7 +144,11 @@ export default function AgentChat({ user, context, onClose }) {
         });
         const data = await fb.json();
         if (data.sessionId) { setSessionId(data.sessionId); sessionStorage.setItem('agent_sessionId', data.sessionId); }
-        setMessages(prev => [...prev, { role: 'assistant', content: data.reply, actions: data.actions, suggestions: data.suggestions }]);
+        // process 제거 후 응답 추가
+        setMessages(prev => [
+          ...prev.filter(m => m.role !== 'process' || m.steps.length > 0),
+          { role: 'assistant', content: data.reply, actions: data.actions, suggestions: data.suggestions },
+        ]);
         setLoading(false);
         return;
       }
@@ -157,13 +172,16 @@ export default function AgentChat({ user, context, onClose }) {
         }
       }
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `연결 오류: ${err.message}` }]);
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.role !== 'process' || m.steps.length > 0);
+        return [...filtered, { role: 'assistant', content: `연결 오류: ${err.message}` }];
+      });
     }
     setLoading(false);
   }
 
   function handleNewChat() {
-    setSessionId(null); setMessages([]); setScratchpad([]);
+    setSessionId(null); setMessages([]);
     sessionStorage.removeItem('agent_sessionId');
     setShowHistory(false);
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -178,46 +196,64 @@ export default function AgentChat({ user, context, onClose }) {
   }
 
   function handleShowHistory() { setShowHistory(true); setSearchQuery(''); loadSessions(); }
-  function handleSelectSession(sid) { setShowHistory(false); setScratchpad([]); loadSession(sid); }
+  function handleSelectSession(sid) { setShowHistory(false); loadSession(sid); }
   function handleSearch(e) { const q = e.target.value; setSearchQuery(q); loadSessions(q); }
   function handleKeyDown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }
   function handleSuggestion(text) { setInput(text); setTimeout(() => inputRef.current?.focus(), 0); }
 
-  function renderScratchpad() {
-    if (scratchpad.length === 0 && !loading) return null;
-    return (
-      <div className="ac-scratch">
-        <div className="ac-scratch-header" onClick={() => setScratchOpen(!scratchOpen)}>
-          <span className="ac-scratch-arrow">{scratchOpen ? '\u25BC' : '\u25B6'}</span>
-          <span className="ac-scratch-title">Agent 동작 과정</span>
-          <span className="ac-scratch-count">{scratchpad.length}</span>
+  function toggleProcess(idx) {
+    setMessages(prev => prev.map((m, i) => i === idx ? { ...m, open: !m.open } : m));
+  }
+
+  function renderProcess(msg, idx) {
+    if (!msg.steps || msg.steps.length === 0) {
+      if (loading) return (
+        <div className="ac-process">
+          <div className="ac-proc-header">
+            <span className="ac-proc-spinner" />
+            <span className="ac-proc-label">처리 중...</span>
+          </div>
         </div>
-        {scratchOpen && (
-          <div className="ac-scratch-body">
-            {scratchpad.map((item, i) => (
-              <div key={i} className={`ac-scratch-item ac-si-${item.type}`}>
-                <span className="ac-scratch-ts">{item.ts}</span>
-                {item.type === 'thinking' && <span className="ac-si-text">{item.data.message}</span>}
-                {item.type === 'tool_call' && (
-                  <span className="ac-si-text">
-                    <strong>{item.data.tool}</strong>
-                    <span className="ac-si-params">({Object.entries(item.data.params || {}).map(([k,v]) => `${k}=${v}`).join(', ')})</span>
+      );
+      return null;
+    }
+    return (
+      <div className="ac-process">
+        <div className="ac-proc-header" onClick={() => toggleProcess(idx)}>
+          <span className="ac-proc-arrow">{msg.open ? '\u25BC' : '\u25B6'}</span>
+          <span className="ac-proc-label">작업 과정</span>
+          <span className="ac-proc-badge">{msg.steps.filter(s => s.type === 'tool_result').length} tools</span>
+        </div>
+        {msg.open && (
+          <div className="ac-proc-body">
+            {msg.steps.map((step, i) => (
+              <div key={i} className={`ac-proc-step ac-ps-${step.type}`}>
+                {step.type === 'thinking' && (
+                  <span className="ac-ps-text ac-ps-dim">{step.data.message}</span>
+                )}
+                {step.type === 'tool_call' && (
+                  <span className="ac-ps-text">
+                    <span className="ac-ps-icon">&#9654;</span>
+                    <strong>{step.data.tool}</strong>
+                    <span className="ac-ps-params">
+                      {Object.entries(step.data.params || {}).map(([k,v]) => `${k}=${v}`).join(', ')}
+                    </span>
                   </span>
                 )}
-                {item.type === 'tool_result' && (
-                  <span className="ac-si-text">
-                    <span className={item.data.status === 'success' ? 'ac-si-ok' : 'ac-si-err'}>{item.data.status === 'success' ? 'OK' : 'ERR'}</span>
-                    {' '}{item.data.tool} &rarr; {item.data.summary}
-                    <span className="ac-si-dur">{item.data.duration_ms}ms</span>
+                {step.type === 'tool_result' && (
+                  <span className="ac-ps-text">
+                    <span className={step.data.status === 'success' ? 'ac-ps-ok' : 'ac-ps-err'}>
+                      {step.data.status === 'success' ? '\u2713' : '\u2717'}
+                    </span>
+                    {step.data.tool} &rarr; {step.data.summary}
+                    <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
                   </span>
                 )}
-                {item.type === 'done' && <span className="ac-si-text ac-si-done">{item.data.message}</span>}
-                {item.type === 'error' && <span className="ac-si-text ac-si-err">{item.data.message}</span>}
+                {step.type === 'error' && (
+                  <span className="ac-ps-text ac-ps-err">{step.data.message}</span>
+                )}
               </div>
             ))}
-            {loading && scratchpad.length === 0 && (
-              <div className="ac-scratch-item ac-si-thinking"><span className="ac-si-text">처리 시작...</span></div>
-            )}
           </div>
         )}
       </div>
@@ -272,42 +308,46 @@ export default function AgentChat({ user, context, onClose }) {
                   </div>
                 </div>
               )}
-              {messages.map((msg, i) => (
-                <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
-                  <div className="ac-msg-content">
-                    {msg.role === 'assistant' ? (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
-                    ) : (
-                      <span>{msg.content}</span>
+              {messages.map((msg, i) => {
+                if (msg.role === 'process') return (
+                  <div key={i} className="ac-msg ac-msg-process">{renderProcess(msg, i)}</div>
+                );
+                return (
+                  <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
+                    <div className="ac-msg-content">
+                      {msg.role === 'assistant' ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
+                      ) : (
+                        <span>{msg.content}</span>
+                      )}
+                    </div>
+                    {msg.actions && msg.actions.length > 0 && (
+                      <div className="ac-actions">
+                        {msg.actions.map((a, j) => (
+                          <div key={j} className="ac-action-card">
+                            <span className="ac-action-skill">{a.skill}</span>
+                            <span className="ac-action-status">{a.error ? '실패' : '완료'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {msg.suggestions && msg.suggestions.length > 0 && (
+                      <div className="ac-suggestions">
+                        {msg.suggestions.map((s, j) => (
+                          <button key={j} onClick={() => handleSuggestion(s)}>{s}</button>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  {msg.actions && msg.actions.length > 0 && (
-                    <div className="ac-actions">
-                      {msg.actions.map((a, j) => (
-                        <div key={j} className="ac-action-card">
-                          <span className="ac-action-skill">{a.skill}</span>
-                          <span className="ac-action-status">{a.error ? '실패' : '완료'}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {msg.suggestions && msg.suggestions.length > 0 && (
-                    <div className="ac-suggestions">
-                      {msg.suggestions.map((s, j) => (
-                        <button key={j} onClick={() => handleSuggestion(s)}>{s}</button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {loading && !messages.some(m => m._streaming) && (
+                );
+              })}
+              {loading && !messages.some(m => m._streaming) && !messages.some(m => m.role === 'process') && (
                 <div className="ac-msg ac-msg-assistant">
                   <div className="ac-msg-content ac-typing">생각하는 중...</div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
-            {renderScratchpad()}
             <div className="ac-input-area">
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
