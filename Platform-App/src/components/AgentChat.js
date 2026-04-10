@@ -206,27 +206,23 @@ export default function AgentChat({ user, context, onClose }) {
   }
 
   function renderProcess(msg, idx) {
-    if (!msg.steps || msg.steps.length === 0) {
-      if (loading) return (
-        <div className="ac-process">
-          <div className="ac-proc-header">
-            <span className="ac-proc-spinner" />
-            <span className="ac-proc-label">처리 중...</span>
-          </div>
-        </div>
-      );
-      return null;
-    }
+    const steps = msg.steps || [];
+    const toolCount = steps.filter(s => s.type === 'tool_result').length;
+    const isRunning = loading && !messages.some(m => m._streaming) && idx === messages.findLastIndex(m => m.role === 'process');
+
     return (
       <div className="ac-process">
         <div className="ac-proc-header" onClick={() => toggleProcess(idx)}>
-          <span className="ac-proc-arrow">{msg.open ? '\u25BC' : '\u25B6'}</span>
-          <span className="ac-proc-label">작업 과정</span>
-          <span className="ac-proc-badge">{msg.steps.filter(s => s.type === 'tool_result').length} tools</span>
+          {isRunning
+            ? <span className="ac-proc-spinner" />
+            : <span className="ac-proc-arrow">{msg.open ? '\u25BC' : '\u25B6'}</span>
+          }
+          <span className="ac-proc-label">{isRunning ? '작업 중...' : '작업 과정'}</span>
+          {toolCount > 0 && <span className="ac-proc-badge">{toolCount} tools</span>}
         </div>
         {msg.open && (
           <div className="ac-proc-body">
-            {msg.steps.map((step, i) => (
+            {steps.map((step, i) => (
               <div key={i} className={`ac-proc-step ac-ps-${step.type}`}>
                 {step.type === 'thinking' && (
                   <span className="ac-ps-text ac-ps-dim">{step.data.message}</span>
@@ -235,9 +231,11 @@ export default function AgentChat({ user, context, onClose }) {
                   <span className="ac-ps-text">
                     <span className="ac-ps-icon">&#9654;</span>
                     <strong>{step.data.tool}</strong>
-                    <span className="ac-ps-params">
-                      {Object.entries(step.data.params || {}).map(([k,v]) => `${k}=${v}`).join(', ')}
-                    </span>
+                    {Object.keys(step.data.params || {}).length > 0 && (
+                      <span className="ac-ps-params">
+                        ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})
+                      </span>
+                    )}
                   </span>
                 )}
                 {step.type === 'tool_result' && (
