@@ -19,6 +19,9 @@ __pycache__/
 # Cache
 GoJIRA-API/cache/
 
+# Docs backup
+docs-bkg/
+
 # IDE
 .idea/
 .vscode/
