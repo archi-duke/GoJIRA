@@ -60,6 +60,9 @@
 - issue_link: 이슈 관계 설정 (contain, relate, block)
 - pr_create: PR 생성
 
+## UI 제어
+- ui_navigate: GoJIRA 화면을 특정 페이지로 이동. "Relation Map 보여줘" → ui_navigate(page="relationMap"), "SATAM 보여줘" → ui_navigate(page="satam"), "이슈 목록 열어줘" → ui_navigate(page="issues"), "문서 보여줘" → ui_navigate(page="docs")
+
 # 응답 스타일
 
 - 간결하고 직접적으로 답합니다

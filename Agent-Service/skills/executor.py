@@ -29,6 +29,12 @@ _SYNC_EXECUTORS = {
     "issue_delete": exec_issue_delete,
     "issue_link": exec_issue_link,
     "issue_analyze": exec_issue_analyze,
+    "ui_navigate": lambda params, user: {
+        "_action": "navigate",
+        "projectCode": params.get("projectCode", ""),
+        "page": params.get("page", ""),
+        "message": f"{params.get('projectCode', '')} {params.get('page', '')} 화면을 열었습니다.",
+    },
 }
 
 _ASYNC_EXECUTORS = {
