@@ -7,7 +7,7 @@ import './AgentChat.css';
 const API = config.GOJIRA_API || config.API_BASE;
 const STREAM_API = config.AGENT_API || API;
 
-export default function AgentChat({ user, context, onClose }) {
+export default function AgentChat({ user, authority, context, onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,6 +17,9 @@ export default function AgentChat({ user, context, onClose }) {
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Master 그룹: authority.USR >= 15
+  const isMaster = authority && (authority.USR || 0) >= 15;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -59,7 +62,6 @@ export default function AgentChat({ user, context, onClose }) {
     const text = input.trim();
     if (!text || loading) return;
     setInput('');
-    // user 메시지 + 빈 process 메시지 삽입
     setMessages(prev => [
       ...prev,
       { role: 'user', content: text },
@@ -91,6 +93,9 @@ export default function AgentChat({ user, context, onClose }) {
         case 'thinking':
           addStep({ type: 'thinking', data, ts });
           break;
+        case 'reasoning':
+          addStep({ type: 'reasoning', data, ts });
+          break;
         case 'tool_call':
           addStep({ type: 'tool_call', data, ts });
           break;
@@ -111,7 +116,6 @@ export default function AgentChat({ user, context, onClose }) {
           finalActions = data.actions || [];
           setMessages(prev => {
             const filtered = prev.filter(m => !m._streaming);
-            // process 접기
             const updated = filtered.map(m =>
               m.role === 'process' && m.steps.length > 0 ? { ...m, open: false } : m
             );
@@ -144,7 +148,6 @@ export default function AgentChat({ user, context, onClose }) {
         });
         const data = await fb.json();
         if (data.sessionId) { setSessionId(data.sessionId); sessionStorage.setItem('agent_sessionId', data.sessionId); }
-        // process 제거 후 응답 추가
         setMessages(prev => [
           ...prev.filter(m => m.role !== 'process' || m.steps.length > 0),
           { role: 'assistant', content: data.reply, actions: data.actions, suggestions: data.suggestions },
@@ -205,13 +208,37 @@ export default function AgentChat({ user, context, onClose }) {
     setMessages(prev => prev.map((m, i) => i === idx ? { ...m, open: !m.open } : m));
   }
 
+  // ─── 디버그 상세(detail) 접기 ───
+  function toggleDetail(msgIdx, stepIdx) {
+    setMessages(prev => prev.map((m, i) => {
+      if (i !== msgIdx || m.role !== 'process') return m;
+      const steps = m.steps.map((s, j) => j === stepIdx ? { ...s, detailOpen: !s.detailOpen } : s);
+      return { ...m, steps };
+    }));
+  }
+
   function renderProcess(msg, idx) {
     const steps = msg.steps || [];
     const toolCount = steps.filter(s => s.type === 'tool_result').length;
     const isRunning = loading && !messages.some(m => m._streaming) && idx === messages.findLastIndex(m => m.role === 'process');
 
+    // 일반 사용자: 스피너 + "작업 중..."만 표시
+    if (!isMaster) {
+      if (isRunning) return (
+        <div className="ac-process">
+          <div className="ac-proc-header">
+            <span className="ac-proc-spinner" />
+            <span className="ac-proc-label">작업 중...</span>
+          </div>
+        </div>
+      );
+      // 완료 후에도 표시하지 않음
+      return null;
+    }
+
+    // Master: 전체 디버그 뷰
     return (
-      <div className="ac-process">
+      <div className="ac-process ac-process-debug">
         <div className="ac-proc-header" onClick={() => toggleProcess(idx)}>
           {isRunning
             ? <span className="ac-proc-spinner" />
@@ -225,30 +252,56 @@ export default function AgentChat({ user, context, onClose }) {
             {steps.map((step, i) => (
               <div key={i} className={`ac-proc-step ac-ps-${step.type}`}>
                 {step.type === 'thinking' && (
-                  <span className="ac-ps-text ac-ps-dim">{step.data.message}</span>
+                  <div className="ac-ps-line">
+                    <span className="ac-ps-tag ac-tag-think">THINK</span>
+                    <span className="ac-ps-text ac-ps-dim">{step.data.message}</span>
+                    <span className="ac-ps-ts">{step.ts}</span>
+                  </div>
+                )}
+                {step.type === 'reasoning' && (
+                  <div className="ac-ps-line ac-ps-reasoning">
+                    <span className="ac-ps-tag ac-tag-reason">REASON</span>
+                    <span className="ac-ps-text">{step.data.content}</span>
+                  </div>
                 )}
                 {step.type === 'tool_call' && (
-                  <span className="ac-ps-text">
-                    <span className="ac-ps-icon">&#9654;</span>
-                    <strong>{step.data.tool}</strong>
-                    {Object.keys(step.data.params || {}).length > 0 && (
-                      <span className="ac-ps-params">
-                        ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})
-                      </span>
-                    )}
-                  </span>
+                  <div className="ac-ps-line">
+                    <span className="ac-ps-tag ac-tag-call">CALL</span>
+                    <span className="ac-ps-text">
+                      <strong>{step.data.tool}</strong>
+                      {Object.keys(step.data.params || {}).length > 0 && (
+                        <span className="ac-ps-params">
+                          ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})
+                        </span>
+                      )}
+                    </span>
+                    <span className="ac-ps-ts">{step.ts}</span>
+                  </div>
                 )}
                 {step.type === 'tool_result' && (
-                  <span className="ac-ps-text">
-                    <span className={step.data.status === 'success' ? 'ac-ps-ok' : 'ac-ps-err'}>
-                      {step.data.status === 'success' ? '\u2713' : '\u2717'}
-                    </span>
-                    {step.data.tool} &rarr; {step.data.summary}
-                    <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
-                  </span>
+                  <div className="ac-ps-result-wrap">
+                    <div className="ac-ps-line" onClick={() => toggleDetail(idx, i)} style={{cursor:'pointer'}}>
+                      <span className={`ac-ps-tag ${step.data.status === 'success' ? 'ac-tag-ok' : 'ac-tag-err'}`}>
+                        {step.data.status === 'success' ? 'OK' : 'ERR'}
+                      </span>
+                      <span className="ac-ps-text">
+                        {step.data.tool} &rarr; {step.data.summary}
+                      </span>
+                      <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
+                      {step.data.detail && (
+                        <span className="ac-ps-expand">{step.detailOpen ? '\u25BC' : '...'}</span>
+                      )}
+                    </div>
+                    {step.detailOpen && step.data.detail && (
+                      <pre className="ac-ps-detail">{step.data.detail}</pre>
+                    )}
+                  </div>
                 )}
                 {step.type === 'error' && (
-                  <span className="ac-ps-text ac-ps-err">{step.data.message}</span>
+                  <div className="ac-ps-line">
+                    <span className="ac-ps-tag ac-tag-err">ERR</span>
+                    <span className="ac-ps-text">{step.data.message}</span>
+                  </div>
                 )}
               </div>
             ))}
@@ -307,9 +360,10 @@ export default function AgentChat({ user, context, onClose }) {
                 </div>
               )}
               {messages.map((msg, i) => {
-                if (msg.role === 'process') return (
-                  <div key={i} className="ac-msg ac-msg-process">{renderProcess(msg, i)}</div>
-                );
+                if (msg.role === 'process') {
+                  const rendered = renderProcess(msg, i);
+                  return rendered ? <div key={i} className="ac-msg ac-msg-process">{rendered}</div> : null;
+                }
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
                     <div className="ac-msg-content">

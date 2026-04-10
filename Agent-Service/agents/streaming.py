@@ -50,11 +50,14 @@ async def agent_loop_stream(
         content = msg.content or ""
         tool_calls = msg.tool_calls or []
 
+        # LLM 추론 내용 전송 (도구 호출 전 reasoning)
+        if content and tool_calls:
+            yield _sse("reasoning", {"turn": turn, "content": content})
+
         # 도구 호출 없으면 최종 응답
         if not tool_calls or finish_reason == "stop":
             if not content and all_actions:
                 content = "작업이 완료되었습니다."
-            # 텍스트를 청크로 전송
             for chunk in _split_chunks(content, 80):
                 yield _sse("content", {"text": chunk})
             yield _sse("done", {"reply": content, "actions": all_actions})
@@ -108,6 +111,7 @@ async def agent_loop_stream(
                     "status": "success",
                     "duration_ms": duration,
                     "summary": _summarize_result(skill_result),
+                    "detail": _truncate_detail(skill_result),
                 })
 
             except Exception as e:
@@ -151,6 +155,17 @@ def _split_chunks(text: str, size: int) -> List[str]:
     if buf:
         chunks.append(buf)
     return chunks
+
+
+def _truncate_detail(result, max_len=500) -> str:
+    """도구 결과를 디버그용으로 요약 (마스터 사용자에게 표시)."""
+    try:
+        text = json.dumps(result, ensure_ascii=False, default=str)
+        if len(text) > max_len:
+            return text[:max_len] + "..."
+        return text
+    except Exception:
+        return str(result)[:max_len]
 
 
 def _summarize_result(result) -> str:

@@ -193,7 +193,7 @@ function App() {
       <div className="app-body">{content}</div>
       <NoticePopup user={user} />
       <AlertModal />
-      {showAgent && <AgentChat user={user} context={{ page: activeKey }} onClose={() => setShowAgent(false)} />}
+      {showAgent && <AgentChat user={user} authority={authority} context={{ page: activeKey }} onClose={() => setShowAgent(false)} />}
     </div>
   );
 }
