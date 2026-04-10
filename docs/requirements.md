@@ -27,7 +27,8 @@ GoJIRA는 JIRA Datacenter 기반 프로젝트 관리, 설계문서 형상관리,
 | Platform-API | Go | :9000 | 인증(SSO), 계정/권한, 공지, DocRepo(Gitea), SSE/WebSocket |
 | GoJIRA-API | Go | :9001 | 이슈 CRUD, 프로젝트, JIRA DC 양방향 동기화 |
 | Agent-Service | Python | :9002 | AI 에이전트 오케스트레이터, 16개 스킬, SSE 스트리밍 |
-| GoJIRA-App | React | :3000 | 프론트엔드 SPA |
+| Platform-App | React | :3000 | 통합 컨테이너 (Host) — Account, Notice, Repository |
+| GoJIRA-App | React | :3001 | 프로젝트 관리 SPA (Remote) — Module Federation |
 | Gitea | Go | - | 설계문서 형상관리 (GitHub API 호환) |
 | MongoDB | - | - | 공용 데이터 저장소 |
 | JIRA DC | Java | - | 외부 이슈 추적 시스템 |
@@ -69,7 +70,7 @@ C4Container
     Person(user, "사용자")
 
     System_Boundary(gojira, "GoJIRA Platform") {
-        Container(app, "GoJIRA-App", "React :3000", "SPA 프론트엔드")
+        Container(app, "GoJIRA-App", "React :3001", "SPA 프론트엔드")
         Container(platform, "Platform-API", "Go :9000", "인증, 계정, 공지, DocRepo, SSE/WS")
         Container(api, "GoJIRA-API", "Go :9001", "이슈 CRUD, 프로젝트, 동기화")
         Container(agent, "Agent-Service", "Python :9002", "AI 오케스트레이터, 16스킬")
@@ -560,7 +561,7 @@ flowchart TB
     end
 
     subgraph GoJIRA["GoJIRA Platform"]
-        APP[GoJIRA-App<br/>React :3000]
+        APP[GoJIRA-App<br/>React :3001]
         PLAT[Platform-API<br/>Go :9000]
         GAPI[GoJIRA-API<br/>Go :9001]
         AGENT[Agent-Service<br/>Python :9002]

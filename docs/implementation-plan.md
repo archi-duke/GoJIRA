@@ -201,8 +201,8 @@ pie title 구현 진행 상태
 | 변경 | issue_delete | 확인 요청 |
 | 변경 | issue_link | 확인 요청 |
 | 변경 | pr_create | 확인 요청 |
+| 조회 | doc_history | 자동 |
 | UI | ui_navigate | 자동 |
-| 기타 | (16번째) | - |
 
 ---
 

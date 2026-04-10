@@ -1,6 +1,6 @@
 # GoJIRA 애플리케이션 설계서
 
-> GoJIRA-App (React SPA, :3000)
+> GoJIRA-App (React SPA, :3001) — Module Federation Remote
 > 최종 갱신: 2026-04-10
 
 ---
@@ -44,11 +44,12 @@ graph TD
     App --> RelationMap["RelationMap.js<br/>관계 맵"]
     App --> SATAM["SATAM.js<br/>안전성 매트릭스"]
     App --> DocEditor["DocEditor.js<br/>문서 편집기"]
-    App --> AccountManager["AccountManager.js<br/>계정 관리"]
-    App --> NoticeManager["NoticeManager.js<br/>공지 관리"]
-    App --> AgentChat["AgentChat.js<br/>Agent 채팅"]
+    App --> AgentChat["AgentChat.js<br/>Agent 채팅 (GoJIRA 전용)"]
     App --> AlertModal["AlertModal.js<br/>전역 모달"]
     App --> NoticePopup["NoticePopup.js<br/>실시간 공지"]
+
+    note1["※ AccountManager, NoticeManager는<br/>Platform-App 전용 (GoJIRA-App에 없음)"]
+    style note1 fill:#fff3cd,stroke:#ffc107
 
     ProjectMap --> ContextMenu["ContextMenu.js"]
     ProjectMap --> ProjectDialog["ProjectDialog.js"]
@@ -115,7 +116,9 @@ src/
 **Agent 독립 모드:**
 
 - URL 파라미터 `?mode=agent` 감지 시 `<AgentChat standalone />` 단독 렌더링
-- 로고 클릭 시 `window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')`
+- GoJIRA-App 로고 클릭 시 `window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')`
+- Platform-App 로고 클릭 시 `window.open('http://localhost:3001/?mode=agent', ...)` (cross-origin)
+- AgentChat은 **GoJIRA-App 전용** (Platform-App에서 제거됨). 향후 멀티 에이전트 시 공통화 검토
 
 ### 3.2 ProjectMap.js (간트 차트)
 
@@ -425,9 +428,10 @@ const navigate = (page, project) => {
 | `page === 'issues' && selectedProject` | IssueList |
 | `page === 'relationMap' && selectedProject` | RelationMap |
 | `page === 'satam' && selectedProject` | SATAM |
-| `page === 'account' && hasAccountAdmin` | AccountManager |
-| `page === 'notice' && hasNoticeAdmin` | NoticeManager |
+| `?mode=agent` URL 파라미터 | AgentChat (standalone) |
 | 그 외 | ProjectMap |
+
+> **참고:** Account/Notice 페이지는 Platform-App(:3000) 전용. GoJIRA-App에서는 렌더링하지 않음.
 
 ---
 
@@ -501,7 +505,7 @@ sequenceDiagram
     AC->>AC: 메시지 렌더링<br/>(Markdown)
 
     opt tool_result에 _action: navigate 포함
-        AC->>Main: BroadcastChannel<br/>gojira-navigate<br/>{projectCode, page}
+        AC->>Main: BroadcastChannel (same-origin)<br/>+ window.opener.postMessage (cross-origin)<br/>{projectCode, projectName, page}
         Main->>Main: 페이지 전환
     end
 
@@ -522,18 +526,22 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant MainApp as 메인 앱 (Tab)
+    participant MainApp as 메인 앱<br/>(Platform :3000 또는 GoJIRA :3001)
     participant Logo as 로고 클릭
-    participant AgentWin as Agent 창<br/>(?mode=agent)
-    participant BC as BroadcastChannel<br/>(gojira-navigate)
+    participant AgentWin as Agent 창<br/>(:3001/?mode=agent)
 
-    Logo->>AgentWin: window.open<br/>('/?mode=agent', 'gojira-agent')
+    Logo->>AgentWin: window.open<br/>('http://localhost:3001/?mode=agent')
 
-    Note over AgentWin: 사용자가 Agent에게<br/>"PROJ-001 이슈 보여줘" 요청
+    Note over AgentWin: 사용자가 Agent에게<br/>"PROJ-001 relation map 보여줘"
 
     AgentWin->>AgentWin: tool_result에<br/>_action: navigate 수신
-    AgentWin->>BC: postMessage<br/>{projectCode, projectName, page}
-    BC->>MainApp: onmessage
+
+    alt same-origin (GoJIRA-App :3001)
+        AgentWin->>MainApp: BroadcastChannel<br/>{projectCode, projectName, page}
+    else cross-origin (Platform-App :3000)
+        AgentWin->>MainApp: window.opener.postMessage<br/>{type:'gojira-navigate', projectCode, page}
+    end
+
     MainApp->>MainApp: navigate(page, project)
 ```
 

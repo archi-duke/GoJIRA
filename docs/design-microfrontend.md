@@ -14,7 +14,7 @@ GoJIRA는 **2중 앱 구조**를 채택한 마이크로 프론트엔드 시스�
 
 ## 2. 2중 앱 구조
 
-GoJIRA-App은 단독으로 `:3000`에서 실행 가능하며, Platform-App 안에서는 서브앱으로 로드된다.
+GoJIRA-App은 단독으로 `:3001`에서 실행 가능하며, Platform-App(`:3000`) 안에서는 Module Federation으로 동적 로드된다.
 
 ```mermaid
 graph TB
@@ -34,7 +34,7 @@ graph TB
     end
     
     subgraph Standalone["독립 실행"]
-        GOJIRA_ALONE["GoJIRA-App :3000<br/>(단독 실행 가능)"]
+        GOJIRA_ALONE["GoJIRA-App :3001<br/>(단독 실행 가능)"]
     end
     
     GOJIRA_ALONE -.->|"동일 컴포넌트<br/>(정적 바인딩)"| GOJIRA
