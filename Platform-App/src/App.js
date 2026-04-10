@@ -19,61 +19,14 @@ function App() {
   const [authority, setAuthority] = useState(null);
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [allUsers, setAllUsers] = useState([]);
+  const [showAgent, setShowAgent] = useState(false);
   const [mapResetCount, setMapResetCount] = useState(0);
   const [sseConnected, setSseConnected] = useState(false);
-  const agentWindowRef = React.useRef(null);
-
-  // Agent에서 URL 파라미터로 네비게이션 요청이 온 경우 처리
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const agentNav = params.get('agentNav');
-    const agentProject = params.get('agentProject');
-    if (agentNav && agentProject) {
-      // URL 파라미터 제거 (깔끔하게)
-      window.history.replaceState({}, '', window.location.pathname);
-      // 프로젝트 정보 조회 → sessionStorage 설정
-      fetch(`${config.GOJIRA_API}/Project`)
-        .then(r => r.json())
-        .then(projects => {
-          const arr = Array.isArray(projects) ? projects : [];
-          const prj = arr.find(p => p.jiraCodes?.main?.jiraCode === agentProject);
-          if (prj) {
-            sessionStorage.setItem('gojira_page', agentNav);
-            sessionStorage.setItem('gojira_project', JSON.stringify(prj));
-            setPage(agentNav);
-          }
-        })
-        .catch(() => {});
-    }
-  }, []); // eslint-disable-line
 
   // SSE 연결 상태 모니터링
   useEffect(() => {
     return onStatus(setSseConnected);
   }, []);
-
-  // Agent 창에서 참조할 설정을 window에 노출
-  useEffect(() => {
-    window.__GOJIRA_CONFIG__ = {
-      GOJIRA_API: config.GOJIRA_API || config.API_BASE,
-      AGENT_API: config.AGENT_API,
-      user: user,
-      isMaster: authority && (authority.USR || 0) >= 15,
-    };
-  }, [user, authority]);
-
-  // Agent 창 열기
-  function openAgentWindow() {
-    if (agentWindowRef.current && !agentWindowRef.current.closed) {
-      agentWindowRef.current.focus();
-      return;
-    }
-    agentWindowRef.current = window.open(
-      '/agent-chat.html',
-      'GoJIRA_Agent',
-      'width=480,height=700,resizable=yes,scrollbars=yes'
-    );
-  }
 
   useEffect(() => {
     if (!user) return;
@@ -161,35 +114,6 @@ function App() {
     if (p === 'map') setMapResetCount(c => c + 1);
   }, []);
 
-  // Agent 창에서 보내는 navigate 메시지 수신
-  useEffect(() => {
-    function handleMessage(e) {
-      if (e.origin !== window.location.origin) return;
-      const { type, projectCode, page: targetPage } = e.data || {};
-      if (type !== 'agent_navigate' || !projectCode || !targetPage) return;
-
-      // 프로젝트 목록에서 해당 프로젝트를 찾아 sessionStorage에 저장 후 리로드
-      fetch(`${config.GOJIRA_API}/Project`)
-        .then(r => r.json())
-        .then(projects => {
-          const arr = Array.isArray(projects) ? projects : [];
-          const prj = arr.find(p => {
-            const code = p.jiraCodes?.main?.jiraCode;
-            return code === projectCode;
-          });
-          if (prj) {
-            sessionStorage.setItem('gojira_page', targetPage);
-            sessionStorage.setItem('gojira_project', JSON.stringify(prj));
-            // GoJIRAApp이 sessionStorage를 읽어서 초기 상태로 렌더링하므로 리로드
-            window.location.reload();
-          }
-        })
-        .catch(() => {});
-    }
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
   if (!user) return null;
 
   // 권한 기반 메뉴 필터링
@@ -236,8 +160,8 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={openAgentWindow} />
-        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={openAgentWindow}>GoJIRA</span>
+        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)} />
+        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)}>GoJIRA</span>
         <nav className="app-nav">
           {visibleApps.map((app) => (
             <button
@@ -269,7 +193,7 @@ function App() {
       <div className="app-body">{content}</div>
       <NoticePopup user={user} />
       <AlertModal />
-      {/* Agent 채팅은 별도 윈도우로 분리됨 (openAgentWindow) */}
+      {showAgent && <AgentChat user={user} authority={authority} context={{ page: activeKey }} onClose={() => setShowAgent(false)} />}
     </div>
   );
 }
