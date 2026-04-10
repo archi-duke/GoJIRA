@@ -23,6 +23,30 @@ function App() {
   const [sseConnected, setSseConnected] = useState(false);
   const agentWindowRef = React.useRef(null);
 
+  // Agent에서 URL 파라미터로 네비게이션 요청이 온 경우 처리
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const agentNav = params.get('agentNav');
+    const agentProject = params.get('agentProject');
+    if (agentNav && agentProject) {
+      // URL 파라미터 제거 (깔끔하게)
+      window.history.replaceState({}, '', window.location.pathname);
+      // 프로젝트 정보 조회 → sessionStorage 설정
+      fetch(`${config.GOJIRA_API}/Project`)
+        .then(r => r.json())
+        .then(projects => {
+          const arr = Array.isArray(projects) ? projects : [];
+          const prj = arr.find(p => p.jiraCodes?.main?.jiraCode === agentProject);
+          if (prj) {
+            sessionStorage.setItem('gojira_page', agentNav);
+            sessionStorage.setItem('gojira_project', JSON.stringify(prj));
+            setPage(agentNav);
+          }
+        })
+        .catch(() => {});
+    }
+  }, []); // eslint-disable-line
+
   // SSE 연결 상태 모니터링
   useEffect(() => {
     return onStatus(setSseConnected);

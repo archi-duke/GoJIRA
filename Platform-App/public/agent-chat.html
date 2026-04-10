@@ -259,26 +259,39 @@
       }
     }
 
-    // ─── navigate 액션 처리: 부모 창의 sessionStorage에 직접 설정 후 reload ───
+    // ─── navigate 액션 처리 ───
+    // 부모 창이 있으면 sessionStorage 설정 후 reload
+    // 부모 창이 없으면 새 창을 열어서 GoJIRA를 띄움
+    let mainWindow = window.opener;
     function handleActions(actions) {
       for (const action of actions) {
         if (action.result && action.result._action === 'navigate') {
           const { projectCode, page } = action.result;
-          if (window.opener && !window.opener.closed && projectCode && page) {
-            // 부모 창에서 프로젝트 정보 조회 → sessionStorage 설정 → reload
-            fetch(`${cfg.API}/Project`)
-              .then(r => r.json())
-              .then(projects => {
-                const arr = Array.isArray(projects) ? projects : [];
-                const prj = arr.find(p => p.jiraCodes?.main?.jiraCode === projectCode);
-                if (prj && window.opener && !window.opener.closed) {
-                  window.opener.sessionStorage.setItem('gojira_page', page);
-                  window.opener.sessionStorage.setItem('gojira_project', JSON.stringify(prj));
-                  window.opener.location.reload();
-                }
-              })
-              .catch(err => console.error('navigate failed:', err));
-          }
+          if (!projectCode || !page) continue;
+
+          fetch(`${cfg.API}/Project`)
+            .then(r => r.json())
+            .then(projects => {
+              const arr = Array.isArray(projects) ? projects : [];
+              const prj = arr.find(p => p.jiraCodes?.main?.jiraCode === projectCode);
+              if (!prj) return;
+
+              if (mainWindow && !mainWindow.closed) {
+                // 부모 창이 열려있으면 직접 제어
+                mainWindow.sessionStorage.setItem('gojira_page', page);
+                mainWindow.sessionStorage.setItem('gojira_project', JSON.stringify(prj));
+                mainWindow.location.reload();
+                mainWindow.focus();
+              } else {
+                // 부모 창이 없으면 새 창으로 GoJIRA 열기
+                const origin = window.location.origin;
+                mainWindow = window.open(
+                  `${origin}/?agentNav=${page}&agentProject=${encodeURIComponent(projectCode)}`,
+                  'GoJIRA_Main'
+                );
+              }
+            })
+            .catch(err => console.error('navigate failed:', err));
         }
       }
     }
