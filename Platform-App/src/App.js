@@ -144,25 +144,27 @@ function App() {
       const { type, projectCode, page: targetPage } = e.data || {};
       if (type !== 'agent_navigate' || !projectCode || !targetPage) return;
 
-      fetch(`${config.GOJIRA_API}/Project?jiraCode=${encodeURIComponent(projectCode)}`)
+      // 프로젝트 목록에서 해당 프로젝트를 찾아 sessionStorage에 저장 후 리로드
+      fetch(`${config.GOJIRA_API}/Project`)
         .then(r => r.json())
         .then(projects => {
-          const prj = Array.isArray(projects) ? projects[0] : projects;
+          const arr = Array.isArray(projects) ? projects : [];
+          const prj = arr.find(p => {
+            const code = p.jiraCodes?.main?.jiraCode;
+            return code === projectCode;
+          });
           if (prj) {
             sessionStorage.setItem('gojira_page', targetPage);
             sessionStorage.setItem('gojira_project', JSON.stringify(prj));
-            navigate('map');
-            setTimeout(() => {
-              setPage(targetPage);
-              sessionStorage.setItem('gojira_page', targetPage);
-            }, 100);
+            // GoJIRAApp이 sessionStorage를 읽어서 초기 상태로 렌더링하므로 리로드
+            window.location.reload();
           }
         })
         .catch(() => {});
     }
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [navigate]);
+  }, []);
 
   if (!user) return null;
 
