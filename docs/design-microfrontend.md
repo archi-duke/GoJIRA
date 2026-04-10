@@ -314,6 +314,11 @@ sequenceDiagram
 - 닫기 버튼 숨김 (창 닫기는 OS 수준에서 처리)
 - `BroadcastChannel('gojira-navigate')`로 메인 앱과 양방향 동기화
 
+**Agent 채팅 소유권:**
+- AgentChat 컴포넌트는 **GoJIRA-App 전용** (Platform-App에서 제거)
+- Platform-App 로고 클릭 → GoJIRA-App의 Agent 독립 창 (`http://localhost:3001/?mode=agent`) 오픈
+- 향후 멀티 에이전트(2개 이상) 시 Platform-App 공통화 검토
+
 ---
 
 ## 8. 전역 모달 시스템

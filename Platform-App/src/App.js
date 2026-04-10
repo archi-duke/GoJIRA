@@ -4,7 +4,6 @@ import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
 import DocManager from './components/DocManager';
 import AlertModal from './components/AlertModal';
-import AgentChat from './components/AgentChat';
 import { getAuthUser } from './utils/auth';
 import { subscribe, onStatus } from './utils/sseManager';
 import { modalAlert, modalConfirm } from './components/AlertModal';
@@ -40,7 +39,6 @@ function App() {
   const [authority, setAuthority] = useState(null);
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [allUsers, setAllUsers] = useState([]);
-  const [showAgent, setShowAgent] = useState(false);
   const [mapResetCount, setMapResetCount] = useState(0);
   const [sseConnected, setSseConnected] = useState(false);
 
@@ -183,8 +181,8 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)} />
-        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => setShowAgent(true)}>GoJIRA</span>
+        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => window.open('http://localhost:3001/?mode=agent', 'gojira-agent', 'width=480,height=720')} />
+        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => window.open('http://localhost:3001/?mode=agent', 'gojira-agent', 'width=480,height=720')}>GoJIRA</span>
         <nav className="app-nav">
           {visibleApps.map((app) => (
             <button
@@ -216,7 +214,6 @@ function App() {
       <div className="app-body">{content}</div>
       <NoticePopup user={user} />
       <AlertModal />
-      {showAgent && <AgentChat user={user} authority={authority} context={{ page: activeKey }} onClose={() => setShowAgent(false)} />}
     </div>
   );
 }
