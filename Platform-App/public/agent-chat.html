@@ -8,47 +8,49 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fff; height: 100vh; display: flex; flex-direction: column; }
     #root { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .spinner { width:12px; height:12px; border:2px solid #ddd; border-top-color:#2c3e50; border-radius:50%; animation:sp .8s linear infinite; display:inline-block; }
+    @keyframes sp { to { transform:rotate(360deg) } }
   </style>
-  <script>
-    // 부모 창의 config에서 설정 가져오기
-    window.__AGENT_CONFIG__ = {
-      API: window.opener && window.opener.__GOJIRA_CONFIG__
-        ? window.opener.__GOJIRA_CONFIG__.GOJIRA_API
-        : 'http://localhost:9001/api/v2',
-      STREAM_API: window.opener && window.opener.__GOJIRA_CONFIG__
-        ? (window.opener.__GOJIRA_CONFIG__.AGENT_API || window.opener.__GOJIRA_CONFIG__.GOJIRA_API)
-        : 'http://localhost:9002/api/v2',
-      user: window.opener && window.opener.__GOJIRA_CONFIG__
-        ? window.opener.__GOJIRA_CONFIG__.user
-        : 'anonymous',
-      isMaster: window.opener && window.opener.__GOJIRA_CONFIG__
-        ? window.opener.__GOJIRA_CONFIG__.isMaster
-        : false,
-    };
-  </script>
 </head>
 <body>
   <div id="root"></div>
-  <script type="module">
-    import 'https://esm.sh/react@18/umd/react.production.min.js';
-    // 이 페이지는 React 앱과 별도이므로, 순수 JS로 채팅 UI를 구현합니다
-  </script>
   <script>
-    // ─── 순수 JS Agent 채팅 (React 앱 독립) ───
-    const cfg = window.__AGENT_CONFIG__;
-    const root = document.getElementById('root');
+    // ─── 독립 설정 (window.opener 의존 없음) ───
+    const GOJIRA_API = 'http://localhost:9001/api/v2';
+    const AGENT_API  = 'http://localhost:9002/api/v2';
+    const GOJIRA_APP = 'http://localhost:3000';
 
+    // 사용자 정보: opener에서 가져오거나, 쿠키/기본값 사용
+    function getUser() {
+      // 1. opener가 있으면
+      try { if (window.opener && window.opener.__GOJIRA_CONFIG__) return window.opener.__GOJIRA_CONFIG__.user; } catch {}
+      // 2. 쿠키 ADSSO_USER
+      const m = document.cookie.match(/ADSSO_USER=([^;]+)/);
+      if (m) return decodeURIComponent(m[1]);
+      // 3. 기본값
+      return 'anonymous';
+    }
+    function getIsMaster() {
+      try { if (window.opener && window.opener.__GOJIRA_CONFIG__) return window.opener.__GOJIRA_CONFIG__.isMaster; } catch {}
+      return true; // 독립 실행 시 Master로 간주 (디버그 용도)
+    }
+
+    const cfg = { API: GOJIRA_API, STREAM_API: AGENT_API, user: getUser(), isMaster: getIsMaster() };
+
+    const root = document.getElementById('root');
     let sessionId = sessionStorage.getItem('agent_sessionId') || null;
     let messages = [];
-    let processSteps = [];
     let loading = false;
-    let processOpen = true;
+    let mainWindow = null; // GoJIRA 메인 창 참조
+
+    // opener가 있으면 재사용
+    try { if (window.opener && !window.opener.closed) mainWindow = window.opener; } catch {}
 
     function render() {
       root.innerHTML = `
         <div style="display:flex;align-items:center;padding:10px 16px;background:#2c3e50;color:#fff;">
           <span style="flex:1;font-size:15px;font-weight:600;">GoJIRA Agent</span>
-          <span style="font-size:11px;color:#aaa;">${cfg.user}${cfg.isMaster ? ' (Master)' : ''}</span>
+          <span style="font-size:11px;color:#aaa;">${esc(cfg.user)}${cfg.isMaster ? ' (Master)' : ''}</span>
         </div>
         <div id="msgs" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;">
           ${messages.length === 0 && !loading ? `
@@ -58,248 +60,165 @@
             </div>` : ''}
           ${messages.map((m, i) => {
             if (m.role === 'process') return renderProcess(m, i);
-            if (m.role === 'user') return `<div style="align-self:flex-end;max-width:85%;background:#2c3e50;color:#fff;border-radius:12px 12px 2px 12px;padding:10px 14px;font-size:13px;">${esc(m.content)}</div>`;
-            if (m.role === 'assistant') return `<div style="align-self:flex-start;max-width:90%;background:#f5f5f5;border-radius:12px 12px 12px 2px;padding:10px 14px;font-size:13px;line-height:1.6;">${renderMarkdown(m.content)}</div>`;
+            if (m.role === 'user') return '<div style="align-self:flex-end;max-width:85%;background:#2c3e50;color:#fff;border-radius:12px 12px 2px 12px;padding:10px 14px;font-size:13px;">'+esc(m.content)+'</div>';
+            if (m.role === 'assistant') return '<div style="align-self:flex-start;max-width:90%;background:#f5f5f5;border-radius:12px 12px 12px 2px;padding:10px 14px;font-size:13px;line-height:1.6;">'+renderMd(m.content)+'</div>';
             return '';
           }).join('')}
-          ${loading && !messages.some(m => m._streaming) && !messages.some(m => m.role === 'process') ? `<div style="align-self:flex-start;color:#888;font-style:italic;font-size:13px;">생각하는 중...</div>` : ''}
+          ${loading && !messages.some(m => m._streaming) && !messages.some(m => m.role === 'process') ? '<div style="align-self:flex-start;color:#888;font-style:italic;font-size:13px;">생각하는 중...</div>' : ''}
         </div>
         <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid #eee;background:#fafafa;">
           <textarea id="input" style="flex:1;border:1px solid #ddd;border-radius:8px;padding:8px 12px;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:20px;max-height:80px;" placeholder="메시지를 입력하세요..." rows="1"></textarea>
-          <button id="sendBtn" style="background:#2c3e50;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;" ${loading ? 'disabled' : ''}>전송</button>
-        </div>
-      `;
+          <button id="sendBtn" style="background:#2c3e50;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;" ${loading?'disabled':''}>전송</button>
+        </div>`;
       const msgDiv = document.getElementById('msgs');
       if (msgDiv) msgDiv.scrollTop = msgDiv.scrollHeight;
       const inp = document.getElementById('input');
-      if (inp) {
-        inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-        inp.focus();
-      }
+      if (inp) { inp.addEventListener('keydown', e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} }); inp.focus(); }
       document.getElementById('sendBtn')?.addEventListener('click', send);
-      // 프로세스 토글 이벤트
-      document.querySelectorAll('.proc-toggle').forEach(el => {
-        el.addEventListener('click', () => {
-          const idx = parseInt(el.dataset.idx);
-          messages[idx].open = !messages[idx].open;
-          render();
-        });
-      });
-      // detail 토글
-      document.querySelectorAll('.detail-toggle').forEach(el => {
-        el.addEventListener('click', () => {
-          const mi = parseInt(el.dataset.mi);
-          const si = parseInt(el.dataset.si);
-          messages[mi].steps[si].detailOpen = !messages[mi].steps[si].detailOpen;
-          render();
-        });
-      });
+      document.querySelectorAll('.proc-toggle').forEach(el => { el.onclick = () => { messages[+el.dataset.idx].open = !messages[+el.dataset.idx].open; render(); }; });
+      document.querySelectorAll('.detail-toggle').forEach(el => { el.onclick = () => { messages[+el.dataset.mi].steps[+el.dataset.si].detailOpen = !messages[+el.dataset.mi].steps[+el.dataset.si].detailOpen; render(); }; });
     }
 
     function renderProcess(msg, idx) {
       const steps = msg.steps || [];
-      const toolCount = steps.filter(s => s.type === 'tool_result').length;
-      const isRunning = loading && idx === messages.findLastIndex(m => m.role === 'process');
-
-      if (!cfg.isMaster) {
-        if (isRunning) return `<div style="display:flex;align-items:center;gap:6px;padding:6px;font-size:11px;color:#888;"><span class="spinner"></span> 작업 중...</div>`;
-        return '';
-      }
-
+      const tc = steps.filter(s=>s.type==='tool_result').length;
+      const run = loading && idx === messages.findLastIndex(m=>m.role==='process');
+      if (!cfg.isMaster) { return run ? '<div style="display:flex;align-items:center;gap:6px;padding:6px;font-size:11px;color:#888;"><span class="spinner"></span> 작업 중...</div>' : ''; }
       return `<div style="align-self:flex-start;width:100%;max-width:95%;background:#f8f9fa;border:1px solid #e9ecef;border-radius:8px;overflow:hidden;font-size:11px;">
         <div class="proc-toggle" data-idx="${idx}" style="display:flex;align-items:center;gap:6px;padding:5px 10px;cursor:pointer;color:#666;">
-          ${isRunning ? '<span class="spinner"></span>' : `<span style="font-size:8px;">${msg.open ? '\u25BC' : '\u25B6'}</span>`}
-          <span style="font-weight:600;color:#555;flex:1;">${isRunning ? '작업 중...' : '작업 과정'}</span>
-          ${toolCount > 0 ? `<span style="background:#6c757d;color:#fff;border-radius:8px;padding:0 6px;font-size:10px;">${toolCount} tools</span>` : ''}
+          ${run?'<span class="spinner"></span>':`<span style="font-size:8px;">${msg.open?'\u25BC':'\u25B6'}</span>`}
+          <span style="font-weight:600;color:#555;flex:1;">${run?'작업 중...':'작업 과정'}</span>
+          ${tc>0?`<span style="background:#6c757d;color:#fff;border-radius:8px;padding:0 6px;font-size:10px;">${tc} tools</span>`:''}
         </div>
-        ${msg.open ? `<div style="padding:2px 10px 6px;border-top:1px solid #e9ecef;font-family:monospace;">
-          ${steps.map((s, si) => renderStep(s, idx, si)).join('')}
-        </div>` : ''}
+        ${msg.open?`<div style="padding:2px 10px 6px;border-top:1px solid #e9ecef;font-family:monospace;">${steps.map((s,si)=>renderStep(s,idx,si)).join('')}</div>`:''}
       </div>`;
     }
 
-    function renderStep(step, mi, si) {
-      if (step.type === 'reasoning') {
-        return `<div style="background:#f5f3ff;border-radius:4px;padding:4px 8px;margin:2px 0;display:flex;align-items:baseline;gap:6px;">
-          <span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:#ede9fe;color:#6d28d9;flex-shrink:0;">추론</span>
-          <span style="color:#5b21b6;font-style:italic;font-size:11px;">${esc(step.data.content)}</span>
-        </div>`;
-      }
-      if (step.type === 'tool_call') {
-        const params = Object.entries(step.data.params || {}).map(([k,v]) => `${k}=${v}`).join(', ');
-        return `<div style="border-left:2px solid #3b82f6;padding-left:6px;margin:1px 0;display:flex;align-items:baseline;gap:6px;">
-          <span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:#dbeafe;color:#1d4ed8;flex-shrink:0;">CALL</span>
-          <span style="color:#444;font-size:11px;"><strong style="color:#1d4ed8;">${esc(step.data.tool)}</strong>${params ? ` <span style="color:#888;font-size:10px;">(${esc(params)})</span>` : ''}</span>
-          <span style="color:#aaa;font-size:9px;margin-left:auto;">${step.ts || ''}</span>
-        </div>`;
-      }
-      if (step.type === 'tool_result') {
-        const ok = step.data.status === 'success';
-        return `<div style="border-left:2px solid ${ok ? '#10b981' : '#ef4444'};padding-left:6px;margin:1px 0;">
-          <div class="detail-toggle" data-mi="${mi}" data-si="${si}" style="display:flex;align-items:baseline;gap:6px;cursor:pointer;">
-            <span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:${ok ? '#d1fae5' : '#fee2e2'};color:${ok ? '#065f46' : '#991b1b'};flex-shrink:0;">${ok ? 'OK' : 'ERR'}</span>
-            <span style="color:#444;font-size:11px;">${esc(step.data.tool)} &rarr; ${esc(step.data.summary)}</span>
-            <span style="color:#999;font-size:10px;margin-left:auto;">${step.data.duration_ms}ms</span>
-            ${step.data.detail ? `<span style="color:#999;font-size:10px;">${step.detailOpen ? '\u25BC' : '...'}</span>` : ''}
-          </div>
-          ${step.detailOpen && step.data.detail ? `<pre style="background:#f9fafb;color:#555;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;margin:2px 0 2px 28px;font-size:10px;line-height:1.4;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;">${esc(step.data.detail)}</pre>` : ''}
-        </div>`;
-      }
-      if (step.type === 'error') {
-        return `<div style="display:flex;gap:6px;padding:1px 0;"><span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:#fee2e2;color:#991b1b;">ERR</span><span style="color:#991b1b;font-size:11px;">${esc(step.data.message)}</span></div>`;
-      }
+    function renderStep(s, mi, si) {
+      if (s.type==='reasoning') return `<div style="background:#f5f3ff;border-radius:4px;padding:4px 8px;margin:2px 0;display:flex;align-items:baseline;gap:6px;"><span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:#ede9fe;color:#6d28d9;flex-shrink:0;">추론</span><span style="color:#5b21b6;font-style:italic;font-size:11px;">${esc(s.data.content)}</span></div>`;
+      if (s.type==='tool_call'){const p=Object.entries(s.data.params||{}).map(([k,v])=>k+'='+v).join(', ');return `<div style="border-left:2px solid #3b82f6;padding-left:6px;margin:1px 0;display:flex;align-items:baseline;gap:6px;"><span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:#dbeafe;color:#1d4ed8;flex-shrink:0;">CALL</span><span style="color:#444;font-size:11px;"><strong style="color:#1d4ed8;">${esc(s.data.tool)}</strong>${p?' <span style="color:#888;font-size:10px;">('+esc(p)+')</span>':''}</span><span style="color:#aaa;font-size:9px;margin-left:auto;">${s.ts||''}</span></div>`;}
+      if (s.type==='tool_result'){const ok=s.data.status==='success';return `<div style="border-left:2px solid ${ok?'#10b981':'#ef4444'};padding-left:6px;margin:1px 0;"><div class="detail-toggle" data-mi="${mi}" data-si="${si}" style="display:flex;align-items:baseline;gap:6px;cursor:pointer;"><span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:${ok?'#d1fae5':'#fee2e2'};color:${ok?'#065f46':'#991b1b'};flex-shrink:0;">${ok?'OK':'ERR'}</span><span style="color:#444;font-size:11px;">${esc(s.data.tool)} &rarr; ${esc(s.data.summary)}</span><span style="color:#999;font-size:10px;margin-left:auto;">${s.data.duration_ms}ms</span>${s.data.detail?`<span style="color:#999;font-size:10px;">${s.detailOpen?'\u25BC':'...'}</span>`:''}</div>${s.detailOpen&&s.data.detail?`<pre style="background:#f9fafb;color:#555;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;margin:2px 0 2px 28px;font-size:10px;line-height:1.4;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;">${esc(s.data.detail)}</pre>`:''}</div>`;}
+      if (s.type==='error') return `<div style="display:flex;gap:6px;padding:1px 0;"><span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:2px;background:#fee2e2;color:#991b1b;">ERR</span><span style="color:#991b1b;font-size:11px;">${esc(s.data.message)}</span></div>`;
       return '';
     }
 
-    function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-    function renderMarkdown(text) {
-      // 간단한 마크다운: bold, table, newline
-      return esc(text || '')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br>');
-    }
+    function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+    function renderMd(t){return esc(t||'').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');}
 
     function addStep(step) {
-      const idx = messages.findLastIndex(m => m.role === 'process');
-      if (idx >= 0) {
-        messages[idx].steps.push(step);
-        render();
-      }
+      const idx = messages.findLastIndex(m=>m.role==='process');
+      if (idx>=0){ messages[idx].steps.push(step); render(); }
     }
 
     async function send() {
       const inp = document.getElementById('input');
-      const text = (inp?.value || '').trim();
-      if (!text || loading) return;
+      const text = (inp?.value||'').trim();
+      if (!text||loading) return;
       inp.value = '';
-
-      messages.push({ role: 'user', content: text });
-      messages.push({ role: 'process', steps: [], open: true });
+      messages.push({role:'user',content:text});
+      messages.push({role:'process',steps:[],open:true});
       loading = true;
       render();
 
-      let contentBuf = '';
-      let finalActions = [];
+      let contentBuf = '', finalActions = [];
 
       try {
-        const res = await fetch(`${cfg.STREAM_API}/Agent/chat/stream`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-User-Id': cfg.user },
-          body: JSON.stringify({ sessionId, message: text, context: {} }),
+        const res = await fetch(cfg.STREAM_API+'/Agent/chat/stream', {
+          method:'POST', headers:{'Content-Type':'application/json','X-User-Id':cfg.user},
+          body: JSON.stringify({sessionId,message:text,context:{}}),
         });
-
-        if (!res.ok || !res.body) {
-          // fallback
-          const fb = await fetch(`${cfg.API}/Agent/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-User-Id': cfg.user },
-            body: JSON.stringify({ sessionId, message: text, context: {} }),
+        if (!res.ok||!res.body) {
+          const fb = await fetch(cfg.API+'/Agent/chat', {
+            method:'POST', headers:{'Content-Type':'application/json','X-User-Id':cfg.user},
+            body: JSON.stringify({sessionId,message:text,context:{}}),
           });
           const data = await fb.json();
           if (data.sessionId) sessionId = data.sessionId;
-          messages = messages.filter(m => m.role !== 'process' || m.steps?.length > 0);
-          messages.push({ role: 'assistant', content: data.reply });
-          loading = false;
-          render();
-          handleActions(data.actions || []);
-          return;
+          messages = messages.filter(m=>m.role!=='process'||m.steps?.length>0);
+          messages.push({role:'assistant',content:data.reply});
+          loading=false; render(); handleActions(data.actions||[]); return;
         }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
+        const reader = res.body.getReader(), decoder = new TextDecoder();
         let buffer = '';
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          let eventType = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) eventType = line.slice(7).trim();
-            else if (line.startsWith('data: ') && eventType) {
-              try { handleSSE(eventType, JSON.parse(line.slice(6))); } catch {}
-              eventType = '';
-            }
+        while(true){
+          const{done,value}=await reader.read(); if(done)break;
+          buffer+=decoder.decode(value,{stream:true});
+          const lines=buffer.split('\n'); buffer=lines.pop()||'';
+          let ev='';
+          for(const line of lines){
+            if(line.startsWith('event: '))ev=line.slice(7).trim();
+            else if(line.startsWith('data: ')&&ev){try{handleSSE(ev,JSON.parse(line.slice(6)));}catch{}ev='';}
           }
         }
-      } catch (err) {
-        messages = messages.filter(m => m.role !== 'process' || m.steps?.length > 0);
-        messages.push({ role: 'assistant', content: `연결 오류: ${err.message}` });
+      } catch(err) {
+        messages=messages.filter(m=>m.role!=='process'||m.steps?.length>0);
+        messages.push({role:'assistant',content:'연결 오류: '+err.message});
       }
-      loading = false;
-      render();
+      loading=false; render();
 
-      function handleSSE(type, data) {
-        const ts = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        switch (type) {
-          case 'session': sessionId = data.sessionId; sessionStorage.setItem('agent_sessionId', sessionId); break;
-          case 'thinking': break; // 스피너로 대체
-          case 'reasoning': addStep({ type: 'reasoning', data, ts }); break;
-          case 'tool_call': addStep({ type: 'tool_call', data, ts }); break;
-          case 'tool_result': addStep({ type: 'tool_result', data, ts }); break;
-          case 'content':
-            contentBuf += data.text;
-            const last = messages[messages.length - 1];
-            if (last && last._streaming) { last.content = contentBuf; }
-            else { messages.push({ role: 'assistant', content: contentBuf, _streaming: true }); }
-            render();
-            break;
-          case 'done':
-            finalActions = data.actions || [];
-            messages = messages.filter(m => !m._streaming);
-            messages.forEach(m => { if (m.role === 'process' && m.steps?.length > 0) m.open = false; });
-            messages.push({ role: 'assistant', content: data.reply || contentBuf });
-            loading = false;
-            render();
-            handleActions(finalActions);
-            break;
-          case 'error': addStep({ type: 'error', data, ts }); break;
+      function handleSSE(type,data){
+        const ts=new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        switch(type){
+          case'session':sessionId=data.sessionId;sessionStorage.setItem('agent_sessionId',sessionId);break;
+          case'thinking':break;
+          case'reasoning':addStep({type:'reasoning',data,ts});break;
+          case'tool_call':addStep({type:'tool_call',data,ts});break;
+          case'tool_result':addStep({type:'tool_result',data,ts});break;
+          case'content':
+            contentBuf+=data.text;
+            const last=messages[messages.length-1];
+            if(last&&last._streaming){last.content=contentBuf;}else{messages.push({role:'assistant',content:contentBuf,_streaming:true});}
+            render(); break;
+          case'done':
+            finalActions=data.actions||[];
+            messages=messages.filter(m=>!m._streaming);
+            messages.forEach(m=>{if(m.role==='process'&&m.steps?.length>0)m.open=false;});
+            messages.push({role:'assistant',content:data.reply||contentBuf});
+            loading=false; render(); handleActions(finalActions); break;
+          case'error':addStep({type:'error',data,ts});break;
         }
       }
     }
 
-    // ─── navigate 액션 처리 ───
-    // 부모 창이 있으면 sessionStorage 설정 후 reload
-    // 부모 창이 없으면 새 창을 열어서 GoJIRA를 띄움
-    let mainWindow = window.opener;
+    // ─── GoJIRA UI 제어 ───
     function handleActions(actions) {
       for (const action of actions) {
         if (action.result && action.result._action === 'navigate') {
-          const { projectCode, page } = action.result;
-          if (!projectCode || !page) continue;
-
-          fetch(`${cfg.API}/Project`)
-            .then(r => r.json())
-            .then(projects => {
-              const arr = Array.isArray(projects) ? projects : [];
-              const prj = arr.find(p => p.jiraCodes?.main?.jiraCode === projectCode);
-              if (!prj) return;
-
-              if (mainWindow && !mainWindow.closed) {
-                // 부모 창이 열려있으면 직접 제어
-                mainWindow.sessionStorage.setItem('gojira_page', page);
-                mainWindow.sessionStorage.setItem('gojira_project', JSON.stringify(prj));
-                mainWindow.location.reload();
-                mainWindow.focus();
-              } else {
-                // 부모 창이 없으면 새 창으로 GoJIRA 열기
-                const origin = window.location.origin;
-                mainWindow = window.open(
-                  `${origin}/?agentNav=${page}&agentProject=${encodeURIComponent(projectCode)}`,
-                  'GoJIRA_Main'
-                );
-              }
-            })
-            .catch(err => console.error('navigate failed:', err));
+          navigateGoJIRA(action.result.projectCode, action.result.page);
         }
       }
     }
 
-    // ─── spinner CSS ───
-    const style = document.createElement('style');
-    style.textContent = `.spinner{width:12px;height:12px;border:2px solid #ddd;border-top-color:#2c3e50;border-radius:50%;animation:sp .8s linear infinite;display:inline-block;}@keyframes sp{to{transform:rotate(360deg)}}`;
-    document.head.appendChild(style);
+    function navigateGoJIRA(projectCode, page) {
+      if (!projectCode || !page) return;
+
+      // GoJIRA 메인 창이 살아있으면 재사용, 아니면 새 창 열기
+      try {
+        if (mainWindow && !mainWindow.closed) {
+          // 기존 창에 sessionStorage 설정 후 reload
+          applyNavigation(mainWindow, projectCode, page);
+          return;
+        }
+      } catch {}
+
+      // 새 창 열기
+      mainWindow = window.open(GOJIRA_APP + '/?agentNav=' + page + '&agentProject=' + encodeURIComponent(projectCode), 'GoJIRA_Main');
+    }
+
+    function applyNavigation(win, projectCode, page) {
+      fetch(cfg.API + '/Project')
+        .then(r => r.json())
+        .then(projects => {
+          const prj = (Array.isArray(projects) ? projects : []).find(p => p.jiraCodes?.main?.jiraCode === projectCode);
+          if (prj) {
+            win.sessionStorage.setItem('gojira_page', page);
+            win.sessionStorage.setItem('gojira_project', JSON.stringify(prj));
+            win.location.reload();
+            win.focus();
+          }
+        })
+        .catch(err => console.error('navigate failed:', err));
+    }
 
     render();
   </script>
