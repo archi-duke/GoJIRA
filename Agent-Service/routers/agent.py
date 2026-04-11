@@ -233,8 +233,33 @@ async def doc_enrich(request: Request, x_user_id: str = Header(default="anonymou
         stripped = stripped.replace(phrase, '')
     stripped = stripped.strip()
 
-    if len(stripped) < 30:
-        return {"needsInterview": True, "message": "문서 내용이 부족합니다. 인터뷰를 통해 자동 생성할 수 있습니다."}
+    # 빈 문서는 바로 부족 판정
+    if len(stripped) < 10:
+        return {"sufficient": False, "reason": "문서 내용이 거의 없습니다.", "needsInterview": True, "message": "문서 내용이 부족합니다. 인터뷰를 통해 자동 생성할 수 있습니다."}
+
+    # LLM으로 충분성 판단
+    from core.llm import call_llm
+    judge_prompt = f"""다음 문서 내용을 읽고, 과제의 배경, 목적, 주요 이해관계자, 요구사항을 파악할 수 있는 수준인지 판단하세요.
+
+문서 내용:
+{content[:3000]}
+
+판단 기준:
+- 과제 배경이나 동기가 서술되어 있는가
+- 과제 목적이 명확한가
+- 주요 이해관계자나 요구사항이 언급되어 있는가
+
+위 항목 중 2개 이상 충분히 서술되어 있으면 "예", 아니면 "아니오"로만 답하세요."""
+
+    try:
+        answer = (await call_llm(judge_prompt)).strip()
+        is_sufficient = answer.startswith("예")
+    except Exception as e:
+        log.error("LLM judge error: %s", e)
+        is_sufficient = len(stripped) >= 100  # LLM 실패 시 글자수 fallback
+
+    if not is_sufficient:
+        return {"sufficient": False, "reason": "과제 배경/목적/요구사항이 부족합니다.", "needsInterview": True, "message": "문서 내용이 부족합니다. 인터뷰를 통해 자동 생성할 수 있습니다."}
 
     from skills.dispatcher import execute_skill
     try:

@@ -16,6 +16,10 @@ __pycache__/
 # OS
 .DS_Store
 
+# Playwright
+playwright-report/
+test-results/
+
 # Cache
 GoJIRA-API/cache/
 

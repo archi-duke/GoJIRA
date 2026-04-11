@@ -164,12 +164,15 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         if (data.needsInterview) {
           setAiGenerating(false);
           const ok = await modalConfirm(
-            `${data.message}\n채팅 창에서 인터뷰를 진행할까요?`
+            `${data.reason || data.message}\n채팅 창에서 인터뷰를 진행할까요?`
           );
           if (ok) {
+            const chatW = 480, chatH = 720;
+            const left = window.screenX - chatW - 10;
+            const top = window.screenY;
             window.open(
-              `/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(`${projectCode} 과제의 project-description.md를 작성해줘`)}`,
-              'gojira-agent', 'width=480,height=720'
+              `http://localhost:3001/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(`${projectCode} 과제의 project-description.md를 작성해줘`)}`,
+              'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
             );
           }
           return;
@@ -181,7 +184,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           modalAlert(data.error);
         }
       } else {
-        modalAlert('AI 보강 실패');
+        modalAlert('AI 서비스 연결 실패');
       }
     } catch (e) {
       modalAlert('AI 서비스 연결 실패: ' + e.message);
