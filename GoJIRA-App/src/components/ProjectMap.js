@@ -739,7 +739,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
   const cls = isCompleted ? 'completed' : isOverdue ? 'overdue' : 'active';
   const hasAlert = alert && alert.branchDiff;
   const hasPR = alert && alert.hasOpenPR;
-  const alertColor = hasPR ? '#b8860b' : hasAlert ? 'tomato' : null;
+  const alertColor = hasPR ? '#27ae60' : hasAlert ? 'tomato' : null;
 
   return (
     <g
@@ -815,10 +815,12 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
               onClick={() => onProjectClick && onProjectClick(project)}
             />
             {alertColor && (
-              <g transform={`translate(${nameX - nameW + 23}, ${y - 15}) scale(-1.3, 1.3)`}>
-                <path d="M7 1C3.1 1 0 3.6 0 6.8c0 1.8 1 3.4 2.5 4.4L1.5 13.5l3.2-1.6c.7.2 1.5.3 2.3.3 3.9 0 7-2.6 7-5.8S10.9 1 7 1z" fill={alertColor} />
-                <text x="7" y="9.5" textAnchor="middle" fontSize="7" fontWeight="bold" fill="#fff">!</text>
-              </g>
+              <image
+                href={hasPR ? '/icons/alert-pr.svg' : '/icons/alert-diff.svg'}
+                x={nameX - nameW - iconW + 2}
+                y={y - 9}
+                width="16" height="16"
+              />
             )}
             <text
               x={nameX}
