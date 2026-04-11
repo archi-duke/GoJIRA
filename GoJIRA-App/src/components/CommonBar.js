@@ -47,13 +47,13 @@ export default function CommonBar({ title, onBack, onPull, pullIcon, onEditChang
   return (
     <div className="cb-topbar">
       <span className="cb-title">{title}
-        {projectAlert && projectAlert.branchDiff && (
-          <img src="/icons/git-fetch.svg" alt="Diff" width="16" height="16"
-            title="main 브랜치와 차이가 있습니다" style={{verticalAlign:'middle',marginLeft:6}} />
-        )}
         {projectAlert && projectAlert.hasOpenPR && (
-          <img src="/icons/git-pull.svg" alt="PR" width="16" height="16"
-            title="열린 PR이 있습니다" style={{verticalAlign:'middle',marginLeft:4}} />
+          <img src="/icons/alert-pr.svg" alt="PR" width="16" height="16"
+            style={{verticalAlign:'middle',marginLeft:6}} />
+        )}
+        {projectAlert && projectAlert.branchDiff && (
+          <img src="/icons/alert-diff.svg" alt="Diff" width="16" height="16"
+            style={{verticalAlign:'middle',marginLeft:4}} />
         )}
       </span>
 

@@ -553,6 +553,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 disabled={!hasChanges}
                 title={hasChanges ? `${Object.keys(fileStatus).length}개 파일 변경됨` : '변경사항 없음'}
               >
+                <img src="/icons/git-pull.svg" alt="" width="12" height="12" style={{marginRight:4,verticalAlign:'middle',filter:hasChanges?'invert(1)':'invert(0.6)'}} />
                 발행신청
               </button>
             )}
