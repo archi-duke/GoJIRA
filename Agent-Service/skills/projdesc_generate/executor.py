@@ -1,11 +1,9 @@
 """프로젝트 설명 문서 생성/보강 스킬."""
 
 import json
-import base64
 import logging
 
 from core.llm import call_llm
-from clients.platform_api import PlatformClient
 
 log = logging.getLogger("agent.skills.doc_generate")
 
@@ -61,11 +59,11 @@ async def _generate(code: str, answers: dict, user: str) -> dict:
 마크다운 원문만 출력하세요. 코드블록으로 감싸지 마세요."""
 
     doc = await call_llm(prompt)
-    await _save_doc(code, doc, user)
 
     return {
         "projectCode": code,
         "mode": "generate",
+        "applyToEditor": True,
         "message": "project-description.md가 생성되었습니다.",
         "filePath": "business/project-description.md",
         "content": doc,
@@ -89,25 +87,12 @@ async def _enrich(code: str, content: str, user: str) -> dict:
 보강된 마크다운 전체를 출력하세요. 코드블록으로 감싸지 마세요."""
 
     doc = await call_llm(prompt)
-    await _save_doc(code, doc, user)
 
     return {
         "projectCode": code,
         "mode": "enrich",
+        "applyToEditor": True,
         "message": "project-description.md가 보강되었습니다.",
         "filePath": "business/project-description.md",
         "content": doc,
     }
-
-
-async def _save_doc(code: str, content: str, user: str):
-    """사용자 브랜치에 문서 저장."""
-    client = PlatformClient()
-    await client.save_file(
-        code,
-        path="business/project-description.md",
-        content=content,
-        message="project-description.md AI 생성/보강",
-        user=user,
-    )
-    log.info("doc_generate: saved business/project-description.md for %s (user=%s)", code, user)

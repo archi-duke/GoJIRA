@@ -320,8 +320,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             {steps.map((step, i) => (
               <div key={i} className={`ac-proc-step ac-ps-${step.type}`}>
                 {step.type === 'reasoning' && (
-                  <div className="ac-ps-line ac-ps-reasoning">
-                    <span className="ac-ps-tag ac-tag-reason">추론</span>
+                  <div className={`ac-ps-line ac-ps-reasoning ac-ps-${step.data.step || 'thought'}`}>
+                    <span className={`ac-ps-tag ${
+                      step.data.step === 'action' ? 'ac-tag-action' :
+                      step.data.step === 'observation' ? 'ac-tag-obs' :
+                      step.data.step === 'answer' ? 'ac-tag-answer' :
+                      'ac-tag-reason'
+                    }`}>
+                      {{ thought: 'Thought', action: 'Action', observation: 'Observation', answer: 'Answer' }[step.data.step] || 'Thought'}
+                    </span>
                     <span className="ac-ps-text">{step.data.content}</span>
                   </div>
                 )}
@@ -460,9 +467,28 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               )}
               <div ref={messagesEndRef} />
             </div>
+            <div className="ac-input-resize"
+              onMouseDown={e => {
+                e.preventDefault();
+                const area = e.target.nextElementSibling;
+                const ta = area?.querySelector('textarea');
+                if (!ta) return;
+                const startY = e.clientY;
+                const startH = ta.offsetHeight;
+                const onMove = ev => { ta.style.height = Math.max(32, Math.min(300, startH - (ev.clientY - startY))) + 'px'; };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+              }}
+            />
             <div className="ac-input-area">
               <textarea ref={inputRef} className="ac-input" value={input}
-                onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
+                onChange={e => {
+                  setInput(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = Math.min(e.target.scrollHeight, 300) + 'px';
+                }}
+                onKeyDown={handleKeyDown}
                 placeholder="메시지를 입력하세요..." rows={1} />
               <button className="ac-send" onClick={handleSend} disabled={loading || !input.trim()}>전송</button>
             </div>

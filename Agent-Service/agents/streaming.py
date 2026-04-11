@@ -8,6 +8,7 @@ from typing import List, Dict, AsyncGenerator
 from core.llm import call_llm_with_tools
 from skills.executor import execute_skill
 from skills.registry import get_registry
+from agents.utils import strip_reasoning as _strip_reasoning
 
 log = logging.getLogger("agent.streaming")
 
@@ -54,15 +55,16 @@ async def agent_loop_stream(
             thought = ""
 
         if thought:
-            yield _sse("reasoning", {"turn": turn, "content": thought})
+            # ReACT 마커별로 분리 전송 (Thought / Action / Answer)
+            for evt in _parse_reasoning_steps(thought, turn):
+                yield evt
 
             # Pass 1 추론 결과로 스킬 재선별 (추론에서 언급된 스킬 반영)
-            if turn == 0:
-                tools = registry.select_tools(user_message, extra_context=thought)
+            tools = registry.select_tools(user_message, extra_context=thought)
 
             # 추론 내용을 대화에 추가 (도구 호출 판단에 활용)
             messages.append({"role": "assistant", "content": thought})
-            messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구가 있으면 호출하세요. 더 이상 도구가 필요 없다면 최종 답변을 마크다운으로 정리하여 제공하세요."})
+            messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구가 있으면 호출하세요. 더 이상 도구가 필요 없다면 최종 답변을 제공하세요."})
 
         # ── Pass 2: 도구 호출 (tool_choice="auto") ──
         try:
@@ -78,13 +80,17 @@ async def agent_loop_stream(
         content = msg.content or ""
         tool_calls = msg.tool_calls or []
 
+        # Pass 2의 추론 내용도 분리 전송
+        if content and not tool_calls:
+            for evt in _parse_reasoning_steps(content, turn):
+                yield evt
+
         # 도구 호출 없으면 최종 응답
         if not tool_calls or finish_reason == "stop":
-            # thought(Pass 1 분석)이 있으면 그것이 최종 답변.
-            # Pass 2는 도구 호출용이므로, 도구 없이 나온 텍스트는 부산물.
             final_content = thought or content
             if not final_content and all_actions:
                 final_content = "작업이 완료되었습니다."
+            final_content = _strip_reasoning(final_content)
             for chunk in _split_chunks(final_content, 80):
                 yield _sse("content", {"text": chunk})
             yield _sse("done", {"reply": final_content, "actions": all_actions})
@@ -164,6 +170,36 @@ async def agent_loop_stream(
                 })
 
     yield _sse("done", {"reply": "최대 처리 단계를 초과했습니다.", "actions": all_actions})
+
+
+import re as _re
+
+_REACT_MARKER = _re.compile(r'\*\*(Thought|Action|Observation|Answer)\*\*\s*:\s*')
+
+
+def _parse_reasoning_steps(text: str, turn: int) -> List[str]:
+    """LLM 응답에서 **Thought**:, **Action**:, **Answer**: 마커를 찾아
+    각각 별도 SSE 이벤트로 분리한다.
+
+    반환: SSE 문자열 리스트
+    - reasoning 이벤트: step 필드로 thought/action/observation/answer 구분
+    """
+    markers = list(_REACT_MARKER.finditer(text))
+
+    if not markers:
+        # 마커가 없으면 전체를 하나의 thought로
+        return [_sse("reasoning", {"turn": turn, "step": "thought", "content": text.strip()})]
+
+    events = []
+    for i, m in enumerate(markers):
+        step_type = m.group(1).lower()  # thought, action, observation, answer
+        start = m.end()
+        end = markers[i + 1].start() if i + 1 < len(markers) else len(text)
+        content = text[start:end].strip()
+        if content:
+            events.append(_sse("reasoning", {"turn": turn, "step": step_type, "content": content}))
+
+    return events if events else [_sse("reasoning", {"turn": turn, "step": "thought", "content": text.strip()})]
 
 
 def _sse(event: str, data: dict) -> str:

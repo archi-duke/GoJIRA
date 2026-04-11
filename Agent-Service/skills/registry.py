@@ -69,9 +69,14 @@ KEYWORD_MAP = {
     "schedule": ["schedule_analyze", "project_query"],
     # 프로젝트 설명
     "project-description": ["projdesc_interview", "projdesc_generate"],
+    "projdesc": ["projdesc_interview", "projdesc_generate"],
     "인터뷰": ["projdesc_interview", "projdesc_generate"],
     "과제 소개": ["projdesc_interview", "projdesc_generate"],
     "과제 설명": ["projdesc_interview", "projdesc_generate"],
+    "문서 생성": ["projdesc_generate", "projdesc_interview"],
+    "문서 작성": ["projdesc_generate", "projdesc_interview"],
+    "문서를 생성": ["projdesc_generate"],
+    "문서를 작성": ["projdesc_generate"],
     # 네비게이션
     "이동": ["ui_navigate"],
     "열어": ["ui_navigate"],

@@ -14,6 +14,7 @@ from typing import List, Dict, Tuple, Any, Optional
 from core.llm import call_llm, call_llm_with_tools
 from skills.executor import execute_skill
 from skills.registry import get_registry
+from agents.utils import strip_reasoning as _strip_reasoning
 from state.models import JobState, JobStatus, StageState, StageStatus, ToolResult
 from state import job_store
 
@@ -78,7 +79,7 @@ async def agent_loop(
         if not tool_calls or finish_reason == "stop":
             if not content and all_actions:
                 content = "작업이 완료되었습니다."
-            return content, all_actions
+            return _strip_reasoning(content), all_actions
 
         assistant_msg = {"role": "assistant", "content": content}
         if tool_calls:

@@ -11,7 +11,7 @@
 .ac-close { background: none; border: none; color: #fff; font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1; }
 .ac-close:hover { color: #e74c3c; }
 
-.ac-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.ac-messages { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .ac-welcome { text-align: center; color: #888; font-size: 14px; padding: 40px 20px; }
 .ac-welcome p { margin: 6px 0; }
 
@@ -19,7 +19,7 @@
 .ac-msg-user { align-self: flex-end; }
 .ac-msg-assistant { align-self: flex-start; }
 .ac-msg-user .ac-msg-content { background: #2c3e50; color: #fff; border-radius: 12px 12px 2px 12px; padding: 10px 14px; font-size: 13px; line-height: 1.5; }
-.ac-msg-assistant .ac-msg-content { background: #f5f5f5; color: #333; border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; line-height: 1.6; }
+.ac-msg-assistant .ac-msg-content { background: #f5f5f5; color: #333; border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; line-height: 1.6; overflow-x: auto; word-break: break-word; }
 .ac-msg-assistant .ac-msg-content p { margin: 4px 0; }
 .ac-msg-assistant .ac-msg-content table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
 .ac-msg-assistant .ac-msg-content th, .ac-msg-assistant .ac-msg-content td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
@@ -38,8 +38,10 @@
 .ac-suggestions button { background: #fff; border: 1px solid #ddd; border-radius: 16px; padding: 5px 12px; font-size: 12px; cursor: pointer; color: #2c3e50; }
 .ac-suggestions button:hover { background: #f0f4ff; border-color: #2980b9; }
 
+.ac-input-resize { height: 4px; background: #e5e7eb; cursor: ns-resize; flex-shrink: 0; }
+.ac-input-resize:hover { background: #2980b9; }
 .ac-input-area { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #eee; background: #fafafa; }
-.ac-input { flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font-size: 13px; resize: none; outline: none; font-family: inherit; min-height: 20px; max-height: 100px; }
+.ac-input { flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font-size: 13px; resize: none; outline: none; font-family: inherit; min-height: 20px; max-height: 300px; overflow-y: auto; overflow-x: hidden; word-break: break-word; }
 .ac-input:focus { border-color: #2980b9; }
 .ac-send { background: #2c3e50; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer; }
 .ac-send:hover { background: #34495e; }
@@ -75,6 +77,9 @@
 .ac-ps-line { display: flex; align-items: baseline; gap: 6px; padding: 1px 0; line-height: 1.6; }
 .ac-ps-tag { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 2px; flex-shrink: 0; }
 .ac-tag-reason { background: #ede9fe; color: #6d28d9; }
+.ac-tag-action { background: #dbeafe; color: #1d4ed8; }
+.ac-tag-obs { background: #fef3c7; color: #92400e; }
+.ac-tag-answer { background: #d1fae5; color: #065f46; }
 .ac-tag-call { background: #dbeafe; color: #1d4ed8; }
 .ac-tag-ok { background: #d1fae5; color: #065f46; }
 .ac-tag-err { background: #fee2e2; color: #991b1b; }
