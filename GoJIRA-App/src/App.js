@@ -83,7 +83,8 @@ function App() {
   if (urlMode === 'agent') {
     const autoMessage = urlParams.get('autoMessage') || '';
     const newSession = urlParams.get('newSession') === '1';
-    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} />;
+    const interviewPrompt = urlParams.get('interview') || '';
+    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} interviewPrompt={interviewPrompt} />;
   }
 
   let content;

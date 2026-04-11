@@ -49,6 +49,43 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [diffTab, setDiffTab] = useState('semantic');
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
+  const chatWinRef = React.useRef(null);
+
+  // 채팅창에서 생성된 문서 수신 → 편집기에 반영 → 저장 확인
+  useEffect(() => {
+    function handleDocApply(e) {
+      if (e.data?.type !== 'gojira-doc-apply') return;
+      const { filePath, content: docContent } = e.data;
+      if (!filePath || !docContent) return;
+      setSelectedFile(filePath);
+      setContent(docContent);
+      setOriginal('');
+      setEditMode(true);
+      setSelectedMainOnly(false);
+      setTimeout(async () => {
+        const ok = await modalConfirm('AI가 문서를 생성했습니다.\n내용을 확인 후 저장하시겠습니까?');
+        if (ok) {
+          setSaving(true);
+          const res = await fetch(`${API}/${projectCode}/file`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+            body: JSON.stringify({ path: filePath, content: docContent, message: `${filePath} AI 생성` }),
+          });
+          setSaving(false);
+          if (res.ok) {
+            setOriginal(docContent);
+            setEditMode(false);
+            refreshDocState();
+            modalAlert('저장 완료');
+          } else {
+            modalAlert('저장 실패');
+          }
+        }
+      }, 300);
+    }
+    window.addEventListener('message', handleDocApply);
+    return () => window.removeEventListener('message', handleDocApply);
+  }, [projectCode, user]); // eslint-disable-line
 
   // 문서 상태 갱신 통합 함수 — 트리 로드 + fileStatus 재계산
   async function refreshDocState(retry = 0) {
@@ -170,8 +207,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             const chatW = 480, chatH = 720;
             const left = window.screenX - chatW - 10;
             const top = window.screenY;
-            window.open(
-              `http://localhost:3001/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(`${projectCode} 과제의 project-description.md를 작성해줘`)}`,
+            chatWinRef.current = window.open(
+              `http://localhost:3001/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
               'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
             );
           }

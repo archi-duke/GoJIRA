@@ -7,7 +7,7 @@ import './AgentChat.css';
 const API = config.GOJIRA_API || config.API_BASE;
 const STREAM_API = config.AGENT_API || API;
 
-export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession }) {
+export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession, interviewPrompt }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -62,13 +62,27 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     inputRef.current?.focus();
   }, [showHistory]);
 
+  // interviewPrompt: 인터뷰 모드 — Agent가 먼저 질문을 표시
+  useEffect(() => {
+    if (interviewPrompt && !autoMessageSent.current) {
+      autoMessageSent.current = true;
+      const prompt = `**${interviewPrompt}** 작성을 위해 다음 질문에 답변해 주시면 됩니다:\n\n` +
+        `**과제 배경:** 이 과제를 시작하게 된 배경이나 동기는 무엇인가요?\n\n` +
+        `**과제 목적:** 이 과제가 달성하려는 핵심 목표는 무엇인가요?\n\n` +
+        `**주요 이해관계자:** 이 과제의 주요 사용자나 이해관계자는 누구인가요?\n\n` +
+        `**핵심 요구사항:** 반드시 충족해야 할 주요 요구사항이 있다면 알려주세요.\n\n` +
+        `**제약사항:** 기술적 또는 비즈니스적 제약사항이 있나요? (없으면 '없음')\n\n` +
+        `각 질문에 대한 답변을 주시면, 이를 바탕으로 문서를 생성하겠습니다.`;
+      setMessages([{ role: 'assistant', content: prompt }]);
+    }
+  }, [interviewPrompt]); // eslint-disable-line
+
   // autoMessage: 외부에서 전달된 메시지 자동 전송
   useEffect(() => {
     if (autoMessage && !autoMessageSent.current) {
       autoMessageSent.current = true;
       setTimeout(() => {
         setInput(autoMessage);
-        // input 세팅 후 다음 틱에서 전송 버튼 클릭 시뮬레이션
         setTimeout(() => {
           const btn = document.querySelector('.ac-send');
           if (btn) btn.click();
@@ -153,6 +167,18 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               actions: finalActions,
             }];
           });
+          // applyToEditor: 생성된 문서를 편집기로 전달 후 채팅창 닫기
+          if (window.opener && finalActions.length > 0) {
+            const docAction = finalActions.find(a => a.result && a.result.applyToEditor);
+            if (docAction) {
+              window.opener.postMessage({
+                type: 'gojira-doc-apply',
+                filePath: docAction.result.filePath,
+                content: docAction.result.content,
+              }, '*');
+              setTimeout(() => window.close(), 1500);
+            }
+          }
           break;
         case 'error':
           addStep({ type: 'error', data, ts });
@@ -161,18 +187,32 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       }
     }
 
+    // 인터뷰 모드: 첫 전송 시 인터뷰 질문 + 답변을 묶어서 전송
+    let sendText = text;
+    const sendContext = interviewPrompt
+      ? { ...context, interviewMode: true, targetFile: interviewPrompt }
+      : context;
+    if (interviewPrompt && messages.length <= 2) {
+      // 첫 답변: 인터뷰 질문 컨텍스트를 포함
+      sendText = `[${interviewPrompt} 작성을 ���한 인터뷰]\n\n` +
+        `다음 질문에 대한 사용자의 답변입니다. 답변이 충분한지 확인하고, 부족하면 추가 질문하세요. ` +
+        `모든 항목이 충분하면 projdesc_generate 스킬을 호출하여 문서를 생성하세요.\n\n` +
+        `질문 항목: 과제 배경, 과제 목적, 주요 이해관계자, 핵심 요구사항, 제약사항\n\n` +
+        `사용자 답변:\n${text}`;
+    }
+
     try {
       const res = await fetch(`${STREAM_API}/Agent/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-        body: JSON.stringify({ sessionId, message: text, context }),
+        body: JSON.stringify({ sessionId, message: sendText, context: sendContext }),
       });
 
       if (!res.ok || !res.body) {
         const fb = await fetch(`${API}/Agent/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-          body: JSON.stringify({ sessionId, message: text, context }),
+          body: JSON.stringify({ sessionId, message: sendText, context: sendContext }),
         });
         const data = await fb.json();
         if (data.sessionId) { setSessionId(data.sessionId); sessionStorage.setItem('agent_sessionId', data.sessionId); }
