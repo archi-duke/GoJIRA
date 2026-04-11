@@ -1,19 +1,20 @@
 ---
 name: doc_summarize
 description: 프로젝트의 설계문서를 요약합니다 (LLM 기반)
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  filePath:
-    type: string
-    description: "요약할 문서 파일 경로"
-    required: true
-api:
-  method: GET
-  path: /Doc/summarize
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+filePath:
+  type: string
+  description: "요약할 문서 파일 경로"
+  required: true
+```
 
 ## 문서 요약 규칙
 

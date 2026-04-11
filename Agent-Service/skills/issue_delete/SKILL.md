@@ -1,15 +1,16 @@
 ---
 name: issue_delete
 description: 이슈를 삭제합니다
-parameters:
-  key:
-    type: string
-    description: "삭제할 이슈 키 (예: GOJIRA-1)"
-    required: true
-api:
-  method: DELETE
-  path: /Issue
 ---
+
+## Parameters
+
+```yaml
+key:
+  type: string
+  description: "삭제할 이슈 키 (예: GOJIRA-1)"
+  required: true
+```
 
 ## 이슈 삭제 규칙
 

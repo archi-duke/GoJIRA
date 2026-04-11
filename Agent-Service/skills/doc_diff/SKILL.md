@@ -1,19 +1,20 @@
 ---
 name: doc_diff
 description: main 브랜치와 사용자 브랜치 간의 문서 차이를 분석합니다
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  filePath:
-    type: string
-    description: "비교할 문서 파일 경로"
-    required: true
-api:
-  method: GET
-  path: /Doc/diff
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+filePath:
+  type: string
+  description: "비교할 문서 파일 경로"
+  required: true
+```
 
 ## 문서 비교 규칙
 

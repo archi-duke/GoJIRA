@@ -1,18 +1,22 @@
 ---
 name: doc_history
 description: "프로젝트 문서 저장소의 커밋 이력을 조회합니다. 브랜치별 커밋 로그와 변경 이력을 확인할 수 있습니다."
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  branch:
-    type: string
-    description: "브랜치명 (기본값: main)"
-  limit:
-    type: string
-    description: "조회할 커밋 수 (기본값: 20)"
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+branch:
+  type: string
+  description: "브랜치명 (기본값: main)"
+limit:
+  type: string
+  description: "조회할 커밋 수 (기본값: 20)"
+```
 
 # 규칙
 

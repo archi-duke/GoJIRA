@@ -1,38 +1,39 @@
 ---
 name: issue_create
 description: 프로젝트에 새 이슈를 생성합니다. Requirement 이슈 생성 시 reqType(NFR/FR/CNST)을 지정해야 합니다.
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  issueType:
-    type: string
-    description: "이슈 타입"
-    required: true
-    enum: [VOS, Feature, Requirement, Architectural Design, Detailed Design]
-  reqType:
-    type: string
-    description: "Requirement 세부 타입. issueType이 Requirement일 때 필수. NFR(QA/품질속성), FR(기능), CNST(제약)"
-    enum: [NFR, FR, CNST]
-  summary:
-    type: string
-    description: "이슈 제목"
-    required: true
-  description:
-    type: string
-    description: "이슈 상세 설명"
-  priority:
-    type: string
-    description: "우선순위"
-    enum: [Highest, High, Medium, Low, Lowest]
-  assignee:
-    type: string
-    description: "담당자 ID"
-api:
-  method: POST
-  path: /Issue
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+issueType:
+  type: string
+  description: "이슈 타입"
+  required: true
+  enum: [VOS, Feature, Requirement, Architectural Design, Detailed Design]
+reqType:
+  type: string
+  description: "Requirement 세부 타입. issueType이 Requirement일 때 필수. NFR(QA/품질속성), FR(기능), CNST(제약)"
+  enum: [NFR, FR, CNST]
+summary:
+  type: string
+  description: "이슈 제목"
+  required: true
+description:
+  type: string
+  description: "이슈 상세 설명"
+priority:
+  type: string
+  description: "우선순위"
+  enum: [Highest, High, Medium, Low, Lowest]
+assignee:
+  type: string
+  description: "담당자 ID"
+```
 
 ## 이슈 생성 규칙
 

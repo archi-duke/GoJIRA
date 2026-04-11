@@ -1,21 +1,25 @@
 ---
 name: ui_navigate
 description: "GoJIRA 화면을 특정 페이지로 이동시킵니다. 프로젝트의 Relation Map, SATAM, Issues, Docs 등을 열 수 있습니다."
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  page:
-    type: string
-    description: "이동할 페이지"
-    required: true
-    enum:
-      - relationMap
-      - satam
-      - issues
-      - docs
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+page:
+  type: string
+  description: "이동할 페이지"
+  required: true
+  enum:
+    - relationMap
+    - satam
+    - issues
+    - docs
+```
 
 # 규칙
 

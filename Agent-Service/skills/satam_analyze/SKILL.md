@@ -1,12 +1,16 @@
 ---
 name: satam_analyze
 description: 프로젝트의 SATAM(Sensitivity, Architecture Tradeoff Analysis Method) 매트릭스를 분석합니다. Requirement와 Design 이슈의 risk, sensitivity, mitigation 상태를 평가합니다.
-parameters:
-  projectCode:
-    type: string
-    description: 프로젝트 코드
-    required: true
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: 프로젝트 코드
+  required: true
+```
 
 ## SATAM 분석 규칙
 

@@ -1,6 +1,12 @@
-"""SKILL.md 파서 + executor 로더."""
+"""SKILL.md 파서 + executor 로더.
+
+Claude Code 표준 스킬 형식을 지원한다.
+- frontmatter: name, description (Claude 표준)
+- body: 자연어 지침 + ## Parameters 섹션 (YAML 코드블록)
+"""
 
 import os
+import re
 import importlib
 import asyncio
 from typing import Any, Callable, Dict, List, Optional
@@ -28,17 +34,25 @@ class SkillDef(BaseModel):
 
 
 def parse_skill_file(path: str) -> SkillDef:
-    """SKILL.md 파일 파싱 (YAML frontmatter + markdown body)."""
+    """SKILL.md 파일 파싱 (Claude Code 표준 형식)."""
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
 
     frontmatter, body = _split_frontmatter(content)
 
     raw = yaml.safe_load(frontmatter) or {}
+
+    # Claude 표준: frontmatter에는 name, description만
+    # 하위 호환: frontmatter에 parameters가 있으면 그것도 지원
     params = {}
-    for k, v in (raw.get("parameters") or {}).items():
-        if isinstance(v, dict):
-            params[k] = ParameterDef(**v)
+    if "parameters" in raw:
+        # 레거시 형식 (하위 호환)
+        for k, v in (raw.get("parameters") or {}).items():
+            if isinstance(v, dict):
+                params[k] = ParameterDef(**v)
+    else:
+        # Claude 표준 형식: body에서 ## Parameters 섹션의 YAML 파싱
+        params = _parse_params_from_body(body)
 
     name = raw.get("name", "")
     if not name:
@@ -57,6 +71,31 @@ def parse_skill_file(path: str) -> SkillDef:
         dir=skill_dir,
         executor=executor_fn,
     )
+
+
+def _parse_params_from_body(body: str) -> Dict[str, ParameterDef]:
+    """body에서 ## Parameters 섹션의 YAML 코드블록을 파싱."""
+    params = {}
+
+    # ## Parameters 섹션 찾기
+    match = re.search(
+        r"##\s+Parameters\s*\n+```ya?ml\s*\n(.*?)```",
+        body,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not match:
+        return params
+
+    yaml_text = match.group(1)
+    try:
+        raw = yaml.safe_load(yaml_text) or {}
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                params[k] = ParameterDef(**v)
+    except Exception as e:
+        print(f"[skills] Parameters YAML 파싱 실패: {e}")
+
+    return params
 
 
 def _load_executor(skill_dir: str, skill_name: str) -> Optional[Callable]:

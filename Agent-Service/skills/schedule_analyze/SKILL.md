@@ -1,24 +1,16 @@
 ---
 name: schedule_analyze
 description: 프로젝트의 마일스톤 일정을 분석하여 리스크와 진행 상태를 보고합니다.
-parameters:
-  projectCode:
-    type: string
-    description: 프로젝트 코드
-    required: true
-api:
-  method: GET
-  path: /Project
-  headers:
-    XBody: '{"jiraCode":"{{.projectCode}}"}'
-llm_post_process: true
-prompt_template: skill-schedule-analyze.txt
-data_sources:
-  - type: project
-    fields: [name, status, schedules]
-  - type: issues
-    aggregate: [total, done, inProgress]
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: 프로젝트 코드
+  required: true
+```
 
 ## 일정 분석 규칙
 

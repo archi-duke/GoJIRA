@@ -1,19 +1,20 @@
 ---
 name: pr_list
 description: 프로젝트의 Pull Request 목록을 조회합니다
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  state:
-    type: string
-    description: "PR 상태 필터. 건수/목록 질문에는 반드시 all 사용 (기본: all)"
-    enum: [open, closed, all]
-api:
-  method: GET
-  path: /PullRequest
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+state:
+  type: string
+  description: "PR 상태 필터. 건수/목록 질문에는 반드시 all 사용 (기본: all)"
+  enum: [open, closed, all]
+```
 
 ## PR 목록 조회 규칙
 

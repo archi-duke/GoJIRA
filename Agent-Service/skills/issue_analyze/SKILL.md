@@ -1,12 +1,16 @@
 ---
 name: issue_analyze
 description: 프로젝트의 이슈 관계(contain, relate 등)를 분석하고, 누락된 관계나 고아 이슈를 감지합니다. VOS→Feature→Requirement→ADSN contain 체인을 검증합니다.
-parameters:
-  projectCode:
-    type: string
-    description: 프로젝트 코드
-    required: true
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: 프로젝트 코드
+  required: true
+```
 
 ## 이슈 관계 분석 규칙
 

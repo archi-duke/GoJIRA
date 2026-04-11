@@ -1,15 +1,16 @@
 ---
 name: doc_list
 description: 프로젝트의 설계문서 파일 목록을 조회합니다
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-api:
-  method: GET
-  path: /Doc
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+```
 
 ## 문서 목록 조회 규칙
 

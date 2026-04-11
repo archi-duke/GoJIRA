@@ -1,24 +1,25 @@
 ---
 name: issue_link
 description: 두 이슈 간의 관계를 설정합니다 (contain, relate, block 등)
-parameters:
-  fromKey:
-    type: string
-    description: "출발 이슈 키 (예: GOJIRA-1)"
-    required: true
-  toKey:
-    type: string
-    description: "대상 이슈 키 (예: GOJIRA-2)"
-    required: true
-  linkType:
-    type: string
-    description: "관계 유형"
-    required: true
-    enum: [contain, relate, duplicate, block]
-api:
-  method: POST
-  path: /IssueLink
 ---
+
+## Parameters
+
+```yaml
+fromKey:
+  type: string
+  description: "출발 이슈 키 (예: GOJIRA-1)"
+  required: true
+toKey:
+  type: string
+  description: "대상 이슈 키 (예: GOJIRA-2)"
+  required: true
+linkType:
+  type: string
+  description: "관계 유형"
+  required: true
+  enum: [contain, relate, duplicate, block]
+```
 
 ## 이슈 링크 규칙
 

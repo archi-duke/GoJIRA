@@ -1,20 +1,15 @@
 ---
 name: project_query
 description: 등록된 프로젝트 목록을 조회합니다. 프로젝트 수, 이름, 상태 등을 확인할 수 있습니다.
-parameters:
-  projectCode:
-    type: string
-    description: 특정 프로젝트 코드로 필터링 (생략하면 전체 조회)
-api:
-  method: GET
-  path: /Project
-  headers:
-    XBody: '{"jiraCode":"{{.projectCode}}"}'
-  response_map:
-    - from: "[*]"
-      fields: [jiraCodes.main.jiraCode, name, status]
-      exclude_status: Deleted
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: 특정 프로젝트 코드로 필터링 (생략하면 전체 조회)
+```
 
 ## 프로젝트 조회 규칙
 

@@ -1,15 +1,19 @@
 ---
 name: vos_collect
 description: 프로젝트의 project-description.md를 분석하여 이해관계자 요구사항(VOS)을 추출하고 VOS 이슈를 자동 생성합니다. 기존 VOS가 있으면 중복을 피해 추가분만 생성합니다.
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  user:
-    type: string
-    description: "요청 사용자 ID (문서 브랜치 조회용)"
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+user:
+  type: string
+  description: "요청 사용자 ID (문서 브랜치 조회용)"
+```
 
 ## VOS 수집 절차
 

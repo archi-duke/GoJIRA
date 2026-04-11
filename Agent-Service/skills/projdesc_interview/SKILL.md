@@ -1,15 +1,19 @@
 ---
 name: projdesc_interview
 description: project-description.md 작성을 위한 인터뷰를 진행합니다. 문서가 없거나 내용이 부족하면 질문 목록을 반환하고, 답변을 수집하여 projdesc_generate 스킬로 문서를 생성합니다.
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  answers:
-    type: string
-    description: "이전 질문에 대한 사용자 답변 (JSON 형식). 최초 호출 시 비워두면 질문 목록을 반환합니다."
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+answers:
+  type: string
+  description: "이전 질문에 대한 사용자 답변 (JSON 형식). 최초 호출 시 비워두면 질문 목록을 반환합니다."
+```
 
 ## 역할
 

@@ -1,21 +1,22 @@
 ---
 name: pr_create
 description: 사용자 브랜치에서 main으로 Pull Request를 생성합니다
-parameters:
-  projectCode:
-    type: string
-    description: "프로젝트 코드 (예: GOJIRA)"
-    required: true
-  title:
-    type: string
-    description: "PR 제목"
-  body:
-    type: string
-    description: "PR 본문 설명"
-api:
-  method: POST
-  path: /PullRequest
 ---
+
+## Parameters
+
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA)"
+  required: true
+title:
+  type: string
+  description: "PR 제목"
+body:
+  type: string
+  description: "PR 본문 설명"
+```
 
 ## PR 생성 규칙
 

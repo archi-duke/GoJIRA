@@ -1,36 +1,37 @@
 ---
 name: issue_update
 description: 기존 이슈의 필드를 수정합니다. Requirement 이슈의 경우 reqType도 변경할 수 있습니다.
-parameters:
-  key:
-    type: string
-    description: "이슈 키 (예: GOJIRA-1)"
-    required: true
-  summary:
-    type: string
-    description: "변경할 이슈 제목"
-  description:
-    type: string
-    description: "변경할 이슈 설명"
-  status:
-    type: string
-    description: "변경할 상태"
-    enum: [To Do, In Progress, Done]
-  priority:
-    type: string
-    description: "변경할 우선순위"
-    enum: [Highest, High, Medium, Low, Lowest]
-  assignee:
-    type: string
-    description: "변경할 담당자 ID"
-  reqType:
-    type: string
-    description: "Requirement 세부 타입 변경. NFR(QA/품질속성), FR(기능), CNST(제약)"
-    enum: [NFR, FR, CNST]
-api:
-  method: PUT
-  path: /Issue
 ---
+
+## Parameters
+
+```yaml
+key:
+  type: string
+  description: "이슈 키 (예: GOJIRA-1)"
+  required: true
+summary:
+  type: string
+  description: "변경할 이슈 제목"
+description:
+  type: string
+  description: "변경할 이슈 설명"
+status:
+  type: string
+  description: "변경할 상태"
+  enum: [To Do, In Progress, Done]
+priority:
+  type: string
+  description: "변경할 우선순위"
+  enum: [Highest, High, Medium, Low, Lowest]
+assignee:
+  type: string
+  description: "변경할 담당자 ID"
+reqType:
+  type: string
+  description: "Requirement 세부 타입 변경. NFR(QA/품질속성), FR(기능), CNST(제약)"
+  enum: [NFR, FR, CNST]
+```
 
 ## 이슈 수정 규칙
 
