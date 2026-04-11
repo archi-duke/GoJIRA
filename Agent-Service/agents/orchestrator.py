@@ -53,7 +53,14 @@ async def agent_loop(
 ) -> Tuple[str, List[Dict]]:
     """ReACT 에이전트 루프 — Go agentLoop() 동일."""
     registry = get_registry()
-    tools = registry.list_openai_tools()
+
+    # 사용자 메시지 기반 스킬 선별
+    user_message = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_message = m.get("content", "")
+            break
+    tools = registry.select_tools(user_message)
     all_actions: List[Dict] = []
 
     for turn in range(max_turns):

@@ -30,8 +30,17 @@ async def agent_loop_stream(
     - error: 에러 발생
     """
     registry = get_registry()
-    tools = registry.list_openai_tools()
     all_actions = []
+
+    # 사용자 메시지 추출 (마지막 user 메시지)
+    user_message = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_message = m.get("content", "")
+            break
+
+    # 1차 스킬 선별 (키워드 + description 매칭)
+    tools = registry.select_tools(user_message)
 
     for turn in range(max_turns):
         yield _sse("thinking", {"turn": turn, "message": "추론 중..."})
@@ -46,6 +55,11 @@ async def agent_loop_stream(
 
         if thought:
             yield _sse("reasoning", {"turn": turn, "content": thought})
+
+            # Pass 1 추론 결과로 스킬 재선별 (추론에서 언급된 스킬 반영)
+            if turn == 0:
+                tools = registry.select_tools(user_message, extra_context=thought)
+
             # 추론 내용을 대화에 추가 (도구 호출 판단에 활용)
             messages.append({"role": "assistant", "content": thought})
             messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구가 있으면 호출하세요. 더 이상 도구가 필요 없다면 최종 답변을 마크다운으로 정리하여 제공하세요."})
