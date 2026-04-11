@@ -213,6 +213,42 @@ async def list_sessions(x_user_id: str = Header(default="anonymous")):
     return result
 
 
+@router.post("/doc/enrich")
+async def doc_enrich(request: Request, x_user_id: str = Header(default="anonymous")):
+    """문서 AI 보강 — DocEditor의 AI생성 버튼용."""
+    import re
+    body = await request.json()
+    project_code = body.get("projectCode", "")
+    content = body.get("content", "")
+    file_path = body.get("filePath", "")
+
+    if not project_code or not file_path:
+        return {"error": "projectCode, filePath 필수"}
+
+    # 내용 충분 여부 판단 (템플릿만 있는지)
+    stripped = re.sub(r'#[^\n]*', '', content)
+    stripped = re.sub(r'>.*', '', stripped)
+    stripped = re.sub(r'\(작성 필요\)', '', stripped)
+    for phrase in ['기록하는 문서입니다', '기술하는 문서입니다', '반드시 작성해', '참조합니다']:
+        stripped = stripped.replace(phrase, '')
+    stripped = stripped.strip()
+
+    if len(stripped) < 30:
+        return {"needsInterview": True, "message": "문서 내용이 부족합니다. 인터뷰를 통해 자동 생성할 수 있습니다."}
+
+    from skills.dispatcher import execute_skill
+    try:
+        result = await execute_skill("projdesc_generate", {
+            "projectCode": project_code,
+            "content": content,
+            "mode": "enrich",
+        }, x_user_id)
+        return result
+    except Exception as e:
+        log.error("doc_enrich error: %s", e)
+        return {"error": str(e)}
+
+
 @router.get("/session/{session_id}")
 async def get_session(session_id: str):
     """세션 상세 — Go AgentSessionDetailHandler 대응."""

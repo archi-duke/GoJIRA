@@ -75,17 +75,14 @@ def _to_tool_info(skill: SkillDef) -> dict:
 
 
 def auto_load_skills() -> SkillRegistry:
-    """스킬 자동 로드 — Go AutoLoadSkills() 대응."""
+    """스킬 자동 로드 — skills/defs/ 디렉토리에서 SKILL.md 로드."""
     registry = SkillRegistry()
 
-    # 1. 환경변수
+    # 1. 환경변수 우선
     skills_dir = settings.skills_dir
     if not skills_dir:
-        # 2. 상위 디렉토리의 GoJIRA-API/skills
-        here = os.path.dirname(os.path.abspath(__file__))
-        candidate = os.path.join(here, "..", "..", "GoJIRA-API", "skills")
-        if os.path.isdir(candidate):
-            skills_dir = candidate
+        # 2. Agent-Service/skills/ (SKILL.md + executor.py가 함께 있는 디렉토리)
+        skills_dir = os.path.dirname(os.path.abspath(__file__))
 
     if skills_dir:
         for skill in load_skills_from_dir(skills_dir):

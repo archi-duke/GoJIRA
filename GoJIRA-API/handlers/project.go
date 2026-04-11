@@ -158,5 +158,5 @@ func ensureDocRepo(jiraCode, projectName string) {
 	if sc >= 400 {
 		log.Printf("ensureDocRepo: 실패 for %s (status=%d)", jiraCode, sc)
 	}
-	// 필수 파일은 Platform-API의 DocRepoCreateHandler에서 브랜치 보호 전에 생성됨
+	// 초기 파일은 Platform-API의 DocRepoCreateHandler에서 브랜치 보호 전에 생성됨
 }

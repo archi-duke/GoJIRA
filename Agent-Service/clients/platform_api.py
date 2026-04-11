@@ -55,6 +55,20 @@ class PlatformClient:
                 return []
             return resp.json()
 
+    async def save_file(self, code: str, path: str, content: str, message: str, user: str) -> dict:
+        """사용자 브랜치에 파일 저장 (PUT /DocRepo/{code}/file)."""
+        url = f"{self.base_url}/DocRepo/{code}/file"
+        payload = {"path": path, "content": content, "message": message}
+        async with httpx.AsyncClient() as client:
+            resp = await client.put(
+                url, json=payload,
+                headers={"Content-Type": "application/json", "X-User-Id": user},
+                timeout=30,
+            )
+            if resp.status_code >= 400:
+                raise ValueError(f"파일 저장 실패: {resp.text}")
+            return resp.json()
+
     async def create_pr(self, code: str, title: str, body: str, head: str, base: str, user: str) -> dict:
         url = f"{self.base_url}/DocRepo/{code}/pr"
         payload = {"title": title, "body": body, "head": head, "base": base}

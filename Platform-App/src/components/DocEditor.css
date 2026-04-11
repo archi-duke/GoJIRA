@@ -4,6 +4,7 @@
 .de-btn-primary { background: #2c3e50; color: #fff; }
 .de-btn:disabled { background: #e0e0e0; color: #aaa; cursor: default; }
 .de-btn-danger { background: #e74c3c; color: #fff; }
+.de-btn-ai { background: #8e44ad; color: #fff; }
 
 .de-editor { display: flex; flex: 1; overflow: hidden; }
 .de-sidebar { width: 220px; border-right: 1px solid #e0e0e0; overflow-y: auto; background: #fafafa; flex-shrink: 0; display: flex; flex-direction: column; }
@@ -12,6 +13,8 @@
 .de-sidebar-tab:hover { background: #f0f0f0; }
 .de-sidebar-tab-active { color: #2c3e50; font-weight: 600; border-bottom: 2px solid #2c3e50; }
 .de-sidebar-header { padding: 8px 12px; font-size: 11px; color: #888; border-bottom: 1px solid #eee; display: flex; align-items: center; }
+.de-folder-header { padding: 6px 12px; font-size: 12px; font-weight: 600; color: #555; background: #f0f0f0; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.de-folder-icon { font-size: 13px; }
 .de-file { padding: 6px 12px; font-size: 12px; cursor: pointer; overflow: hidden; white-space: nowrap; display: flex; align-items: center; }
 .de-file:hover { background: #eee; }
 .de-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }

@@ -78,9 +78,12 @@ function App() {
   if (!user) return null;
 
   // Agent 독립 모드: ?mode=agent 로 열린 경우
-  const urlMode = new URLSearchParams(window.location.search).get('mode');
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlMode = urlParams.get('mode');
   if (urlMode === 'agent') {
-    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} />;
+    const autoMessage = urlParams.get('autoMessage') || '';
+    const newSession = urlParams.get('newSession') === '1';
+    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} />;
   }
 
   let content;

@@ -300,7 +300,7 @@ Git 기반 마크다운 문서 편집기.
 | modified | 변경됨 배지 |
 | added | 추가됨 배지 |
 | deleted | 삭제됨 배지 |
-| mainOnly | D 배지, gray italic |
+| mainOnly | M 배지 (gray), italic, Pull 동기화 안내 |
 
 **초기 폴더 구조 (프로젝트 생성 시 자동 생성):**
 

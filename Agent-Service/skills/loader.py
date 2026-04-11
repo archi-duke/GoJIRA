@@ -1,7 +1,9 @@
-"""SKILL.md 파서 — Go skills/registry.go ParseSkillFile/splitFrontmatter 대응."""
+"""SKILL.md 파서 + executor 로더."""
 
 import os
-from typing import Dict, List, Optional
+import importlib
+import asyncio
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel
@@ -18,8 +20,11 @@ class SkillDef(BaseModel):
     name: str
     description: str = ""
     parameters: Dict[str, ParameterDef] = {}
-    prompt: str = ""  # markdown body
-    dir: str = ""     # SKILL.md가 위치한 디렉토리
+    prompt: str = ""
+    dir: str = ""
+    executor: Optional[Callable] = None  # execute(params, user) 함수 참조
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 def parse_skill_file(path: str) -> SkillDef:
@@ -39,13 +44,37 @@ def parse_skill_file(path: str) -> SkillDef:
     if not name:
         name = os.path.basename(os.path.dirname(path))
 
+    skill_dir = os.path.dirname(path)
+
+    # executor.py 로드
+    executor_fn = _load_executor(skill_dir, name)
+
     return SkillDef(
         name=name,
         description=raw.get("description", ""),
         parameters=params,
         prompt=body.strip(),
-        dir=os.path.dirname(path),
+        dir=skill_dir,
+        executor=executor_fn,
     )
+
+
+def _load_executor(skill_dir: str, skill_name: str) -> Optional[Callable]:
+    """스킬 디렉토리에서 executor.py의 execute() 함수를 로드."""
+    executor_path = os.path.join(skill_dir, "executor.py")
+    if not os.path.isfile(executor_path):
+        return None
+
+    module_name = f"skills.{skill_name}.executor"
+    try:
+        module = importlib.import_module(module_name)
+        fn = getattr(module, "execute", None)
+        if fn and callable(fn):
+            return fn
+        print(f"[skills] {skill_name}/executor.py에 execute() 함수 없음")
+    except Exception as e:
+        print(f"[skills] {skill_name}/executor.py 로드 실패: {e}")
+    return None
 
 
 def _split_frontmatter(content: str):
@@ -74,7 +103,8 @@ def load_skills_from_dir(directory: str) -> List[SkillDef]:
             try:
                 skill = parse_skill_file(skill_file)
                 skills.append(skill)
-                print(f"[skills] 로드: {skill.name} ({skill.description[:40]}...)")
+                exec_mark = "+" if skill.executor else "-"
+                print(f"[skills] 로드: {skill.name} [{exec_mark}] ({skill.description[:40]}...)")
             except Exception as e:
                 print(f"[skills] 로드 실패 ({skill_file}): {e}")
     return skills

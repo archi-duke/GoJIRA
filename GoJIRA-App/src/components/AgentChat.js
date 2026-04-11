@@ -7,11 +7,15 @@ import './AgentChat.css';
 const API = config.GOJIRA_API || config.API_BASE;
 const STREAM_API = config.AGENT_API || API;
 
-export default function AgentChat({ user, authority, context, onClose, standalone }) {
+export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState(() => sessionStorage.getItem('agent_sessionId') || null);
+  const [sessionId, setSessionId] = useState(() => {
+    if (newSession) { sessionStorage.removeItem('agent_sessionId'); return null; }
+    return sessionStorage.getItem('agent_sessionId') || null;
+  });
+  const autoMessageSent = useRef(false);
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,6 +61,21 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   useEffect(() => {
     inputRef.current?.focus();
   }, [showHistory]);
+
+  // autoMessage: 외부에서 전달된 메시지 자동 전송
+  useEffect(() => {
+    if (autoMessage && !autoMessageSent.current) {
+      autoMessageSent.current = true;
+      setTimeout(() => {
+        setInput(autoMessage);
+        // input 세팅 후 다음 틱에서 전송 버튼 클릭 시뮬레이션
+        setTimeout(() => {
+          const btn = document.querySelector('.ac-send');
+          if (btn) btn.click();
+        }, 100);
+      }, 500);
+    }
+  }, [autoMessage]); // eslint-disable-line
 
   async function handleSend() {
     const text = input.trim();
