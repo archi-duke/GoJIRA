@@ -313,12 +313,30 @@ architecture/
   architecture.md           # 아키텍처 설계
 ```
 
+**파일 트리 표시:**
+
+- 폴더별 그룹화: 📁 폴더 헤더 + 들여쓰기(16px)
+- 루트 파일: 폴더 아래에 표시
+- 폴더/파일 추가: `+` 버튼 → `modalPrompt`로 경로 입력 (`폴더명/파일명.md` 형식 지원)
+
+**알림 아이콘:**
+
+| 아이콘 | 파일 | 색상 | 의미 |
+|--------|------|------|------|
+| alert-diff.svg | branchDiff | tomato | main과 작업공간 차이 있음 |
+| alert-pr.svg | hasOpenPR | #27ae60 | 열린 PR 있음 (우선 표시) |
+| git-fetch.svg | Pull 버튼 | - | main → 작업공간 동기화 |
+| git-pull.svg | 발행신청 앞 | - | PR 제출 아이콘 |
+
 **편집 흐름:**
 
 1. 초기 파일 생성 (`init-files` — 없는 파일만 생성)
 2. 사용자 브랜치 자동 생성 (`ensure-branch`)
-3. 트리 비교 (main vs workspace)
+3. 트리 비교 (main vs workspace) — `refreshDocState` 통합 함수
 4. 파일 편집 → 저장 → commit/push
+5. 실시간 갱신: WebSocket `subscribe` (sseManager.js)
+
+**AI생성 버튼:** 편집 모드에서 저장 버튼 좌측에 표시. 내용 충분 시 LLM 보강, 부족 시 채팅 인터뷰 제안
 
 **PR 기능:** 생성 / 승인 / 반려 / 머지
 
@@ -330,11 +348,20 @@ architecture/
 
 AI 에이전트와의 대화 인터페이스.
 
+**Props:**
+
+| Prop | 타입 | 설명 |
+|------|------|------|
+| standalone | boolean | true면 전체 화면 모드 |
+| autoMessage | string | 초기 로딩 시 자동 전송 메시지 |
+| newSession | boolean | true면 기존 세션 무시하고 새 세션 시작 |
+
 **모드:**
 
 | 모드 | 조건 | 동작 |
 |------|------|------|
 | standalone | `?mode=agent` | 전체 화면, 닫기 버튼 숨김 |
+| standalone + autoMessage | `?mode=agent&newSession=1&autoMessage=...` | 새 세션에서 메시지 자동 전송 |
 | panel | 기본 | 인라인 패널 |
 
 **세션 관리:**

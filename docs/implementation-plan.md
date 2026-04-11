@@ -79,7 +79,7 @@ gantt
     ReACT 2-pass + 디버그 뷰            :done, p46b, 2026-03, 2026-04
     Agent Chat 독립 창 분리              :done, p46c, 2026-04, 2026-04
     BroadcastChannel + ui_navigate       :done, p46d, 2026-04, 2026-04
-    16개 Skill 완성                      :done, p46e, 2026-04, 2026-04
+    19개 Skill 완성 (vos/projdesc 추가)   :done, p46e, 2026-04, 2026-04
 
     section Agent Phase 5 - 확장 (미착수)
     외부 MCP 서버 연동                   :p5a, 2026-05, 2026-06
@@ -178,27 +178,31 @@ pie title 구현 진행 상태
 - [x] BroadcastChannel(`gojira-navigate`) 크로스 윈도우 네비게이션
 - [x] ui_navigate Skill
 - [x] pr_list 기본 state=all
-- [x] 총 16개 Skill 완성
+- [x] 총 19개 Skill 완성
+- [x] 스킬 구조 통합: GoJIRA-API/skills/ → Agent-Service/skills/ (SKILL.md + executor.py 동일 폴더)
 
-**현재 Skill 목록 (16개):**
+**현재 Skill 목록 (19개):**
 
 | 분류 | Skill | 안전 등급 |
 |------|-------|----------|
 | 조회 | project_query | 자동 |
 | 조회 | issue_query | 자동 |
 | 조회 | doc_list | 자동 |
+| 조회 | doc_history | 자동 |
 | 조회 | pr_list | 자동 |
 | 분석 | doc_summarize | 자동 |
 | 분석 | doc_diff | 자동 |
 | 분석 | schedule_analyze | 자동 |
 | 분석 | satam_analyze | 자동 |
 | 분석 | issue_analyze | 자동 |
+| 분석 | vos_collect | 자동 |
 | 변경 | issue_create | 확인 요청 |
 | 변경 | issue_update | 확인 요청 |
 | 변경 | issue_delete | 확인 요청 |
 | 변경 | issue_link | 확인 요청 |
 | 변경 | pr_create | 확인 요청 |
-| 조회 | doc_history | 자동 |
+| 변경 | projdesc_interview | 확인 요청 |
+| 변경 | projdesc_generate | 확인 요청 |
 | UI | ui_navigate | 자동 |
 
 ---

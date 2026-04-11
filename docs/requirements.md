@@ -26,7 +26,7 @@ GoJIRA는 JIRA Datacenter 기반 프로젝트 관리, 설계문서 형상관리,
 |--------|----------|------|------|
 | Platform-API | Go | :9000 | 인증(SSO), 계정/권한, 공지, DocRepo(Gitea), SSE/WebSocket |
 | GoJIRA-API | Go | :9001 | 이슈 CRUD, 프로젝트, JIRA DC 양방향 동기화 |
-| Agent-Service | Python | :9002 | AI 에이전트 오케스트레이터, 16개 스킬, SSE 스트리밍 |
+| Agent-Service | Python | :9002 | AI 에이전트 오케스트레이터, 19개 스킬, SSE 스트리밍 |
 | Platform-App | React | :3000 | 통합 컨테이너 (Host) — Account, Notice, Repository |
 | GoJIRA-App | React | :3001 | 프로젝트 관리 SPA (Remote) — Module Federation |
 | Gitea | Go | - | 설계문서 형상관리 (GitHub API 호환) |
@@ -327,11 +327,13 @@ graph LR
 | ID | FR-11 |
 | 우선순위 | 필수 |
 | 담당 서비스 | Agent-Service |
-| 설명 | 멀티턴 자연어 대화 및 16개 스킬 실행 |
+| 설명 | 멀티턴 자연어 대화 및 19개 스킬 실행 |
 
 - 멀티턴 대화 컨텍스트 유지
-- 16개 스킬 자동 선택 및 실행
-  - 이슈 조회/생성/수정, 프로젝트 조회, 문서 관리, 관계 분석, 일정 분석, SATAM 분석 등
+- 19개 스킬 자동 선택 및 실행
+  - 이슈 조회/생성/수정/삭제/링크, 프로젝트 조회, 문서 관리(목록/요약/비교/이력)
+  - PR 목록/생성, 관계 분석, 일정 분석, SATAM 분석, UI 네비게이션
+  - VOS 수집(vos_collect), 프로젝트 설명 인터뷰/생성(projdesc_interview/generate)
 - 스킬 실행 결과를 자연어로 요약 응답
 
 #### FR-12: SSE 스트리밍 + ReACT 2-pass 추론
