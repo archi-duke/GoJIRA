@@ -4,6 +4,7 @@ import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
+import AlertModal from './components/AlertModal';
 import config from './config';
 
 // Platform-App의 sseManager/eventQueue가 없으면 noop
@@ -167,25 +168,30 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     });
   }
 
+  let content;
   if (page === 'docs' && selectedProject) {
-    return <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} projectAlert={projectAlert} onDocStateChange={refreshAlert} />;
-  }
-  if (page === 'issues' && selectedProject) {
-    return <IssueList project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
-  }
-  if (page === 'relationMap' && selectedProject) {
-    return <RelationMap project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
-  }
-  if (page === 'satam' && selectedProject) {
-    return <SATAM project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
+    content = <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} projectAlert={projectAlert} onDocStateChange={refreshAlert} />;
+  } else if (page === 'issues' && selectedProject) {
+    content = <IssueList project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
+  } else if (page === 'relationMap' && selectedProject) {
+    content = <RelationMap project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
+  } else if (page === 'satam' && selectedProject) {
+    content = <SATAM project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
+  } else {
+    content = (
+      <ProjectMap
+        onProjectClick={(p) => navigate('issues', p)}
+        onRelationMap={(p) => navigate('relationMap', p)}
+        onSATAM={(p) => navigate('satam', p)}
+        user={user}
+      />
+    );
   }
 
   return (
-    <ProjectMap
-      onProjectClick={(p) => navigate('issues', p)}
-      onRelationMap={(p) => navigate('relationMap', p)}
-      onSATAM={(p) => navigate('satam', p)}
-      user={user}
-    />
+    <>
+      {content}
+      <AlertModal />
+    </>
   );
 }
