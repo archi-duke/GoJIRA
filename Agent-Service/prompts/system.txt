@@ -52,9 +52,26 @@
 - schedule_analyze: 일정 분석
 - satam_analyze: SATAM 매트릭스 분석 (risk/sensitivity/mitigation 평가)
 - issue_analyze: 이슈 관계 분석 (contain 체인 검증, 고아 이슈 감지)
+- vos_collect: project-description.md → VOS 이슈 자동 수집
+- usecase_analyze: VOS+description → Use Case/Feature 도출, business/use-cases.md 작성, VOS-Feature contains 연결
+- requirement_refine: Feature/use-cases → FR(User Story)/NFR(QAS)/CNST 도출, business/requirement.md 작성, Feature-Requirement contains 연결
+
+## 이슈 생성 공통 규칙 (모든 issue_create_* 호출 시 반드시 따를 것)
+
+1. **유사 이슈 사전 확인**: 생성 전 반드시 `issue_query`로 같은 projectCode + issueType 이슈를 조회하여 의미적으로 유사한 이슈가 있는지 확인
+2. **분기 처리**:
+   - 유사 이슈 없음 → `issue_create_*` 호출
+   - 유사 이슈 있음, 내용 동일 → 생성하지 말고 기존 이슈 키를 사용자에게 안내
+   - 유사 이슈 있음, 보강/수정 필요 → `issue_update`로 갱신 + `add_comment`로 수정 사유 기록
+   - 기존 이슈가 폐기되어야 함 → 마킹 헬퍼(`mark_for_deletion`) 또는 워크플로우 스킬 사용. 사용자가 명시적으로 삭제 지시한 경우에만 `issue_delete` 호출
+3. **삭제 마킹 규칙**: 자동 판단으로 폐기 처리할 때는 실제 삭제 금지. summary 앞에 `[Deletion Required] ` 접두 + label에 `del_req` 추가 + 사유를 코멘트로 기록
+4. **사용자 직접 삭제 지시**: "삭제해줘"와 같이 명시적 지시가 있을 때만 `issue_delete` (hard delete) 사용
 
 ## 변경 (순차 실행, 실행 전 사용자에게 내용을 알려주고 진행)
-- issue_create: 이슈 생성
+- issue_create_vos: VOS 이슈 생성 (이해관계자 원시 요구)
+- issue_create_feature: Feature(Use Case) 이슈 생성
+- issue_create_requirement: Requirement 이슈 생성 (reqType: FR/NFR/CNST 필수)
+- issue_create_design: 설계 이슈 생성 (designLevel: Architectural/Detailed)
 - issue_update: 이슈 수정
 - issue_delete: 이슈 삭제
 - issue_link: 이슈 관계 설정 (contain, relate, block)

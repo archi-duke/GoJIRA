@@ -228,7 +228,12 @@ def _split_chunks(text: str, size: int) -> List[str]:
 _TOOL_DESCRIPTIONS = {
     "project_query": "프로젝트 목록 확인",
     "issue_query": "{projectCode} 이슈 조회",
-    "issue_create": "{projectCode}에 {issueType} 이슈 생성",
+    "issue_create_vos": "{projectCode}에 VOS 이슈 생성",
+    "issue_create_feature": "{projectCode}에 Feature 이슈 생성",
+    "issue_create_requirement": "{projectCode}에 Requirement({reqType}) 이슈 생성",
+    "issue_create_design": "{projectCode}에 {designLevel} Design 이슈 생성",
+    "usecase_analyze": "{projectCode} Use Case 분석 → Feature 도출",
+    "requirement_refine": "{projectCode} Requirement 정제 (FR/NFR/CNST)",
     "issue_update": "{key} 이슈 수정",
     "issue_delete": "{key} 이슈 삭제",
     "issue_link": "{fromKey}와 {toKey} 관계 설정",

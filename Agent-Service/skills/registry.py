@@ -18,33 +18,65 @@ log = logging.getLogger("agent.registry")
 ALWAYS_INCLUDE = {"project_query"}
 
 # 스킬 그룹: 하나가 매칭되면 그룹 전체를 포함
+_ISSUE_CREATE_ALL = [
+    "issue_create_vos",
+    "issue_create_feature",
+    "issue_create_requirement",
+    "issue_create_design",
+]
+
 SKILL_GROUPS = {
-    "issue": ["issue_query", "issue_create", "issue_update", "issue_delete", "issue_link", "issue_analyze"],
+    "issue": ["issue_query", *_ISSUE_CREATE_ALL, "issue_update", "issue_delete", "issue_link", "issue_analyze"],
     "doc": ["doc_list", "doc_summarize", "doc_diff", "doc_history"],
     "pr": ["pr_list", "pr_create"],
-    "design": ["satam_analyze", "issue_analyze", "issue_query", "issue_create", "issue_link"],
+    "design": ["satam_analyze", "issue_analyze", "issue_query", "issue_create_design", "issue_link"],
     "projdesc": ["projdesc_interview", "projdesc_generate"],
+    "requirement_workflow": ["vos_collect", "usecase_analyze", "requirement_refine", "issue_query", "issue_analyze"],
 }
 
 # 키워드 → 스킬 이름 매핑 (description 보완)
 KEYWORD_MAP = {
     # 이슈 관련
-    "이슈": ["issue_query", "issue_create", "issue_update", "issue_delete"],
-    "issue": ["issue_query", "issue_create", "issue_update", "issue_delete"],
-    "생성": ["issue_create"],
+    "이슈": ["issue_query", *_ISSUE_CREATE_ALL, "issue_update", "issue_delete"],
+    "issue": ["issue_query", *_ISSUE_CREATE_ALL, "issue_update", "issue_delete"],
+    "생성": _ISSUE_CREATE_ALL,
     "수정": ["issue_update"],
     "삭제": ["issue_delete"],
     "관계": ["issue_link", "issue_analyze"],
     "link": ["issue_link"],
     "contain": ["issue_link", "issue_analyze"],
     "고아": ["issue_analyze"],
-    # 타입별
-    "vos": ["issue_query", "issue_create", "vos_collect"],
-    "feature": ["issue_query", "issue_create"],
-    "requirement": ["issue_query", "issue_create"],
-    "요구사항": ["issue_query", "issue_create", "vos_collect"],
-    "유즈케이스": ["issue_query", "issue_create"],
-    "usecase": ["issue_query", "issue_create"],
+    # 타입별 — 해당 타입의 생성 스킬만 선별
+    "vos": ["issue_query", "issue_create_vos", "vos_collect"],
+    "feature": ["issue_query", "issue_create_feature", "usecase_analyze"],
+    "유즈케이스": ["issue_query", "issue_create_feature", "usecase_analyze"],
+    "usecase": ["issue_query", "issue_create_feature", "usecase_analyze"],
+    "use case": ["issue_query", "issue_create_feature", "usecase_analyze"],
+    "use-case": ["issue_query", "usecase_analyze"],
+    "유즈 케이스": ["usecase_analyze"],
+    "actor": ["usecase_analyze"],
+    "시나리오": ["usecase_analyze"],
+    "requirement": ["issue_query", "issue_create_requirement", "requirement_refine"],
+    "요구사항": ["issue_query", "issue_create_requirement", "vos_collect", "requirement_refine"],
+    "정제": ["requirement_refine"],
+    "user story": ["requirement_refine"],
+    "유저 스토리": ["requirement_refine"],
+    "qas": ["requirement_refine"],
+    "fr": ["issue_create_requirement"],
+    "nfr": ["issue_create_requirement"],
+    "qa": ["issue_create_requirement"],
+    "품질속성": ["issue_create_requirement"],
+    "품질 속성": ["issue_create_requirement"],
+    "cnst": ["issue_create_requirement"],
+    "제약": ["issue_create_requirement"],
+    # 설계
+    "설계": ["issue_query", "issue_create_design", "satam_analyze"],
+    "design": ["issue_query", "issue_create_design"],
+    "adsn": ["issue_create_design"],
+    "ddsn": ["issue_create_design"],
+    "아키텍처": ["issue_create_design"],
+    "architectural": ["issue_create_design"],
+    "detailed": ["issue_create_design"],
     # 문서 관련
     "문서": ["doc_list", "doc_summarize", "doc_diff", "doc_history"],
     "doc": ["doc_list", "doc_summarize", "doc_diff", "doc_history"],

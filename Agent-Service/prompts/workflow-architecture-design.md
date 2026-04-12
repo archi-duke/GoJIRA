@@ -25,6 +25,9 @@ Phase 4: 설계 평가
 
 ## Phase 1: 요구 분석
 
+> **상세 워크플로우**: [`workflow-requirement-analysis.md`](./workflow-requirement-analysis.md)
+> ②~④ 단계의 구체적 절차(VOS 도출 → Use Case/Feature 분석 → Requirement 정제), 산출 문서 양식, 자동 결정된 NFR Measure의 검토 흐름 등을 다룬다.
+
 ### ① 과제 소개 분석 (Project Description Analysis)
 
 **목적**: 과제의 배경, 목적, 이해관계자, 핵심 요구를 파악한다.
@@ -243,11 +246,11 @@ VOS —(contains)→ Feature —(contains)→ Requirement —(contains)→ ADSN 
 |------|----------|
 | ① 과제 소개 분석 | `projdesc_interview`, `projdesc_generate` |
 | ② VOS 수집 | `vos_collect` |
-| ③ UseCase 분석 | *(신규 필요: `usecase_analyze`)* |
-| ④ Requirements 정제 | *(신규 필요: `requirement_refine`)* |
+| ③ UseCase 분석 | `usecase_analyze` (산출: `business/use-cases.md`) |
+| ④ Requirements 정제 | `requirement_refine` (산출: `business/requirement.md`) |
 | ⑤ Architecture Driver 선정 | `issue_query`, `issue_update` |
 | ⑥ 시스템 스타일 정의 | *(문서 작성)* |
-| ⑦ 설계안 결정 | `issue_create(ADSN/DDSN)`, `issue_link` |
+| ⑦ 설계안 결정 | `issue_create_design`(designLevel: Architectural/Detailed), `issue_link` |
 | ⑧ 디자인 통합 | *(문서 작성)* |
 | ⑨ Architecture 평가 | `satam_analyze` |
 | 공통 | `project_query`, `issue_analyze`, `doc_list`, `doc_summarize` |

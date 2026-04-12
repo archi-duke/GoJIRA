@@ -14,9 +14,6 @@ var (
 	JiraAPIBase    = envOrDefault("GOJIRA_JIRA_API_BASE", "/rest/api/2")
 	JiraUser       string
 	JiraPass       string
-	ConfluenceURL  = envOrDefault("GOJIRA_CONFLUENCE_URL", "http://localhost:8090")
-	ConfluenceUser string
-	ConfluencePass string
 	MongoURI       = envOrDefault("GOJIRA_MONGO_URI", "mongodb://localhost:27017")
 	MongoDB        = envOrDefault("GOJIRA_MONGO_DB", "gojira")
 	OpenAIAPIKey   = envOrDefault("OPENAI_API_KEY", "")
@@ -42,19 +39,6 @@ func init() {
 		log.Printf("JIRA_PASS 복호화 실패: %v", err)
 	}
 
-	raw = envOrDefault("GOJIRA_CONFLUENCE_USER", "")
-	if val, err := Decrypt(raw); err == nil {
-		ConfluenceUser = val
-	} else {
-		ConfluenceUser = raw
-	}
-
-	raw = envOrDefault("GOJIRA_CONFLUENCE_PASS", "")
-	if val, err := Decrypt(raw); err == nil {
-		ConfluencePass = val
-	} else {
-		ConfluencePass = raw
-	}
 }
 
 func envOrDefault(key, fallback string) string {

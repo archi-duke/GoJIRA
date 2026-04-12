@@ -1,13 +1,12 @@
-"""VOS 수집 스킬 — project-description.md 분석 → VOS 이슈 자동 생성."""
+"""VOS 수집 스킬 — project-description.md 분석 → VOS 이슈 도출 (mode 분기 지원)."""
 
 import re
 import json
-from datetime import datetime
 
 from core.database import issues
 from core.llm import call_llm
 from clients.platform_api import PlatformClient
-from skills.helpers import get_next_issue_num, add_issue_to_project
+from skills.helpers import create_issue, dispatch_by_mode
 
 
 async def execute(params: dict, user: str) -> dict:
@@ -17,7 +16,7 @@ async def execute(params: dict, user: str) -> dict:
 
     req_user = params.get("user", user)
 
-    # 1. project-description.md 조회 (main → 사용자 브랜치, 템플릿이면 사용자 브랜치 재시도)
+    # 1. project-description.md 조회
     client = PlatformClient()
     doc_content = await client.get_file_content(code, "business/project-description.md", ref="main")
     if not doc_content or _is_template_only(doc_content):
@@ -28,146 +27,129 @@ async def execute(params: dict, user: str) -> dict:
         return {
             "projectCode": code,
             "message": "business/project-description.md 문서가 없거나 내용이 불충분합니다. "
-                       "VOS를 추출하려면 문서를 먼저 작성해야 합니다. "
-                       "자동 생성을 도와드릴 수 있습니다. 간단한 인터뷰를 진행할까요?",
-            "action": "문서 보강 필요",
+                       "VOS를 추출하려면 문서를 먼저 작성해야 합니다.",
             "suggestSkill": "projdesc_interview",
-            "created": [],
-            "skipped": 0,
+            "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
 
-    # 2. 기존 VOS 이슈 조회
-    prefix = {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"}
-    existing_vos = list(issues().find(prefix))
-    existing_summaries = [v.get("summary", "") for v in existing_vos]
+    # 2. 기존 VOS 이슈 조회 (LLM 컨텍스트)
+    existing_vos = list(issues().find(
+        {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
+        {"key": 1, "summary": 1, "description": 1, "client": 1, "_id": 0},
+    ))
+    existing_keys = {v["key"] for v in existing_vos}
 
-    existing_info = ""
-    if existing_vos:
-        vos_list = [{"key": v.get("key", ""), "summary": v.get("summary", ""), "client": v.get("client", "")} for v in existing_vos]
-        existing_info = f"\n\n## 기존 VOS ({len(existing_vos)}건)\n{json.dumps(vos_list, ensure_ascii=False, indent=2)}\n\n위 VOS와 중복되는 항목은 생성하지 마세요."
-
-    # 3. LLM으로 VOS 추출
-    truncated = doc_content[:6000] if len(doc_content) > 6000 else doc_content
-
+    # 3. LLM에 기존 VOS 컨텍스트 + mode 결정 요청
+    truncated = doc_content[:6000]
     prompt = f"""다음은 프로젝트 {code}의 과제 설명 문서입니다.
 
 {truncated}
-{existing_info}
 
+## 기존 VOS ({len(existing_vos)}건)
+{json.dumps(existing_vos, ensure_ascii=False, indent=2)}
+
+## 작업
 위 문서를 분석하여 이해관계자(Stakeholder)의 요구사항(VOS: Voice of Stakeholder)을 추출하세요.
+사용자 관점 어투("~가 필요해요 / ~해야 합니다 / ~하면 좋겠어요")로 작성합니다.
 
-분석 관점:
-- 과제 배경에서 도출되는 비즈니스 요구
-- 과제 목적에서 도출되는 핵심 목표
-- 주요 사항에서 도출되는 구체적 요구사항
-- 이해관계자(사용자, 관리자, 운영자, 외부 시스템 등)별 관점
+각 VOS 항목에 **mode**를 의미적 유사도 기반으로 결정하세요:
+- `create`: 기존과 의미적으로 다른 새 VOS
+- `reuse`: 기존 VOS와 의미가 동일 (existingKey 지정, 추가 작업 없음)
+- `modify`: 기존 VOS와 거의 같지만 description/client 등 보강 필요 (existingKey + modifyReason 지정)
+- `delete_mark`: 기존 VOS가 더 이상 유효하지 않아 폐기되어야 함 (existingKey + deleteReason 지정, 실제 삭제는 안 함)
 
-반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요:
+## 출력 (반드시 JSON 배열로만 응답, 다른 텍스트 금지)
 [
   {{
     "summary": "요구사항 제목 (간결하게)",
-    "description": "요구사항 상세 내용 (배경, 근거 포함)",
-    "client": "이해관계자 역할명 (예: 사용자, 관리자, 운영자, 개발자 등)"
+    "description": "요구사항 상세 (배경, 근거 포함)",
+    "client": "이해관계자 역할명 (예: 사용자, 관리자, 운영자)",
+    "mode": "create",
+    "existingKey": "",
+    "modifyReason": "",
+    "deleteReason": ""
   }}
 ]
 
-추가할 VOS가 없으면 빈 배열 []을 반환하세요."""
+추가/수정/마킹할 항목이 없으면 빈 배열 []을 반환하세요."""
 
     raw = await call_llm(prompt)
-
-    # JSON 파싱
-    try:
-        vos_items = json.loads(raw)
-    except json.JSONDecodeError:
-        match = re.search(r'\[.*\]', raw, re.DOTALL)
-        if match:
-            try:
-                vos_items = json.loads(match.group())
-            except json.JSONDecodeError:
-                return {
-                    "projectCode": code,
-                    "message": "LLM 응답을 파싱할 수 없습니다.",
-                    "raw": raw[:500],
-                    "created": [],
-                    "skipped": 0,
-                }
-        else:
-            return {
-                "projectCode": code,
-                "message": "LLM 응답에서 VOS 목록을 찾을 수 없습니다.",
-                "raw": raw[:500],
-                "created": [],
-                "skipped": 0,
-            }
-
-    if not isinstance(vos_items, list):
-        vos_items = []
-
-    # 4. 중복 필터링 및 이슈 생성
-    created = []
-    skipped = 0
-    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.000+0900")
-
-    for item in vos_items:
-        summary = item.get("summary", "").strip()
-        if not summary:
-            continue
-
-        if _is_duplicate(summary, existing_summaries):
-            skipped += 1
-            continue
-
-        key = f"{code}-{get_next_issue_num(code)}"
-        doc = {
-            "key": key,
-            "issueType": "VOS",
-            "summary": summary,
-            "description": item.get("description", ""),
-            "client": item.get("client", ""),
-            "status": "To Do",
-            "priority": "Medium",
-            "reporter": user,
-            "created": now,
-            "updated": now,
-            "labels": [],
-            "issueLinks": [],
-            "_source": "gojira-agent",
+    items = _extract_json_list(raw)
+    if items is None:
+        return {
+            "projectCode": code,
+            "message": "LLM 응답을 파싱할 수 없습니다.",
+            "raw": raw[:500],
+            "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
-        issues().update_one({"key": key}, {"$set": doc}, upsert=True)
-        add_issue_to_project(code, key)
-        created.append({"key": key, "summary": summary, "client": item.get("client", "")})
-        existing_summaries.append(summary)
+
+    # 4. mode 분기 처리
+    def _create_fn(item):
+        client_val = item.get("client", "")
+        return create_issue(
+            "VOS",
+            {
+                "projectCode": code,
+                "summary": (item.get("summary") or "").strip(),
+                "description": item.get("description", ""),
+            },
+            user,
+            extras={"client": client_val} if client_val else None,
+        )
+
+    def _update_fields_fn(item):
+        updates = {}
+        for f in ("summary", "description", "client"):
+            v = item.get(f)
+            if v is not None and v != "":
+                updates[f] = v
+        return updates
+
+    buckets = dispatch_by_mode(items, existing_keys, _create_fn, _update_fields_fn, user)
 
     return {
         "projectCode": code,
         "existingCount": len(existing_vos),
-        "created": created,
-        "createdCount": len(created),
-        "skipped": skipped,
-        "message": f"{len(created)}건 VOS 생성, {skipped}건 중복 스킵" if created else "추가 VOS 없음",
+        "created": buckets["created"],
+        "reused": buckets["reused"],
+        "modified": buckets["modified"],
+        "markedForDeletion": buckets["markedForDeletion"],
+        "message": _summarize(buckets),
     }
 
 
 def _is_template_only(content: str) -> bool:
-    """템플릿만 있고 실제 내용이 없는지 확인."""
-    stripped = re.sub(r'#[^\n]*', '', content)          # 제목 제거
-    stripped = re.sub(r'>.*', '', stripped)              # 인용 제거
+    stripped = re.sub(r'#[^\n]*', '', content or '')
+    stripped = re.sub(r'>.*', '', stripped)
     stripped = re.sub(r'\(작성 필요\)', '', stripped)
-    # 템플릿 안내 문구 제거
-    for phrase in ['기록하는 문서입니다', '기술하는 문서입니다', '반드시 작성해', '참조합니다']:
+    for phrase in ('기록하는 문서입니다', '기술하는 문서입니다', '반드시 작성해', '참조합니다'):
         stripped = stripped.replace(phrase, '')
-    stripped = stripped.strip()
-    return len(stripped) < 30
+    return len(stripped.strip()) < 30
 
 
-def _is_duplicate(new_summary: str, existing: list) -> bool:
-    """기존 VOS summary와 유사한지 확인."""
-    norm_new = re.sub(r'\s+', ' ', new_summary.lower().strip())
-    for ex in existing:
-        norm_ex = re.sub(r'\s+', ' ', ex.lower().strip())
-        if norm_new == norm_ex:
-            return True
-        if len(norm_new) > 5 and len(norm_ex) > 5:
-            if norm_new in norm_ex or norm_ex in norm_new:
-                return True
-    return False
+def _extract_json_list(raw: str):
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else None
+    except json.JSONDecodeError:
+        m = re.search(r'\[.*\]', raw, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group())
+                return data if isinstance(data, list) else None
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
+def _summarize(buckets: dict) -> str:
+    parts = []
+    if buckets["created"]:
+        parts.append(f"신규 {len(buckets['created'])}건")
+    if buckets["reused"]:
+        parts.append(f"재사용 {len(buckets['reused'])}건")
+    if buckets["modified"]:
+        parts.append(f"수정 {len(buckets['modified'])}건")
+    if buckets["markedForDeletion"]:
+        parts.append(f"⚠ 삭제마킹 {len(buckets['markedForDeletion'])}건")
+    return "VOS — " + (", ".join(parts) if parts else "변경 없음")

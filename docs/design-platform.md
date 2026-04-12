@@ -253,7 +253,6 @@ Gitea 레포지토리와 1:1 매핑되며, 프로젝트별 문서 이력 관리�
   Issue/relations                  # 관계 일괄 조회
   Jira/Account                     # JIRA 계정 등록
   Page/images                      # 페이지 이미지 관리
-  Page/confluence                  # Confluence 내보내기
   Project                          # 프로젝트 CRUD
   Project/alerts                   # 프로젝트 알림 (브랜치 diff)
   Agent/*                          # Agent-Service 프록시 또는 자체 처리
@@ -998,7 +997,6 @@ Agent-Service의 `/chat/stream`은 별도의 SSE 스트림이다.
 | GOJIRA_JIRA_API_BASE | /rest/api/2 | JIRA API 경로 |
 | GOJIRA_JIRA_USER | - | JIRA 계정 (암호화) |
 | GOJIRA_JIRA_PASS | - | JIRA 비밀번호 (암호화) |
-| GOJIRA_CONFLUENCE_URL | http://localhost:8090 | Confluence URL |
 | GOJIRA_MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
 | GOJIRA_MONGO_DB | gojira | DB 이름 |
 | OPENAI_API_KEY | - | LLM API 키 |
