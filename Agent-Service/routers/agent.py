@@ -213,9 +213,49 @@ async def list_sessions(x_user_id: str = Header(default="anonymous")):
     return result
 
 
+# 파일 경로 → 워크플로우 스킬 매핑 (워크플로우 스킬은 자체적으로 선행 검증 + 파일 저장 수행)
+_DOC_WORKFLOW_SKILLS = {
+    "business/use-cases.md": "usecase_analyze",
+    "business/requirements.md": "requirement_refine",
+}
+
+# 워크플로우 스킬별 선행(prerequisite) 체인 — runPrerequisites=true일 때 순서대로 실행
+_PREREQUISITE_CHAIN = {
+    "usecase_analyze": ["vos_collect"],
+    "requirement_refine": ["vos_collect", "usecase_analyze"],
+}
+
+
+async def _run_chain(skill_name: str, params: dict, user: str, prereqs: list):
+    """선행 스킬을 순서대로 실행하고 마지막에 target 스킬 실행.
+
+    중간 스킬이 suggestSkill을 반환하면 (= 추가 선행 필요) 체인 중단하고 그 결과 반환.
+    """
+    from skills.dispatcher import execute_skill
+    ran = []
+    for p in prereqs:
+        r = await execute_skill(p, params, user)
+        ran.append({
+            "skill": p,
+            "createdCount": r.get("createdCount") or len(r.get("created") or []),
+            "message": r.get("message", ""),
+        })
+        if r.get("suggestSkill"):
+            return {**r, "prerequisitesRan": ran, "blockedAt": p}
+
+    target = await execute_skill(skill_name, params, user)
+    return {**target, "prerequisitesRan": ran}
+
+
 @router.post("/doc/enrich")
 async def doc_enrich(request: Request, x_user_id: str = Header(default="anonymous")):
-    """문서 AI 보강 — DocEditor의 AI생성 버튼용."""
+    """문서 AI 보강 — DocEditor의 AI생성 버튼용.
+
+    파일별 분기:
+    - business/project-description.md: 충분성 판단 → projdesc_generate(enrich) (편집기에 content 반영)
+    - business/use-cases.md: usecase_analyze (Feature 이슈 생성 + 파일 저장 → refreshFile)
+    - business/requirements.md: requirement_refine (FR/NFR/CNST 이슈 + 파일 저장 → refreshFile)
+    """
     import re
     body = await request.json()
     project_code = body.get("projectCode", "")
@@ -225,7 +265,34 @@ async def doc_enrich(request: Request, x_user_id: str = Header(default="anonymou
     if not project_code or not file_path:
         return {"error": "projectCode, filePath 필수"}
 
-    # 내용 충분 여부 판단 (템플릿만 있는지)
+    run_prereq = bool(body.get("runPrerequisites", False))
+    log.info("doc_enrich: filePath=%r project=%s user=%s prereq=%s",
+             file_path, project_code, x_user_id, run_prereq)
+
+    from skills.dispatcher import execute_skill
+
+    # 1. 워크플로우 스킬 분기 (use-cases / requirements)
+    if file_path in _DOC_WORKFLOW_SKILLS:
+        skill_name = _DOC_WORKFLOW_SKILLS[file_path]
+        skill_params = {"projectCode": project_code, "user": x_user_id}
+        try:
+            if run_prereq:
+                prereqs = _PREREQUISITE_CHAIN.get(skill_name, [])
+                result = await _run_chain(skill_name, skill_params, x_user_id, prereqs)
+            else:
+                result = await execute_skill(skill_name, skill_params, x_user_id)
+            # 워크플로우 스킬은 자체적으로 파일을 저장하므로 편집기는 파일을 재로드해야 함
+            return {
+                **result,
+                "filePath": file_path,
+                "refreshFile": True,
+                "skill": skill_name,
+            }
+        except Exception as e:
+            log.error("doc_enrich workflow error (%s): %s", skill_name, e)
+            return {"error": str(e)}
+
+    # 2. 기존 흐름: project-description.md 충분성 판단 → projdesc_generate
     stripped = re.sub(r'#[^\n]*', '', content)
     stripped = re.sub(r'>.*', '', stripped)
     stripped = re.sub(r'\(작성 필요\)', '', stripped)
@@ -233,11 +300,9 @@ async def doc_enrich(request: Request, x_user_id: str = Header(default="anonymou
         stripped = stripped.replace(phrase, '')
     stripped = stripped.strip()
 
-    # 빈 문서는 바로 부족 판정
     if len(stripped) < 10:
         return {"sufficient": False, "reason": "문서 내용이 거의 없습니다.", "needsInterview": True, "message": "문서 내용이 부족합니다. 인터뷰를 통해 자동 생성할 수 있습니다."}
 
-    # LLM으로 충분성 판단
     from core.llm import call_llm
     judge_prompt = f"""다음 문서 내용을 읽고, 과제의 배경, 목적, 주요 이해관계자, 요구사항을 파악할 수 있는 수준인지 판단하세요.
 
@@ -256,12 +321,11 @@ async def doc_enrich(request: Request, x_user_id: str = Header(default="anonymou
         is_sufficient = answer.startswith("예")
     except Exception as e:
         log.error("LLM judge error: %s", e)
-        is_sufficient = len(stripped) >= 100  # LLM 실패 시 글자수 fallback
+        is_sufficient = len(stripped) >= 100
 
     if not is_sufficient:
         return {"sufficient": False, "reason": "과제 배경/목적/요구사항이 부족합니다.", "needsInterview": True, "message": "문서 내용이 부족합니다. 인터뷰를 통해 자동 생성할 수 있습니다."}
 
-    from skills.dispatcher import execute_skill
     try:
         result = await execute_skill("projdesc_generate", {
             "projectCode": project_code,

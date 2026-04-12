@@ -1,4 +1,4 @@
-"""Requirement 정제 스킬 — Feature/Use Case → FR/NFR/CNST + business/requirement.md (mode 분기 지원)."""
+"""Requirement 정제 스킬 — Feature/Use Case → FR/NFR/CNST + business/requirements.md (mode 분기 지원)."""
 
 import os
 import re
@@ -19,7 +19,7 @@ _NFR_FIELDS = (
 
 
 def _load_template() -> str:
-    path = os.path.join(_PROMPTS_DIR, "requirement.md")
+    path = os.path.join(_PROMPTS_DIR, "requirements.md")
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
@@ -71,7 +71,7 @@ async def execute(params: dict, user: str) -> dict:
     if _is_template_only(desc):
         return {
             "projectCode": code,
-            "message": "business/project-description.md가 비어 있습니다.",
+            "message": "프로젝트 관련 정보가 불충분합니다. 과제 설명 문서 작성을 먼저 진행해야 합니다.",
             "suggestSkill": "projdesc_interview",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
@@ -85,7 +85,7 @@ async def execute(params: dict, user: str) -> dict:
     if not feat_list:
         return {
             "projectCode": code,
-            "message": "등록된 Feature가 없습니다. usecase_analyze를 먼저 실행하세요.",
+            "message": "등록된 Feature가 없습니다. Use Case/Feature 분석을 먼저 진행해야 합니다.",
             "suggestSkill": "usecase_analyze",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
@@ -176,10 +176,10 @@ async def execute(params: dict, user: str) -> dict:
       "existingKey": "", "modifyReason": "", "deleteReason": ""
     }}
   ],
-  "document": "전체 requirement.md 본문 (Markdown). 자동 결정된 NFR Measure에는 비고에 [자동결정] 표시. 양식은 아래를 따를 것."
+  "document": "전체 requirements.md 본문 (Markdown). 자동 결정된 NFR Measure에는 비고에 [자동결정] 표시. 양식은 아래를 따를 것."
 }}
 
-## requirement.md 양식
+## requirements.md 양식
 {template}
 """
 
@@ -258,19 +258,19 @@ async def execute(params: dict, user: str) -> dict:
                     "measure": item.get("measure", ""),
                 })
 
-    # business/requirement.md 저장
+    # business/requirements.md 저장
     saved_path = None
     save_error = None
     if document.strip():
         try:
             await client.save_file(
                 code,
-                "business/requirement.md",
+                "business/requirements.md",
                 document,
                 f"Requirement 정제 (신규 {len(buckets['created'])} / 수정 {len(buckets['modified'])})",
                 req_user,
             )
-            saved_path = "business/requirement.md"
+            saved_path = "business/requirements.md"
         except Exception as e:
             save_error = str(e)
 
@@ -280,7 +280,7 @@ async def execute(params: dict, user: str) -> dict:
         f"Feature-Requirement 연결 {len(linked)}건",
     ]
     if saved_path:
-        msg_parts.append("requirement.md 저장 완료")
+        msg_parts.append("requirements.md 저장 완료")
     elif save_error:
         msg_parts.append(f"문서 저장 실패: {save_error}")
     if auto_measure_items:
@@ -288,7 +288,7 @@ async def execute(params: dict, user: str) -> dict:
             f"⚠ 자동 결정된 NFR Measure {len(auto_measure_items)}건 — 설계자 검토/조정 필요"
         )
     if buckets["markedForDeletion"]:
-        msg_parts.append("⚠ 삭제마킹 항목은 검토 후 issue_delete로 실제 삭제 또는 라벨 제거")
+        msg_parts.append("⚠ 삭제 마킹된 항목은 검토 후 실제 삭제 또는 마킹 해제가 필요합니다")
 
     return {
         "projectCode": code,

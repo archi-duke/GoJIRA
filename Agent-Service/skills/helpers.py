@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime
+from typing import Optional
 
 from core.database import issues, projects
 
@@ -34,7 +35,7 @@ def add_issue_to_project(code: str, issue_key: str):
     )
 
 
-def create_issue(issue_type: str, params: dict, user: str, extras: dict | None = None) -> dict:
+def create_issue(issue_type: str, params: dict, user: str, extras: Optional[dict] = None) -> dict:
     """공용 이슈 생성 — 타입을 고정해서 받고 공통 필드를 채운다.
 
     Args:

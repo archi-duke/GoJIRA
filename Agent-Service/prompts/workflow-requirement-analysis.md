@@ -16,8 +16,8 @@ VOS 이슈
    ▼ ② Use Case 분석 → Feature 도출 + business/use-cases.md
 Feature 이슈 + use-cases.md (Mermaid 다이어그램)
    │
-   ▼ ③ Requirement 정제 → FR/NFR/CNST + business/requirement.md
-Requirement 이슈 + requirement.md
+   ▼ ③ Requirement 정제 → FR/NFR/CNST + business/requirements.md
+Requirement 이슈 + requirements.md
 ```
 
 이슈 관계 (contain chain):
@@ -80,7 +80,7 @@ VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 **입력**: Feature 이슈 + `business/use-cases.md` + `business/project-description.md`
 **산출물**:
 - Requirement 이슈 (FR / NFR / CNST)
-- `business/requirement.md`
+- `business/requirements.md`
 - Feature —(contains)→ Requirement 관계
 
 **수행 방법**:
@@ -104,19 +104,19 @@ VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 - **Measure 자동 결정**: 원본에 명시되지 않은 경우 LLM이 일반적 수준에서 합리적 값으로 결정
   - 응답 시간(웹), API 응답, 가용성, 동시접속 등 도메인 휴리스틱 사용
   - **자동 결정된 항목은 결과에 명시 — 설계자가 검토/조정해야 함**
-  - requirement.md 표의 비고에 `[자동결정]`으로 표시
+  - requirements.md 표의 비고에 `[자동결정]`으로 표시
 
 ### CNST (Constraint)
 
 - 도출 기준: 과제 소개나 use-case에서 확인된 **반드시 지켜야 하는** 사양/기능/규제/표준
 - 변경 불가한 조건이므로 별도 설계 이슈를 가지지 않음
 
-**문서 양식**: `prompts/requirement.md`
+**문서 양식**: `prompts/requirements.md`
 
 **완료 기준**:
 - 각 Feature에 FR이 1개 이상 연결됨
 - 식별 가능한 NFR/CNST가 모두 등록됨
-- requirement.md 저장됨
+- requirements.md 저장됨
 - 자동 결정된 NFR Measure 항목이 사용자에게 보고되어 검토 흐름이 안내됨
 
 ---
@@ -127,7 +127,7 @@ VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 |------|----------|----------|
 | ① VOS 도출 | `vos_collect` | — |
 | ② Use Case 분석 / Feature 도출 | `usecase_analyze` | `business/use-cases.md` |
-| ③ Requirement 정제 | `requirement_refine` | `business/requirement.md` |
+| ③ Requirement 정제 | `requirement_refine` | `business/requirements.md` |
 
 이슈 생성은 다음 헬퍼 스킬을 통해 수행된다:
 

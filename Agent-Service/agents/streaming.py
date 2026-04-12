@@ -234,6 +234,7 @@ _TOOL_DESCRIPTIONS = {
     "issue_create_design": "{projectCode}에 {designLevel} Design 이슈 생성",
     "usecase_analyze": "{projectCode} Use Case 분석 → Feature 도출",
     "requirement_refine": "{projectCode} Requirement 정제 (FR/NFR/CNST)",
+    "reset_project": "[개발/테스트] {projectCode} 프로젝트 초기화",
     "issue_update": "{key} 이슈 수정",
     "issue_delete": "{key} 이슈 삭제",
     "issue_link": "{fromKey}와 {toKey} 관계 설정",

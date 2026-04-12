@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
+import MermaidBlock from './MermaidBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import './DocEditor.css';
@@ -50,6 +51,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
   const chatWinRef = React.useRef(null);
+
+  // AI 생성 버튼 노출 대상 — 워크플로우 스킬과 매핑된 문서만
+  const AI_ENABLED_FILES = {
+    'business/project-description.md': 'projdesc_generate',
+    'business/use-cases.md': 'usecase_analyze',
+    'business/requirements.md': 'requirement_refine',
+  };
+  const aiSkillForFile = selectedFile ? AI_ENABLED_FILES[selectedFile] : null;
 
   // 채팅창에서 생성된 문서 수신 → 편집기에 반영 → 저장 확인
   useEffect(() => {
@@ -188,45 +197,157 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 
   async function handleAIGenerate() {
     const AGENT_API = config.AGENT_API || 'http://localhost:9002/api/v2';
-    if (!await modalConfirm('AI가 문서를 분석하여 보강합니다.\n진행하시겠습니까?')) return;
+    const skill = aiSkillForFile;
+    if (!skill) {
+      modalAlert('이 문서는 AI 생성을 지원하지 않습니다.');
+      return;
+    }
+
+    const promptMsg = skill === 'projdesc_generate'
+      ? 'AI가 문서를 분석하여 보강합니다.\n진행하시겠습니까?'
+      : skill === 'usecase_analyze'
+        ? 'VOS와 과제 설명을 분석하여 Use Case/Feature를 도출하고 문서를 생성합니다.\n생성 중에는 편집이 비활성화됩니다. 진행하시겠습니까?'
+        : 'Feature와 Use Case를 분석하여 FR/NFR/CNST Requirement를 도출하고 문서를 생성합니다.\n생성 중에는 편집이 비활성화됩니다. 진행하시겠습니까?';
+    if (!await modalConfirm(promptMsg)) return;
+
+    // 생성 시작 — 편집 모드 해제(잠금)
     setAiGenerating(true);
+    setEditMode(false);
     try {
       const res = await fetch(`${AGENT_API}/Agent/doc/enrich`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
         body: JSON.stringify({ projectCode, filePath: selectedFile, content: content || '' }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.needsInterview) {
-          setAiGenerating(false);
-          const ok = await modalConfirm(
-            `${data.reason || data.message}\n채팅 창에서 인터뷰를 진행할까요?`
+      if (!res.ok) {
+        modalAlert('AI 서비스 연결 실패');
+        return;
+      }
+      const data = await res.json();
+
+      // 문서 부족 → 인터뷰 안내 (project-description.md 전용)
+      if (data.needsInterview) {
+        setAiGenerating(false);
+        const ok = await modalConfirm(
+          `${data.reason || data.message}\n채팅 창에서 인터뷰를 진행할까요?`
+        );
+        if (ok) {
+          const chatW = 480, chatH = 720;
+          const left = window.screenX - chatW - 10;
+          const top = window.screenY;
+          chatWinRef.current = window.open(
+            `http://localhost:3001/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
+            'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
           );
-          if (ok) {
-            const chatW = 480, chatH = 720;
-            const left = window.screenX - chatW - 10;
-            const top = window.screenY;
-            chatWinRef.current = window.open(
-              `http://localhost:3001/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
-              'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
+        }
+        return;
+      }
+
+      // 워크플로우 스킬 — 백엔드가 파일을 이미 저장했으므로 재로드
+      if (data.refreshFile) {
+        // 선행 조건 미달(예: VOS 없음 / Feature 없음) — 사용자에게 자동 선행 실행 여부 확인
+        if (data.suggestSkill && (data.created?.length === 0 || data.createdCount === 0)) {
+          const prereqLabel = {
+            vos_collect: 'VOS 수집',
+            usecase_analyze: 'Use Case/Feature 분석',
+            projdesc_interview: '과제 설명 인터뷰',
+          }[data.suggestSkill] || data.suggestSkill;
+
+          // 인터뷰가 필요하면 채팅창 안내로 빠짐 (별도 처리)
+          if (data.suggestSkill === 'projdesc_interview') {
+            modalAlert(`${data.message || ''}\n채팅 창에서 과제 설명 인터뷰를 먼저 진행해 주세요.`);
+            return;
+          }
+
+          const ok = await modalConfirm(`${prereqLabel}을(를) 먼저 진행할까요?`);
+          if (!ok) return;
+
+          // 같은 endpoint를 runPrerequisites=true로 재호출 (오버레이 유지)
+          try {
+            const res2 = await fetch(`${AGENT_API}/Agent/doc/enrich`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+              body: JSON.stringify({
+                projectCode,
+                filePath: selectedFile,
+                content: '',
+                runPrerequisites: true,
+              }),
+            });
+            if (!res2.ok) {
+              modalAlert('선행 스킬 실행 실패');
+              return;
+            }
+            const data2 = await res2.json();
+
+            // 선행 단계에서도 막혔으면 메시지 안내 (예: 과제 설명도 비어있음)
+            if (data2.suggestSkill && (data2.created?.length === 0 || data2.createdCount === 0)) {
+              modalAlert(data2.message || '실행 조건이 부족합니다.');
+              return;
+            }
+
+            // 정상 완료 → 파일 + 트리 재로드
+            try {
+              const branch = `docs/${user}`;
+              const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(branch)}`);
+              if (r.ok) {
+                const d = await r.json();
+                const text = d.content ? decodeBase64(d.content) : '';
+                setContent(text);
+                setOriginal(text);
+              }
+            } catch {}
+            await refreshDocState();
+
+            // 선행 단계 결과 + 본 단계 결과 모두 안내
+            const SKILL_LABEL = {
+              vos_collect: 'VOS 수집',
+              usecase_analyze: 'Use Case/Feature 분석',
+              requirement_refine: 'Requirement 정제',
+            };
+            const ranSummary = (data2.prerequisitesRan || [])
+              .map(p => `• ${SKILL_LABEL[p.skill] || p.skill}: ${p.message || `${p.createdCount}건`}`)
+              .join('\n');
+            modalAlert(
+              (ranSummary ? `[선행 단계]\n${ranSummary}\n\n` : '') +
+              (data2.message || 'AI 생성이 완료되었습니다.')
             );
+          } catch (e) {
+            modalAlert('선행 스킬 실행 실패: ' + e.message);
           }
           return;
         }
-        if (data.content) {
-          setContent(data.content);
-          modalAlert('AI 보강이 완료되었습니다. 내용을 확인 후 저장하세요.');
-        } else if (data.error) {
-          modalAlert(data.error);
-        }
-      } else {
-        modalAlert('AI 서비스 연결 실패');
+
+        // 정상 완료 — 파일 재로드
+        try {
+          const branch = `docs/${user}`;
+          const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(branch)}`);
+          if (r.ok) {
+            const d = await r.json();
+            const text = d.content ? decodeBase64(d.content) : '';
+            setContent(text);
+            setOriginal(text);
+          }
+        } catch {}
+        await refreshDocState();
+        modalAlert(data.message || 'AI 생성이 완료되었습니다.');
+        return;
+      }
+
+      // 단일 보강 (project-description.md) — content를 편집기에 반영
+      if (data.content) {
+        setContent(data.content);
+        // 사용자가 보강된 내용을 검토 후 저장할 수 있도록 편집 모드 복귀
+        setEditMode(true);
+        modalAlert('AI 보강이 완료되었습니다. 내용을 확인 후 저장하세요.');
+      } else if (data.error) {
+        modalAlert(data.error);
       }
     } catch (e) {
       modalAlert('AI 서비스 연결 실패: ' + e.message);
+    } finally {
+      setAiGenerating(false);
     }
-    setAiGenerating(false);
   }
 
   async function handleDelete() {
@@ -646,10 +767,18 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 <div className="de-actions">
                   {selectedMainOnly ? (
                     <button className="de-tab de-tab-active">미리보기</button>
+                  ) : aiGenerating ? (
+                    <>
+                      <span className="de-ai-running">⏳ AI 생성 중... (편집 일시 비활성화)</span>
+                    </>
                   ) : editMode ? (
                     <>
                       <button className="de-tab" onClick={() => setEditMode(false)}>미리보기</button>
-                      <button className="de-btn de-btn-ai" onClick={handleAIGenerate} disabled={aiGenerating}>{aiGenerating ? 'AI 생성중...' : 'AI생성'}</button>
+                      {aiSkillForFile && (
+                        <button className="de-btn de-btn-ai" onClick={handleAIGenerate} disabled={aiGenerating}>
+                          AI생성
+                        </button>
+                      )}
                       <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
                     </>
                   ) : (
@@ -670,7 +799,18 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                   )}
                 </div>
               </div>
-              <div className="de-body">
+              <div className="de-body" style={{ position: 'relative' }}>
+                {aiGenerating && (
+                  <div className="de-ai-overlay">
+                    <div className="de-ai-overlay-box">
+                      <div className="de-ai-spinner" />
+                      <div style={{ marginTop: 10, fontWeight: 600 }}>AI가 문서를 생성하는 중입니다…</div>
+                      <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+                        편집은 완료 후 다시 활성화됩니다.
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {diffMode ? (
                   <DiffAnalysis oldText={mainContent} newText={content} fileName={selectedFile} activeTab={diffTab} onTabChange={setDiffTab} />
                 ) : editMode && !selectedMainOnly ? (
@@ -678,7 +818,18 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                     onChange={e => setContent(e.target.value)} spellCheck={false} />
                 ) : (
                   <div className={`de-preview ${selectedMainOnly ? 'de-preview-mainonly' : ''}`}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code({ className, children, ...props }) {
+                          const lang = /language-(\w+)/.exec(className || '')?.[1];
+                          if (lang === 'mermaid') {
+                            return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
+                          }
+                          return <code className={className} {...props}>{children}</code>;
+                        },
+                      }}
+                    >{content}</ReactMarkdown>
                   </div>
                 )}
               </div>

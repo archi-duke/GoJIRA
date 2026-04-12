@@ -247,7 +247,7 @@ VOS —(contains)→ Feature —(contains)→ Requirement —(contains)→ ADSN 
 | ① 과제 소개 분석 | `projdesc_interview`, `projdesc_generate` |
 | ② VOS 수집 | `vos_collect` |
 | ③ UseCase 분석 | `usecase_analyze` (산출: `business/use-cases.md`) |
-| ④ Requirements 정제 | `requirement_refine` (산출: `business/requirement.md`) |
+| ④ Requirements 정제 | `requirement_refine` (산출: `business/requirements.md`) |
 | ⑤ Architecture Driver 선정 | `issue_query`, `issue_update` |
 | ⑥ 시스템 스타일 정의 | *(문서 작성)* |
 | ⑦ 설계안 결정 | `issue_create_design`(designLevel: Architectural/Detailed), `issue_link` |

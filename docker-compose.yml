@@ -18,19 +18,9 @@ services:
       - "3300:3000"
     restart: unless-stopped
 
-  agent-service:
-    build: ./Agent-Service
-    container_name: gojira-agent
-    environment:
-      - GOJIRA_MONGO_URI=mongodb://host.docker.internal:27017
-      - GOJIRA_MONGO_DB=gojira
-      - GOJIRA_API_URL=http://host.docker.internal:9001/api/v2
-      - GOJIRA_PLATFORM_API=http://host.docker.internal:9000/api/v2
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - AGENT_SERVICE_PORT=9002
-    ports:
-      - "9002:9002"
-    restart: unless-stopped
+  # agent-service는 로컬 uvicorn으로 직접 실행한다 (--reload로 코드 변경 즉시 반영)
+  # 실행:
+  #   cd Agent-Service && ./.venv/bin/uvicorn main:app --host 0.0.0.0 --port 9002 --reload
 
 volumes:
   gitea-data:

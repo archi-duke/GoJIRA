@@ -47,7 +47,7 @@ async def execute(params: dict, user: str) -> dict:
             return {
                 "projectCode": code,
                 "status": "ready",
-                "message": "인터뷰 완료! projdesc_generate 스킬을 호출하여 문서를 생성하세요.",
+                "message": "인터뷰 완료! 답변을 바탕으로 과제 설명 문서를 생성합니다.",
                 "answers": answers,
                 "nextAction": "projdesc_generate",
             }
@@ -65,15 +65,14 @@ async def execute(params: dict, user: str) -> dict:
         return {
             "projectCode": code,
             "status": "sufficient",
-            "message": "project-description.md에 내용이 있습니다. 보강이 필요하면 projdesc_generate 스킬을 사용하세요.",
+            "message": "과제 설명 문서에 내용이 있습니다. 필요하면 보강을 진행할 수 있습니다.",
             "existingContent": doc_content[:500],
         }
 
     return {
         "projectCode": code,
         "status": "needs_interview",
-        "message": "project-description.md 문서가 비어 있거나 부족합니다. "
-                   "자동 생성을 위해 몇 가지 질문에 답해주세요.",
+        "message": "과제 설명이 비어 있거나 부족합니다. 자동 생성을 위해 몇 가지 질문에 답해주세요.",
         "questions": [{"id": q["id"], "label": q["label"], "question": q["question"]} for q in INTERVIEW_QUESTIONS],
     }
 

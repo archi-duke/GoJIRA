@@ -1,6 +1,6 @@
 ---
 name: requirement_refine
-description: Feature와 use-cases.md를 분석하여 FR(User Story)/NFR(QAS)/CNST(제약) Requirement를 도출, 이슈로 등록하고 Feature와 contains 관계를 연결하며 business/requirement.md를 작성합니다.
+description: Feature와 use-cases.md를 분석하여 FR(User Story)/NFR(QAS)/CNST(제약) Requirement를 도출, 이슈로 등록하고 Feature와 contains 관계를 연결하며 business/requirements.md를 작성합니다.
 ---
 
 ## Parameters
@@ -26,12 +26,12 @@ user:
    - **CNST**: project-description / use-case에서 반드시 지켜야 하는 사양/제약
 5. 각 Requirement를 이슈로 생성 (issue_create_requirement 헬퍼 사용)
 6. 각 Requirement ↔ 관련 Feature를 `contains` 관계로 연결 (Feature contains Requirement)
-7. `business/requirement.md` 작성·저장 (사용자 브랜치)
+7. `business/requirements.md` 작성·저장 (사용자 브랜치)
 8. **자동 결정된 NFR Measure 항목을 사용자에게 명시하고 검토 요청**
 
 ## 출력 문서 양식
 
-`prompts/requirement.md`의 양식을 따릅니다.
+`prompts/requirements.md`의 양식을 따릅니다.
 
 ## 규칙
 

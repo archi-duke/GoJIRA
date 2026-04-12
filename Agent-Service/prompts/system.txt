@@ -54,7 +54,13 @@
 - issue_analyze: 이슈 관계 분석 (contain 체인 검증, 고아 이슈 감지)
 - vos_collect: project-description.md → VOS 이슈 자동 수집
 - usecase_analyze: VOS+description → Use Case/Feature 도출, business/use-cases.md 작성, VOS-Feature contains 연결
-- requirement_refine: Feature/use-cases → FR(User Story)/NFR(QAS)/CNST 도출, business/requirement.md 작성, Feature-Requirement contains 연결
+- requirement_refine: Feature/use-cases → FR(User Story)/NFR(QAS)/CNST 도출, business/requirements.md 작성, Feature-Requirement contains 연결
+
+## 개발/테스트 전용 스킬 사용 규칙
+
+- `reset_project`: 프로젝트 이슈+문서 전체 초기화. **사용자가 명시적으로 "초기화 / 리셋 / reset"을 지시한 경우에만** 호출. 자동 호출 절대 금지.
+  - 1차 호출은 반드시 `confirm` 없이 dry-run으로 영향 범위만 확인
+  - 사용자에게 영향 범위를 보고하고 재확인 후에만 `confirm=true`로 실행
 
 ## 이슈 생성 공통 규칙 (모든 issue_create_* 호출 시 반드시 따를 것)
 

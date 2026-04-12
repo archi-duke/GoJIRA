@@ -64,7 +64,7 @@ async def _generate(code: str, answers: dict, user: str) -> dict:
         "projectCode": code,
         "mode": "generate",
         "applyToEditor": True,
-        "message": "project-description.md가 생성되었습니다.",
+        "message": "과제 설명 문서가 생성되었습니다.",
         "filePath": "business/project-description.md",
         "content": doc,
     }
@@ -92,7 +92,7 @@ async def _enrich(code: str, content: str, user: str) -> dict:
         "projectCode": code,
         "mode": "enrich",
         "applyToEditor": True,
-        "message": "project-description.md가 보강되었습니다.",
+        "message": "과제 설명 문서가 보강되었습니다.",
         "filePath": "business/project-description.md",
         "content": doc,
     }

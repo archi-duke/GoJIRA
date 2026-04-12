@@ -26,8 +26,7 @@ async def execute(params: dict, user: str) -> dict:
     if not doc_content or _is_template_only(doc_content):
         return {
             "projectCode": code,
-            "message": "business/project-description.md 문서가 없거나 내용이 불충분합니다. "
-                       "VOS를 추출하려면 문서를 먼저 작성해야 합니다.",
+            "message": "프로젝트 관련 정보가 불충분합니다. 과제 설명 문서 작성을 먼저 진행해야 합니다.",
             "suggestSkill": "projdesc_interview",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }

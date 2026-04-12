@@ -3,6 +3,7 @@
 import os
 import re
 import json
+from typing import Optional
 
 from core.database import issues
 from core.llm import call_llm
@@ -65,7 +66,7 @@ async def execute(params: dict, user: str) -> dict:
     if not desc or _is_template_only(desc):
         return {
             "projectCode": code,
-            "message": "business/project-description.md가 비어 있습니다. 먼저 작성/보강이 필요합니다.",
+            "message": "프로젝트 관련 정보가 불충분합니다. 과제 설명 문서 작성을 먼저 진행해야 합니다.",
             "suggestSkill": "projdesc_interview",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
@@ -78,7 +79,7 @@ async def execute(params: dict, user: str) -> dict:
     if not vos_list:
         return {
             "projectCode": code,
-            "message": "등록된 VOS가 없습니다. vos_collect를 먼저 실행하세요.",
+            "message": "등록된 이해관계자 요구사항이 없습니다. VOS 수집을 먼저 진행해야 합니다.",
             "suggestSkill": "vos_collect",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
@@ -223,7 +224,7 @@ async def execute(params: dict, user: str) -> dict:
     }
 
 
-def _summarize(buckets: dict, link_cnt: int, saved: str | None, err: str | None) -> str:
+def _summarize(buckets: dict, link_cnt: int, saved: Optional[str], err: Optional[str]) -> str:
     parts = [f"Feature — 신규 {len(buckets['created'])}, 재사용 {len(buckets['reused'])}, "
              f"수정 {len(buckets['modified'])}, 삭제마킹 {len(buckets['markedForDeletion'])}"]
     parts.append(f"VOS-Feature 연결 {link_cnt}건")
@@ -232,5 +233,5 @@ def _summarize(buckets: dict, link_cnt: int, saved: str | None, err: str | None)
     elif err:
         parts.append(f"문서 저장 실패: {err}")
     if buckets["markedForDeletion"]:
-        parts.append("⚠ 삭제마킹 항목은 검토 후 issue_delete로 실제 삭제 또는 라벨 제거")
+        parts.append("⚠ 삭제 마킹된 항목은 검토 후 실제 삭제 또는 마킹 해제가 필요합니다")
     return " / ".join(parts)
