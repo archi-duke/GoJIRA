@@ -73,6 +73,7 @@ decision:
 ## 설계 이슈 생성 규칙
 
 - **호출 전 필수**: `issue_query`로 동일 프로젝트의 기존 설계 이슈를 조회하여 유사 이슈가 없는지 확인. 유사 이슈가 있으면 생성 대신 재사용/수정/삭제마킹으로 처리 (system.txt "이슈 생성 공통 규칙" 참조)
+- **Mermaid 다이어그램 작성 시**: `adiagram`(정적 구조), `bdiagram`(동적 동작) 필드에 Mermaid 코드를 작성할 때 반드시 `prompts/mermaid-syntax.md`의 규칙을 따름 (노드 ID는 영문만, 한글은 `[]`/`(())` label 사용, 구문 오류 시 브라우저 렌더 실패)
 - designLevel에 따라 issueType이 결정됩니다:
   - Architectural → "Architectural Design" (ADSN)
   - Detailed → "Detailed Design" (DDSN)

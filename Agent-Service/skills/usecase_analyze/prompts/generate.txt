@@ -1,0 +1,137 @@
+당신은 소프트웨어 아키텍트입니다. 프로젝트 {code}의 Use Case를 분석하세요.
+
+## project-description.md
+{desc_trunc}
+
+## 기존 VOS ({vos_count}건)
+{vos_json}
+
+## 기존 Feature ({existing_feature_count}건)
+{feat_json}
+
+## 작업 — 반드시 아래 순서대로 수행하세요.
+
+### Step 1. Business Domain 분석 (선행)
+Use Case 도출의 기반이 되는 도메인 이해를 먼저 정리합니다.
+
+1. **도메인 경계와 범위**: 시스템이 책임지는 영역 / 책임지지 않는 영역
+2. **핵심 도메인 개념(Core Concepts)**: 도메인에서 반복적으로 등장하는 개체/업무 용어
+   (예: 게임/라운드/점수/기록, 주문/결제/배송, 계정/권한/세션 등)
+3. **Actor 식별 및 분류**:
+   - Primary Actor: 시스템에게 가치 요청을 직접 트리거하는 주체
+   - Supporting Actor: 시스템이 목표 달성을 위해 협력하는 주체
+4. **외부 시스템**: 데이터 교환/통합이 발생하는 외부 시스템
+5. **도메인 규칙/제약**: 비즈니스 규칙, 정책, 상태 전이, 불변식
+
+**결과물 → document의 "## 1. Business Domain 분석" 섹션**
+
+### Step 2. User Story 탐색 (중요 — Use Case 세분화의 핵심)
+
+사용자가 인터뷰에서 제공하는 핵심 기능/요구사항은 **대부분 커다란 개념**인 경우가 많습니다.
+예: "온라인으로 즐긴다", "게임방을 만든다", "계정을 관리한다" 등은 구체적 상호작용이 아닌 **상위 의도**.
+
+이 큰 개념을 **사용자가 시스템을 사용하는 다양한 User Story**로 분해해야 합니다.
+각 User Story는 "**누가 / 언제 / 무엇을 / 왜**"의 구체적 상황을 담은 이야기입니다.
+
+#### User Story 탐색 체크리스트
+각 Primary Actor에 대해, 아래 3종류의 Story를 **가능한 많이** 탐색하세요:
+
+**(A) 정상 스토리 (Happy Path)** — 주요 작업 흐름에서 성공적으로 진행되는 경우
+- "게임방 생성" → [방 생성 요청 / 생성된 방 확인 / 다른 사용자 초대 / 초대 수락 대기 / 게임 시작]
+- "게임 플레이" → [추측 입력 / 판정 결과 확인 / 남은 기회 확인 / 다음 차례 대기 / 게임 종료]
+- "이력 확인" → [과거 게임 목록 조회 / 특정 게임 상세 보기]
+
+**(B) 비정상 스토리 (Alternative)** — 정상 흐름의 분기/대체 경로
+- "초대 수락 대기 중에 초대 취소" / "초대자가 먼저 방 나가기"
+- "게임 중 일시 정지 후 재개" / "게임 포기"
+- "이전 추측과 같은 값 재입력"
+
+**(C) 예외 스토리 (Exception)** — 오류/실패 상황
+- "초대받은 사용자가 거부" / "초대받은 사용자가 응답 없음(타임아웃)"
+- "네트워크 끊김" / "상대방 연결 끊김"
+- "잘못된 형식의 추측 입력 (4자리가 아님 / 중복 숫자)"
+- "동시에 같은 방 ID 생성 시도"
+
+#### 인터뷰에서 놓친 암묵적 Story 발굴 (시니어 기획자의 역할)
+인터뷰 답변에 명시되지 않았더라도 일반적으로 필요한 Story를 **능동적으로 추가**하세요:
+- 계정/인증 관련: 로그인, 프로필 확인
+- 중단/이탈: 중간 종료, 타임아웃, 재접속
+- 다중 사용자 동기화: 상대방 상태 확인, 동시 조작 충돌
+- 데이터 영속성: 게임 종료 후 기록 저장/조회
+
+### Step 3. Use Case 도출 (Step 2의 Story들을 그룹핑)
+- **비슷한 목적의 Story들을 묶어 하나의 Use Case**로 정의
+- 단, **명백히 다른 목적/시점/입출력**을 가진 Story는 **별도 Use Case**로 분리
+  - 예: "추측 입력" Use Case 내부에서 정상/잘못된 형식/중복값은 같은 UC의 alternative/exception flow
+  - 예: "게임 시작" vs "추측 입력" vs "게임 종료"는 시점이 달라 **별도 UC**
+- 각 Use Case에 `relatedVOS` 매핑
+
+**Step 2에서 탐색한 User Story 목록을 document의 "## 2.1 User Story 목록" 섹션에 표 형태로 기록**합니다.
+각 Story에는 ID, Actor, 분류(정상/비정상/예외), Story 본문, 매핑된 Use Case ID(UC-N)를 포함합니다.
+이 표는 어떤 Story가 어떤 Use Case로 수렴되었는지 추적성을 제공합니다.
+
+### Step 4. Feature 선정
+**Actor와 직접 관계를 가진 Use Case만 Feature로 선정** (보조/하위/include/extend 제외)
+
+### Step 5. 시나리오 정의
+각 Feature에 Basic/Alternative/Exception Flow 작성.
+- **Basic Flow가 5단계 이상인 경우**, 각 단계가 혹시 별도 Use Case의 입출력으로 쪼갤 수 있는지 재검토하세요.
+
+### Step 6. Mermaid 다이어그램
+- Context Diagram (graph LR): Step 1의 도메인 경계 + Actor + 외부 시스템
+- Use Case Diagram (graph TB): Step 3의 Actor-Use Case 관계 + include/extend
+- Feature별 Sequence Diagram (sequenceDiagram): Step 5의 Basic Flow를 메시지 시퀀스로
+
+#### Mermaid 구문 규칙 (반드시 준수 — 구문 오류 방지)
+- **노드 ID는 영문/숫자/언더스코어만**. 공백/한글/특수문자 금지
+  - ✗ `보안 담당:::actor --> UC4` (ID에 공백)
+  - ✗ `사용자-관리자[관리자] --> UC1` (ID에 하이픈 문제 소지)
+  - ✓ `SecAdmin[보안 담당]:::actor --> UC4`
+  - ✓ `User[사용자] --> UC1`
+- **한글/공백/괄호가 포함된 표시명은 반드시 `[]` 또는 `(())`로 감싸서 label로 지정**
+  - 사각형 노드: `UserId[표시 이름]`
+  - 원형 노드(Use Case): `UC1((Use Case 이름))` — 괄호 안은 label이므로 한글/공백 OK
+- 화살표: `-->`, `---`, 점선은 `-.->`
+- sequenceDiagram의 participant도 동일 규칙: `participant User as 사용자` 또는 `participant SecAdmin as 보안 담당`
+- include/extend 표시: `UC1 -.->|include| UC2`
+- classDef 이름도 영문만: `classDef actor fill:#fef3c7,stroke:#f59e0b`
+- 코드블록은 반드시 ```mermaid 로 시작하고 ``` 로 닫기
+
+## Feature 다양성 가이드 (중요)
+- **하나의 "플레이" 또는 "사용"으로 뭉치지 말 것**. 각 Actor-System 상호작용(사용자가 시스템에게 명시적으로 하는 요청 1개 단위)을 독립 Use Case로 분리
+- Feature 식별 체크리스트:
+  - 사용자가 **다른 시점에 수행**하는 행위인가? → 다른 Feature
+  - 사용자가 **의도/목적이 다르게 수행**하는 행위인가? → 다른 Feature
+  - **입력/출력 형태가 구분**되는가? → 다른 Feature
+  - 하나의 Basic Flow 내 단계로 설명되는가? → 같은 Feature의 내부 단계
+- 흔한 과도 통합 예시 (금지):
+  - "게임 플레이" 하나로 [새 게임 시작 / 추측 입력 / 결과 확인 / 이력 조회 / 리셋] 묶는 것
+  - "사용자 관리" 하나로 [추가 / 수정 / 삭제 / 조회] 묶는 것 (각각 다른 Use Case)
+- **수량 기준**: 일반적으로 VOS 건수의 30~80% 수준으로 Feature가 도출됨. 단 Feature 1건은 극소형 과제에서만 정상
+- 모든 VOS가 최소 1개 Feature에 매핑되어야 함 (상위 포함 관계)
+
+## 각 Feature 항목의 mode 결정
+- `create` / `reuse` / `modify` / `delete_mark` (existingKey/modifyReason/deleteReason 포함)
+
+## 출력 (반드시 단일 JSON 객체로만 응답)
+{{
+  "features": [
+    {{
+      "summary": "Use Case 이름",
+      "description": "Use Case 개요",
+      "actor": "주요 Actor",
+      "precondition": "...",
+      "basicflow": "...",
+      "alternativeflow": "...",
+      "exceptionflow": "...",
+      "postcondition": "...",
+      "relatedVOS": ["VOS-키1"],
+      "mode": "create",
+      "existingKey": "", "modifyReason": "", "deleteReason": ""
+    }}
+  ],
+  "document": "전체 use-cases.md 본문 (Markdown, Mermaid 코드블록 포함). 양식 준수."
+}}
+
+## use-cases.md 양식
+{template}

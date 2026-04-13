@@ -51,6 +51,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
   const chatWinRef = React.useRef(null);
+  // 인터뷰 후 자동 이어서 AI 생성할 원본 요청 파일 (예: 'business/use-cases.md')
+  const pendingAIFileRef = React.useRef(null);
+  // handleAIGenerate 를 useEffect 내부에서 호출하기 위한 ref (정의 뒤 동기화)
+  const handleAIGenerateRef = React.useRef(null);
 
   // AI 생성 버튼 노출 대상 — 워크플로우 스킬과 매핑된 문서만
   const AI_ENABLED_FILES = {
@@ -85,7 +89,35 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             setOriginal(docContent);
             setEditMode(false);
             refreshDocState();
-            modalAlert('저장 완료');
+
+            // 인터뷰를 통해 과제 설명을 완성한 경우, 원래 요청 문서(use-cases/requirements)로 자동 이어감
+            const pending = pendingAIFileRef.current;
+            pendingAIFileRef.current = null;
+            if (pending && pending !== filePath && AI_ENABLED_FILES[pending]) {
+              const ok2 = await modalConfirm(
+                `과제 설명 저장 완료.\n${pending === 'business/use-cases.md' ? 'Use Case/Feature' : 'Requirement'} 생성을 이어서 진행할까요?`
+              );
+              if (ok2) {
+                // 대상 파일로 이동 후 AI 생성 트리거
+                try {
+                  const branch = `docs/${user}`;
+                  const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(pending)}&ref=${encodeURIComponent(branch)}`);
+                  if (r.ok) {
+                    const d = await r.json();
+                    const text = d.content ? decodeBase64(d.content) : '';
+                    setSelectedFile(pending);
+                    setContent(text);
+                    setOriginal(text);
+                    setEditMode(true);
+                    setSelectedMainOnly(false);
+                    // 편집 모드 전환 후 약간의 딜레이를 두고 생성 트리거
+                    setTimeout(() => { handleAIGenerateRef.current?.(); }, 400);
+                  }
+                } catch {}
+              }
+            } else {
+              modalAlert('저장 완료');
+            }
           } else {
             modalAlert('저장 실패');
           }
@@ -253,9 +285,22 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             projdesc_interview: '과제 설명 인터뷰',
           }[data.suggestSkill] || data.suggestSkill;
 
-          // 인터뷰가 필요하면 채팅창 안내로 빠짐 (별도 처리)
+          // 과제 설명이 비어있음 → 인터뷰 채팅창 자동 오픈 (project-description.md AI 생성과 동일한 흐름)
           if (data.suggestSkill === 'projdesc_interview') {
-            modalAlert(`${data.message || ''}\n채팅 창에서 과제 설명 인터뷰를 먼저 진행해 주세요.`);
+            const ok = await modalConfirm(
+              `${data.message || '과제 설명이 부족합니다.'}\n채팅 창에서 인터뷰를 진행할까요?`
+            );
+            if (ok) {
+              // 인터뷰 완료 후 원래 문서(use-cases/requirements)로 이어갈 수 있도록 기록
+              pendingAIFileRef.current = selectedFile;
+              const chatW = 480, chatH = 720;
+              const left = window.screenX - chatW - 10;
+              const top = window.screenY;
+              chatWinRef.current = window.open(
+                `http://localhost:3001/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
+                'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
+              );
+            }
             return;
           }
 
@@ -349,6 +394,9 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       setAiGenerating(false);
     }
   }
+
+  // 인터뷰 → 과제 설명 저장 후 handleDocApply가 handleAIGenerate를 호출할 수 있도록 ref 동기화
+  handleAIGenerateRef.current = handleAIGenerate;
 
   async function handleDelete() {
     if (!await modalConfirm(`"${selectedFile}" 파일을 삭제하시겠습니까?`)) return;

@@ -66,16 +66,26 @@ async def iterate_generate_critique(
             trail.append({
                 "iteration": i + 1,
                 "pass": True,
-                "issues": [],
+                "critical": [],
+                "suggestions": [],
                 "note": "평가 파싱 실패, 현재 결과로 종료",
             })
             break
 
-        passed = bool(critique.get("pass", False))
+        # 신 스키마: critical + suggestions 지원. 없으면 기존 issues로 fallback.
+        critical = critique.get("critical")
+        suggestions = critique.get("suggestions", [])
+        if critical is None:
+            critical = critique.get("issues", [])
+
+        # pass 판정: critical이 비어있으면 통과 (LLM의 pass 플래그보다 우선)
+        passed = len(critical) == 0
+
         trail.append({
             "iteration": i + 1,
             "pass": passed,
-            "issues": critique.get("issues", []) if not passed else [],
+            "critical": critical,
+            "suggestions": suggestions,
             "reasoning": critique.get("reasoning", ""),
         })
 
@@ -83,13 +93,13 @@ async def iterate_generate_critique(
             break
 
         if i >= max_iter:
-            # 최대 반복 초과 — 마지막 draft로 종료
             trail[-1]["note"] = f"최대 반복({max_iter}회) 초과, 마지막 생성물로 종료"
             break
 
-        # 수정
+        # 수정 (critical issues만 전달)
         try:
-            draft = await call_llm(revise_prompt(draft, critique))
+            critique_for_revise = {**critique, "issues": critical}
+            draft = await call_llm(revise_prompt(draft, critique_for_revise))
         except Exception as e:
             log.error("revise LLM error: %s", e)
             trail[-1]["note"] = f"수정 단계 실패: {e}"
@@ -104,8 +114,10 @@ def trail_summary(trail: List[Dict[str, Any]]) -> str:
         return ""
     last = trail[-1]
     n = len(trail)
+    sug_count = len(last.get("suggestions", []))
+    sug_note = f", 개선 제안 {sug_count}건" if sug_count else ""
     if last.get("pass"):
         if n == 1:
-            return "검증 통과 (1회차)"
-        return f"검증 통과 ({n}회차, {n-1}회 수정)"
+            return f"검증 통과 (1회차{sug_note})"
+        return f"검증 통과 ({n}회차, {n-1}회 수정{sug_note})"
     return f"검증 미통과 ({n}회 시도, 마지막 결과 사용)"

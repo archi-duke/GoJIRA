@@ -7,6 +7,41 @@ from typing import Optional
 from core.database import issues, projects
 
 
+def load_prompt(skill_dir: str, name: str) -> str:
+    """스킬 디렉토리 내 `prompts/{name}.txt` 파일을 읽어 반환.
+
+    사용 예:
+        _SKILL_DIR = os.path.dirname(__file__)
+        prompt = load_prompt(_SKILL_DIR, "generate").format(code=code, ...)
+
+    텍스트 내 `{variable}`은 .format()으로 치환. JSON 리터럴 중괄호는 `{{`/`}}`로 이스케이프.
+    """
+    import os
+    path = os.path.join(skill_dir, "prompts", f"{name}.txt")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+_TEMPLATE_PHRASES = (
+    '기록하는 문서입니다', '기술하는 문서입니다',
+    '반드시 작성해', '참조합니다', '작성 필요',
+)
+
+
+def is_template_only(content: str) -> bool:
+    """문서 내용이 템플릿 수준(실질 내용 없음)인지 판정한다.
+
+    스트립 대상: # 제목 라인, > 인용 라인, (작성 필요) 마커, 템플릿 안내 문구.
+    스트립 후 30자 미만이면 템플릿으로 간주.
+    """
+    stripped = re.sub(r'#[^\n]*', '', content or '')
+    stripped = re.sub(r'>.*', '', stripped)
+    stripped = re.sub(r'\(작성 필요\)', '', stripped)
+    for phrase in _TEMPLATE_PHRASES:
+        stripped = stripped.replace(phrase, '')
+    return len(stripped.strip()) < 30
+
+
 def get_next_issue_num(code: str) -> int:
     """프로젝트 이슈 키에서 최대 번호 + 1 반환."""
     cursor = issues().find(

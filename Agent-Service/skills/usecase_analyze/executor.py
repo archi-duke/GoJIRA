@@ -7,11 +7,16 @@ from typing import Optional
 
 from core.database import issues
 from clients.platform_api import PlatformClient
-from skills.helpers import create_issue, link_issues, dispatch_by_mode
+from skills.helpers import (
+    create_issue, link_issues, dispatch_by_mode,
+    is_template_only as _is_template_only,
+    load_prompt,
+)
 from skills.critique import iterate_generate_critique, trail_summary
 
 
-_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "prompts")
+_SKILL_DIR = os.path.dirname(__file__)
+_PROMPTS_DIR = os.path.join(_SKILL_DIR, "..", "..", "prompts")
 _USECASE_FIELDS = (
     "actor", "precondition", "basicflow",
     "alternativeflow", "exceptionflow", "postcondition",
@@ -25,13 +30,6 @@ def _load_template() -> str:
             return f.read()
     except FileNotFoundError:
         return ""
-
-
-def _is_template_only(content: str) -> bool:
-    stripped = re.sub(r'#[^\n]*', '', content or '')
-    stripped = re.sub(r'>.*', '', stripped)
-    stripped = re.sub(r'\(작성 필요\)', '', stripped).strip()
-    return len(stripped) < 30
 
 
 def _extract_json_obj(raw: str):
@@ -93,103 +91,39 @@ async def execute(params: dict, user: str) -> dict:
     existing_feature_keys = {f["key"] for f in existing_features}
     valid_vos_keys = {v["key"] for v in vos_list}
 
-    # 3. 생성 + 비판적 평가 루프
+    # 3. 생성 + 비판적 평가 루프 (프롬프트는 prompts/*.txt로 분리)
     template = _load_template()
     desc_trunc = desc[:5000]
     vos_json = json.dumps(vos_list, ensure_ascii=False, indent=2)
     feat_json = json.dumps(existing_features, ensure_ascii=False, indent=2)
 
-    generate_prompt = f"""당신은 소프트웨어 아키텍트입니다. 프로젝트 {code}의 Use Case를 분석하세요.
+    generate_prompt = load_prompt(_SKILL_DIR, "generate").format(
+        code=code,
+        desc_trunc=desc_trunc,
+        vos_count=len(vos_list),
+        vos_json=vos_json,
+        existing_feature_count=len(existing_features),
+        feat_json=feat_json,
+        template=template,
+    )
 
-## project-description.md
-{desc_trunc}
-
-## 기존 VOS ({len(vos_list)}건)
-{vos_json}
-
-## 기존 Feature ({len(existing_features)}건)
-{feat_json}
-
-## 작업
-1. Business Domain 컨텍스트에서 Actor와 외부 시스템을 식별
-2. 각 VOS를 충족시키는 Use Case 도출 (Actor와 매핑)
-3. **Actor와 직접 관계를 가진 Use Case만 Feature로 선정** (보조/하위/include/extend 제외)
-4. 각 Feature 후보 Use Case 시나리오 정의 (Basic/Alternative/Exception/Pre/Post)
-5. Mermaid 다이어그램: Context (graph LR), Use Case (graph TB), Feature별 Sequence (sequenceDiagram)
-
-## 각 Feature 항목의 mode 결정
-- `create` / `reuse` / `modify` / `delete_mark` (existingKey/modifyReason/deleteReason 포함)
-
-## 출력 (반드시 단일 JSON 객체로만 응답)
-{{
-  "features": [
-    {{
-      "summary": "Use Case 이름",
-      "description": "Use Case 개요",
-      "actor": "주요 Actor",
-      "precondition": "...",
-      "basicflow": "...",
-      "alternativeflow": "...",
-      "exceptionflow": "...",
-      "postcondition": "...",
-      "relatedVOS": ["VOS-키1"],
-      "mode": "create",
-      "existingKey": "", "modifyReason": "", "deleteReason": ""
-    }}
-  ],
-  "document": "전체 use-cases.md 본문 (Markdown, Mermaid 코드블록 포함). 양식 준수."
-}}
-
-## use-cases.md 양식
-{template}
-"""
+    critique_tpl = load_prompt(_SKILL_DIR, "critique")
+    revise_tpl = load_prompt(_SKILL_DIR, "revise")
 
     def _critique_prompt(draft: str) -> str:
-        return f"""당신은 엄격한 비판적 평가자입니다. Use Case 분석 결과를 평가하세요.
-
-## 원본 과제 설명 (요약)
-{desc_trunc[:3000]}
-
-## VOS 목록
-{vos_json}
-
-## 생성 결과 (features + document)
-{draft[:8000]}
-
-## 평가 기준
-1. Actor와 직접 관계된 Use Case만 Feature로 선정됨 (보조/하위/include/extend는 Feature 아님)
-2. 각 Feature에 actor, precondition, basicflow, alternativeflow, exceptionflow, postcondition 모든 필드가 채워짐
-3. relatedVOS가 실제 존재하는 VOS 키를 사용
-4. 모든 VOS가 최소 1개 Feature와 매핑되어 누락이 없음
-5. document에 Context Diagram, Use Case Diagram, 각 Feature별 Sequence Diagram(Mermaid)이 포함됨
-6. Mermaid 다이어그램 구문 오류가 없음
-7. mode 값이 유효하고 existingKey가 일관됨
-8. JSON 형식이 유효함
-
-## 출력 (반드시 JSON 객체로만 응답)
-{{
-  "pass": true 또는 false,
-  "issues": ["문제점 1", "문제점 2"],
-  "reasoning": "판단 근거"
-}}"""
+        return critique_tpl.format(
+            desc_trunc=desc_trunc[:3000],
+            vos_json=vos_json,
+            draft=draft[:8000],
+        )
 
     def _revise_prompt(draft: str, critique: dict) -> str:
         issues_text = "\n".join(f"- {i}" for i in critique.get("issues", []))
-        return f"""이전에 생성한 Use Case 분석 결과에 아래 문제가 있습니다. 문제를 수정한 새 결과를 출력하세요.
-
-## VOS 목록
-{vos_json}
-
-## 이전 생성 결과
-{draft[:10000]}
-
-## 지적된 문제
-{issues_text}
-
-## 요청
-지적된 문제만 고치고, 올바른 부분은 유지하세요.
-출력 형식은 이전과 동일한 JSON 객체 ({{features, document}})입니다.
-document는 전체 Markdown 본문을 다시 완전하게 포함해야 합니다."""
+        return revise_tpl.format(
+            vos_json=vos_json,
+            draft=draft[:10000],
+            issues_text=issues_text,
+        )
 
     raw, critique_trail = await iterate_generate_critique(
         generate_prompt, _critique_prompt, _revise_prompt,

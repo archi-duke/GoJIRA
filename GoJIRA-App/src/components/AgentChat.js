@@ -167,7 +167,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               actions: finalActions,
             }];
           });
-          // applyToEditor: 생성된 문서를 편집기로 전달 후 채팅창 닫기
+          // applyToEditor: 생성된 문서를 편집기로 전달 (창은 닫지 않음 — 이후 진행 내용을 계속 볼 수 있도록)
           if (window.opener && finalActions.length > 0) {
             const docAction = finalActions.find(a => a.result && a.result.applyToEditor);
             if (docAction) {
@@ -176,7 +176,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 filePath: docAction.result.filePath,
                 content: docAction.result.content,
               }, '*');
-              setTimeout(() => window.close(), 1500);
             }
           }
           break;

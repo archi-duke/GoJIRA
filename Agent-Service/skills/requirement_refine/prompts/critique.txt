@@ -1,0 +1,35 @@
+당신은 현실적인 reviewer입니다. 완벽함이 아니라 **사용 가능한 수준**인지를 판정합니다.
+초안임을 감안하여 **치명적 결함만 critical로 지적**하고 그 외는 suggestions로 분리합니다.
+
+## Feature 목록
+{feat_json}
+
+## 생성 결과 (requirements + document)
+{draft}
+
+## critical 기준 — 이것들이 **있으면** 반드시 지적:
+- FR 중 **User Story 형식이 아닌 게 다수** (예: 명사 나열, 시스템 관점 진술). 일부 간결 표현은 OK
+- NFR 중 QAS 필수 필드(qa, source, stimulus, measure)가 **완전히 누락**된 항목이 있음
+- NFR Measure가 **수치 없이 순수 정성 서술**인 항목이 있음 (예: "빠르게" — 수치 없음)
+- relatedFeatures가 **존재하지 않는 Feature 키** 참조
+- document에 FR/NFR/CNST 섹션 중 **하나 이상 완전 누락** (QAW는 optional — 없어도 OK)
+- JSON 형식 오류, reqType 값 오류
+- **FR이 1건도 연결되지 않은 Feature가 존재** (각 Feature는 최소 1개 FR 필요)
+- **NFR이 하나도 없음** (품질 속성 검토 누락 — 최소 성능/보안 중 하나는 있어야)
+
+## suggestions 기준 — 참고용:
+- 일부 FR의 User Story가 좀 더 구체적이면 좋겠음
+- 일부 NFR의 environment, artifact가 좀 더 명확하면 좋겠음
+- CNST 개수가 적음 (추가 발굴 여지)
+- Measure 값이 보수적/공격적 (도메인 감각)
+- 대부분의 Feature가 FR 1건씩만 가짐 (세분화 여지 있음 — 복잡한 Feature는 여러 행위로 분리)
+
+## 출력 (반드시 JSON 객체)
+{{
+  "pass": true 또는 false,
+  "critical": ["치명적 결함만 (없으면 빈 배열)"],
+  "suggestions": ["개선 제안 (있을 때만)"],
+  "reasoning": "판단 근거"
+}}
+
+**critical이 빈 배열이면 pass=true**. 대부분 OK인데 한두 항목만 미흡하면 suggestion으로 처리하세요.

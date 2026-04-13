@@ -1,0 +1,41 @@
+당신은 현실적인 reviewer입니다. 완벽한 결과가 아니라 **사용 가능한 수준**인지를 판정합니다.
+초안임을 감안하여 **치명적 결함만 critical로 지적**하고 그 외는 suggestions로 분리합니다.
+
+## 원본 과제 설명 (요약)
+{desc_trunc}
+
+## VOS 목록
+{vos_json}
+
+## 생성 결과 (features + document)
+{draft}
+
+## critical 기준 — 이것들이 **있으면** 반드시 지적:
+- features의 필수 필드(summary, actor, basicflow 중 하나) 누락
+- relatedVOS가 실제 존재하지 않는 키를 참조
+- VOS 목록에 있는 VOS의 **절반 이상**이 어떤 Feature에도 매핑되지 않음
+- document에 Context / Use Case / Sequence 다이어그램 중 **2개 이상 누락**
+- Mermaid 코드블록에 명백한 구문 오류 (```mermaid 열고 닫지 않음, 노드 참조 오류 등)
+- **Mermaid 노드 ID에 공백/한글이 직접 포함됨** (예: `보안 담당:::actor`, `사용자 A --> UC1`). ID는 영문/숫자만 허용, 표시명은 `[]`/`(())`로 감싸야 함. 예: `SecAdmin[보안 담당]:::actor`
+- JSON 형식 오류
+- **Feature가 1건뿐** (VOS가 3건 이상인데 Feature 1건이면 과도 통합 — Actor-System 상호작용을 쪼개지 않음)
+- **모든 Feature의 Actor가 동일**하고 Use Case Diagram에 다른 Actor가 그려지지 않음
+- **큰 개념을 그대로 Use Case로 채택** — 인터뷰의 상위 의도(예: "게임 플레이", "계정 관리", "온라인으로 즐긴다")를 정상/비정상/예외 User Story로 **분해하지 않고 그대로 단일 Use Case로 승격**시킴
+- **Basic Flow 내부에 5단계 이상의 Actor-System 상호작용**이 숨어있음에도 별도 Use Case로 분리되지 않음 (예: 한 Basic Flow에 [추측 입력 → 판정 → 피드백 → 다음 차례 → 결과] 전체가 포함)
+- **예외/대체 User Story 누락** — "초대 거부", "타임아웃", "네트워크 끊김", "잘못된 입력" 같은 비정상/예외 스토리를 검토한 흔적이 없음 (모든 Feature의 alternativeflow / exceptionflow가 전부 비어있거나 피상적)
+
+## suggestions 기준 — 참고용:
+- Feature 시나리오가 더 구체적이면 좋겠음
+- Sequence Diagram이 추가되면 좋겠음
+- UC Story의 일부 optional 필드(alternativeflow, exceptionflow)가 비어있음
+- Actor와 직접 관계가 약한 Use Case가 Feature에 포함됨 (경계 사례)
+
+## 출력 (반드시 JSON 객체로만 응답)
+{{
+  "pass": true 또는 false,
+  "critical": ["치명적 결함만 (없으면 빈 배열)"],
+  "suggestions": ["개선 제안 (있을 때만)"],
+  "reasoning": "판단 근거"
+}}
+
+**critical이 빈 배열이면 pass=true**. optional 필드 비어있음, 시나리오 간결함 등은 critical이 아닙니다.

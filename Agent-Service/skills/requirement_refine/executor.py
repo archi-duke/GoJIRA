@@ -6,11 +6,16 @@ import json
 
 from core.database import issues
 from clients.platform_api import PlatformClient
-from skills.helpers import create_issue, link_issues, dispatch_by_mode
+from skills.helpers import (
+    create_issue, link_issues, dispatch_by_mode,
+    is_template_only as _is_template_only,
+    load_prompt,
+)
 from skills.critique import iterate_generate_critique, trail_summary
 
 
-_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "prompts")
+_SKILL_DIR = os.path.dirname(__file__)
+_PROMPTS_DIR = os.path.join(_SKILL_DIR, "..", "..", "prompts")
 
 _NFR_FIELDS = (
     "qa", "source", "stimulus", "environment", "artifact",
@@ -25,13 +30,6 @@ def _load_template() -> str:
             return f.read()
     except FileNotFoundError:
         return ""
-
-
-def _is_template_only(content: str) -> bool:
-    stripped = re.sub(r'#[^\n]*', '', content or '')
-    stripped = re.sub(r'>.*', '', stripped)
-    stripped = re.sub(r'\(작성 필요\)', '', stripped).strip()
-    return len(stripped) < 30
 
 
 def _extract_json_obj(raw: str):
@@ -109,104 +107,28 @@ async def execute(params: dict, user: str) -> dict:
     vos_json = json.dumps(vos_list, ensure_ascii=False, indent=2)
     existing_req_json = json.dumps(existing_reqs, ensure_ascii=False, indent=2)
 
-    generate_prompt = f"""당신은 소프트웨어 아키텍트입니다. 프로젝트 {code}의 Requirement를 정제하세요.
+    generate_prompt = load_prompt(_SKILL_DIR, "generate").format(
+        code=code,
+        desc_trunc=desc_trunc,
+        uc_trunc=uc_trunc,
+        feat_count=len(feat_list),
+        feat_json=feat_json,
+        vos_count=len(vos_list),
+        vos_json=vos_json,
+        existing_req_count=len(existing_reqs),
+        existing_req_json=existing_req_json,
+        template=template,
+    )
 
-## project-description.md
-{desc_trunc}
-
-## use-cases.md
-{uc_trunc}
-
-## Feature ({len(feat_list)}건)
-{feat_json}
-
-## VOS ({len(vos_list)}건)
-{vos_json}
-
-## 기존 Requirement ({len(existing_reqs)}건)
-{existing_req_json}
-
-## 작업
-각 Feature와 Use Case 시나리오에서 FR/NFR/CNST를 도출하세요.
-
-### FR
-- **User Story 형식 필수**: "{{역할}}은(는) {{목적}}을 위해 {{기능}}을 할 수 있다"
-
-### NFR
-- **QAS 필수** — qa, source, stimulus, environment, artifact, response, measure, responseScenario
-- Measure가 원본에 없으면 합리적 수준으로 결정 후 `measureAuto: true`
-
-### CNST
-- 반드시 지켜야 하는 사양/규제/표준
-
-## 각 항목의 mode 결정
-- `create` / `reuse` / `modify` / `delete_mark` (existingKey/사유 포함)
-
-## 출력 (반드시 단일 JSON 객체)
-{{
-  "requirements": [
-    {{"reqType": "FR", "summary": "...", "description": "User Story 본문",
-      "relatedFeatures": ["..."], "mode": "create", "existingKey": "", "modifyReason": "", "deleteReason": ""}},
-    {{"reqType": "NFR", "summary": "...", "description": "...",
-      "qa": "...", "source": "...", "stimulus": "...", "environment": "...",
-      "artifact": "...", "response": "...", "measure": "...", "responseScenario": "...",
-      "measureAuto": true, "relatedFeatures": ["..."], "mode": "create",
-      "existingKey": "", "modifyReason": "", "deleteReason": ""}},
-    {{"reqType": "CNST", "summary": "...", "description": "...", "relatedFeatures": [],
-      "mode": "create", "existingKey": "", "modifyReason": "", "deleteReason": ""}}
-  ],
-  "document": "전체 requirements.md 본문 (Markdown). 자동 결정 NFR은 비고에 [자동결정] 표시. 양식 준수."
-}}
-
-## requirements.md 양식
-{template}
-"""
+    critique_tpl = load_prompt(_SKILL_DIR, "critique")
+    revise_tpl = load_prompt(_SKILL_DIR, "revise")
 
     def _critique_prompt(draft: str) -> str:
-        return f"""당신은 엄격한 비판적 평가자입니다. Requirement 정제 결과를 평가하세요.
-
-## Feature 목록
-{feat_json}
-
-## 생성 결과 (requirements + document)
-{draft[:8000]}
-
-## 평가 기준
-1. **FR은 User Story 형식**: "{{역할}}은(는) {{목적}}을 위해 {{기능}}을 할 수 있다" — 격식 준수 여부
-2. **NFR은 QAS 모든 필드 채움**: qa / source / stimulus / environment / artifact / response / measure / responseScenario
-3. **NFR Measure는 측정 가능한 수치**: 모호한 표현("빠르게", "안전하게") 금지, 수치+단위 필수
-4. **CNST는 진짜 제약**: 단순 선호/권장사항이 아닌 반드시 지켜야 할 규제/표준
-5. **각 Feature에 FR 최소 1개 연결** (relatedFeatures로 매핑됨)
-6. **relatedFeatures가 유효한 Feature 키** 사용
-7. **중복 없음**: 의미적으로 같은 Requirement가 여러 개 생성되지 않음
-8. **document에 FR/NFR/CNST/QAW 섹션이 모두 있고 양식 준수**
-9. **자동 결정된 Measure는 `[자동결정]` 표시**가 document에 반영됨
-10. **JSON 형식 유효, mode/reqType 일관**
-
-## 출력 (반드시 JSON 객체)
-{{
-  "pass": true 또는 false,
-  "issues": ["문제점 1", "문제점 2"],
-  "reasoning": "판단 근거"
-}}"""
+        return critique_tpl.format(feat_json=feat_json, draft=draft[:8000])
 
     def _revise_prompt(draft: str, critique: dict) -> str:
         issues_text = "\n".join(f"- {i}" for i in critique.get("issues", []))
-        return f"""이전에 생성한 Requirement 정제 결과에 아래 문제가 있습니다. 수정하세요.
-
-## Feature 목록
-{feat_json}
-
-## 이전 생성 결과
-{draft[:10000]}
-
-## 지적된 문제
-{issues_text}
-
-## 요청
-지적된 문제만 고치고, 올바른 부분은 유지하세요.
-출력 형식은 이전과 동일한 JSON 객체 ({{requirements, document}})입니다.
-document는 전체 Markdown 본문을 다시 완전하게 포함해야 합니다."""
+        return revise_tpl.format(feat_json=feat_json, draft=draft[:10000], issues_text=issues_text)
 
     raw, critique_trail = await iterate_generate_critique(
         generate_prompt, _critique_prompt, _revise_prompt,

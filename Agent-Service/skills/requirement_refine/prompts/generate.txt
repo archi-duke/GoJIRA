@@ -1,0 +1,63 @@
+당신은 소프트웨어 아키텍트입니다. 프로젝트 {code}의 Requirement를 정제하세요.
+
+## project-description.md
+{desc_trunc}
+
+## use-cases.md
+{uc_trunc}
+
+## Feature ({feat_count}건)
+{feat_json}
+
+## VOS ({vos_count}건)
+{vos_json}
+
+## 기존 Requirement ({existing_req_count}건)
+{existing_req_json}
+
+## 작업
+각 Feature와 Use Case 시나리오에서 FR/NFR/CNST를 **다양한 관점에서 충분히 많이** 도출하세요.
+
+### 다양성 가이드 (중요)
+- **각 Feature는 보통 2~5개의 FR**로 세분화 (단일 FR은 Feature가 단순하거나 세분화 부족 신호)
+- FR 도출 관점 예시: 기본 동작, 입력 검증, 조회/검색, CRUD 각각, 권한/접근제어, 알림/피드백, 오류 처리
+- **NFR은 품질 속성(QA)별로 다양하게 커버**: Performance, Security, Availability, Usability, Maintainability, Scalability 등
+- **CNST**는 과제 설명 및 use-case에서 명확히 드러난 제약만 (기술 스택, 규정, 플랫폼, 표준 등). 추측성 제약은 금지
+
+### FR
+- **User Story 형식 필수**: "{{역할}}은(는) {{목적}}을 위해 {{기능}}을 할 수 있다"
+- 하나의 Feature에서 여러 사용자 행위(생성/조회/수정/삭제/검색 등)를 개별 FR로 분리
+
+### NFR
+- **QAS 필수** — qa, source, stimulus, environment, artifact, response, measure, responseScenario
+- Measure가 원본에 없으면 합리적 수준으로 결정 후 `measureAuto: true`
+- 하나의 품질 속성(qa)에 대해 여러 시나리오가 있다면 각각 별도 NFR로 분리
+
+### CNST
+- 반드시 지켜야 하는 사양/규제/표준
+
+### 수량 가이드
+- 과제 규모에 따라 다르지만, 일반적으로 FR 10~30건, NFR 3~10건, CNST 0~5건 수준
+- 한 Feature에 FR이 1건만 나오면 세분화 부족 — 다시 검토
+
+## 각 항목의 mode 결정
+- `create` / `reuse` / `modify` / `delete_mark` (existingKey/사유 포함)
+
+## 출력 (반드시 단일 JSON 객체)
+{{
+  "requirements": [
+    {{"reqType": "FR", "summary": "...", "description": "User Story 본문",
+      "relatedFeatures": ["..."], "mode": "create", "existingKey": "", "modifyReason": "", "deleteReason": ""}},
+    {{"reqType": "NFR", "summary": "...", "description": "...",
+      "qa": "...", "source": "...", "stimulus": "...", "environment": "...",
+      "artifact": "...", "response": "...", "measure": "...", "responseScenario": "...",
+      "measureAuto": true, "relatedFeatures": ["..."], "mode": "create",
+      "existingKey": "", "modifyReason": "", "deleteReason": ""}},
+    {{"reqType": "CNST", "summary": "...", "description": "...", "relatedFeatures": [],
+      "mode": "create", "existingKey": "", "modifyReason": "", "deleteReason": ""}}
+  ],
+  "document": "전체 requirements.md 본문 (Markdown). 자동 결정 NFR은 비고에 [자동결정] 표시. 양식 준수."
+}}
+
+## requirements.md 양식
+{template}
