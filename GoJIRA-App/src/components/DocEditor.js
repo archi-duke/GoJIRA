@@ -828,6 +828,16 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                           }
                           return <code className={className} {...props}>{children}</code>;
                         },
+                        pre({ children, ...props }) {
+                          // mermaid 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
+                          const arr = React.Children.toArray(children);
+                          const only = arr.length === 1 ? arr[0] : null;
+                          const cls = only?.props?.className || '';
+                          if (cls.includes('language-mermaid')) {
+                            return <>{children}</>;
+                          }
+                          return <pre {...props}>{children}</pre>;
+                        },
                       }}
                     >{content}</ReactMarkdown>
                   </div>

@@ -9,8 +9,12 @@ function ensureInit() {
     startOnLoad: false,
     theme: 'default',
     securityLevel: 'loose',
+    themeVariables: {
+      background: '#ffffff',
+      primaryColor: '#ffffff',
+    },
     flowchart: { htmlLabels: true, curve: 'basis' },
-    sequence: { showSequenceNumbers: false },
+    sequence: { showSequenceNumbers: false, actorBkg: '#ffffff' },
   });
   _initialized = true;
 }
