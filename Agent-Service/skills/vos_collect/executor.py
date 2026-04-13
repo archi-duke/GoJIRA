@@ -11,7 +11,7 @@ from skills.helpers import (
     is_template_only as _is_template_only,
     load_prompt,
 )
-from skills.critique import iterate_generate_critique, trail_summary
+from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
 
 
 _SKILL_DIR = os.path.dirname(__file__)
@@ -63,11 +63,20 @@ async def execute(params: dict, user: str) -> dict:
     critique_tpl = load_prompt(_SKILL_DIR, "critique")
     revise_tpl = load_prompt(_SKILL_DIR, "revise")
 
+    # 워크플로우 문서에서 검증 기준/정책 로드 (단일 진실 출처)
+    policy = load_step_policy("workflow-requirement-analysis.md", "VOS 도출")
+
+    context_block = (
+        f"## 원본 과제 설명 (요약)\n{truncated[:3000]}\n\n"
+        f"## 기존 VOS\n{existing_json}"
+    )
+
     def _critique_prompt(draft: str) -> str:
         return critique_tpl.format(
-            desc_trunc=truncated[:3000],
-            existing_json=existing_json,
+            context_block=context_block,
             draft=draft,
+            criteria=policy["criteria"],
+            policy=policy["policy_text"],
         )
 
     def _revise_prompt(draft: str, critique: dict) -> str:
@@ -81,6 +90,9 @@ async def execute(params: dict, user: str) -> dict:
 
     raw, critique_trail = await iterate_generate_critique(
         generate_prompt, _critique_prompt, _revise_prompt,
+        max_iter=policy["max_iter"],
+        threshold=policy["threshold"],
+        on_fail=policy["on_fail"],
     )
 
     items = _extract_json_list(raw)

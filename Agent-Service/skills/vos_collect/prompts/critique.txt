@@ -1,36 +1,29 @@
-당신은 현실적인 reviewer입니다. 완벽한 결과가 아니라 **사용 가능한 수준**인지를 판정합니다.
-초안(first draft)임을 감안하여, **치명적 결함만 critical로 지적**하고 그 외는 suggestions로 분리합니다.
+당신은 현실적인 reviewer입니다. 완벽함이 아니라 **사용 가능한 수준**인지를 판정합니다.
+초안임을 감안하여 **치명적 결함만 critical로 지적**하고 그 외는 suggestions로 분리합니다.
 
-## 원본 과제 설명 (요약)
-{desc_trunc}
-
-## 기존 VOS
-{existing_json}
+## 컨텍스트
+{context_block}
 
 ## 생성 결과
 {draft}
 
-## critical 기준 — 이것들이 **있으면** 반드시 지적 (있으면 pass 불가):
-- 필수 필드 누락 (summary, client, mode 등)
-- JSON 형식 오류, mode/existingKey 불일치
-- 전혀 사용자 관점 어투가 아닌 항목 (절반 이상 일반 진술문)
-- 주요 Stakeholder 그룹이 통째로 누락됨 (예: 사용자, 관리자 중 하나 이상 완전 누락)
-- 기존 VOS와 의미적 중복인데 create 모드로 생성됨
-- **VOS 총 개수가 3건 미만** (입력을 그대로 단일 복사한 수준 — 다양한 관점 발굴 부족)
-- **모든 VOS의 client가 동일** (단 하나의 이해관계자 관점만 다룸 — 다른 관점 완전 누락)
-- **품질 속성(성능/보안/안정성/사용성 등) 관련 VOS가 하나도 없음** (기능 요구만 있고 비기능 요구 미발굴)
+## 검증 기준
+{criteria}
 
-## suggestions 기준 — 참고용, pass 여부에는 영향 없음:
-- 일부 VOS의 어투가 좀 더 부드러우면 좋겠음
-- 일부 description이 더 구체적이면 좋겠음
-- 추가 발굴 가능한 이해관계자 힌트 등
+## 검증 정책
+{policy}
+
+## 판정 규칙
+- `critical`이 비어있지 않으면 score 무관하게 `pass=false`
+- `critical`이 비어있고 `score`가 검증 정책의 임계값 이상이면 `pass=true`
+- `score`는 검증 기준 충족도의 종합 점수 (0.0~1.0)
+- 사소한 trailing 문제는 critical이 아닌 suggestions로
 
 ## 출력 (반드시 JSON 객체로만 응답)
 {{
+  "score": 0.0~1.0 사이 실수,
   "pass": true 또는 false,
-  "critical": ["치명적 결함만 (없으면 빈 배열)"],
+  "critical": ["치명적 결함 (없으면 빈 배열)"],
   "suggestions": ["개선 제안 (있을 때만)"],
-  "reasoning": "간단한 판단 근거"
+  "reasoning": "판단 근거"
 }}
-
-**critical이 빈 배열이면 pass=true**. 사소한 trailing 문제까지 critical로 올리지 마세요.

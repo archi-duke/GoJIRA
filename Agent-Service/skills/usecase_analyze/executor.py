@@ -12,7 +12,7 @@ from skills.helpers import (
     is_template_only as _is_template_only,
     load_prompt,
 )
-from skills.critique import iterate_generate_critique, trail_summary
+from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
 from skills.mermaid_utils import (
     get_mermaid_rules, validate_document_mermaid, build_mermaid_fix_prompt,
 )
@@ -136,11 +136,19 @@ async def execute(params: dict, user: str) -> dict:
     critique_tpl = load_prompt(_SKILL_DIR, "critique")
     revise_tpl = load_prompt(_SKILL_DIR, "revise")
 
+    policy = load_step_policy("workflow-requirement-analysis.md", "Use Case 분석")
+
+    context_block = (
+        f"## 원본 과제 설명 (요약)\n{desc_trunc[:3000]}\n\n"
+        f"## VOS 목록\n{vos_json}"
+    )
+
     def _critique_prompt(draft: str) -> str:
         return critique_tpl.format(
-            desc_trunc=desc_trunc[:3000],
-            vos_json=vos_json,
+            context_block=context_block,
             draft=draft[:8000],
+            criteria=policy["criteria"],
+            policy=policy["policy_text"],
         )
 
     def _revise_prompt(draft: str, critique: dict) -> str:
@@ -153,6 +161,9 @@ async def execute(params: dict, user: str) -> dict:
 
     raw, critique_trail = await iterate_generate_critique(
         generate_prompt, _critique_prompt, _revise_prompt,
+        max_iter=policy["max_iter"],
+        threshold=policy["threshold"],
+        on_fail=policy["on_fail"],
     )
     parsed = _extract_json_obj(raw)
     if not parsed:

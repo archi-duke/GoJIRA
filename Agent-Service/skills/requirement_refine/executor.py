@@ -11,7 +11,7 @@ from skills.helpers import (
     is_template_only as _is_template_only,
     load_prompt,
 )
-from skills.critique import iterate_generate_critique, trail_summary
+from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
 
 
 _SKILL_DIR = os.path.dirname(__file__)
@@ -148,8 +148,17 @@ async def execute(params: dict, user: str) -> dict:
     critique_tpl = load_prompt(_SKILL_DIR, "critique")
     revise_tpl = load_prompt(_SKILL_DIR, "revise")
 
+    policy = load_step_policy("workflow-requirement-analysis.md", "Requirement 정제")
+
+    context_block = f"## Feature 목록\n{feat_json}"
+
     def _critique_prompt(draft: str) -> str:
-        return critique_tpl.format(feat_json=feat_json, draft=draft[:8000])
+        return critique_tpl.format(
+            context_block=context_block,
+            draft=draft[:8000],
+            criteria=policy["criteria"],
+            policy=policy["policy_text"],
+        )
 
     def _revise_prompt(draft: str, critique: dict) -> str:
         issues_text = "\n".join(f"- {i}" for i in critique.get("issues", []))
@@ -157,6 +166,9 @@ async def execute(params: dict, user: str) -> dict:
 
     raw, critique_trail = await iterate_generate_critique(
         generate_prompt, _critique_prompt, _revise_prompt,
+        max_iter=policy["max_iter"],
+        threshold=policy["threshold"],
+        on_fail=policy["on_fail"],
     )
     parsed = _extract_json_obj(raw)
     if not parsed:
