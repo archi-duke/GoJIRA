@@ -259,6 +259,8 @@ graph LR
 | 설명 | 이슈 생성/수정/삭제/조회 및 JIRA DC와 30초 주기 양방향 동기화 |
 
 - 이슈 CRUD (타입: Epic, Story, Task, Bug, Requirement 등)
+- 이슈 생성 시 **subkey 자동 부여**: VOS→`VOS_001`, Feature→`UC_001`, Requirement(FR)→`FR_001`, Requirement(NFR)→`QA_001`, Requirement(CNST)→`CNST_001`, Architectural Design→`ADSN_001`, Detailed Design→`DDSN_001` (같은 프로젝트 내 동일 prefix 중 최대 +1, 3자리 zero-pad)
+- 이슈 링크는 **JIRA DC v2 표준 포맷**(`type:{name}`, `outwardIssue/inwardIssue:{key}`, 전역 숫자 link id)으로 저장하여 WBS/Gantt 등 외부 도구와 호환
 - JIRA DC Pull: 30초 주기로 JIRA DC 변경사항 로컬 반영
 - JIRA DC Push: 로컬 변경사항 30초 주기로 JIRA DC 반영
 - 충돌 해결 정책 (최신 타임스탬프 우선)
@@ -327,14 +329,17 @@ graph LR
 | ID | FR-11 |
 | 우선순위 | 필수 |
 | 담당 서비스 | Agent-Service |
-| 설명 | 멀티턴 자연어 대화 및 19개 스킬 실행 |
+| 설명 | 멀티턴 자연어 대화 및 25개 스킬 실행 |
 
 - 멀티턴 대화 컨텍스트 유지
-- 19개 스킬 자동 선택 및 실행
-  - 이슈 조회/생성/수정/삭제/링크, 프로젝트 조회, 문서 관리(목록/요약/비교/이력)
-  - PR 목록/생성, 관계 분석, 일정 분석, SATAM 분석, UI 네비게이션
-  - VOS 수집(vos_collect), 프로젝트 설명 인터뷰/생성(projdesc_interview/generate)
-- 스킬 실행 결과를 자연어로 요약 응답
+- 25개 스킬 자동 선택 및 실행
+  - 이슈 조회(issue_query), 타입별 생성(issue_create_vos/_feature/_requirement/_design), 수정/삭제/링크
+  - 프로젝트 조회(project_query), 문서 관리(doc_list/_summarize/_diff/_history)
+  - PR 목록/생성(pr_list/_create), 관계 분석(issue_analyze), 일정 분석(schedule_analyze), SATAM 분석(satam_analyze), UI 네비게이션(ui_navigate)
+  - **워크플로우**: VOS 수집(vos_collect), Use Case 분석(usecase_analyze), Requirement 정제(requirement_refine), 프로젝트 설명 인터뷰/생성(projdesc_interview/_generate)
+  - 개발용: 프로젝트 리셋(reset_project)
+- **워크플로우 자동 위임**: requirement_refine → usecase_analyze → vos_collect 연쇄가 스킬 내부에서 자동 실행. project-description.md 부족 시에만 LLM 인터뷰 핸드오프
+- 산출 문서 본문(`document`/`content`)은 채팅에 노출하지 않고 파일에만 저장 (요약만 응답)
 
 #### FR-12: SSE 스트리밍 + ReACT 2-pass 추론
 
@@ -345,9 +350,11 @@ graph LR
 | 담당 서비스 | Agent-Service |
 | 설명 | 실시간 SSE 스트리밍 및 ReACT 2-pass 추론 |
 
-- SSE를 통한 실시간 응답 스트리밍
+- SSE를 통한 실시간 응답 스트리밍 (`session`/`thinking`/`reasoning`/`tool_call`/`tool_result`/`progress`/`content`/`done`/`error` 이벤트)
 - ReACT 패턴: Reasoning → Action → Observation → Response
-- 2-pass 추론: 1차 스킬 실행 → 2차 결과 종합 응답
+- 2-pass 추론: Pass 1 추론(tool_choice=none) → Pass 2 도구 호출(tool_choice=auto)
+- **인터뷰 가드**: Pass 1 추론이 사용자 질문 형태(`?` + "여쭤볼게요"/"알려주세요" 등 마커)면 Pass 2 건너뛰고 즉시 응답 종료 → 사용자 답변 대기 (질문 직후 임의 답변으로 도구 호출하던 문제 차단)
+- **진행 스트리밍**: contextvar 기반 progress 큐로 워크플로우 스킬의 단계별 진행을 즉시 채팅 노출
 - 디버그 뷰를 통한 추론 과정 시각화
 
 #### FR-13: 독립 채팅 창 + BroadcastChannel 네비게이션

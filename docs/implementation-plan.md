@@ -178,10 +178,17 @@ pie title 구현 진행 상태
 - [x] BroadcastChannel(`gojira-navigate`) 크로스 윈도우 네비게이션
 - [x] ui_navigate Skill
 - [x] pr_list 기본 state=all
-- [x] 총 19개 Skill 완성
+- [x] 총 25개 Skill 완성 (issue_create_* 4종 분리 + 워크플로우 스킬 추가)
 - [x] 스킬 구조 통합: GoJIRA-API/skills/ → Agent-Service/skills/ (SKILL.md + executor.py 동일 폴더)
+- [x] 이슈 subkey 자동 부여 (VOS_001/UC_001/FR_001/QA_001/CNST_001/ADSN_001/DDSN_001) — `helpers.next_subkey()`
+- [x] JIRA DC v2 표준 link 포맷: `type:{name:"Contains(WBSGantt)"}, outwardIssue/inwardIssue:{key}`, 전역 숫자 link id (10001~)
+- [x] 워크플로우 자동 위임: requirement_refine → usecase_analyze → vos_collect 연쇄 (스킬이 부족한 선행을 직접 호출, suggestSkill 반환만 하던 구조 폐기)
+- [x] 진행 스트리밍: `core/progress.py` contextvar 큐 + SSE `progress` 이벤트
+- [x] LLM 인터뷰 가드: 사용자 질문 형태 추론 시 도구 호출 단계 건너뛰기
+- [x] DocEditor의 use-cases.md/requirements.md AI생성 → 채팅 창 + autoMessage 워크플로우 트리거 (REST 직접 호출 폐지)
+- [x] projdesc_generate가 `docs/{user}` 브랜치에 자동 파일 저장
 
-**현재 Skill 목록 (19개):**
+**현재 Skill 목록 (25개):**
 
 | 분류 | Skill | 안전 등급 |
 |------|-------|----------|
@@ -195,14 +202,20 @@ pie title 구현 진행 상태
 | 분석 | schedule_analyze | 자동 |
 | 분석 | satam_analyze | 자동 |
 | 분석 | issue_analyze | 자동 |
-| 분석 | vos_collect | 자동 |
-| 변경 | issue_create | 확인 요청 |
+| 워크플로우 | vos_collect | 확인 요청 (이슈 생성 동반) |
+| 워크플로우 | usecase_analyze | 확인 요청 (Feature 생성 + 파일 저장 + 자동 위임) |
+| 워크플로우 | requirement_refine | 확인 요청 (Requirement 생성 + 파일 저장 + 자동 위임) |
+| 워크플로우 | projdesc_interview | 자동 (멀티턴 질문 수집) |
+| 워크플로우 | projdesc_generate | 확인 요청 (문서 생성 + docs/{user} 자동 저장) |
+| 변경 | issue_create_vos | 확인 요청 |
+| 변경 | issue_create_feature | 확인 요청 |
+| 변경 | issue_create_requirement | 확인 요청 |
+| 변경 | issue_create_design | 확인 요청 |
 | 변경 | issue_update | 확인 요청 |
 | 변경 | issue_delete | 확인 요청 |
 | 변경 | issue_link | 확인 요청 |
 | 변경 | pr_create | 확인 요청 |
-| 변경 | projdesc_interview | 확인 요청 |
-| 변경 | projdesc_generate | 확인 요청 |
+| 개발용 | reset_project | 명시 지시 필수 |
 | UI | ui_navigate | 자동 |
 
 ---

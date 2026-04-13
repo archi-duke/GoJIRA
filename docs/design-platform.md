@@ -277,10 +277,11 @@ r.HandleFunc("/Agent/*", proxy.ServeHTTP)
 | MongoDB 필드 | 설명 |
 |--------------|------|
 | key | 이슈 키 (예: PROJ-123) |
+| subkey | 타입별 가독성 키 (자동 부여): VOS→`VOS_001`, Feature→`UC_001`, Requirement(FR)→`FR_001`, Requirement(NFR)→`QA_001`, Requirement(CNST)→`CNST_001`, Architectural Design→`ADSN_001`, Detailed Design→`DDSN_001`. 같은 프로젝트 내 동일 prefix 중 최대 +1, 3자리 zero-pad |
 | summary | 제목 |
 | issueType | VOS / Feature / Requirement / Design / Test |
 | reqType | Requirement 세부 타입: QA/NFR, FR, CNST |
-| issueLinks | 관계 배열 (contain, relate 등) |
+| issueLinks | 관계 배열. **JIRA DC v2 표준 형식**: `{id:"10001", type:{name:"Contains(WBSGantt)"}, outwardIssue:{key}, inwardIssue:{key}}`. linkType enum: `contains`/`relates`/`duplicates`/`blocks`. 전역 숫자 link id 부여(10001부터). |
 | _dirty | 동기화 대기 플래그 |
 | _syncedAt | 마지막 동기화 시각 |
 | _deletedLinks | JIRA 삭제 대기 링크 ID |
@@ -384,10 +385,10 @@ sequenceDiagram
 |------|------|
 | project_query | 프로젝트 목록 조회 |
 | issue_query | 이슈 조회 (타입/프로젝트 필터) |
-| issue_create | 이슈 생성 |
+| issue_create_vos / _feature / _requirement / _design | 타입별 이슈 생성 (subkey 자동 부여) |
 | issue_update | 이슈 수정 |
 | issue_delete | 이슈 삭제 |
-| issue_link | 이슈 관계 설정 |
+| issue_link | 이슈 관계 설정 (JIRA DC v2 표준 포맷) |
 | issue_analyze | 이슈 관계 분석 (contain 체인 검증) |
 | satam_analyze | SATAM 매트릭스 분석 |
 | schedule_analyze | 일정 분석 |
@@ -395,9 +396,20 @@ sequenceDiagram
 | doc_summarize | 문서 요약 (LLM 기반) |
 | doc_diff | 문서 변경 비교 |
 | doc_history | 커밋 이력 조회 |
-| pr_list | PR 목록 조회 |
-| pr_create | PR 생성 |
-| navigate | UI 네비게이션 |
+| pr_list / pr_create | PR 조회/생성 |
+| ui_navigate | UI 네비게이션 |
+| projdesc_interview | project-description.md 인터뷰 (멀티턴 질문/답변 수집) |
+| projdesc_generate | 인터뷰 답변 또는 기존 본문에서 project-description.md 생성·자동 저장 |
+| vos_collect | project-description.md → VOS 이슈 자동 수집 |
+| usecase_analyze | VOS+description → Use Case/Feature 도출, business/use-cases.md 작성, VOS-Feature contains 연결 |
+| requirement_refine | Feature/use-cases → FR/QA/CNST 도출, business/requirements.md 작성, Feature-Requirement contains 연결 |
+| reset_project | (개발용) 프로젝트 이슈+문서 초기화 |
+
+**워크플로우 자동 위임 구조** (각 스킬이 부족한 선행 조건을 직접 호출):
+- `requirement_refine`: Feature 없으면 → `usecase_analyze` 직접 호출
+- `usecase_analyze`: VOS 없으면 → `vos_collect` 직접 호출
+- `vos_collect`: project-description 없으면 → `suggestSkill: projdesc_interview` 반환 (멀티턴이라 자동 위임 불가, LLM이 처리)
+- 결과의 `prerequisitesRan` 필드에 자동 실행된 선행 단계 누적 기록
 
 **로딩 순서:**
 1. `GOJIRA_SKILLS_DIR` 환경변수
@@ -409,6 +421,17 @@ sequenceDiagram
 - MongoDB `agent_sessions` 컬렉션에 저장
 - 최근 **20개** 메시지만 LLM 컨텍스트에 포함 (토큰 관리)
 - 세션별 context 객체로 프로젝트 코드 등 메타데이터 유지
+
+### 5.6 진행 스트리밍 (core/progress.py)
+
+- `contextvars` 기반 async 큐. 스트리밍 라우터가 `bind_queue()`로 큐를 바인딩한 뒤 `execute_skill()` 호출 → 스킬 내부에서 `await emit_progress(stage, message, **extra)` 호출이 SSE `progress` 이벤트로 즉시 채팅에 노출
+- 큐 미주입(REST/배치 호출) 시 no-op → 스킬은 호출 컨텍스트에 무관하게 동일하게 동작
+- `streaming.py`가 `execute_skill`을 task로 띄우고 `asyncio.wait`로 큐를 폴링하여 메시지 수신 즉시 yield (위임된 sub-skill의 emit도 그대로 흐름)
+
+### 5.7 인터뷰 가드 (LLM 응답 강제)
+
+- `streaming.py`가 Pass 1 추론 결과를 검사하여 사용자에게 질문하는 형태(`?` + 질문 마커: "여쭤볼게요"/"알려주세요"/"진행할까요" 등)면 **Pass 2 도구 호출 단계를 건너뛰고** 추론 내용을 그대로 응답으로 종료
+- 목적: LLM이 사용자에게 질문한 직후 같은 턴에 임의 답변(`"없음"` 등)으로 `projdesc_generate`를 호출하던 문제 차단
 
 ---
 

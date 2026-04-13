@@ -195,7 +195,7 @@ src/
 |----|-----------|-----------|
 | VOS | VOS | summary, description, priority, status |
 | Feature (UC) | Feature | summary, description, 유스케이스 |
-| Requirement | Requirement | summary, subtype(QA/FR/CNST), ASR 여부 |
+| Requirement | Requirement | summary, subtype(FR=`FR_001`, NFR→`QA_001`, CNST=`CNST_001`로 자동 매핑), ASR 여부 |
 | Design (ADSN) | Architectural/Detailed Design | summary, 설계 상세 |
 | Trade Off | 공통 | Risk/Sensitivity/Mitigation YAML 편집 |
 
@@ -209,7 +209,7 @@ src/
 |------|-----------|-----------|
 | VOS | VOS | VOS |
 | Feature | Feature | Feature |
-| Requirement | Requirement | QA, FR, CNST |
+| Requirement | Requirement | FR, QA(NFR), CNST |
 | Design | Architectural/Detailed Design | ADSN, DDSN |
 | Test (선택) | Test | Test |
 
@@ -353,8 +353,10 @@ AI 에이전트와의 대화 인터페이스.
 | Prop | 타입 | 설명 |
 |------|------|------|
 | standalone | boolean | true면 전체 화면 모드 |
-| autoMessage | string | 초기 로딩 시 자동 전송 메시지 |
+| autoMessage | string | 초기 로딩 시 자동 전송 메시지 (DocEditor의 AI생성 클릭으로 워크플로우 트리거 시 사용) |
 | newSession | boolean | true면 기존 세션 무시하고 새 세션 시작 |
+| interviewPrompt | string | 인터뷰 모드 시작 (project-description.md 등) |
+| continueTo | string | 인터뷰 완료 후 이어갈 대상 파일 경로 |
 
 **모드:**
 
@@ -373,10 +375,15 @@ AI 에이전트와의 대화 인터페이스.
 **디버그 뷰 (Master 사용자, USR >= 15):**
 
 - 접기/펼치기 블록으로 "작업 과정" 표시
-- 추론(reasoning), 도구 호출(tool_call), 도구 결과(tool_result) 단계별 표시
+- 추론(reasoning), 도구 호출(tool_call), 도구 결과(tool_result), **진행 단계(progress)** 표시
 - 실행 시간(duration_ms), 상세 결과(detail) 확인 가능
 
-**일반 사용자:** 스피너 + "작업 중..." 표시만 노출
+**일반 사용자:** 스피너 + 진행 단계(progress) 메시지만 노출 (예: "VOS 수집 시작", "Use Case 분석 완료")
+
+**워크플로우 트리거 흐름 (DocEditor → AgentChat 연동):**
+
+- DocEditor에서 use-cases.md / requirements.md의 AI생성 클릭 → 채팅 창을 열고 `autoMessage`로 워크플로우 자연어 요청 전송 (REST 직접 호출 폐지)
+- 인터뷰가 필요한 경우 projdesc 저장 후 DocEditor가 `postMessage({type:'gojira-continue', target, projectCode})`를 채팅 창에 전송 → AgentChat이 후속 작업 메시지를 자동 입력
 
 ### 3.9 CommonBar.js (공통 상단바)
 
