@@ -62,6 +62,46 @@ def get_next_issue_num(code: str) -> int:
     return mx + 1
 
 
+_SUBKEY_PREFIX = {
+    "VOS": "VOS",
+    "Feature": "UC",
+    "Architectural Design": "ADSN",
+    "Detailed Design": "DDSN",
+}
+_REQ_SUBKEY_PREFIX = {"FR": "FR", "NFR": "QA", "CNST": "CNST"}
+
+
+def _resolve_subkey_prefix(issue_type: str, extras: Optional[dict]) -> Optional[str]:
+    if issue_type == "Requirement":
+        rt = (extras or {}).get("reqtype", "").upper()
+        return _REQ_SUBKEY_PREFIX.get(rt)
+    return _SUBKEY_PREFIX.get(issue_type)
+
+
+def next_subkey(code: str, prefix: str) -> str:
+    """`{code}-{prefix}_NNN` 형식의 다음 subkey를 반환 (3자리 zero-pad)."""
+    pat = f"^{re.escape(prefix)}_(\\d+)$"
+    cursor = issues().find(
+        {
+            "key": {"$regex": f"^{re.escape(code)}-"},
+            "subkey": {"$regex": pat},
+        },
+        {"subkey": 1},
+    )
+    mx = 0
+    rx = re.compile(pat)
+    for doc in cursor:
+        m = rx.match(doc.get("subkey", ""))
+        if m:
+            try:
+                n = int(m.group(1))
+                if n > mx:
+                    mx = n
+            except ValueError:
+                pass
+    return f"{prefix}_{mx + 1:03d}"
+
+
 def add_issue_to_project(code: str, issue_key: str):
     """프로젝트의 issues 배열에 이슈 키 추가."""
     projects().update_one(
@@ -106,9 +146,19 @@ def create_issue(issue_type: str, params: dict, user: str, extras: Optional[dict
     if extras:
         doc.update(extras)
 
+    prefix = _resolve_subkey_prefix(issue_type, extras)
+    if prefix:
+        doc["subkey"] = next_subkey(code, prefix)
+
     issues().update_one({"key": key}, {"$set": doc}, upsert=True)
     add_issue_to_project(code, key)
-    return {"key": key, "issueType": issue_type, "summary": summary, "status": "To Do"}
+    return {
+        "key": key,
+        "subkey": doc.get("subkey", ""),
+        "issueType": issue_type,
+        "summary": summary,
+        "status": "To Do",
+    }
 
 
 DELETION_PREFIX = "[Deletion Required] "
@@ -256,20 +306,47 @@ def dispatch_by_mode(
     return buckets
 
 
-def link_issues(from_key: str, to_key: str, link_type: str = "contains") -> dict:
-    """두 이슈를 양방향 link로 연결한다 (contains / relates / blocks 등).
+_LINK_TYPE_NAME = {
+    "contains": "Contains(WBSGantt)",
+    "relates": "Relates",
+    "blocks": "Blocks",
+    "duplicates": "Duplicate",
+}
 
-    `from_key`가 outward(부모), `to_key`가 inward(자식) 관점.
+
+def _next_link_id() -> str:
+    """전역 issueLinks.id 최대값 + 1 (숫자 문자열). 최소 10001부터 시작."""
+    mx = 10000
+    cursor = issues().find({"issueLinks.id": {"$exists": True}}, {"issueLinks.id": 1})
+    for doc in cursor:
+        for ln in doc.get("issueLinks", []) or []:
+            lid = str(ln.get("id", ""))
+            if lid.isdigit():
+                n = int(lid)
+                if n > mx:
+                    mx = n
+    return str(mx + 1)
+
+
+def link_issues(from_key: str, to_key: str, link_type: str = "contains") -> dict:
+    """두 이슈를 JIRA 표준 형식으로 양방향 link한다.
+
+    `from_key`가 outward(상위/부모), `to_key`가 inward(하위/자식).
+    저장 형식 (JIRA DC v2 호환):
+      from_key.issueLinks: {id, type:{name}, outwardIssue:{key:to_key}}
+      to_key.issueLinks:   {id, type:{name}, inwardIssue:{key:from_key}}
     """
     if not from_key or not to_key or not link_type:
         raise ValueError("from_key, to_key, link_type 필수")
-    link_id = f"{from_key}_{link_type}_{to_key}"
+    type_name = _LINK_TYPE_NAME.get(link_type, link_type)
+    link_id = _next_link_id()
+    type_obj = {"name": type_name}
     issues().update_one(
         {"key": from_key},
-        {"$addToSet": {"issueLinks": {"id": link_id, "type": link_type, "outward": to_key}}},
+        {"$push": {"issueLinks": {"id": link_id, "type": type_obj, "outwardIssue": {"key": to_key}}}},
     )
     issues().update_one(
         {"key": to_key},
-        {"$addToSet": {"issueLinks": {"id": link_id, "type": link_type, "inward": from_key}}},
+        {"$push": {"issueLinks": {"id": link_id, "type": type_obj, "inwardIssue": {"key": from_key}}}},
     )
-    return {"linkId": link_id, "fromKey": from_key, "toKey": to_key, "linkType": link_type}
+    return {"linkId": link_id, "fromKey": from_key, "toKey": to_key, "linkType": type_name}

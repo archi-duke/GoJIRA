@@ -29,12 +29,14 @@ def execute(params: dict, user: str) -> dict:
         for link in links:
             if not isinstance(link, dict):
                 continue
-            lt = link.get("type", "")
+            lt_raw = link.get("type", "")
+            lt = lt_raw.get("name", "") if isinstance(lt_raw, dict) else lt_raw
             if not isinstance(lt, str):
                 continue
             link_count[lt] = link_count.get(lt, 0) + 1
-            if lt == "contain":
-                inward = link.get("inward", "")
+            if lt in ("contain", "contains", "Contains(WBSGantt)"):
+                inward_raw = link.get("inwardIssue") or link.get("inward")
+                inward = inward_raw.get("key", "") if isinstance(inward_raw, dict) else (inward_raw or "")
                 if isinstance(inward, str) and inward:
                     contained_by[key] = inward
 
