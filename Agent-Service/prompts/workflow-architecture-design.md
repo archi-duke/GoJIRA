@@ -23,10 +23,38 @@ Phase 4: 설계 평가
 
 ---
 
+## 공통 원칙 — 생성 단계의 비판적 평가 루프
+
+모든 생성 단계(VOS 도출, Use Case 분석, Requirement 정제, 설계안 결정, SATAM 평가 등)는 다음 루프를 거친다:
+
+```
+[생성] → [비판적 평가] ──pass?──▶ 완료
+           │
+           └─ fail → [수정] → [재평가]  (최대 N회)
+```
+
+- 생성 직후 **비판적 평가자(critic)** 관점에서 결과물의 품질/규칙 준수/누락 여부를 점검
+- 평가는 `{"pass": true/false, "issues": [...], "reasoning": "..."}` 형식의 구조화된 JSON
+- 실패 시 지적된 issues를 반영하여 수정 → 재평가 반복
+- **최대 반복 제한** (기본 2회)으로 비용 통제, 평가 파싱 실패 시 현재 결과로 종료
+- 최종 산출물에 `critiqueTrail`을 포함하여 검증 이력 추적 가능
+
+**공용 헬퍼**: `skills/critique.py` — `iterate_generate_critique(generate_prompt, critique_fn, revise_fn, max_iter)`
+
+**각 단계의 평가 기준**은 하위 워크플로우 문서 또는 해당 섹션에 명시한다.
+
+현재 구현 상태:
+- ✅ Phase 1 (VOS/Use Case/Requirement) — `vos_collect`, `usecase_analyze`, `requirement_refine`에 적용됨
+- ⏳ Phase 2~4 — 구조 결정/설계/SATAM 스킬은 향후 추가 시 동일 패턴 적용
+
+상세는 [`workflow-requirement-analysis.md`](./workflow-requirement-analysis.md)의 "품질 검증 루프" 섹션 참조.
+
+---
+
 ## Phase 1: 요구 분석
 
 > **상세 워크플로우**: [`workflow-requirement-analysis.md`](./workflow-requirement-analysis.md)
-> ②~④ 단계의 구체적 절차(VOS 도출 → Use Case/Feature 분석 → Requirement 정제), 산출 문서 양식, 자동 결정된 NFR Measure의 검토 흐름 등을 다룬다.
+> ②~④ 단계의 구체적 절차(VOS 도출 → Use Case/Feature 분석 → Requirement 정제), 산출 문서 양식, 자동 결정된 NFR Measure의 검토 흐름, 비판적 평가 기준 등을 다룬다.
 
 ### ① 과제 소개 분석 (Project Description Analysis)
 

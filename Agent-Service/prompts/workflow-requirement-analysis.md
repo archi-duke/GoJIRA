@@ -26,6 +26,32 @@ Requirement 이슈 + requirements.md
 VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 ```
 
+각 단계는 **생성 → 비판적 평가 → 수정 루프**를 내장한다 (아래 "품질 검증 루프" 섹션 참조).
+
+---
+
+## 품질 검증 루프 (Generate → Critique → Revise)
+
+본 워크플로우의 모든 생성 단계(① ~ ③)는 다음 루프를 거친다:
+
+```
+[생성] ──→ [비판적 평가] ──pass?──▶ 완료
+            │
+            └─ fail ─→ [수정] ─→ [재평가] … (최대 N회)
+```
+
+**루프 정책**:
+- 초기 생성 후 **비판적 평가자(critic)** 입장에서 결과물을 점검한다
+- `{"pass": true/false, "issues": [...], "reasoning": "..."}` JSON으로 평가 결과 반환
+- 평가가 통과(pass)면 종료, 실패면 지적된 issues를 반영해 수정 후 재평가
+- **최대 반복 횟수**: 기본 2회 수정 (공용 헬퍼 `skills/critique.py`의 `MAX_ITERATIONS`)
+- 평가 자체가 파싱 실패하면 현재 결과로 종료 (무한 루프 방지)
+- 최종 반환값에 `critiqueTrail` 포함 — 반복별 평가 결과 이력
+
+**공용 헬퍼**: `skills/critique.py` — `iterate_generate_critique(generate_prompt, critique_fn, revise_fn, max_iter)`
+
+**각 단계의 평가 기준은 단계별 "비판적 평가 기준" 섹션에 정의한다.**
+
 ---
 
 ## ① VOS 도출
@@ -42,7 +68,15 @@ VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 - 각 VOS의 `client`에 요구 제기 이해관계자 명시
 - 기존 VOS와 중복되지 않는 항목만 추가
 
-**완료 기준**: 주요 이해관계자별 VOS가 1개 이상 등록됨
+**비판적 평가 기준**:
+1. 사용자 관점 어투 사용 (`~가 필요해요`, `~해야 합니다`, `~하면 좋겠어요`)
+2. 각 VOS의 `client`(이해관계자 역할)가 명확히 지정됨
+3. 과제 설명의 주요 Stakeholder들이 모두 커버됨 (누락된 관점 없음)
+4. 기존 VOS와 의미적 중복 항목이 `create`로 잘못 생성되지 않음
+5. `summary`는 간결하고 `description`은 구체적 (배경/근거 포함)
+6. `mode`, `existingKey` 등 JSON 스키마 일관성
+
+**완료 기준**: 주요 이해관계자별 VOS가 1개 이상 등록되고, 비판적 평가를 통과함
 
 ---
 
@@ -69,7 +103,16 @@ VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 
 **문서 양식**: `prompts/use-cases.md`
 
-**완료 기준**: 모든 VOS가 최소 1개의 Feature에 연결됨, use-cases.md 저장됨
+**비판적 평가 기준**:
+1. **Actor와 직접 관계된 Use Case만 Feature로 선정**됨 (보조/하위/include/extend는 Feature 아님)
+2. 각 Feature에 `actor`, `precondition`, `basicflow`, `alternativeflow`, `exceptionflow`, `postcondition` 모든 필드가 채워짐
+3. `relatedVOS`가 실제 존재하는 VOS 키를 사용
+4. **모든 VOS가 최소 1개 Feature에 매핑**되어 누락이 없음
+5. `document`에 Context Diagram / Use Case Diagram / 각 Feature별 Sequence Diagram (Mermaid) 포함
+6. Mermaid 다이어그램 구문 오류 없음
+7. `mode`, `existingKey` 일관성, JSON 형식 유효
+
+**완료 기준**: 모든 VOS가 최소 1개의 Feature에 연결되고, use-cases.md 저장됨, 비판적 평가 통과
 
 ---
 
@@ -113,11 +156,24 @@ VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 
 **문서 양식**: `prompts/requirements.md`
 
+**비판적 평가 기준**:
+1. **FR은 User Story 형식 준수**: `{역할}은(는) {목적}을 위해 {기능}을 할 수 있다`
+2. **NFR은 QAS 전 필드 채움**: `qa`, `source`, `stimulus`, `environment`, `artifact`, `response`, `measure`, `responseScenario`
+3. **NFR Measure는 측정 가능한 수치 + 단위** ("빠르게", "안전하게" 같은 모호 표현 금지)
+4. **CNST는 진짜 제약** (단순 선호/권장이 아닌 반드시 지켜야 할 규제/표준)
+5. **각 Feature에 FR 최소 1개 연결** (`relatedFeatures`로 매핑)
+6. `relatedFeatures`가 유효한 Feature 키 사용
+7. 의미적 중복 Requirement 없음
+8. document에 FR/NFR/CNST/QAW 섹션 모두 포함하고 양식 준수
+9. 자동 결정된 Measure는 비고에 `[자동결정]` 표시 반영됨
+10. JSON 형식 유효, `mode`/`reqType` 일관
+
 **완료 기준**:
 - 각 Feature에 FR이 1개 이상 연결됨
 - 식별 가능한 NFR/CNST가 모두 등록됨
 - requirements.md 저장됨
 - 자동 결정된 NFR Measure 항목이 사용자에게 보고되어 검토 흐름이 안내됨
+- 비판적 평가 통과
 
 ---
 
