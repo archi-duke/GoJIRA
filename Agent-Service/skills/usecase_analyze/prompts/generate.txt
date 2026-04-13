@@ -78,24 +78,39 @@ Use Case 도출의 기반이 되는 도메인 이해를 먼저 정리합니다.
 - **Basic Flow가 5단계 이상인 경우**, 각 단계가 혹시 별도 Use Case의 입출력으로 쪼갤 수 있는지 재검토하세요.
 
 ### Step 6. Mermaid 다이어그램
-- Context Diagram (graph LR): Step 1의 도메인 경계 + Actor + 외부 시스템
-- Use Case Diagram (graph TB): Step 3의 Actor-Use Case 관계 + include/extend
-- Feature별 Sequence Diagram (sequenceDiagram): Step 5의 Basic Flow를 메시지 시퀀스로
+다이어그램 종류별로 **시작 라인을 정확히** 사용해야 합니다 (잘못 선택하면 렌더 실패).
+
+- Context Diagram → 시작 라인 **`graph LR`**: Step 1의 도메인 경계 + Actor + 외부 시스템
+- Use Case Diagram → 시작 라인 **`graph TB`** (절대 `classDiagram` 쓰지 말 것): Step 3의 Actor-Use Case 관계 + include/extend
+- Feature별 Sequence Diagram → 시작 라인 **`sequenceDiagram`**: Step 5의 Basic Flow를 메시지 시퀀스로
+
+#### Use Case Diagram 작성 예시 (반드시 이 형식 따를 것)
+```mermaid
+graph TB
+    User[사용자]:::actor
+    Admin[관리자]:::actor
+    UC1((로그인))
+    UC2((게임 시작))
+    User --> UC1
+    User --> UC2
+    UC2 -.->|include| UC1
+    classDef actor fill:#fef3c7,stroke:#f59e0b
+```
+
+❌ 절대 금지 — 아래는 모두 렌더 실패:
+- `classDiagram` 으로 Use Case 표현 (Mermaid는 useCaseDiagram 미지원, graph로 그려야 함)
+- `class user[사용자]{{ +game[게임] 시작() }}` (classDiagram에서 `[]` 사용 불가, 메서드명 한글 불가)
+
+#### 중요: 반드시 인라인 Mermaid 코드블록으로 작성
+- 모든 다이어그램은 ```mermaid ... ``` 코드블록 안에 **인라인으로** 작성해야 합니다
+- **외부 이미지 참조 절대 금지**: `![...](...png)`, `![...](...jpg)`, `![...](...svg)` 등 외부 파일 참조 사용하지 말 것
+  - ✗ `![Context Diagram](context-diagram.png)` (외부 파일 — 존재하지 않음)
+  - ✗ `![Sequence](https://example.com/seq.png)` (외부 URL)
+  - ✓ ```mermaid\ngraph LR\n  User --> System\n``` (인라인 코드블록)
+- Markdown 이미지 문법은 다이어그램 표현에 **사용 금지** (PNG/SVG 파일이 실제로 존재하지 않아 깨짐)
 
 #### Mermaid 구문 규칙 (반드시 준수 — 구문 오류 방지)
-- **노드 ID는 영문/숫자/언더스코어만**. 공백/한글/특수문자 금지
-  - ✗ `보안 담당:::actor --> UC4` (ID에 공백)
-  - ✗ `사용자-관리자[관리자] --> UC1` (ID에 하이픈 문제 소지)
-  - ✓ `SecAdmin[보안 담당]:::actor --> UC4`
-  - ✓ `User[사용자] --> UC1`
-- **한글/공백/괄호가 포함된 표시명은 반드시 `[]` 또는 `(())`로 감싸서 label로 지정**
-  - 사각형 노드: `UserId[표시 이름]`
-  - 원형 노드(Use Case): `UC1((Use Case 이름))` — 괄호 안은 label이므로 한글/공백 OK
-- 화살표: `-->`, `---`, 점선은 `-.->`
-- sequenceDiagram의 participant도 동일 규칙: `participant User as 사용자` 또는 `participant SecAdmin as 보안 담당`
-- include/extend 표시: `UC1 -.->|include| UC2`
-- classDef 이름도 영문만: `classDef actor fill:#fef3c7,stroke:#f59e0b`
-- 코드블록은 반드시 ```mermaid 로 시작하고 ``` 로 닫기
+{mermaid_rules}
 
 ## Feature 다양성 가이드 (중요)
 - **하나의 "플레이" 또는 "사용"으로 뭉치지 말 것**. 각 Actor-System 상호작용(사용자가 시스템에게 명시적으로 하는 요청 1개 단위)을 독립 Use Case로 분리

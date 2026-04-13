@@ -13,6 +13,10 @@ from skills.helpers import (
     load_prompt,
 )
 from skills.critique import iterate_generate_critique, trail_summary
+from skills.mermaid_utils import (
+    get_mermaid_rules, validate_document_mermaid, build_mermaid_fix_prompt,
+)
+from core.llm import call_llm
 
 
 _SKILL_DIR = os.path.dirname(__file__)
@@ -105,6 +109,7 @@ async def execute(params: dict, user: str) -> dict:
         existing_feature_count=len(existing_features),
         feat_json=feat_json,
         template=template,
+        mermaid_rules=get_mermaid_rules(),
     )
 
     critique_tpl = load_prompt(_SKILL_DIR, "critique")
@@ -139,6 +144,20 @@ async def execute(params: dict, user: str) -> dict:
 
     features = parsed.get("features") or []
     document = parsed.get("document") or ""
+
+    # 3.5 Mermaid 정적 검증 — 오류 있으면 한번만 자동 수정 시도
+    mermaid_validation = validate_document_mermaid(document)
+    if not mermaid_validation["valid"] and document:
+        try:
+            fixed = await call_llm(build_mermaid_fix_prompt(document, mermaid_validation["errors"]))
+            # 수정 후 재검증
+            recheck = validate_document_mermaid(fixed)
+            # 수정본이 덜 틀리면 채택
+            if len(recheck["errors"]) < len(mermaid_validation["errors"]):
+                document = fixed
+                mermaid_validation = recheck
+        except Exception:
+            pass  # 실패해도 원본 유지
 
     # 4. mode 분기 처리
     def _create_fn(item):
@@ -194,6 +213,9 @@ async def execute(params: dict, user: str) -> dict:
 
     tsum = trail_summary(critique_trail)
     base_msg = _summarize(buckets, len(linked), saved_path, save_error)
+    mermaid_note = ""
+    if mermaid_validation.get("errors"):
+        mermaid_note = f" / ⚠ Mermaid 검증 경고 {len(mermaid_validation['errors'])}건"
     return {
         "projectCode": code,
         "created": buckets["created"],
@@ -205,7 +227,8 @@ async def execute(params: dict, user: str) -> dict:
         "documentSaved": saved_path,
         "saveError": save_error,
         "critiqueTrail": critique_trail,
-        "message": base_msg + (f" / {tsum}" if tsum else ""),
+        "mermaidValidation": mermaid_validation,
+        "message": base_msg + (f" / {tsum}" if tsum else "") + mermaid_note,
     }
 
 

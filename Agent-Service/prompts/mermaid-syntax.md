@@ -39,3 +39,38 @@ Order_A --> Payment
 ## 코드블록
 - 반드시 \`\`\`mermaid 로 열고 \`\`\` 로 닫기
 - 다이어그램마다 별도 코드블록 사용
+
+## 다이어그램 종류별 시작 라인 (반드시 정확히 사용)
+
+| 용도 | 시작 라인 | 절대 사용 금지 |
+| --- | --- | --- |
+| Context Diagram | `graph LR` | classDiagram, erDiagram |
+| **Use Case Diagram** | **`graph TB`** | **classDiagram (절대 금지)**, useCaseDiagram(존재하지 않음) |
+| Sequence Diagram | `sequenceDiagram` | graph |
+| ER Diagram | `erDiagram` | classDiagram |
+
+### Use Case Diagram 템플릿 (반드시 graph TB 사용 — classDiagram 금지)
+```
+graph TB
+    User[사용자]:::actor
+    Admin[관리자]:::actor
+    UC1((로그인))
+    UC2((게임 시작))
+    User --> UC1
+    User --> UC2
+    Admin --> UC1
+    UC2 -.->|include| UC1
+    classDef actor fill:#fef3c7,stroke:#f59e0b
+```
+
+### 흔한 치명적 오류 (절대 금지)
+```
+✗ classDiagram                              (Use Case에 classDiagram 사용 금지 — 렌더 실패)
+✗ class user[사용자]{}                      (classDiagram에서 [] 사용 불가)
+✗ class user[사용자]{ +game[게임] 시작() }  (메서드명에 한글/공백/대괄호 금지)
+```
+
+## classDiagram (꼭 필요할 때만 — Use Case 표현용 아님)
+- label에 한글/공백 시 반드시 **큰따옴표**: `class User["사용자"] { }`
+- `[]` 대괄호는 classDiagram에서 사용 불가
+- 메서드/속성 이름도 영문/숫자만 — 한글 금지

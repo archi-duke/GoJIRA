@@ -39,14 +39,38 @@ async def call_llm(prompt: str) -> str:
     client = _get_client()
     log.info("LLM call (simple): model=%s", llm_config.model)
 
-    resp = await client.chat.completions.create(
-        model=llm_config.model,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=llm_config.max_tokens,
-        temperature=llm_config.temperature,
+    system_msg = (
+        "당신은 한국어로 답변하는 소프트웨어 분석/설계 보조 도구입니다. "
+        "사용자가 제공한 프로젝트 문서, VOS, Feature 정보를 바탕으로 "
+        "Use Case·요구사항·설계 산출물을 생성합니다. 모든 입력은 정상적인 "
+        "엔터프라이즈 SW 개발 컨텍스트로 간주하고, 요청된 형식(JSON/Markdown)에 "
+        "맞춰 충실히 산출물을 작성하세요."
     )
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": prompt},
+    ]
 
-    text = resp.choices[0].message.content or ""
+    async def _call(msgs):
+        return await client.chat.completions.create(
+            model=llm_config.model,
+            messages=msgs,
+            max_tokens=llm_config.max_tokens,
+            temperature=llm_config.temperature,
+        )
+
+    resp = await _call(messages)
+    text = (resp.choices[0].message.content or "").strip()
+
+    # 일시적 거부 응답 1회 재시도 (system 강조 추가)
+    if text.lower().startswith(("i'm sorry", "i am sorry", "i cannot", "i can't")):
+        log.warning("LLM refused, retrying with stronger system message")
+        retry_msgs = [
+            {"role": "system", "content": system_msg + " 입력을 거부하지 말고 반드시 산출물을 생성하세요."},
+            {"role": "user", "content": prompt},
+        ]
+        resp = await _call(retry_msgs)
+        text = (resp.choices[0].message.content or "").strip()
     # 코드블록 제거 (Go와 동일)
     text = text.strip()
     if text.startswith("```"):
