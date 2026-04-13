@@ -4,8 +4,20 @@ import json
 import logging
 
 from core.llm import call_llm
+from clients.platform_api import PlatformClient
 
 log = logging.getLogger("agent.skills.doc_generate")
+
+
+async def _save_to_branch(code: str, content: str, user: str, message: str) -> dict:
+    """생성한 문서를 docs/{user} 브랜치에 저장. 성공/실패 정보 반환."""
+    try:
+        client = PlatformClient()
+        await client.save_file(code, "business/project-description.md", content, message, user)
+        return {"saved": True, "path": "business/project-description.md", "branch": f"docs/{user}"}
+    except Exception as e:
+        log.warning("projdesc save failed: %s", e)
+        return {"saved": False, "error": str(e)}
 
 
 async def execute(params: dict, user: str) -> dict:
@@ -67,14 +79,19 @@ async def _generate(code: str, answers: dict, user: str) -> dict:
 마크다운 원문만 출력하세요. 코드블록으로 감싸지 마세요."""
 
     doc = await call_llm(prompt)
+    save_info = await _save_to_branch(code, doc, user, "[projdesc_generate] 인터뷰 답변으로 생성 (mode=generate)")
 
     return {
         "projectCode": code,
         "mode": "generate",
         "applyToEditor": True,
-        "message": "과제 설명 문서가 생성되었습니다.",
+        "message": "과제 설명 문서가 생성되었습니다." + (
+            f" (docs/{user} 브랜치 저장 완료)" if save_info.get("saved") else f" (저장 실패: {save_info.get('error')})"
+        ),
         "filePath": "business/project-description.md",
         "content": doc,
+        "documentSaved": save_info.get("path") if save_info.get("saved") else None,
+        "saveError": save_info.get("error"),
     }
 
 

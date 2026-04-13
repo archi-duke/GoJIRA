@@ -90,30 +90,22 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             setEditMode(false);
             refreshDocState();
 
-            // 인터뷰를 통해 과제 설명을 완성한 경우, 원래 요청 문서(use-cases/requirements)로 자동 이어감
+            // 인터뷰를 통해 과제 설명을 완성한 경우, 원래 요청 문서로 자동 이어감
             const pending = pendingAIFileRef.current;
             pendingAIFileRef.current = null;
             if (pending && pending !== filePath && AI_ENABLED_FILES[pending]) {
-              const ok2 = await modalConfirm(
-                `과제 설명 저장 완료.\n${pending === 'business/use-cases.md' ? 'Use Case/Feature' : 'Requirement'} 생성을 이어서 진행할까요?`
-              );
-              if (ok2) {
-                // 대상 파일로 이동 후 AI 생성 트리거
+              // 채팅 창이 열려있으면 그 안에서 이어감 (SSE 진행상황 노출)
+              if (chatWinRef.current && !chatWinRef.current.closed) {
                 try {
-                  const branch = `docs/${user}`;
-                  const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(pending)}&ref=${encodeURIComponent(branch)}`);
-                  if (r.ok) {
-                    const d = await r.json();
-                    const text = d.content ? decodeBase64(d.content) : '';
-                    setSelectedFile(pending);
-                    setContent(text);
-                    setOriginal(text);
-                    setEditMode(true);
-                    setSelectedMainOnly(false);
-                    // 편집 모드 전환 후 약간의 딜레이를 두고 생성 트리거
-                    setTimeout(() => { handleAIGenerateRef.current?.(); }, 400);
-                  }
+                  chatWinRef.current.postMessage(
+                    { type: 'gojira-continue', target: pending, projectCode },
+                    '*'
+                  );
+                  chatWinRef.current.focus();
                 } catch {}
+                modalAlert('과제 설명 저장 완료. 채팅 창에서 이어진 작업을 확인하세요.');
+              } else {
+                modalAlert('저장 완료');
               }
             } else {
               modalAlert('저장 완료');
@@ -235,11 +227,24 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       return;
     }
 
-    const promptMsg = skill === 'projdesc_generate'
-      ? 'AI가 문서를 분석하여 보강합니다.\n진행하시겠습니까?'
-      : skill === 'usecase_analyze'
-        ? 'VOS와 과제 설명을 분석하여 Use Case/Feature를 도출하고 문서를 생성합니다.\n생성 중에는 편집이 비활성화됩니다. 진행하시겠습니까?'
-        : 'Feature와 Use Case를 분석하여 FR/NFR/CNST Requirement를 도출하고 문서를 생성합니다.\n생성 중에는 편집이 비활성화됩니다. 진행하시겠습니까?';
+    // 워크플로우 스킬은 채팅 창에서 진행 (SSE 스트리밍으로 작업 과정 노출)
+    if (skill === 'usecase_analyze' || skill === 'requirement_refine') {
+      const skillLabel = skill === 'usecase_analyze' ? 'Use Case/Feature 분석' : 'Requirement 정제';
+      if (!await modalConfirm(`${skillLabel}을(를) 채팅 창에서 진행합니다.\n진행 상황은 채팅 창에서 확인할 수 있습니다.`)) return;
+      const docLabel = selectedFile === 'business/use-cases.md' ? '유즈케이스 문서'
+        : selectedFile === 'business/requirements.md' ? '요구사양서' : selectedFile;
+      const autoMsg = `${projectCode} 과제의 ${docLabel}를 작성해줘.`;
+      const chatW = 480, chatH = 720;
+      const left = window.screenX - chatW - 10;
+      const top = window.screenY;
+      chatWinRef.current = window.open(
+        `http://localhost:3001/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(autoMsg)}`,
+        'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
+      );
+      return;
+    }
+
+    const promptMsg = 'AI가 문서를 분석하여 보강합니다.\n진행하시겠습니까?';
     if (!await modalConfirm(promptMsg)) return;
 
     // 생성 시작 — 편집 모드 해제(잠금)

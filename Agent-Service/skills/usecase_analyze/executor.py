@@ -78,13 +78,33 @@ async def execute(params: dict, user: str) -> dict:
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
         {"key": 1, "summary": 1, "description": 1, "client": 1, "_id": 0},
     ))
+    from core.progress import emit_progress
+    prereqs_ran = []
     if not vos_list:
-        return {
-            "projectCode": code,
-            "message": "등록된 이해관계자 요구사항이 없습니다. VOS 수집을 먼저 진행해야 합니다.",
-            "suggestSkill": "vos_collect",
-            "created": [], "reused": [], "modified": [], "markedForDeletion": [],
-        }
+        # 선행 위임: VOS가 없으면 vos_collect를 먼저 자동 실행
+        await emit_progress("usecase_analyze", "VOS가 없어 vos_collect 선행 실행")
+        from skills.vos_collect.executor import execute as vos_collect_execute
+        vos_result = await vos_collect_execute(params, user)
+        prereqs_ran.append({"skill": "vos_collect", "result": vos_result})
+        # 더 상위 선행이 막혔으면 (예: projdesc 부족) 그대로 위로 전파
+        if vos_result.get("suggestSkill"):
+            return {
+                **vos_result,
+                "prerequisitesRan": prereqs_ran,
+                "blockedAt": "vos_collect",
+            }
+        # vos_collect 성공 — VOS 목록 재조회
+        vos_list = list(issues().find(
+            {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
+            {"key": 1, "summary": 1, "description": 1, "client": 1, "_id": 0},
+        ))
+        if not vos_list:
+            return {
+                "projectCode": code,
+                "message": "VOS 수집 후에도 등록된 이해관계자 요구사항이 없습니다.",
+                "prerequisitesRan": prereqs_ran,
+                "created": [], "reused": [], "modified": [], "markedForDeletion": [],
+            }
 
     existing_features = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Feature"},
@@ -95,6 +115,7 @@ async def execute(params: dict, user: str) -> dict:
     existing_feature_keys = {f["key"] for f in existing_features}
     valid_vos_keys = {v["key"] for v in vos_list}
 
+    await emit_progress("usecase_analyze", "Use Case/Feature 분석 시작")
     # 3. 생성 + 비판적 평가 루프 (프롬프트는 prompts/*.txt로 분리)
     template = _load_template()
     desc_trunc = desc[:5000]
@@ -213,6 +234,7 @@ async def execute(params: dict, user: str) -> dict:
 
     tsum = trail_summary(critique_trail)
     base_msg = _summarize(buckets, len(linked), saved_path, save_error)
+    await emit_progress("usecase_analyze", f"Use Case 분석 완료 — {base_msg}")
     mermaid_note = ""
     if mermaid_validation.get("errors"):
         mermaid_note = f" / ⚠ Mermaid 검증 경고 {len(mermaid_validation['errors'])}건"
@@ -228,6 +250,7 @@ async def execute(params: dict, user: str) -> dict:
         "saveError": save_error,
         "critiqueTrail": critique_trail,
         "mermaidValidation": mermaid_validation,
+        "prerequisitesRan": prereqs_ran,
         "message": base_msg + (f" / {tsum}" if tsum else "") + mermaid_note,
     }
 

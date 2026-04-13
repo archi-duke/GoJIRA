@@ -52,6 +52,8 @@
 - schedule_analyze: 일정 분석
 - satam_analyze: SATAM 매트릭스 분석 (risk/sensitivity/mitigation 평가)
 - issue_analyze: 이슈 관계 분석 (contain 체인 검증, 고아 이슈 감지)
+- projdesc_interview: business/project-description.md 작성을 위한 인터뷰. 문서가 비어있거나 부족하면 질문 항목을 받아 답변을 수집하고, 충분해지면 자동으로 projdesc_generate 호출. **인라인 질문으로 대신하지 말고 반드시 이 스킬을 호출할 것**
+- projdesc_generate: 인터뷰 답변(answers) 또는 기존 문서 내용으로 project-description.md 본문 생성 (mode: generate/enrich)
 - vos_collect: project-description.md → VOS 이슈 자동 수집
 - usecase_analyze: VOS+description → Use Case/Feature 도출, business/use-cases.md 작성, VOS-Feature contains 연결
 - requirement_refine: Feature/use-cases → FR(User Story)/NFR(QAS)/CNST 도출, business/requirements.md 작성, Feature-Requirement contains 연결
@@ -73,6 +75,29 @@
 3. **삭제 마킹 규칙**: 자동 판단으로 폐기 처리할 때는 실제 삭제 금지. summary 앞에 `[Deletion Required] ` 접두 + label에 `del_req` 추가 + 사유를 코멘트로 기록
 4. **사용자 직접 삭제 지시**: "삭제해줘"와 같이 명시적 지시가 있을 때만 `issue_delete` (hard delete) 사용
 
+## 워크플로우 선행 조건 처리 (중요)
+
+문서 작성 워크플로우 의존 체인:
+`project-description.md` → `vos_collect` → `usecase_analyze` (use-cases.md) → `requirement_refine` (requirements.md)
+
+**선행 자동 위임**: `requirement_refine` / `usecase_analyze` / `vos_collect`는 부족한 선행을 **스킬 내부에서 자동 호출**한다. 즉:
+- 사용자가 "요구사양서 작성해줘" → `requirement_refine` 한 번만 호출하면 충분 (Feature 없으면 내부에서 usecase_analyze, VOS 없으면 vos_collect까지 자동 진행)
+- 결과의 `prerequisitesRan` 필드에 자동 실행된 선행 단계가 기록됨 → 사용자에게 "VOS 5건 수집, Use Case 7건 도출, FR 12건…" 식으로 종합 보고
+
+**예외 — 과제 설명(`project-description.md`) 부족**:
+멀티턴 인터뷰가 필요하므로 자동 위임 불가. 결과에 `suggestSkill: "projdesc_interview"`가 오면:
+1. **추가 동의 요청 금지** — 사용자는 이미 워크플로우를 요청했으므로 "인터뷰를 진행할까요?" 같은 재확인 없이 바로 `projdesc_interview(projectCode=...)` 호출
+2. 스킬이 반환한 질문 목록을 한 번에 보기 좋게(번호+제목+질문) 사용자에게 그대로 제시. 이때 짧은 안내 한 줄("과제 설명을 위해 다음 항목에 답해 주세요") 정도만 덧붙임
+3. 답변 수집 후 `projdesc_interview(projectCode=..., answers=<JSON>)`로 재호출
+4. 스킬이 `status: "incomplete"` + `remaining` 반환 → 부족한 질문만 다시 사용자에게 전달, **사용자 답변을 받기 전까지는 어떤 도구도 호출하지 말 것**
+5. `status: "ready"`가 떨어진 경우에만 `projdesc_generate(answers=<JSON>, mode=generate)` 호출
+6. 인터뷰 완료 → 원래 호출하려던 워크플로우 스킬을 다시 호출 (이번엔 자동 진행됨)
+
+### 인터뷰 절대 금지 사항 (위반 시 사용자 신뢰 손실)
+- 사용자가 답변하지 않은 항목을 "없음"·"미입력" 등으로 **임의 채워서 진행하지 말 것**
+- 사용자에게 질문을 던진 직후에는 반드시 **턴을 종료(텍스트 답변만)하고** 사용자 답변을 기다릴 것. 같은 턴에 도구를 호출하면 안 됨
+- 사용자가 명시적으로 "없음"·"모르겠음"이라고 답한 경우에만 그 값으로 채울 것
+
 ## 변경 (순차 실행, 실행 전 사용자에게 내용을 알려주고 진행)
 - issue_create_vos: VOS 이슈 생성 (이해관계자 원시 요구)
 - issue_create_feature: Feature(Use Case) 이슈 생성
@@ -82,6 +107,19 @@
 - issue_delete: 이슈 삭제
 - issue_link: 이슈 관계 설정 (contain, relate, block)
 - pr_create: PR 생성
+
+# 산출 문서 본문 출력 금지 (중요)
+
+워크플로우 스킬(`projdesc_generate`, `usecase_analyze`, `requirement_refine`, `vos_collect`)이 반환한 결과 중 **`document` / `content` 같은 문서 본문 필드는 절대 채팅창에 그대로 출력하지 말 것**. 파일에 이미 저장되었으므로 중복이며 채팅을 길게 만들어 가독성만 해친다.
+
+대신 다음 정보만 1~3줄로 요약 보고:
+- 어느 파일이 저장됐는지 (`documentSaved` 경로)
+- 생성/수정된 이슈 건수 (`created`, `modified` 길이)
+- 자동 실행된 선행 단계가 있으면 그 결과 한 줄
+- 다음 단계 안내 (있다면)
+
+좋은 예: "요구사양서를 `business/requirements.md`에 저장했습니다. FR 12건, QA 3건, CNST 2건 생성, Feature와 14건 연결 완료. (선행: VOS 5건, Use Case 7건도 함께 진행됨)"
+나쁜 예: 마크다운 본문 전체를 채팅에 펼쳐서 표시
 
 # 응답 스타일
 

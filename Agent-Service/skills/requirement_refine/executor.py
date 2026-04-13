@@ -80,13 +80,37 @@ async def execute(params: dict, user: str) -> dict:
          "actor": 1, "precondition": 1, "basicflow": 1,
          "alternativeflow": 1, "exceptionflow": 1, "postcondition": 1, "_id": 0},
     ))
+    from core.progress import emit_progress
+    prereqs_ran = []
     if not feat_list:
-        return {
-            "projectCode": code,
-            "message": "등록된 Feature가 없습니다. Use Case/Feature 분석을 먼저 진행해야 합니다.",
-            "suggestSkill": "usecase_analyze",
-            "created": [], "reused": [], "modified": [], "markedForDeletion": [],
-        }
+        # 선행 위임: Feature 없으면 usecase_analyze를 먼저 자동 실행 (이는 다시 vos_collect로 위임 가능)
+        await emit_progress("requirement_refine", "Feature가 없어 usecase_analyze 선행 실행")
+        from skills.usecase_analyze.executor import execute as usecase_analyze_execute
+        uc_result = await usecase_analyze_execute(params, user)
+        prereqs_ran.append({"skill": "usecase_analyze", "result": uc_result})
+        # 더 상위 선행이 막혔으면 그대로 위로 전파 (예: projdesc_interview 필요)
+        if uc_result.get("suggestSkill"):
+            return {
+                **uc_result,
+                "prerequisitesRan": (uc_result.get("prerequisitesRan") or []) + prereqs_ran,
+                "blockedAt": uc_result.get("blockedAt") or "usecase_analyze",
+            }
+        # 위임 결과 → Feature 목록 재조회
+        feat_list = list(issues().find(
+            {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Feature"},
+            {"key": 1, "summary": 1, "description": 1,
+             "actor": 1, "precondition": 1, "basicflow": 1,
+             "alternativeflow": 1, "exceptionflow": 1, "postcondition": 1, "_id": 0},
+        ))
+        if not feat_list:
+            return {
+                "projectCode": code,
+                "message": "Use Case 분석 후에도 Feature가 도출되지 않았습니다.",
+                "prerequisitesRan": prereqs_ran,
+                "created": [], "reused": [], "modified": [], "markedForDeletion": [],
+            }
+        # 하위 위임에서 prereqs_ran을 흡수
+        prereqs_ran = (uc_result.get("prerequisitesRan") or []) + prereqs_ran
 
     vos_list = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
@@ -107,6 +131,7 @@ async def execute(params: dict, user: str) -> dict:
     vos_json = json.dumps(vos_list, ensure_ascii=False, indent=2)
     existing_req_json = json.dumps(existing_reqs, ensure_ascii=False, indent=2)
 
+    await emit_progress("requirement_refine", "Requirement 정제 시작")
     generate_prompt = load_prompt(_SKILL_DIR, "generate").format(
         code=code,
         desc_trunc=desc_trunc,
@@ -228,6 +253,7 @@ async def execute(params: dict, user: str) -> dict:
         f"수정 {len(buckets['modified'])}, 삭제마킹 {len(buckets['markedForDeletion'])}",
         f"Feature-Requirement 연결 {len(linked)}건",
     ]
+    await emit_progress("requirement_refine", f"Requirement 정제 완료 — {msg_parts[0]}")
     if saved_path:
         msg_parts.append("requirements.md 저장 완료")
     elif save_error:
@@ -255,5 +281,6 @@ async def execute(params: dict, user: str) -> dict:
         "autoMeasureItems": auto_measure_items,
         "needsReview": bool(auto_measure_items) or bool(buckets["markedForDeletion"]),
         "critiqueTrail": critique_trail,
+        "prerequisitesRan": prereqs_ran,
         "message": " / ".join(msg_parts),
     }

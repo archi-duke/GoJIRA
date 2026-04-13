@@ -39,6 +39,9 @@ async def execute(params: dict, user: str) -> dict:
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
 
+    from core.progress import emit_progress
+    await emit_progress("vos_collect", "VOS 수집 시작 — 과제 설명 분석 중")
+
     # 2. 기존 VOS 이슈 조회 (LLM 컨텍스트)
     existing_vos = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
@@ -115,6 +118,10 @@ async def execute(params: dict, user: str) -> dict:
 
     tsum = trail_summary(critique_trail)
     msg = _summarize(buckets) + (f" — {tsum}" if tsum else "")
+    await emit_progress("vos_collect", f"VOS 수집 완료 — {msg}", **{
+        "createdCount": len(buckets["created"]),
+        "reusedCount": len(buckets["reused"]),
+    })
     return {
         "projectCode": code,
         "existingCount": len(existing_vos),

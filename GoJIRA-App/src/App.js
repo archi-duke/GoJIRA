@@ -84,7 +84,8 @@ function App() {
     const autoMessage = urlParams.get('autoMessage') || '';
     const newSession = urlParams.get('newSession') === '1';
     const interviewPrompt = urlParams.get('interview') || '';
-    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} interviewPrompt={interviewPrompt} />;
+    const continueTo = urlParams.get('continueTo') || '';
+    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} interviewPrompt={interviewPrompt} continueTo={continueTo} />;
   }
 
   let content;

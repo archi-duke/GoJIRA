@@ -7,7 +7,7 @@ import './AgentChat.css';
 const API = config.GOJIRA_API || config.API_BASE;
 const STREAM_API = config.AGENT_API || API;
 
-export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession, interviewPrompt }) {
+export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession, interviewPrompt, continueTo }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -91,6 +91,30 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     }
   }, [autoMessage]); // eslint-disable-line
 
+  // 외부(opener=DocEditor)에서 후속 작업 지시 — 인터뷰 저장 후 워크플로우 이어가기
+  useEffect(() => {
+    function onContinue(e) {
+      if (e.data?.type !== 'gojira-continue') return;
+      const { target, projectCode } = e.data;
+      if (!target) return;
+      const TARGET_LABEL = {
+        'business/use-cases.md': '유즈케이스 문서',
+        'business/requirements.md': '요구사양서',
+      };
+      const label = TARGET_LABEL[target] || target;
+      const msg = `이어서 ${projectCode || ''} 과제의 ${label}를 작성해줘.`;
+      setTimeout(() => {
+        setInput(msg);
+        setTimeout(() => {
+          const btn = document.querySelector('.ac-send');
+          if (btn) btn.click();
+        }, 100);
+      }, 300);
+    }
+    window.addEventListener('message', onContinue);
+    return () => window.removeEventListener('message', onContinue);
+  }, []);
+
   async function handleSend() {
     const text = input.trim();
     if (!text || loading) return;
@@ -131,6 +155,9 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           break;
         case 'tool_call':
           addStep({ type: 'tool_call', data, ts });
+          break;
+        case 'progress':
+          addStep({ type: 'progress', data, ts });
           break;
         case 'tool_result':
           addStep({ type: 'tool_result', data, ts });
@@ -289,18 +316,27 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     const toolCount = steps.filter(s => s.type === 'tool_result').length;
     const isRunning = loading && !messages.some(m => m._streaming) && idx === messages.findLastIndex(m => m.role === 'process');
 
-    // 일반 사용자: 스피너 + "작업 중..."만 표시
+    // 일반 사용자: 스피너 + 진행 메시지(progress 단계만) 표시
     if (!isMaster) {
-      if (isRunning) return (
+      const progressSteps = steps.filter(s => s.type === 'progress');
+      if (!isRunning && progressSteps.length === 0) return null;
+      return (
         <div className="ac-process">
           <div className="ac-proc-header">
-            <span className="ac-proc-spinner" />
-            <span className="ac-proc-label">작업 중...</span>
+            {isRunning && <span className="ac-proc-spinner" />}
+            <span className="ac-proc-label">{isRunning ? '작업 중...' : '완료'}</span>
           </div>
+          {progressSteps.length > 0 && (
+            <div className="ac-proc-body">
+              {progressSteps.map((s, i) => (
+                <div key={i} className="ac-ps-line">
+                  <span className="ac-ps-text">• {s.data.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
-      // 완료 후에도 표시하지 않음
-      return null;
     }
 
     // Master: 전체 디버그 뷰
@@ -329,6 +365,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                       {{ thought: 'Thought', action: 'Action', observation: 'Observation', answer: 'Answer' }[step.data.step] || 'Thought'}
                     </span>
                     <span className="ac-ps-text">{step.data.content}</span>
+                  </div>
+                )}
+                {step.type === 'progress' && (
+                  <div className="ac-ps-line">
+                    <span className="ac-ps-tag ac-tag-action">PROG</span>
+                    <span className="ac-ps-text">
+                      <strong>{step.data.stage}</strong> — {step.data.message}
+                    </span>
+                    <span className="ac-ps-ts">{step.ts}</span>
                   </div>
                 )}
                 {step.type === 'tool_call' && (
