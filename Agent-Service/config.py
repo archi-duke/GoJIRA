@@ -36,16 +36,24 @@ class Settings(BaseSettings):
     # LLM — API 키는 llm.json 의 apiKeyEnv 로 지정한 환경변수에서 읽음 (기본: OPENAI_API_KEY)
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    litellm_master_key: str = Field(default="sk-gojira-local", validation_alias="LITELLM_MASTER_KEY")
     llm_config_path: str = Field(default="", validation_alias="GOJIRA_LLM_CONFIG")
     # llm.json registry 에서 활성 프로바이더 선택 (비어있으면 registry 의 active 값 사용)
     llm_active: str = Field(default="", validation_alias="GOJIRA_LLM_ACTIVE")
 
     def get_llm_api_key(self, env_name: str = "") -> str:
-        """llm.json 의 api_key_env 에 지정된 환경변수 값을 반환.
-        지정이 없으면 OPENAI_API_KEY, 그것도 없고 env_name 이 'GEMINI_API_KEY'면 GEMINI_API_KEY 반환."""
+        """llm.json 의 apiKeyEnv 에 지정된 환경변수 값을 반환.
+
+        우선순위: settings 필드(.env 로드분) > os.environ. pydantic-settings 는 .env 를
+        os.environ 에 주입하지 않으므로 settings 필드 먼저 확인해야 함.
+        """
         if env_name:
+            field = env_name.lower()  # "GEMINI_API_KEY" → "gemini_api_key"
+            val = getattr(self, field, "")
+            if val:
+                return val
             return os.environ.get(env_name, "")
-        return self.openai_api_key
+        return self.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
 
     # 스킬
     skills_dir: str = Field(default="", validation_alias="GOJIRA_SKILLS_DIR")

@@ -20,24 +20,46 @@ log = logging.getLogger("agent.router")
 router = APIRouter(prefix="/api/v2/Agent", tags=["Agent"])
 
 # 시스템 프롬프트 로드
-_system_prompt = ""
+# system prompt 캐시 — thinking / non-thinking 2가지를 메모이즈
+_system_prompt_cache: Dict[str, str] = {}
+
+
+def _read_file(path: str) -> str:
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
 
 
 def _load_system_prompt() -> str:
-    global _system_prompt
-    if _system_prompt:
-        return _system_prompt
-    paths = [
-        os.path.join(os.path.dirname(__file__), "..", "prompts", "system.txt"),
-        os.path.join(os.path.dirname(__file__), "..", "..", "GoJIRA-API", "prompts", "agent-system.txt"),
-    ]
-    for p in paths:
-        if os.path.isfile(p):
-            with open(p, "r", encoding="utf-8") as f:
-                _system_prompt = f.read().strip()
-                return _system_prompt
-    _system_prompt = "당신은 GoJIRA 프로젝트 관리 시스템의 AI 에이전트입니다."
-    return _system_prompt
+    """현재 활성 모델이 thinking 계열이면 ReACT addon 생략, 아니면 부착."""
+    from core.llm import is_thinking_model
+
+    key = "thinking" if is_thinking_model() else "react"
+    if key in _system_prompt_cache:
+        return _system_prompt_cache[key]
+
+    here = os.path.dirname(__file__)
+    base = (
+        _read_file(os.path.join(here, "..", "prompts", "system.txt"))
+        or _read_file(os.path.join(here, "..", "..", "GoJIRA-API", "prompts", "agent-system.txt"))
+        or "당신은 GoJIRA 프로젝트 관리 시스템의 AI 에이전트입니다."
+    )
+    if key == "thinking":
+        _system_prompt_cache[key] = base
+    else:
+        react = _read_file(os.path.join(here, "..", "prompts", "system-react.txt"))
+        # ReACT addon 을 base 맨 앞에 삽입 (기존 system.txt 순서 보존)
+        first_line_end = base.find("\n")
+        first_line = base[:first_line_end] if first_line_end > 0 else base
+        rest = base[first_line_end + 1:] if first_line_end > 0 else ""
+        _system_prompt_cache[key] = f"{first_line}\n\n{react}\n\n{rest}".strip()
+    return _system_prompt_cache[key]
+
+
+def invalidate_system_prompt_cache():
+    """LLM 전환 시 system prompt 재빌드 필요."""
+    _system_prompt_cache.clear()
 
 
 def _build_messages(session: dict) -> List[Dict]:
@@ -282,6 +304,7 @@ async def switch_llm(request: Request):
     _config_mod.llm_config = new_cfg
     _llm_mod.llm_config = new_cfg
     _llm_mod._client = None
+    invalidate_system_prompt_cache()    # thinking 모델 전환 시 ReACT addon 재계산
 
     log.info("LLM 전환: provider=%s, model=%s", target, new_cfg.model)
     return {

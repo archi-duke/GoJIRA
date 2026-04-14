@@ -12,6 +12,23 @@ log = logging.getLogger("agent.llm")
 _client: Optional[AsyncOpenAI] = None
 
 
+# thinking 계열 모델 식별 — 내부 추론을 수행하므로 ReACT 2-pass 불필요
+_THINKING_MODEL_PREFIXES = (
+    # OpenAI o-시리즈 (o1/o3/o4/o5 ...)
+    "o1", "o3", "o4", "o5",
+    # Google Gemini thinking 모델 (2.5 이상 시리즈는 기본 thinking)
+    "gemini-2.5", "gemini-3",
+)
+
+
+def is_thinking_model(model: str = "") -> bool:
+    """현재 활성 모델이 내부 추론(thinking) 을 수행하는 모델인지 판정."""
+    m = (model or (llm_config.model if llm_config else "")).lower().strip()
+    if not m:
+        return False
+    return any(m.startswith(p) for p in _THINKING_MODEL_PREFIXES)
+
+
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:

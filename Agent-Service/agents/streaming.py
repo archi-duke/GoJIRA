@@ -43,16 +43,30 @@ async def agent_loop_stream(
             break
 
     # 워크플로우 상태 주입 (Belief State)
-    # 사용자 메시지에서 프로젝트 코드가 감지되면, 현재 진행 상태 요약을 system 메시지로 주입.
-    # LLM 이 '계속' 같은 모호한 입력에서 다음 단계 스킬을 정확히 선택하도록 돕는다.
+    # 대화 이력 전체를 뒤에서부터 훑어 프로젝트 코드를 찾는다. 사용자가 "계속" 처럼
+    # 프로젝트 코드를 생략한 입력을 주어도 이전 턴에서 언급한 코드를 재사용.
     # design-agent.md §10, design-workflow.md §10 참조.
     try:
         from core.workflow_state import detect_project_code, get_workflow_state, format_state_for_llm
-        detected_code = detect_project_code(user_message)
+        detected_code = None
+        for m in reversed(messages):
+            role = m.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            content = m.get("content") or ""
+            if not isinstance(content, str):
+                continue
+            detected_code = detect_project_code(content)
+            if detected_code:
+                break
         if detected_code:
             state = get_workflow_state(detected_code)
             state_text = format_state_for_llm(state)
-            # 기존 system 메시지 뒤에 덧붙임 (맨 앞에 새 system 추가 시 기존 톤/규칙과 순서 어긋날 수 있음)
+            log.info("워크플로우 상태 주입: code=%s next=%s vos=%d feat=%d req=%d drv=%d",
+                     detected_code, state.get("nextRecommendedStep"),
+                     state.get("vosCount", 0), state.get("featureCount", 0),
+                     state.get("requirementCount", 0), state.get("driverCount", 0))
+            # 기존 system 메시지 뒤에 덧붙임
             injected = False
             for i, m in enumerate(messages):
                 if m.get("role") == "system":
@@ -61,44 +75,50 @@ async def agent_loop_stream(
                     break
             if not injected:
                 messages.insert(0, {"role": "system", "content": state_text})
-    except Exception:
-        # 상태 조회 실패는 치명적이지 않음 — 조용히 무시하고 기존 흐름 유지
-        pass
+        else:
+            log.info("워크플로우 상태 주입 스킵: 프로젝트 코드 미감지")
+    except Exception as e:
+        log.warning("워크플로우 상태 주입 실패: %s", e)
 
     # 1차 스킬 선별 (키워드 + description 매칭)
     tools = registry.select_tools(user_message)
 
+    # thinking 계열 모델은 내부 추론을 수행하므로 별도 Pass 1 (명시적 ReACT 외재화) 불필요.
+    # Pass 2 (tool_choice="auto") 단일 호출로 충분.
+    from core.llm import is_thinking_model
+    thinking_model = is_thinking_model()
+
     for turn in range(max_turns):
         yield _sse("thinking", {"turn": turn, "message": "추론 중..."})
 
-        # ── Pass 1: 추론 (tool_choice="none") ──
-        # LLM에게 도구 호출 없이 사고 과정만 출력하도록 요청
-        try:
-            think_result = await call_llm_with_tools(messages, tools, tool_choice="none")
-            thought = think_result["message"].content or ""
-        except Exception:
-            thought = ""
+        thought = ""
+        if not thinking_model:
+            # ── Pass 1: 추론 (tool_choice="none") ── (비-thinking 모델 전용)
+            try:
+                think_result = await call_llm_with_tools(messages, tools, tool_choice="none")
+                thought = think_result["message"].content or ""
+            except Exception:
+                thought = ""
 
-        if thought:
-            # ReACT 마커별로 분리 전송 (Thought / Action / Answer)
-            for evt in _parse_reasoning_steps(thought, turn):
-                yield evt
+            if thought:
+                # ReACT 마커별로 분리 전송 (Thought / Action / Answer)
+                for evt in _parse_reasoning_steps(thought, turn):
+                    yield evt
 
-            # Pass 1 추론 결과로 스킬 재선별 (추론에서 언급된 스킬 반영)
-            tools = registry.select_tools(user_message, extra_context=thought)
+                # Pass 1 추론 결과로 스킬 재선별 (추론에서 언급된 스킬 반영)
+                tools = registry.select_tools(user_message, extra_context=thought)
 
-            # 추론이 사용자에게 질문하는 형태라면 Pass 2 건너뛰고 텍스트 답변으로 종료
-            # (LLM이 질문 직후 같은 턴에 도구를 호출하여 사용자 답변을 무시하는 문제 방지)
-            if _is_user_question(thought):
-                final_content = _strip_reasoning(thought)
-                for chunk in _split_chunks(final_content, 80):
-                    yield _sse("content", {"text": chunk})
-                yield _sse("done", {"reply": final_content, "actions": all_actions})
-                return
+                # 추론이 사용자에게 질문하는 형태라면 Pass 2 건너뛰고 텍스트 답변으로 종료
+                if _is_user_question(thought):
+                    final_content = _strip_reasoning(thought)
+                    for chunk in _split_chunks(final_content, 80):
+                        yield _sse("content", {"text": chunk})
+                    yield _sse("done", {"reply": final_content, "actions": all_actions})
+                    return
 
-            # 추론 내용을 대화에 추가 (도구 호출 판단에 활용)
-            messages.append({"role": "assistant", "content": thought})
-            messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구가 있으면 호출하세요. 더 이상 도구가 필요 없다면 최종 답변을 제공하세요."})
+                # 추론 내용을 대화에 추가 (도구 호출 판단에 활용)
+                messages.append({"role": "assistant", "content": thought})
+                messages.append({"role": "user", "content": "위 분석에 따라 필요한 도구가 있으면 호출하세요. 더 이상 도구가 필요 없다면 최종 답변을 제공하세요."})
 
         # ── Pass 2: 도구 호출 (tool_choice="auto") ──
         try:
