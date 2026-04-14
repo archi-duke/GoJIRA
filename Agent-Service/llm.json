@@ -1,10 +1,39 @@
 {
-  "endpoint": "https://api.openai.com/v1/chat/completions",
-  "model": "gpt-4o",
-  "maxTokens": 8000,
-  "temperature": 0.3,
-  "headers": {
-    "Content-Type": "application/json"
-  },
-  "authType": "bearer"
+  "_comment_": "active 필드로 프로바이더 선택. 환경변수 GOJIRA_LLM_ACTIVE 로 override 가능. API 키는 apiKeyEnv 에 지정된 환경변수에서 읽음.",
+  "active": "openai",
+  "providers": {
+    "openai": {
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4o",
+      "maxTokens": 8000,
+      "temperature": 0.3,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "authType": "bearer",
+      "apiKeyEnv": "OPENAI_API_KEY"
+    },
+    "gemini": {
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "model": "gemini-2.0-flash",
+      "maxTokens": 8000,
+      "temperature": 0.3,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "authType": "bearer",
+      "apiKeyEnv": "GEMINI_API_KEY"
+    },
+    "gemini-pro": {
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "model": "gemini-2.5-pro",
+      "maxTokens": 8000,
+      "temperature": 0.3,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "authType": "bearer",
+      "apiKeyEnv": "GEMINI_API_KEY"
+    }
+  }
 }

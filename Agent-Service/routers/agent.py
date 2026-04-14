@@ -190,6 +190,99 @@ async def list_tools():
     return registry.list_tools_info()
 
 
+@router.get("/llm")
+async def get_llm_config():
+    """현재 활성 LLM 프로바이더 + 등록된 프로바이더 목록 반환."""
+    import json
+    from config import llm_config
+    from pathlib import Path
+
+    # llm.json 직접 읽어서 등록된 프로바이더 목록 구성 (registry 형식 전제)
+    from config import settings as _settings
+    llm_path = Path(__file__).parent.parent / "llm.json"
+    providers_info: List[Dict] = []
+
+    def _api_key_present(env_name: str) -> bool:
+        if not env_name:
+            return True
+        # settings 필드 우선 확인 (.env 파일 로드분 반영), fallback 으로 os.environ
+        field = env_name.lower()  # OPENAI_API_KEY → openai_api_key
+        val = getattr(_settings, field, None)
+        if val:
+            return True
+        return bool(os.environ.get(env_name))
+
+    try:
+        with open(llm_path) as f:
+            raw = json.load(f)
+        if "providers" in raw:
+            for name, p in raw["providers"].items():
+                env_name = p.get("apiKeyEnv", "")
+                providers_info.append({
+                    "name": name,
+                    "model": p.get("model", ""),
+                    "endpoint": p.get("endpoint", ""),
+                    "apiKeyEnv": env_name,
+                    "apiKeyPresent": _api_key_present(env_name),
+                })
+    except Exception as e:
+        log.warning("llm.json 읽기 실패: %s", e)
+
+    return {
+        "active": llm_config.provider,
+        "activeModel": llm_config.model,
+        "providers": providers_info,
+    }
+
+
+@router.post("/llm")
+async def switch_llm(request: Request):
+    """활성 LLM 프로바이더 전환 — llm.json 의 active 를 수정하고 클라이언트 리로드."""
+    import json
+    from pathlib import Path
+    from config import _build_cfg_from_dict
+    import config as _config_mod
+    import core.llm as _llm_mod
+
+    body = await request.json()
+    target = (body.get("active") or "").strip()
+    if not target:
+        return {"ok": False, "error": "active 필드 필수"}
+
+    llm_path = Path(__file__).parent.parent / "llm.json"
+    try:
+        with open(llm_path) as f:
+            raw = json.load(f)
+    except Exception as e:
+        return {"ok": False, "error": f"llm.json 읽기 실패: {e}"}
+
+    providers = raw.get("providers") or {}
+    if target not in providers:
+        return {"ok": False, "error": f"'{target}' 프로바이더 없음. 사용 가능: {list(providers.keys())}"}
+
+    # 파일에 active 반영
+    raw["active"] = target
+    try:
+        with open(llm_path, "w") as f:
+            json.dump(raw, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return {"ok": False, "error": f"llm.json 쓰기 실패: {e}"}
+
+    # 런타임 싱글턴 갱신 — config.llm_config 재로드 + core.llm._client 리셋
+    chosen = providers[target]
+    new_cfg = _build_cfg_from_dict(chosen, provider_label=target)
+    _config_mod.llm_config = new_cfg
+    _llm_mod.llm_config = new_cfg       # 이미 임포트된 모듈의 참조도 갱신
+    _llm_mod._client = None              # 다음 호출 시 재생성
+
+    log.info("LLM 프로바이더 전환: %s (model=%s)", target, new_cfg.model)
+    return {
+        "ok": True,
+        "active": target,
+        "activeModel": new_cfg.model,
+    }
+
+
 @router.get("/sessions")
 async def list_sessions(x_user_id: str = Header(default="anonymous")):
     """세션 목록 — Go AgentSessionsHandler 대응."""

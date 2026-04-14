@@ -8,6 +8,23 @@
 .ac-header-btns { display: flex; align-items: center; gap: 6px; }
 .ac-header-btn { background: none; border: none; color: #aaa; cursor: pointer; padding: 4px; line-height: 1; border-radius: 4px; }
 .ac-header-btn:hover { color: #fff; background: rgba(255,255,255,0.15); }
+
+/* LLM 모델 선택 */
+.ac-llm-picker { position: relative; margin-right: 8px; }
+.ac-llm-btn { background: lightgray; color: #000; border: none; border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.ac-llm-btn:hover { background: #d0d0d0; }
+.ac-llm-caret { font-size: 9px; opacity: 0.7; }
+.ac-llm-menu { position: absolute; top: 100%; right: 0; margin-top: 4px; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); min-width: 200px; z-index: 10; max-height: 300px; overflow-y: auto; }
+.ac-llm-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0; color: #333; }
+.ac-llm-item:last-child { border-bottom: none; }
+.ac-llm-item:hover { background: #f5f8ff; }
+.ac-llm-item-active { background: #e8f0fe; }
+.ac-llm-item-active::before { content: "✓ "; color: #1976d2; }
+.ac-llm-item-disabled { opacity: 0.5; cursor: not-allowed; }
+.ac-llm-item-disabled:hover { background: transparent; }
+.ac-llm-item-name { font-size: 13px; font-weight: 600; }
+.ac-llm-item-model { font-size: 11px; color: #666; margin-top: 2px; }
+.ac-llm-item-warn { font-size: 10px; color: #d32f2f; margin-top: 2px; }
 .ac-close { background: none; border: none; color: #fff; font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1; }
 .ac-close:hover { color: #e74c3c; }
 

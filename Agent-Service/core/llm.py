@@ -15,12 +15,15 @@ _client: Optional[AsyncOpenAI] = None
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
+        # llm.json 의 api_key_env 가 지정되어 있으면 그 환경변수에서 읽음 (기본: OPENAI_API_KEY)
+        api_key = settings.get_llm_api_key(llm_config.api_key_env) or "dummy"
+
         kwargs = {}
         if llm_config.auth_type == "bearer":
-            kwargs["api_key"] = settings.openai_api_key
+            kwargs["api_key"] = api_key
         elif llm_config.auth_type == "header":
-            kwargs["api_key"] = settings.openai_api_key
-            kwargs["default_headers"] = {llm_config.auth_header: settings.openai_api_key}
+            kwargs["api_key"] = api_key
+            kwargs["default_headers"] = {llm_config.auth_header: api_key}
         else:
             kwargs["api_key"] = "dummy"
 
@@ -31,6 +34,8 @@ def _get_client() -> AsyncOpenAI:
         kwargs["base_url"] = base_url
 
         _client = AsyncOpenAI(**kwargs)
+        log.info("LLM 클라이언트 초기화: provider=%s, model=%s, base_url=%s",
+                 llm_config.provider, llm_config.model, base_url)
     return _client
 
 

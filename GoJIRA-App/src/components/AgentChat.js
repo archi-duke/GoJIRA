@@ -22,6 +22,12 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+  // LLM 모델 선택 상태
+  const [llmActive, setLlmActive] = useState('');
+  const [llmModel, setLlmModel] = useState('');
+  const [llmProviders, setLlmProviders] = useState([]);
+  const [llmMenuOpen, setLlmMenuOpen] = useState(false);
+
   // Master 그룹: authority.USR >= 15
   const isMaster = authority && (authority.USR || 0) >= 15;
 
@@ -61,6 +67,41 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   useEffect(() => {
     inputRef.current?.focus();
   }, [showHistory]);
+
+  // LLM 프로바이더 목록 + 활성 조회 (초기 1회)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${STREAM_API}/Agent/llm`);
+        if (!res.ok) return;
+        const d = await res.json();
+        setLlmActive(d.active || '');
+        setLlmModel(d.activeModel || '');
+        setLlmProviders(d.providers || []);
+      } catch {}
+    })();
+  }, []);
+
+  async function handleSwitchLlm(providerName) {
+    setLlmMenuOpen(false);
+    if (providerName === llmActive) return;
+    try {
+      const res = await fetch(`${STREAM_API}/Agent/llm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: providerName }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setLlmActive(d.active);
+        setLlmModel(d.activeModel);
+      } else {
+        alert('LLM 전환 실패: ' + (d.error || '알 수 없음'));
+      }
+    } catch (e) {
+      alert('LLM 전환 실패: ' + e.message);
+    }
+  }
 
   // interviewPrompt: 인터뷰 모드 — Agent가 먼저 질문을 표시
   useEffect(() => {
@@ -469,6 +510,30 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     <div className={standalone ? "ac-standalone" : "ac-panel"}>
         <div className="ac-header">
           <span className="ac-title">GoJIRA Agent</span>
+          {llmModel && (
+            <div className="ac-llm-picker">
+              <button className="ac-llm-btn" onClick={() => setLlmMenuOpen(o => !o)} title="LLM 모델 전환">
+                {llmActive} · {llmModel}
+                <span className="ac-llm-caret">▾</span>
+              </button>
+              {llmMenuOpen && (
+                <div className="ac-llm-menu">
+                  {llmProviders.map(p => (
+                    <div
+                      key={p.name}
+                      className={`ac-llm-item ${p.name === llmActive ? 'ac-llm-item-active' : ''} ${!p.apiKeyPresent ? 'ac-llm-item-disabled' : ''}`}
+                      onClick={() => p.apiKeyPresent && handleSwitchLlm(p.name)}
+                      title={!p.apiKeyPresent ? `${p.apiKeyEnv} 환경변수 미설정` : p.endpoint}
+                    >
+                      <div className="ac-llm-item-name">{p.name}</div>
+                      <div className="ac-llm-item-model">{p.model}</div>
+                      {!p.apiKeyPresent && <div className="ac-llm-item-warn">키 없음</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="ac-header-btns">
             <button className="ac-header-btn" onClick={handleShowHistory} title="대화 이력">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 0 11zM8.5 4H7v4.5l3.5 2 .75-1.23L8.5 7.5V4z"/></svg>
