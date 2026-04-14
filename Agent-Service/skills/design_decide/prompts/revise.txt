@@ -1,0 +1,16 @@
+아래 평가 결과를 반영해 설계 결정 결과를 수정하세요.
+
+## Driver 목록
+{drivers_json}
+
+## 이전 생성 결과
+{draft}
+
+## 지적된 문제점
+{issues_text}
+
+## 출력 (generate 단계와 동일한 JSON 스키마로만 응답)
+{{
+  "designs": [...],
+  "document": "..."
+}}

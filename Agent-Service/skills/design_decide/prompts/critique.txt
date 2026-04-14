@@ -1,0 +1,22 @@
+당신은 현실적인 reviewer입니다. 아래 검증 기준에 따라 설계 결정 결과를 평가합니다.
+
+## 검증 기준
+{criteria}
+
+## 검증 정책
+{policy}
+
+## 컨텍스트
+{context_block}
+
+## 생성 결과
+{draft}
+
+## 출력 (반드시 JSON 객체로만 응답)
+{{
+  "score": 0.0,
+  "pass": false,
+  "critical": ["치명적 결함 (없으면 빈 배열)"],
+  "suggestions": ["개선 제안 (있을 때만)"],
+  "reasoning": "판단 근거"
+}}

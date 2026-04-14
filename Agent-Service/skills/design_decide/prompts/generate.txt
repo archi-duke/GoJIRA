@@ -1,0 +1,127 @@
+당신은 아키텍트입니다. 프로젝트 {code} 의 설계안을 결정하세요.
+
+## 정규화된 시스템 속성
+{normalized_json}
+
+## 선정된 시스템 스타일
+Primary: {primary}
+Secondary: {secondary}
+Supporting: {supporting}
+
+## Architecture Drivers (priority 순, {driver_count}건)
+{drivers_json}
+
+## Requirement 전체 (참고, {req_count}건)
+{req_json}
+
+## 기존 설계 이슈 (참고, {design_count}건)
+{existing_design_json}
+
+## 작업
+
+### Step 1. Design Point 식별
+Driver / 스타일 / 주요 품질속성으로부터 **설계 결정이 필요한 관심사(Design Point)** 를 도출. 예:
+- 데이터 일관성 전략 (strong/eventual, 분산 트랜잭션 방식)
+- 통신 패턴 (sync REST vs async event, 브로커 선택)
+- 배포/실행 모델 (컨테이너, 서버리스, 런타임 선택)
+- 인증/인가 구조
+- 모듈 경계 및 내부 구조 (hexagonal 적용 범위)
+- 장애 처리 (retry / DLQ / circuit breaker 정책)
+- 관측성 / 로깅 / 감사 추적
+- 배포 전략 (canary, blue-green, 무중단 배포)
+
+**모든 Driver 가 최소 1개 Design Point 로 다루어져야** 한다.
+
+### Step 2. 대안 비교
+각 Design Point 에 **approach 2개 이상** 을 적고, pros/cons 와 Driver 적합도를 비교.
+
+### Step 3. 결정
+- 선정 approach 를 `decisionRationale` 에 기술 — Driver 와 1:1 추적 가능하게
+- 미선정 대안의 trade-off 도 `tradeoffs` 에 기록
+
+### Step 4. ADSN / DDSN 분류
+- **ADSN (Architectural Design)**: 구조/스타일/패턴 결정 — 시스템 수준
+- **DDSN (Detailed Design)**: 알고리즘/데이터 구조/인터페이스/라이브러리 선택 — 상세 수준
+- 일반적으로 Architecture Driver 매핑은 ADSN, 하위 세부 설계는 DDSN
+
+### Step 5. Requirement 매핑
+- `relatedRequirements` 에 연결할 Requirement 의 JIRA key 배열 (예: `["{code}-12", "{code}-15"]`)
+- FR/NFR/CNST 중 해당 설계가 다루는 요구사항 모두 포함
+
+### Step 6. 문서-이슈 추적성 (docId 규칙 — 반드시 준수)
+- 각 설계 항목에 `docId` 필수: `ADSN-1`, `ADSN-2`, `DDSN-1`, `DDSN-2`, ...
+- 문서 본문(표의 "ID" 열, "이슈 키" 열, 상세 섹션 헤딩 등)에 **동일한 docId 를 그대로** 사용
+- 코드가 이후 실제 subkey(`ADSN_NNN` / `DDSN_NNN`) 로 치환
+
+### Step 7. architecture/design-decisions.md 작성
+
+양식:
+
+---
+
+# 설계 결정 (Architectural & Detailed Design)
+
+## 1. Design Point 요약
+
+| Design Point | 결정 | 대안 | 관련 Driver | 이슈 ID |
+|-------------|------|------|------------|--------|
+| 데이터 일관성 전략 | ... | ... | QA_001 | ADSN-1 |
+
+## 2. 설계 결정 상세
+
+### ADSN-1: {{Design Point 이름}}
+
+- **관련 Driver / Requirement**: {{ID 목록}}
+- **검토된 대안**:
+  - (A) ... — pros / cons
+  - (B) ... — pros / cons
+- **선정**: (A)
+- **결정 근거**: Driver X 의 요구(scalability=high 등)에 가장 부합
+- **트레이드오프**: (B) 는 ... 관점에서 유리하나 ... 이유로 기각
+- **리스크 / 민감도**: (선택) 설계 결정이 민감하게 작용하는 품질속성
+
+### ADSN-2 / DDSN-1 / ...
+
+## 3. Driver 추적성 매트릭스
+
+| Driver | 담당 설계 이슈 |
+|--------|---------------|
+| QA_001 | ADSN-1, ADSN-3 |
+
+## 4. 설계 결정의 리스크 요약
+
+- 잔존 리스크와 후속 SATAM 에서 점검할 포인트
+
+---
+
+## 출력 (반드시 단일 JSON 객체)
+
+{{
+  "designs": [
+    {{
+      "docId": "ADSN-1",
+      "designLevel": "Architectural",
+      "summary": "...",
+      "description": "설계 결정 개요 / 배경",
+      "designPoint": "데이터 일관성 전략",
+      "approaches": [
+        {{"name": "SAGA 패턴", "pros": "...", "cons": "..."}},
+        {{"name": "2PC", "pros": "...", "cons": "..."}}
+      ],
+      "decision": "SAGA 선정",
+      "decisionRationale": "...",
+      "tradeoffs": "...",
+      "risk": "...",
+      "sensitivity": "...",
+      "relatedRequirements": ["{code}-12", "{code}-15"],
+      "mode": "create",
+      "existingKey": "", "modifyReason": "", "deleteReason": ""
+    }}
+  ],
+  "document": "전체 design-decisions.md 본문 (Markdown)"
+}}
+
+**주의**:
+- `designLevel` 값은 정확히 `"Architectural"` 또는 `"Detailed"` 중 하나
+- `relatedRequirements` 는 실제 존재하는 Requirement JIRA key 만 (허구 금지)
+- 카탈로그에 없는 스타일 / 존재하지 않는 이슈 키 참조 금지

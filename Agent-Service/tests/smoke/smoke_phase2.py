@@ -1,8 +1,8 @@
-"""Phase 2 스킬 smoke test — driver_select → style_define 연쇄를 실제 LLM + DB 로 검증.
+"""Phase 2/3 스킬 smoke test — driver_select → style_define → design_decide 연쇄 검증.
 
 사용:
     cd Agent-Service
-    .venv/bin/python scripts/smoke_phase2.py [PROJECT_CODE] [USER]
+    PYTHONPATH=. .venv/bin/python tests/smoke/smoke_phase2.py [PROJECT_CODE] [USER]
     # 기본: PROJECT_CODE=GOJIRA3, USER=batman
 
 주의: 실제 OpenAI API 호출 발생. 1회에 수십만 토큰 소모 가능.
@@ -42,6 +42,22 @@ async def main(code: str, user: str):
     print(f"documentSaved: {sd.get('documentSaved')}")
     if sd.get("saveError"):
         print(f"saveError: {sd['saveError']}")
+
+    print(f"\n========== design_decide 호출 ==========")
+    from skills.design_decide.executor import execute as dd_execute
+    dd = await dd_execute({"projectCode": code, "user": user}, user)
+    print(f"message: {dd.get('message')}")
+    print(f"신규 설계 이슈 {len(dd.get('created') or [])}건")
+    for entry in (dd.get("created") or [])[:6]:
+        it = entry.get("item") or {}
+        print(f"  - {entry['key']} [{it.get('designLevel','-'):13s}] docId={it.get('docId','-')} summary={it.get('summary','')[:50]}")
+    print(f"Requirement→설계 링크: {dd.get('linkedCount')}건")
+    print(f"docIdMap: {dd.get('docIdMap')}")
+    if dd.get("leftoverDocIds"):
+        print(f"⚠ 미치환 docId: {dd['leftoverDocIds']}")
+    print(f"documentSaved: {dd.get('documentSaved')}")
+    if dd.get("saveError"):
+        print(f"saveError: {dd['saveError']}")
 
 
 if __name__ == "__main__":
