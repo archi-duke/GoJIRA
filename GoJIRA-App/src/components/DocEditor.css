@@ -65,9 +65,9 @@
 .de-tab:hover { background: #f0f0f0; color: #333; }
 .de-tab-active { color: #2c3e50; font-weight: 600; border-bottom: 2px solid tomato; border-radius: 0; }
 
-.de-body { flex: 1; overflow: auto; }
-.de-textarea { width: 100%; height: 100%; border: none; outline: none; resize: none; padding: 16px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; box-sizing: border-box; }
-.de-preview { padding: 16px; font-size: 14px; line-height: 1.7; }
+.de-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.de-textarea { flex: 1; width: 100%; border: none; outline: none; resize: none; padding: 16px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; box-sizing: border-box; overflow: auto; }
+.de-preview { flex: 1; overflow: auto; padding: 16px; font-size: 14px; line-height: 1.7; min-height: 0; }
 .de-preview pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
 .de-preview-mainonly { opacity: 0.4; }
 .de-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 15px; }
