@@ -1,6 +1,6 @@
 ---
 name: satam_analyze
-description: ADSN의 risk/sensitivity/tradeoffs 를 읽어 SATAM(Software Architecture Trade-off Analysis Method) 문서를 `architecture/satam.md` 에 YAML 포맷으로 생성합니다. Risks/Sensitivities/Trade-offs 3개 섹션으로 구성.
+description: ADSN 의 risk/sensitivity/tradeoffs 원문을 구조화 YAML 로 변환해 각 ADSN 이슈의 risk/sensitivity/mitigation 필드에 직접 반영합니다. 문서 파일을 생성하지 않으며, 프론트엔드 SATAM 컴포넌트가 이 필드를 파싱해 렌더링합니다.
 ---
 
 ## Parameters
@@ -14,33 +14,34 @@ projectCode:
 
 ## 동작
 
-1. ADSN(Architectural Design) 이슈를 조회해 `risk` / `sensitivity` / `tradeoffs` 필드를 수집
-2. QA(Requirement 중 reqtype=NFR) 이슈 목록을 레퍼런스로 준비
-3. LLM 에 YAML 양식을 **엄격히 강제**해 `Risks` / `Sensitivities` / `Trade-offs` 3개 섹션 생성
-4. `architecture/satam.md` 에 YAML 코드블록 형태로 저장
+1. ADSN(Architectural Design) 이슈를 조회해 `risk` / `sensitivity` / `tradeoffs` 원문 수집
+2. QA(Requirement 중 reqtype=NFR) 이슈 목록 레퍼런스 준비
+3. LLM 에 각 ADSN 의 원문을 **구조화 항목 리스트**(Risks/Sensitivities/Trade-offs) 로 변환 + QA 매핑 요청
+4. 반환 결과를 YAML 텍스트로 직렬화해 **각 ADSN 이슈의 `risk` / `sensitivity` / `mitigation` 필드에 직접 저장**
+5. `archSettings.satamDone = true` 영속화
+6. `nextAction` 으로 `ui_navigate(page=satam)` 를 반환 — 호출 측 에이전트가 이어서 실행
 
-## 출력 YAML 포맷 (절대 규칙)
+## 저장 YAML 포맷 (ADSN 이슈 필드별)
 
 ```yaml
-Risks:
-  - ID: R1
-    QA: [PROJECTCODE-XXX, ...]
-    Description: ...
-
-Sensitivities:
-  - ID: S1
-    QA: [PROJECTCODE-XXX, ...]
-    Description: ...
-
-Trade-offs:
-  - ID: M1
-    QA: [PROJECTCODE-XXX, ...]
-    Counter Risk: ["R1:PROJECTCODE-XXX", "R2:PROJECTCODE-YYY"]
-    Description: ...
+- ID : R1
+  QA : [PROJECTCODE-123, PROJECTCODE-124]
+  Description : ...
 ```
 
-- ID 순차 부여 규칙: Risk→R1,R2... / Sensitivity→S1,S2... / Trade-off→M1,M2...
-- QA 필드는 **이슈 key** 형식 사용 (subkey 금지)
-- Trade-off 의 `Counter Risk` 는 해당 Mitigation 이 완화하는 Risk ID 와 원래 영향받던 QA key 조합 (`"R1:PROJECTCODE-XXX"` 포맷)
-- ADSN 에 원천 내용이 비어있는 항목은 해당 섹션에서 제외
-- 임의 창작 금지 — ADSN 필드 내용을 그대로 Description 에 반영
+Mitigation 필드만 `Counter Risk` 라인 추가:
+
+```yaml
+- ID : M1
+  QA : [PROJECTCODE-123]
+  Counter Risk : ["R1:PROJECTCODE-123"]
+  Description : ...
+```
+
+## 규칙
+
+- ID 는 ADSN 내부에서만 유일하면 됨 (R1/S1/M1 ADSN 마다 재시작)
+- QA 는 이슈 key 형식 (subkey 금지)
+- Counter Risk 는 같은 ADSN 내 Risk ID 참조
+- 문서 파일 생성 절대 금지 — 이슈 필드 반영만
+- 완료 후 호출자는 ui_navigate(page=satam) 로 SATAM 화면 전환

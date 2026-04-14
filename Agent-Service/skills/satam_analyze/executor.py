@@ -1,7 +1,12 @@
-"""SATAM 분석 스킬 — ADSN 의 risk/sensitivity/tradeoffs 를 읽어 YAML 포맷으로 집약."""
+"""SATAM 분석 스킬 — ADSN 의 risk/sensitivity/tradeoffs 원문을 구조화 YAML 로 변환해
+각 ADSN 이슈의 risk/sensitivity/mitigation 필드에 직접 반영한다.
+
+문서 파일은 생성하지 않는다. 프론트엔드 SATAM 컴포넌트가 이 필드를 직접 파싱해 렌더링한다.
+"""
 
 import re
 import json
+from typing import List, Dict
 
 from core.database import issues, projects
 from core.llm import call_llm
@@ -13,146 +18,198 @@ async def execute(params: dict, user: str) -> dict:
         raise ValueError("projectCode 필수")
 
     prefix = {"key": {"$regex": f"^{re.escape(code)}-"}}
-    qa_issues = list(issues().find({**prefix, "issueType": "Requirement"}))
+    qa_issues = list(issues().find(
+        {**prefix, "issueType": "Requirement", "reqtype": "NFR"},
+        {"key": 1, "subkey": 1, "summary": 1, "_id": 0},
+    ))
     adsn_issues = list(issues().find({**prefix, "issueType": "Architectural Design"}))
 
-    # ADSN — risk/sensitivity/tradeoffs 가 실제로 기록되는 원천
-    adsn_items = []
-    risk_count = sens_count = trade_count = 0
-    for issue in adsn_issues:
-        risk = (issue.get("risk") or "").strip()
-        sens = (issue.get("sensitivity") or "").strip()
-        trade = (issue.get("tradeoffs") or issue.get("tradeoff") or issue.get("mitigation") or "").strip()
-        if risk:
-            risk_count += 1
-        if sens:
-            sens_count += 1
-        if trade:
-            trade_count += 1
-        # contains 링크로 연결된 QA 키 목록
+    if not adsn_issues:
+        return {
+            "projectCode": code,
+            "message": "ADSN(Architectural Design) 이슈가 없습니다. design_decide 를 먼저 실행하세요.",
+            "adsnCount": 0,
+        }
+
+    # 1) LLM 에 넘길 입력 데이터 준비
+    adsn_inputs = []
+    for ad in adsn_issues:
+        # contains 링크로 연결된 QA 키
         linked_qas = []
-        for ln in issue.get("issueLinks") or []:
+        for ln in ad.get("issueLinks") or []:
             t = (ln.get("type") or {}).get("name", "")
             if "Contains" in t or "contain" in t.lower():
                 k = ((ln.get("inwardIssue") or {}).get("key")
                      or (ln.get("outwardIssue") or {}).get("key"))
                 if k:
                     linked_qas.append(k)
-        adsn_items.append({
-            "key": issue.get("key", ""),
-            "subkey": issue.get("subkey", ""),
-            "summary": issue.get("summary", ""),
-            "designPoint": issue.get("designPoint", ""),
-            "decision": issue.get("decision", ""),
-            "risk": risk,
-            "sensitivity": sens,
-            "tradeoffs": trade,
+        adsn_inputs.append({
+            "key": ad.get("key", ""),
+            "subkey": ad.get("subkey", ""),
+            "summary": ad.get("summary", ""),
+            "designPoint": ad.get("designPoint", ""),
+            "decision": ad.get("decision", ""),
+            "riskText": (ad.get("risk") or "").strip(),
+            "sensitivityText": (ad.get("sensitivity") or "").strip(),
+            "tradeoffText": (ad.get("tradeoffs") or ad.get("tradeoff") or ad.get("mitigation") or "").strip(),
             "linkedQAs": linked_qas,
         })
 
-    # QA (Requirement, reqtype=NFR 우선) — 참조용 리스트
-    qa_refs = []
-    for issue in qa_issues:
-        if (issue.get("reqtype") or "").upper() != "NFR":
-            continue
-        qa_refs.append({
-            "key": issue.get("key", ""),
-            "subkey": issue.get("subkey", ""),
-            "summary": issue.get("summary", ""),
-        })
+    # 2) LLM 프롬프트 — 각 ADSN 의 원문 텍스트를 구조화 YAML 로 변환. QA 연결 추론.
+    prompt = _build_prompt(code, adsn_inputs, qa_issues)
+    raw = await call_llm(prompt)
+    mapping = _extract_json(raw) or {}
 
-    adsn_json = json.dumps(adsn_items, ensure_ascii=False, indent=2)
-    qa_json = json.dumps(qa_refs, ensure_ascii=False, indent=2)
+    # 3) 각 ADSN 이슈의 risk/sensitivity/mitigation 필드를 업데이트
+    updated_keys = []
+    failed = []
+    risk_total = sens_total = miti_total = 0
 
-    prompt = f"""프로젝트 {code} 의 SATAM(Software Architecture Trade-off Analysis Method) 문서를 작성한다.
+    for ad in adsn_inputs:
+        key = ad["key"]
+        entry = mapping.get(key) or {}
+        risk_items = entry.get("risks") or []
+        sens_items = entry.get("sensitivities") or []
+        miti_items = entry.get("tradeoffs") or entry.get("mitigations") or []
 
-## 입력 데이터
+        risk_yaml = _serialize_items(risk_items, counter=False)
+        sens_yaml = _serialize_items(sens_items, counter=False)
+        miti_yaml = _serialize_items(miti_items, counter=True)
 
-### ADSN (Architectural Design 이슈) — risk / sensitivity / tradeoffs 의 원천
-{adsn_json}
+        try:
+            issues().update_one(
+                {"key": key},
+                {"$set": {
+                    "risk": risk_yaml,
+                    "sensitivity": sens_yaml,
+                    "mitigation": miti_yaml,
+                }},
+            )
+            updated_keys.append(key)
+            risk_total += len(risk_items)
+            sens_total += len(sens_items)
+            miti_total += len(miti_items)
+        except Exception as e:
+            failed.append({"key": key, "error": str(e)})
 
-### QA (Quality Attribute, Requirement 중 NFR) — Risk/Sensitivity/Trade-off 가 영향을 주는 대상
-{qa_json}
-
-## 출력 형식 — 반드시 아래 YAML 양식을 정확히 따를 것 (절대 규칙)
-
-```yaml
-Risks:
-  - ID: R1
-    QA: [PROJECTCODE-XXX, PROJECTCODE-YYY]   # 이 Risk 가 영향을 주는 QA 이슈 key 목록
-    Description: <risk 의 상세 내용>
-
-Sensitivities:
-  - ID: S1
-    QA: [PROJECTCODE-XXX]                     # 이 Sensitivity 가 영향을 주는 QA 이슈 key 목록
-    Description: <sensitivity 의 상세 내용>
-
-Trade-offs:
-  - ID: M1
-    QA: [PROJECTCODE-XXX, PROJECTCODE-YYY]    # 이 Trade-off 가 영향을 주는 QA 이슈 key 목록
-    Counter Risk: ["R1:PROJECTCODE-XXX", "R2:PROJECTCODE-YYY"]  # Mitigation 되는 Risk ID + 영향받는 QA key 조합
-    Description: <trade-off(Mitigation) 의 상세 내용>
-```
-
-## 작성 규칙 (엄수)
-
-1. **ID 규칙**: Risks 는 R1,R2,... / Sensitivities 는 S1,S2,... / Trade-offs 는 M1,M2,... 순차 부여
-2. **원천 유지**: ADSN 의 `risk` 필드 내용은 Risks.Description 에, `sensitivity` 는 Sensitivities.Description 에, `tradeoffs` 는 Trade-offs.Description 에 기재한다. 임의 창작 금지
-3. **QA 매핑**: 각 항목의 `QA:` 에는 `linkedQAs` 로 연결된 QA 이슈 key 또는 본문 분석으로 실제 영향받는 QA 의 key 를 나열. 반드시 **이슈 key 형식** (예: GOJIRA-123) 사용, subkey(QA_001) 금지
-4. **Trade-off 의 Counter Risk**: 그 trade-off 가 완화하는 Risk 의 ID 와, 해당 Risk 가 원래 영향주던 QA 이슈 key 의 조합을 `"R1:GOJIRA-001"` 포맷으로 기재. 다수면 배열로 나열
-5. **비어있는 필드 건너뛰기**: ADSN 에 risk/sensitivity/tradeoffs 가 비어있는 항목은 해당 섹션에서 제외
-6. **출력은 yaml 코드블록 단일**: 상단에 서두, 하단에 후기 절대 금지. `\`\`\`yaml` 로 시작해 `\`\`\`` 로 닫는다
-
-지금 위 데이터를 바탕으로 YAML 을 작성하라."""
-
-    document = await call_llm(prompt)
-
-    # yaml 코드블록만 추출 (앞뒤 불필요한 설명 제거)
-    yaml_block = _extract_yaml(document)
-
-    # 문서 파일 저장
-    saved_path = None
-    save_error = None
-    try:
-        from clients.platform_api import PlatformClient
-        client = PlatformClient()
-        content = f"# SATAM 분석 — {code}\n\n```yaml\n{yaml_block}\n```\n"
-        await client.save_file(
-            code,
-            "architecture/satam.md",
-            content,
-            f"SATAM 분석 (Risks {risk_count}/Sensitivities {sens_count}/Trade-offs {trade_count})",
-            user,
-        )
-        saved_path = "architecture/satam.md"
-        # 완료 플래그 영속화 (user branch 저장 → main 에는 없어도 belief state 인지)
-        projects().update_one(
-            {"jiraCodes.main.jiraCode": code},
-            {"$set": {"archSettings.satamDone": True}},
-        )
-    except Exception as e:
-        save_error = str(e)
+    # 4) 완료 플래그
+    projects().update_one(
+        {"jiraCodes.main.jiraCode": code},
+        {"$set": {"archSettings.satamDone": True}},
+    )
 
     return {
         "projectCode": code,
-        "adsnCount": len(adsn_items),
-        "qaCount": len(qa_refs),
-        "riskCount": risk_count,
-        "sensitivityCount": sens_count,
-        "tradeoffCount": trade_count,
-        "documentSaved": saved_path,
-        "saveError": save_error,
-        "document": yaml_block,
+        "adsnCount": len(adsn_inputs),
+        "updatedCount": len(updated_keys),
+        "riskCount": risk_total,
+        "sensitivityCount": sens_total,
+        "mitigationCount": miti_total,
+        "failed": failed,
+        "nextAction": {"skill": "ui_navigate", "params": {"projectCode": code, "page": "satam"}},
+        "message": (
+            f"SATAM 분석 완료 — ADSN {len(updated_keys)}건의 risk/sensitivity/mitigation 필드 갱신. "
+            f"Risks {risk_total} / Sensitivities {sens_total} / Trade-offs {miti_total}. "
+            "SATAM 화면으로 이동하려면 ui_navigate(page=satam) 를 호출하세요."
+        ),
     }
 
 
-def _extract_yaml(text: str) -> str:
-    """LLM 응답에서 ```yaml ... ``` 블록만 추출. 없으면 원문."""
-    m = re.search(r"```ya?ml\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
+def _build_prompt(code: str, adsn_inputs: List[Dict], qa_refs: List[Dict]) -> str:
+    adsn_json = json.dumps(adsn_inputs, ensure_ascii=False, indent=2)
+    qa_json = json.dumps(qa_refs, ensure_ascii=False, indent=2)
+    return f"""프로젝트 {code} 의 SATAM 분석을 수행한다.
+각 ADSN 이슈의 riskText / sensitivityText / tradeoffText 원문을 읽어 구조화된 항목 리스트로 변환하고,
+영향받는 QA(Quality Attribute) 이슈 key 를 매핑한다. 이 결과는 각 ADSN 이슈의 risk/sensitivity/mitigation
+필드에 YAML 로 저장되어 프론트엔드 SATAM 컴포넌트가 직접 파싱한다.
+
+## 입력
+
+### ADSN 목록 (각 항목의 원문을 구조화 대상)
+{adsn_json}
+
+### QA 참조 (Requirement 중 NFR) — Risk/Sensitivity/Trade-off 가 영향주는 대상
+{qa_json}
+
+## 출력 (반드시 단일 JSON, 코드블록 없이)
+
+{{
+  "<ADSN_ISSUE_KEY>": {{
+    "risks": [
+      {{ "id": "R1", "qa": ["QA_ISSUE_KEY", ...], "description": "..." }}
+    ],
+    "sensitivities": [
+      {{ "id": "S1", "qa": ["QA_ISSUE_KEY", ...], "description": "..." }}
+    ],
+    "tradeoffs": [
+      {{ "id": "M1", "qa": ["QA_ISSUE_KEY", ...], "counterRisk": ["R1:QA_ISSUE_KEY", ...], "description": "..." }}
+    ]
+  }},
+  ...
+}}
+
+## 규칙 (엄수)
+
+1. **키는 ADSN 이슈 key** (예: "{code}-23"). subkey 사용 금지
+2. **ID 순차**: ADSN 별로 R1,R2... / S1,S2... / M1,M2... 부여. 다른 ADSN 과 번호 공유 안 함 (ADSN 내부에서 유일)
+3. **QA 매핑**: `qa` 배열은 **이슈 key** 형식 (subkey 금지). `linkedQAs` 우선 사용, 없거나 부족하면 QA 참조 목록에서 summary 로 매칭해 선택
+4. **Counter Risk (Trade-off 전용)**: 해당 Mitigation 이 완화하는 Risk 의 `"R1:QA_ISSUE_KEY"` 조합 배열. 같은 ADSN 내 Risk ID 참조
+5. **원문 유지**: 원문(riskText/sensitivityText/tradeoffText) 이 의미상 분리 가능한 복수 항목이면 여러 항목으로 분해, 단일이면 1개 항목. 임의 창작 금지
+6. **빈 원문은 빈 배열**: 원문이 비어있으면 해당 리스트는 `[]`
+7. **출력은 JSON 객체 단일** — 앞뒤 설명, 코드블록 모두 금지. 바로 `{{` 로 시작"""
+
+
+def _extract_json(text: str) -> Dict:
+    """LLM 응답에서 JSON 객체 추출."""
+    t = text.strip()
+    # ```json ... ``` 블록 제거
+    m = re.search(r"```(?:json)?\s*\n(.*?)```", t, re.DOTALL | re.IGNORECASE)
     if m:
-        return m.group(1).strip()
-    # 백틱만 있을 때
-    m = re.search(r"```\s*\n(.*?)```", text, re.DOTALL)
-    if m:
-        return m.group(1).strip()
-    return text.strip()
+        t = m.group(1).strip()
+    # 첫 { 부터 매칭되는 } 까지
+    start = t.find("{")
+    if start < 0:
+        return {}
+    depth = 0
+    for i in range(start, len(t)):
+        ch = t[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(t[start:i + 1])
+                except json.JSONDecodeError:
+                    return {}
+    return {}
+
+
+def _serialize_items(items: List[Dict], counter: bool) -> str:
+    """항목 리스트를 SATAM 프론트엔드 parseRST 포맷의 YAML 로 직렬화.
+
+    형식:
+      - ID : R1
+        QA : [KEY1, KEY2]
+        Counter Risk : ["R1:KEY1", ...]   (mitigation 전용)
+        Description : ...
+    """
+    if not items:
+        return ""
+    lines = []
+    for it in items:
+        iid = (it.get("id") or "").strip()
+        if not iid:
+            continue
+        qa = it.get("qa") or []
+        cr = it.get("counterRisk") or it.get("counter_risk") or []
+        desc = (it.get("description") or "").strip().replace("\n", " ")
+        lines.append(f"- ID : {iid}")
+        if qa:
+            lines.append(f"  QA : [{', '.join(qa)}]")
+        if counter and cr:
+            quoted = ", ".join('"' + c + '"' for c in cr)
+            lines.append(f"  Counter Risk : [{quoted}]")
+        if desc:
+            lines.append(f"  Description : {desc}")
+    return "\n".join(lines)

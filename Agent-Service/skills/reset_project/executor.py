@@ -66,12 +66,6 @@ _TEMPLATES = {
         "design_integrate 스킬이 생성합니다.\n\n"
         "## 개요\n\n(작성 필요)\n"
     ),
-    "architecture/satam.md": (
-        "# SATAM 분석 (Software Architecture Trade-off Analysis Method)\n\n"
-        "ADSN 의 risk/sensitivity/tradeoffs 를 Risks/Sensitivities/Trade-offs YAML 로 집약하는 문서입니다.\n"
-        "satam_analyze 스킬이 생성합니다.\n\n"
-        "```yaml\n(작성 필요)\n```\n"
-    ),
 }
 
 

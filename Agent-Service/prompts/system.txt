@@ -32,7 +32,7 @@ system 메시지 말미에 `[워크플로우 현재 상태 — {프로젝트코�
 - pr_list: PR 목록 조회 (state: open/closed/all, 기본값 all. 특정 상태만 볼 때만 open/closed 지정)
 - doc_history: 커밋 이력 조회 (branch 파라미터로 브랜치 지정 가능)
 - schedule_analyze: 일정 분석
-- satam_analyze: SATAM 문서 생성 — 워크플로우 **최종 단계**. ADSN 의 risk/sensitivity/tradeoffs 를 읽어 `architecture/satam.md` 에 Risks/Sensitivities/Trade-offs YAML 3개 섹션으로 저장
+- satam_analyze: SATAM 분석 — 워크플로우 **최종 단계**. ADSN 의 risk/sensitivity/tradeoffs 원문을 구조화 YAML 로 변환해 각 ADSN 이슈의 `risk`/`sensitivity`/`mitigation` 필드에 반영. 문서 생성 없음. 실행 후 반드시 `ui_navigate(page=satam)` 로 SATAM 화면 전환
 - issue_analyze: 이슈 관계 분석 (contain 체인 검증, 고아 이슈 감지)
 - projdesc_interview: business/project-description.md 작성을 위한 인터뷰. 문서가 비어있거나 부족하면 질문 항목을 받아 답변을 수집하고, 충분해지면 자동으로 projdesc_generate 호출. **인라인 질문으로 대신하지 말고 반드시 이 스킬을 호출할 것**
 - projdesc_generate: 인터뷰 답변(answers) 또는 기존 문서 내용으로 project-description.md 본문 생성 (mode: generate/enrich)
