@@ -39,5 +39,6 @@ node_modules/
 repos/
 screenshot*.png
 scripts/
+!Agent-Service/scripts/
 package.json
 package-lock.json
