@@ -50,6 +50,7 @@ def get_workflow_state(project_code: str) -> Dict[str, Any]:
     arch = proj.get("archSettings") or {}
     chosen = arch.get("chosenStyles") or {}
     normalized = arch.get("normalizedAttributes") or {}
+    integrated_done = bool(arch.get("designIntegrated"))
 
     state: Dict[str, Any] = {
         "projectCode": project_code,
@@ -61,6 +62,7 @@ def get_workflow_state(project_code: str) -> Dict[str, Any]:
         "ddsnCount": ddsn_count,
         "hasNormalizedAttributes": bool(normalized),
         "chosenStyles": chosen or None,
+        "designIntegrated": integrated_done,
     }
     state["nextRecommendedStep"] = next_recommended_step(state)
     return state
@@ -84,7 +86,9 @@ def next_recommended_step(state: Dict[str, Any]) -> Optional[str]:
         return "style_define"
     if state["adsnCount"] == 0 and state["ddsnCount"] == 0:
         return "design_decide"
-    # design_integrate / satam 은 사용자 명시 요청 시에만
+    if not state.get("designIntegrated"):
+        return "design_integrate"
+    # satam 은 사용자 명시 요청 시에만
     return None
 
 
@@ -105,6 +109,7 @@ def format_state_for_llm(state: Dict[str, Any]) -> str:
     else:
         lines.append("- 선정 스타일: 미정")
     lines.append(f"- ADSN: {state['adsnCount']}건 / DDSN: {state['ddsnCount']}건")
+    lines.append(f"- 통합 설계 문서: {'✓ 작성됨' if state.get('designIntegrated') else '미작성'}")
 
     nxt = state["nextRecommendedStep"]
     if nxt:

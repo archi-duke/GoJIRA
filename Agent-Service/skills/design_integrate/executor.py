@@ -199,6 +199,12 @@ async def execute(params: dict, user: str) -> dict:
                 req_user,
             )
             saved_path = "architecture/architecture-integrated.md"
+            # 완료 플래그 저장 — workflow_state.next_recommended_step() 에서 중복 호출 방지용
+            projects().update_one(
+                {"jiraCodes.main.jiraCode": code},
+                {"$set": {"archSettings.designIntegrated": True,
+                          "archSettings.viewsIncluded": views}},
+            )
         except Exception as e:
             save_error = str(e)
 

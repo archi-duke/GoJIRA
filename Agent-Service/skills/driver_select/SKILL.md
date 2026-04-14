@@ -7,12 +7,17 @@ description: Requirement(FR/NFR/CNST) 중 아키텍처 결정에 영향이 큰 �
 
 Phase 2 ⑤ Architecture Driver 선정 — 요구사항(FR/NFR/CNST)에서 아키텍처 결정에 영향이 큰 항목을 선별하고 QAD/QAI/Priority 를 부여한다. 부산물로 **정규화된 요구사항 속성**(style_define 입력)을 함께 산출한다.
 
-## 입력
+## Parameters
 
-| 필드 | 필수 | 설명 |
-|------|------|------|
-| projectCode | ✓ | 프로젝트 코드 |
-| priorityWeight | 선택 | `{qad: 0.5, qai: 0.5}` 기본. 사용자가 지정하면 프로젝트의 `archSettings.priorityWeight` 에 영속화되어 다음 호출부터 재사용됨 |
+```yaml
+projectCode:
+  type: string
+  description: "프로젝트 코드 (예: GOJIRA3)"
+  required: true
+priorityWeight:
+  type: object
+  description: "{qad: 0.5, qai: 0.5} 기본. 사용자가 지정하면 projects.archSettings.priorityWeight 에 영속화되어 다음 호출부터 재사용됨"
+```
 
 ## 전제
 
