@@ -1,0 +1,17 @@
+아래 평가 결과를 반영해 Architecture Driver 선정 결과를 수정하세요.
+
+## 요구사항 목록
+{req_json}
+
+## 이전 생성 결과
+{draft}
+
+## 지적된 문제점
+{issues_text}
+
+## 출력 (generate 단계와 동일한 JSON 스키마로만 응답)
+{{
+  "drivers": [...],
+  "normalizedAttributes": {{...}},
+  "document": "..."
+}}
