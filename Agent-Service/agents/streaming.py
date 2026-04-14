@@ -34,6 +34,16 @@ async def agent_loop_stream(
     """
     registry = get_registry()
     all_actions = []
+    executed_skills: set = set()  # 환각 가드용 — 이 세션에서 실제로 호출된 스킬 이름
+    # 완료형 문장 패턴 (LLM 이 호출하지도 않고 '저장했다/완료했다' 고 주장할 때 탐지)
+    _COMPLETION_PATTERNS = (
+        "저장했습니다", "저장되었", "작성했습니다", "작성되었", "작성이 완료",
+        "생성했습니다", "생성되었", "완료되었", "완료했습니다",
+    )
+    _GEN_SKILLS = {
+        "vos_collect", "usecase_analyze", "requirement_refine",
+        "driver_select", "style_define", "design_decide", "design_integrate",
+    }
 
     # 사용자 메시지 추출 (마지막 user 메시지)
     user_message = ""
@@ -46,9 +56,9 @@ async def agent_loop_stream(
     # 대화 이력 전체를 뒤에서부터 훑어 프로젝트 코드를 찾는다. 사용자가 "계속" 처럼
     # 프로젝트 코드를 생략한 입력을 주어도 이전 턴에서 언급한 코드를 재사용.
     # design-agent.md §10, design-workflow.md §10 참조.
+    detected_code = None
     try:
         from core.workflow_state import detect_project_code, get_workflow_state, format_state_for_llm
-        detected_code = None
         for m in reversed(messages):
             role = m.get("role")
             if role not in ("user", "assistant"):
@@ -59,13 +69,15 @@ async def agent_loop_stream(
             detected_code = detect_project_code(content)
             if detected_code:
                 break
+        state = None
         if detected_code:
-            state = get_workflow_state(detected_code)
+            state = await get_workflow_state(detected_code)
             state_text = format_state_for_llm(state)
-            log.info("워크플로우 상태 주입: code=%s next=%s vos=%d feat=%d req=%d drv=%d",
+            log.info("워크플로우 상태 주입: code=%s next=%s vos=%d feat=%d req=%d drv=%d completed=%s",
                      detected_code, state.get("nextRecommendedStep"),
                      state.get("vosCount", 0), state.get("featureCount", 0),
-                     state.get("requirementCount", 0), state.get("driverCount", 0))
+                     state.get("requirementCount", 0), state.get("driverCount", 0),
+                     [k for k, v in (state.get("completedSteps") or {}).items() if v])
             # 기존 system 메시지 뒤에 덧붙임
             injected = False
             for i, m in enumerate(messages):
@@ -141,14 +153,54 @@ async def agent_loop_stream(
 
         # 도구 호출 없으면 최종 응답
         if not tool_calls or finish_reason == "stop":
-            final_content = thought or content
-            if not final_content and all_actions:
-                final_content = "작업이 완료되었습니다."
-            final_content = _strip_reasoning(final_content)
-            for chunk in _split_chunks(final_content, 80):
-                yield _sse("content", {"text": chunk})
-            yield _sse("done", {"reply": final_content, "actions": all_actions})
-            return
+            # ── 환각 가드 ──
+            # LLM 이 실제 스킬을 호출하지 않고 '저장했다/완료했다' 고만 주장한 경우 탐지.
+            # belief state 의 nextRecommendedStep 이 여전히 생성 스킬이고 이번 세션에서
+            # 호출된 적 없으면 해당 스킬을 tool_choice 로 강제해 1 회 재시도.
+            guard_text = (thought or "") + " " + (content or "")
+            if detected_code and any(p in guard_text for p in _COMPLETION_PATTERNS):
+                try:
+                    from core.workflow_state import get_workflow_state
+                    fresh = await get_workflow_state(detected_code)
+                    pending = fresh.get("nextRecommendedStep")
+                    if pending in _GEN_SKILLS and pending not in executed_skills:
+                        log.warning("환각 탐지: 완료 주장이나 %s 미실행. 강제 호출 재시도.", pending)
+                        yield _sse("thinking", {"turn": turn, "message": f"완료 주장 감지 — {pending} 강제 호출"})
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                f"[가드] 방금 응답은 '{pending}' 을 호출하지 않은 채 완료됐다고 주장했다. "
+                                f"belief state 체크리스트 기준 '{pending}' 은 아직 ⬜ 미완료. "
+                                "반드시 해당 도구를 호출하라. 다른 설명 없이 tool call 만."
+                            ),
+                        })
+                        try:
+                            forced = await call_llm_with_tools(
+                                messages, tools,
+                                tool_choice={"type": "function", "function": {"name": pending}},
+                            )
+                            f_msg = forced["message"]
+                            f_tool_calls = f_msg.tool_calls or []
+                            if f_tool_calls:
+                                # 아래 '각 도구 실행' 블록으로 자연 진입 — outer append 가 처리
+                                tool_calls = f_tool_calls
+                                content = f_msg.content or ""
+                            else:
+                                log.warning("강제 호출에도 tool_calls 없음 — 포기")
+                        except Exception as e:
+                            log.warning("강제 호출 실패: %s", e)
+                except Exception as e:
+                    log.warning("환각 가드 실패: %s", e)
+
+            if not tool_calls:
+                final_content = thought or content
+                if not final_content and all_actions:
+                    final_content = "작업이 완료되었습니다."
+                final_content = _strip_reasoning(final_content)
+                for chunk in _split_chunks(final_content, 80):
+                    yield _sse("content", {"text": chunk})
+                yield _sse("done", {"reply": final_content, "actions": all_actions})
+                return
 
         # assistant message 기록
         assistant_msg = {"role": "assistant", "content": content}
@@ -169,6 +221,7 @@ async def agent_loop_stream(
         # 각 도구 실행
         for tc in tool_calls:
             fn_name = tc.function.name
+            executed_skills.add(fn_name)
             try:
                 fn_args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
