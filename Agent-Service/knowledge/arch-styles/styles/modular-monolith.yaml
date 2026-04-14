@@ -1,0 +1,111 @@
+id: modular-monolith
+name: "Modular Monolith"
+scope: system_structure
+category: monolith
+summary: "단일 배포 단위 내에서 경계가 명확한 모듈로 구성된 모놀리스."
+description: |
+  마이크로서비스 수준의 모듈 경계를 유지하면서 단일 프로세스/배포로 운영.
+  운영 단순성을 유지한 채 도메인 분리를 확보하며 향후 분리도 용이.
+
+fit_signals:
+  team_size: small
+  ops_maturity: low
+  modifiability: high
+  strong_consistency: high
+  scalability: medium
+  domain_complexity: medium_or_higher
+
+avoid_signals:
+  team_independent_deploy: high
+  scalability: required
+
+prerequisites:
+  technical:
+    - ci_cd_pipeline
+  design:
+    - module_boundary_enforcement
+    - internal_api_contract
+  organizational:
+    developer_discipline: medium_or_higher
+
+quality_attributes:
+  - attribute: simplicity
+    effect: positive
+    strength: high
+  - attribute: consistency
+    effect: positive
+    strength: high
+  - attribute: modifiability
+    effect: positive
+    strength: medium
+  - attribute: testability
+    effect: positive
+    strength: medium
+  - attribute: deployability
+    effect: negative
+    strength: medium
+  - attribute: scalability
+    effect: negative
+    strength: low
+
+combines_well_with:
+  - style: hexagonal
+    reason: "모듈 경계를 포트/어댑터로 강화해 향후 분리 용이"
+  - style: clean-architecture
+    reason: "의존성 규칙으로 모듈 경계 강제"
+  - style: event-driven
+    reason: "모듈 간 통합을 비동기 이벤트로 느슨하게 유지"
+  - style: cqrs
+    reason: "모듈 내 쓰기/읽기 모델 분리"
+
+conflicts_with:
+  - style: microservices
+    reason: "같은 system_structure scope에서 택일 관계"
+
+operational_complexity: low
+observability_requirement: low
+testing_complexity: low
+consistency_model: strong
+interaction_mode: synchronous
+team_maturity_required: medium
+failure_handling_patterns:
+  - transactional_boundary
+  - feature_toggle
+
+decision_rules:
+  - if:
+      team_size: small
+    then:
+      score: +3
+      reason: "작은 팀이 운영 단순성을 유지한 채 모듈 경계 확보 가능"
+  - if:
+      team_independent_deploy: high
+    then:
+      score: -3
+      reason: "단일 배포 단위라 팀별 독립 배포 요구를 충족하지 못함"
+  - if:
+      strong_consistency: high
+    then:
+      score: +2
+      reason: "단일 DB 트랜잭션 경계로 강한 일관성 자연스러움"
+  - if:
+      scalability: required
+    then:
+      score: -3
+      reason: "극단적 확장 시 단일 프로세스 한계"
+
+tradeoffs:
+  pros:
+    - "모놀리스의 운영 단순성"
+    - "모듈 경계로 향후 분리 용이"
+    - "강한 일관성 유지 쉬움"
+  cons:
+    - "단일 배포 단위의 릴리즈 조율 필요"
+    - "극단적 확장엔 불리"
+    - "모듈 경계 규율이 흔들리면 '빅 볼 오브 머드' 위험"
+
+related_patterns: [hexagonal, clean-architecture]
+
+references:
+  - "Tune, Modular Monoliths 강연"
+  - "Fowler, MonolithFirst"
