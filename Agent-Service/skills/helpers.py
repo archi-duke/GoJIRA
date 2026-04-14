@@ -306,6 +306,46 @@ def dispatch_by_mode(
     return buckets
 
 
+def build_docid_subkey_map(buckets: dict, existing_by_key: dict) -> dict:
+    """docId → subkey 매핑 구축.
+
+    - created/modified/reused 모든 엔트리에서 item["docId"]를 subkey로 매핑
+    - created: create_issue 결과가 entry에 subkey로 담겨있지 않으므로 issues() 재조회
+    - reuse/modify: existing_by_key[entry["key"]]["subkey"]
+    """
+    mapping: dict = {}
+    coll = issues()
+    for bucket_name in ("created", "modified", "reused"):
+        for entry in buckets.get(bucket_name, []):
+            doc_id = (entry.get("item") or {}).get("docId", "").strip()
+            if not doc_id:
+                continue
+            if bucket_name == "created":
+                doc = coll.find_one({"key": entry["key"]}, {"subkey": 1, "_id": 0})
+                subkey = (doc or {}).get("subkey", "")
+            else:
+                subkey = (existing_by_key.get(entry["key"]) or {}).get("subkey", "")
+            if subkey:
+                mapping[doc_id] = subkey
+    return mapping
+
+
+def substitute_doc_ids(document: str, mapping: dict) -> tuple:
+    """document 본문에서 docId(UC-1, FR-1, NFR-1, CNST-1)를 실제 subkey로 단어경계 치환.
+
+    Returns (substituted_document, missing_doc_ids): 치환 후 본문과, 본문에 등장했으나 매핑에 없는 docId 목록.
+    """
+    if not document:
+        return document, []
+    result = document
+    for doc_id, subkey in mapping.items():
+        pattern = r"\b" + re.escape(doc_id) + r"\b"
+        result = re.sub(pattern, subkey, result)
+    # 잔여 docId 탐지 (UC-N / FR-N / NFR-N / CNST-N 형태)
+    leftover = set(re.findall(r"\b(?:UC|FR|NFR|CNST)-\d+\b", result))
+    return result, sorted(leftover)
+
+
 _LINK_TYPE_NAME = {
     "contains": "Contains(WBSGantt)",
     "relates": "Relates",

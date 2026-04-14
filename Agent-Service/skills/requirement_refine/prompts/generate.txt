@@ -43,17 +43,27 @@
 ## 각 항목의 mode 결정
 - `create` / `reuse` / `modify` / `delete_mark` (existingKey/사유 포함)
 
+## 문서-이슈 추적성 (docId 규칙 — 반드시 준수)
+- 각 Requirement 항목은 **`docId` 필드 필수**. 형식:
+  - FR → `FR-1`, `FR-2`, ... (1부터 순차)
+  - NFR → `NFR-1`, `NFR-2`, ...
+  - CNST → `CNST-1`, `CNST-2`, ...
+- 문서 본문의 모든 Requirement 관련 표기(표의 "ID" 열, "(이슈 키)" 열, 요구사항 헤딩, 관련 Feature 매핑 등)에 **동일한 docId를 그대로 사용**
+- "(이슈 키)" 같은 칸을 **빈칸으로 두지 말 것** — 해당 항목의 `docId`를 그대로 기록 (코드가 실제 subkey로 치환: FR→FR_NNN, NFR→QA_NNN, CNST→CNST_NNN)
+- `relatedFeatures`에는 실제 Feature JIRA 키({code}-N)를 사용 (docId 아님)
+- `reuse`/`modify` 항목도 `docId`를 부여하고 `existingKey`는 별도 제공
+
 ## 출력 (반드시 단일 JSON 객체)
 {{
   "requirements": [
-    {{"reqType": "FR", "summary": "...", "description": "User Story 본문",
+    {{"docId": "FR-1", "reqType": "FR", "summary": "...", "description": "User Story 본문",
       "relatedFeatures": ["..."], "mode": "create", "existingKey": "", "modifyReason": "", "deleteReason": ""}},
-    {{"reqType": "NFR", "summary": "...", "description": "...",
+    {{"docId": "NFR-1", "reqType": "NFR", "summary": "...", "description": "...",
       "qa": "...", "source": "...", "stimulus": "...", "environment": "...",
       "artifact": "...", "response": "...", "measure": "...", "responseScenario": "...",
       "measureAuto": true, "relatedFeatures": ["..."], "mode": "create",
       "existingKey": "", "modifyReason": "", "deleteReason": ""}},
-    {{"reqType": "CNST", "summary": "...", "description": "...", "relatedFeatures": [],
+    {{"docId": "CNST-1", "reqType": "CNST", "summary": "...", "description": "...", "relatedFeatures": [],
       "mode": "create", "existingKey": "", "modifyReason": "", "deleteReason": ""}}
   ],
   "document": "전체 requirements.md 본문 (Markdown). 자동 결정 NFR은 비고에 [자동결정] 표시. 양식 준수."

@@ -128,10 +128,17 @@ graph TB
 ## 각 Feature 항목의 mode 결정
 - `create` / `reuse` / `modify` / `delete_mark` (existingKey/modifyReason/deleteReason 포함)
 
+## 문서-이슈 추적성 (docId 규칙 — 반드시 준수)
+- 각 Feature 항목은 **`docId` 필드 필수**. 형식: `UC-1`, `UC-2`, ... (1부터 순차, 공백/언더스코어 금지)
+- 문서 본문의 모든 Feature 관련 표기(표의 "ID" 열, "매핑 Use Case" 열, "(Feature 이슈 키)" 열, "#### UC-N: ..." 헤딩, 시퀀스 다이어그램 제목 등)에 **동일한 docId를 그대로 사용**
+- "(Feature 이슈 키)" 칸을 **빈칸으로 두지 말 것** — 해당 Use Case의 `docId`(예: `UC-3`)를 그대로 기록 (코드가 실제 subkey로 치환)
+- `reuse`/`modify` 항목도 `docId`를 부여하되 기존 이슈와 같은 역할이면 `existingKey`도 함께 제공
+
 ## 출력 (반드시 단일 JSON 객체로만 응답)
 {{
   "features": [
     {{
+      "docId": "UC-1",
       "summary": "Use Case 이름",
       "description": "Use Case 개요",
       "actor": "주요 Actor",

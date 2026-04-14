@@ -245,7 +245,49 @@ Agent-Service의 LLM 오케스트레이션 스킬(`vos_collect`, `usecase_analyz
 
 ---
 
-## 9. 핵심 결정 요약
+## 9. 문서 ID ↔ subkey 동기화 정책
+
+### 9.1 배경
+
+`usecase_analyze`, `requirement_refine` 스킬은 LLM이 **문서(use-cases.md / requirements.md)와 이슈 목록(features / requirements)을 한 번의 JSON 응답으로 동시 생성**한다. 이 시점에는 실제 이슈가 아직 DB에 없으므로 LLM은 문서 안의 Use Case/Requirement를 자체 placeholder(`UC-1`, `FR-1`, `NFR-1`, `CNST-1`)로 표기한다. 이후 `create_issue()`가 실제 subkey(`UC_001`, `FR_001`, `QA_001`, `CNST_001`)를 부여한다.
+
+결과적으로 문서에 기록된 ID(UC-1 …)와 실제 생성된 이슈의 subkey(UC_001 …) 가 일치하지 않아 **문서-이슈 추적성이 끊겼다**.
+
+### 9.2 대안 비교
+
+| 안 | 방식 | 토큰 비용 | 지연 | 결정성 | 비고 |
+|----|------|-----------|------|--------|------|
+| A | LLM 응답에 `docId`(UC-1) 포함 → 이슈 생성 후 executor가 문서에서 `docId` → `subkey` 치환 | 동일 | 동일 | 높음 (정규식 치환) | 채택 |
+| B | 2-pass: features 생성 → 이슈 create → 실제 subkey를 컨텍스트로 document 재생성 | 약 2배 | 한 번 더 LLM 왕복 | 중간 (LLM 재생성 변동성) | 탈락 |
+
+### 9.3 채택 안 (A)
+
+**원칙**: LLM은 문서-내부 식별자(docId)만 책임지고, 코드가 이슈 생성 후 실제 subkey로 기계적 치환한다.
+
+- 각 features/requirements 항목에 **`docId` 필드 필수** (예: `"docId": "UC-1"`)
+- LLM은 문서 본문(표, 헤딩, 시나리오 섹션, 매핑 열 모두)에서 동일 `docId`를 일관되게 사용
+- "(Feature 이슈 키)" 등 실제 subkey를 써야 하는 컬럼에도 **LLM은 `docId`를 그대로 기록** (빈칸 금지)
+- executor는 `dispatch_by_mode` 완료 후 `docId → subkey` 매핑을 구축:
+  - `created`: `create_issue()` 반환값의 `subkey`
+  - `reuse`/`modify`: 기존 이슈 조회 결과의 `subkey`
+- 매핑을 document에 단어 경계 정규식으로 치환 후 저장
+
+### 9.4 채택 사유
+
+1. **토큰/지연 추가 없음** — 기존 단일 호출 구조 유지
+2. **결정성** — 치환은 기계적이므로 LLM 변동성 없음
+3. **하위 호환** — 기존 mode 분기/링크 로직에 영향 없음
+4. **범위 제한** — use-cases.md / requirements.md 만 대상. VOS(vos_collect)는 문서 산출이 없고, projdesc_generate는 이슈를 만들지 않아 제외
+
+### 9.5 치환 규칙
+
+- 단어 경계(`\b`) 기반 정규식으로 `docId` → `subkey` 전역 치환
+- `docId` 접두사는 고정: `UC`, `FR`, `NFR`, `CNST` (대시/밑줄 모두 허용하지 않고 `UC-N` 형식만)
+- docId가 매핑에 없으면(LLM 실수/누락) 원문 유지 — 사용자에게 경고 메시지로 보고
+
+---
+
+## 10. 핵심 결정 요약
 
 1. **단일 진실 출처**: 워크플로우 문서가 검증 기준/정책의 권위 출처
 2. **자연어 우선**: YAML/JSON 블록 금지, 마크다운 불릿으로 표현
@@ -253,3 +295,4 @@ Agent-Service의 LLM 오케스트레이션 스킬(`vos_collect`, `usecase_analyz
 4. **헤딩 매칭으로 추출**: `**검증 기준**:`, `**검증 정책**:` 섹션을 executor가 추출
 5. **score 기반 판정**: LLM 단일 종합 점수, critical은 점수 무관 결격
 6. **하드 상한으로 안전성 보장**: max_iter 5회 클램프, 파싱 실패 시 현재 결과 종료
+7. **문서 ID는 docId로 우회 후 치환**: LLM 응답에 `docId` 필수, executor가 이슈 생성 후 실제 subkey로 기계 치환 (옵션 A 채택)

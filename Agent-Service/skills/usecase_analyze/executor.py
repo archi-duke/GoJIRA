@@ -11,6 +11,7 @@ from skills.helpers import (
     create_issue, link_issues, dispatch_by_mode,
     is_template_only as _is_template_only,
     load_prompt,
+    build_docid_subkey_map, substitute_doc_ids,
 )
 from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
 from skills.mermaid_utils import (
@@ -108,11 +109,12 @@ async def execute(params: dict, user: str) -> dict:
 
     existing_features = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Feature"},
-        {"key": 1, "summary": 1, "description": 1, "actor": 1,
+        {"key": 1, "subkey": 1, "summary": 1, "description": 1, "actor": 1,
          "precondition": 1, "basicflow": 1, "alternativeflow": 1,
          "exceptionflow": 1, "postcondition": 1, "_id": 0},
     ))
     existing_feature_keys = {f["key"] for f in existing_features}
+    existing_feature_by_key = {f["key"]: f for f in existing_features}
     valid_vos_keys = {v["key"] for v in vos_list}
 
     await emit_progress("usecase_analyze", "Use Case/Feature 분석 시작")
@@ -227,6 +229,10 @@ async def execute(params: dict, user: str) -> dict:
                     except Exception:
                         pass
 
+    # 5.5 docId → subkey 치환 (문서 ID와 실제 이슈 subkey 동기화)
+    docid_map = build_docid_subkey_map(buckets, existing_feature_by_key)
+    document, leftover_doc_ids = substitute_doc_ids(document, docid_map)
+
     # 6. business/use-cases.md 저장
     saved_path = None
     save_error = None
@@ -249,6 +255,9 @@ async def execute(params: dict, user: str) -> dict:
     mermaid_note = ""
     if mermaid_validation.get("errors"):
         mermaid_note = f" / ⚠ Mermaid 검증 경고 {len(mermaid_validation['errors'])}건"
+    docid_note = ""
+    if leftover_doc_ids:
+        docid_note = f" / ⚠ 미치환 docId {len(leftover_doc_ids)}건: {', '.join(leftover_doc_ids[:5])}"
     return {
         "projectCode": code,
         "created": buckets["created"],
@@ -262,7 +271,9 @@ async def execute(params: dict, user: str) -> dict:
         "critiqueTrail": critique_trail,
         "mermaidValidation": mermaid_validation,
         "prerequisitesRan": prereqs_ran,
-        "message": base_msg + (f" / {tsum}" if tsum else "") + mermaid_note,
+        "docIdMap": docid_map,
+        "leftoverDocIds": leftover_doc_ids,
+        "message": base_msg + (f" / {tsum}" if tsum else "") + mermaid_note + docid_note,
     }
 
 

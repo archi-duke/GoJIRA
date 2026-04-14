@@ -10,6 +10,7 @@ from skills.helpers import (
     create_issue, link_issues, dispatch_by_mode,
     is_template_only as _is_template_only,
     load_prompt,
+    build_docid_subkey_map, substitute_doc_ids,
 )
 from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
 
@@ -118,10 +119,11 @@ async def execute(params: dict, user: str) -> dict:
     ))
     existing_reqs = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Requirement"},
-        {"key": 1, "summary": 1, "description": 1, "reqtype": 1,
+        {"key": 1, "subkey": 1, "summary": 1, "description": 1, "reqtype": 1,
          "qa": 1, "measure": 1, "_id": 0},
     ))
     existing_req_keys = {r["key"] for r in existing_reqs}
+    existing_req_by_key = {r["key"]: r for r in existing_reqs}
     valid_feat_keys = {f["key"] for f in feat_list}
 
     template = _load_template()
@@ -244,6 +246,10 @@ async def execute(params: dict, user: str) -> dict:
                     "measure": item.get("measure", ""),
                 })
 
+    # docId → subkey 치환 (문서 ID와 실제 이슈 subkey 동기화)
+    docid_map = build_docid_subkey_map(buckets, existing_req_by_key)
+    document, leftover_doc_ids = substitute_doc_ids(document, docid_map)
+
     # business/requirements.md 저장
     saved_path = None
     save_error = None
@@ -276,6 +282,8 @@ async def execute(params: dict, user: str) -> dict:
         )
     if buckets["markedForDeletion"]:
         msg_parts.append("⚠ 삭제 마킹된 항목은 검토 후 실제 삭제 또는 마킹 해제가 필요합니다")
+    if leftover_doc_ids:
+        msg_parts.append(f"⚠ 미치환 docId {len(leftover_doc_ids)}건: {', '.join(leftover_doc_ids[:5])}")
 
     tsum = trail_summary(critique_trail)
     if tsum:
@@ -293,6 +301,8 @@ async def execute(params: dict, user: str) -> dict:
         "autoMeasureItems": auto_measure_items,
         "needsReview": bool(auto_measure_items) or bool(buckets["markedForDeletion"]),
         "critiqueTrail": critique_trail,
+        "docIdMap": docid_map,
+        "leftoverDocIds": leftover_doc_ids,
         "prerequisitesRan": prereqs_ran,
         "message": " / ".join(msg_parts),
     }
