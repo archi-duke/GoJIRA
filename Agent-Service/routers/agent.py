@@ -237,7 +237,12 @@ async def get_llm_config():
 
 @router.post("/llm")
 async def switch_llm(request: Request):
-    """활성 LLM 프로바이더 전환 — llm.json 의 active 를 수정하고 클라이언트 리로드."""
+    """활성 LLM 프로바이더/모델 전환 — llm.json 의 active 와 해당 provider 의 model 을 수정하고 클라이언트 리로드.
+
+    body: {active: str, model?: str}
+    - active 만 있으면 프로바이더만 전환 (해당 provider 의 기존 model 유지)
+    - model 도 있으면 해당 provider 의 model 도 덮어쓰기
+    """
     import json
     from pathlib import Path
     from config import _build_cfg_from_dict
@@ -246,6 +251,7 @@ async def switch_llm(request: Request):
 
     body = await request.json()
     target = (body.get("active") or "").strip()
+    new_model = (body.get("model") or "").strip()
     if not target:
         return {"ok": False, "error": "active 필드 필수"}
 
@@ -260,8 +266,10 @@ async def switch_llm(request: Request):
     if target not in providers:
         return {"ok": False, "error": f"'{target}' 프로바이더 없음. 사용 가능: {list(providers.keys())}"}
 
-    # 파일에 active 반영
+    # active + (선택적으로) model 반영
     raw["active"] = target
+    if new_model:
+        raw["providers"][target]["model"] = new_model
     try:
         with open(llm_path, "w") as f:
             json.dump(raw, f, ensure_ascii=False, indent=2)
@@ -269,18 +277,100 @@ async def switch_llm(request: Request):
         return {"ok": False, "error": f"llm.json 쓰기 실패: {e}"}
 
     # 런타임 싱글턴 갱신 — config.llm_config 재로드 + core.llm._client 리셋
-    chosen = providers[target]
+    chosen = raw["providers"][target]
     new_cfg = _build_cfg_from_dict(chosen, provider_label=target)
     _config_mod.llm_config = new_cfg
-    _llm_mod.llm_config = new_cfg       # 이미 임포트된 모듈의 참조도 갱신
-    _llm_mod._client = None              # 다음 호출 시 재생성
+    _llm_mod.llm_config = new_cfg
+    _llm_mod._client = None
 
-    log.info("LLM 프로바이더 전환: %s (model=%s)", target, new_cfg.model)
+    log.info("LLM 전환: provider=%s, model=%s", target, new_cfg.model)
     return {
         "ok": True,
         "active": target,
         "activeModel": new_cfg.model,
     }
+
+
+# 모델 목록 캐시 (프로바이더별, TTL 없이 단순 메모리 캐시 — 수동 refresh=true 파라미터로 무효화)
+_models_cache: Dict[str, List[Dict]] = {}
+
+
+@router.get("/llm/models")
+async def list_available_models(provider: str, refresh: bool = False):
+    """프로바이더 API 의 /models 엔드포인트에서 사용 가능한 모델 목록을 가져온다.
+
+    OpenAI 호환 엔드포인트 가정 — `{base_url}/models` 로 GET.
+    """
+    import json
+    from pathlib import Path
+    import httpx
+    from config import settings as _settings
+
+    if not refresh and provider in _models_cache:
+        return {"provider": provider, "models": _models_cache[provider], "cached": True}
+
+    llm_path = Path(__file__).parent.parent / "llm.json"
+    try:
+        with open(llm_path) as f:
+            raw = json.load(f)
+    except Exception as e:
+        return {"error": f"llm.json 읽기 실패: {e}", "models": []}
+
+    providers = raw.get("providers") or {}
+    p = providers.get(provider)
+    if not p:
+        return {"error": f"프로바이더 없음: {provider}", "models": []}
+
+    # API 키 해석
+    env_name = p.get("apiKeyEnv", "")
+    api_key = getattr(_settings, env_name.lower(), "") or os.environ.get(env_name, "")
+    if not api_key:
+        return {"error": f"{env_name} 환경변수 미설정", "models": []}
+
+    # base_url 계산
+    endpoint = p.get("endpoint", "")
+    base_url = endpoint[:-len("/chat/completions")] if endpoint.endswith("/chat/completions") else endpoint
+    models_url = base_url.rstrip("/") + "/models"
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(models_url, headers={"Authorization": f"Bearer {api_key}"})
+            if resp.status_code >= 400:
+                return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}", "models": []}
+            data = resp.json()
+    except Exception as e:
+        return {"error": f"요청 실패: {e}", "models": []}
+
+    # OpenAI 포맷: {data: [{id, created, owned_by}, ...]}
+    items = data.get("data") or data.get("models") or []
+    # 채팅 모델만 필터 — 이미지/오디오/비디오/임베딩 등 제외
+    _EXCLUDE = (
+        "embedding", "dall-e", "whisper", "tts", "moderation", "audio",
+        "image", "sora", "veo", "lyria", "nano-banana", "robotics",
+        "realtime", "transcribe", "speech", "translate",
+    )
+    # Gemini: 채팅 계열 접두사만 허용 (gemini-/gemma-)
+    _GEMINI_CHAT = ("gemini-", "gemma-")
+    # Gemini 는 ID 가 preview/exp/deprecated/-001 등 다양 — 별도 필터 없이 포함
+    filtered = []
+    for m in items:
+        raw_id = m.get("id") or m.get("name") or ""
+        if not raw_id:
+            continue
+        # Gemini: "models/" prefix 제거
+        mid = raw_id[len("models/"):] if raw_id.startswith("models/") else raw_id
+        lower = mid.lower()
+        if any(x in lower for x in _EXCLUDE):
+            continue
+        # Gemini 전용 추가 필터
+        if provider.startswith("gemini") and not any(lower.startswith(p) for p in _GEMINI_CHAT):
+            continue
+        filtered.append({"id": mid, "ownedBy": m.get("owned_by", "")})
+    # 정렬: 최신이 위로
+    filtered.sort(key=lambda x: x["id"], reverse=True)
+
+    _models_cache[provider] = filtered
+    return {"provider": provider, "models": filtered, "cached": False}
 
 
 @router.get("/sessions")

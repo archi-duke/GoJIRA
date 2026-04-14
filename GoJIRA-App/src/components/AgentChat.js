@@ -27,6 +27,9 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const [llmModel, setLlmModel] = useState('');
   const [llmProviders, setLlmProviders] = useState([]);
   const [llmMenuOpen, setLlmMenuOpen] = useState(false);
+  const [llmExpanded, setLlmExpanded] = useState(null);   // 현재 확장된 프로바이더 이름
+  const [llmModels, setLlmModels] = useState({});          // {provider: [{id, ownedBy}]}
+  const [llmLoading, setLlmLoading] = useState({});        // {provider: bool}
 
   // Master 그룹: authority.USR >= 15
   const isMaster = authority && (authority.USR || 0) >= 15;
@@ -82,24 +85,54 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     })();
   }, []);
 
-  async function handleSwitchLlm(providerName) {
+  async function handleSwitchLlm(providerName, modelId = null) {
     setLlmMenuOpen(false);
-    if (providerName === llmActive) return;
+    setLlmExpanded(null);
+    if (providerName === llmActive && (!modelId || modelId === llmModel)) return;
     try {
+      const body = { active: providerName };
+      if (modelId) body.model = modelId;
       const res = await fetch(`${STREAM_API}/Agent/llm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active: providerName }),
+        body: JSON.stringify(body),
       });
       const d = await res.json();
       if (d.ok) {
         setLlmActive(d.active);
         setLlmModel(d.activeModel);
+        // providers 목록도 해당 provider 의 model 을 업데이트
+        setLlmProviders(prev => prev.map(p => p.name === d.active ? { ...p, model: d.activeModel } : p));
       } else {
         alert('LLM 전환 실패: ' + (d.error || '알 수 없음'));
       }
     } catch (e) {
       alert('LLM 전환 실패: ' + e.message);
+    }
+  }
+
+  async function handleExpandProvider(providerName, forceRefresh = false) {
+    if (llmExpanded === providerName && !forceRefresh) {
+      setLlmExpanded(null);
+      return;
+    }
+    setLlmExpanded(providerName);
+    if (llmModels[providerName] && !forceRefresh) return;
+    setLlmLoading(prev => ({ ...prev, [providerName]: true }));
+    try {
+      const q = forceRefresh ? '&refresh=true' : '';
+      const res = await fetch(`${STREAM_API}/Agent/llm/models?provider=${encodeURIComponent(providerName)}${q}`);
+      const d = await res.json();
+      if (d.error) {
+        alert(`${providerName} 모델 조회 실패: ${d.error}`);
+        setLlmLoading(prev => ({ ...prev, [providerName]: false }));
+        return;
+      }
+      setLlmModels(prev => ({ ...prev, [providerName]: d.models || [] }));
+    } catch (e) {
+      alert('모델 조회 실패: ' + e.message);
+    } finally {
+      setLlmLoading(prev => ({ ...prev, [providerName]: false }));
     }
   }
 
@@ -519,15 +552,51 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               {llmMenuOpen && (
                 <div className="ac-llm-menu">
                   {llmProviders.map(p => (
-                    <div
-                      key={p.name}
-                      className={`ac-llm-item ${p.name === llmActive ? 'ac-llm-item-active' : ''} ${!p.apiKeyPresent ? 'ac-llm-item-disabled' : ''}`}
-                      onClick={() => p.apiKeyPresent && handleSwitchLlm(p.name)}
-                      title={!p.apiKeyPresent ? `${p.apiKeyEnv} 환경변수 미설정` : p.endpoint}
-                    >
-                      <div className="ac-llm-item-name">{p.name}</div>
-                      <div className="ac-llm-item-model">{p.model}</div>
-                      {!p.apiKeyPresent && <div className="ac-llm-item-warn">키 없음</div>}
+                    <div key={p.name} className="ac-llm-group">
+                      <div
+                        className={`ac-llm-item ${p.name === llmActive ? 'ac-llm-item-active' : ''} ${!p.apiKeyPresent ? 'ac-llm-item-disabled' : ''}`}
+                        title={!p.apiKeyPresent ? `${p.apiKeyEnv} 환경변수 미설정` : p.endpoint}
+                      >
+                        <div className="ac-llm-item-main" onClick={() => p.apiKeyPresent && handleSwitchLlm(p.name)}>
+                          <div className="ac-llm-item-name">{p.name}</div>
+                          <div className="ac-llm-item-model">{p.model}</div>
+                          {!p.apiKeyPresent && <div className="ac-llm-item-warn">키 없음</div>}
+                        </div>
+                        {p.apiKeyPresent && (
+                          <button
+                            className="ac-llm-expand"
+                            onClick={(e) => { e.stopPropagation(); handleExpandProvider(p.name); }}
+                            title="모델 목록"
+                          >
+                            {llmExpanded === p.name ? '▾' : '▸'}
+                          </button>
+                        )}
+                      </div>
+                      {llmExpanded === p.name && (
+                        <div className="ac-llm-sub">
+                          {llmLoading[p.name] ? (
+                            <div className="ac-llm-sub-loading">모델 조회 중...</div>
+                          ) : (llmModels[p.name] || []).length === 0 ? (
+                            <div className="ac-llm-sub-loading">모델 없음</div>
+                          ) : (
+                            <>
+                              <div className="ac-llm-sub-header">
+                                <span>사용 가능 모델</span>
+                                <button className="ac-llm-refresh" onClick={(e) => { e.stopPropagation(); handleExpandProvider(p.name, true); }} title="새로고침">⟳</button>
+                              </div>
+                              {(llmModels[p.name] || []).map(m => (
+                                <div
+                                  key={m.id}
+                                  className={`ac-llm-sub-item ${(p.name === llmActive && m.id === llmModel) ? 'ac-llm-sub-item-active' : ''}`}
+                                  onClick={() => handleSwitchLlm(p.name, m.id)}
+                                >
+                                  {m.id}
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
