@@ -207,6 +207,13 @@ async def execute(params: dict, user: str) -> dict:
         if (r.get("reqtype") or "").upper() == "NFR":
             _add_asr_label(r["key"])
 
+    # normalizedAttributes 를 프로젝트에 영속화 (style_define 재사용)
+    if normalized:
+        projects().update_one(
+            {"jiraCodes.main.jiraCode": code},
+            {"$set": {"archSettings.normalizedAttributes": normalized}},
+        )
+
     # architecture/drivers.md 저장
     saved_path = None
     save_error = None
