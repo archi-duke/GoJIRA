@@ -23,6 +23,7 @@ _STEP_DOCS = {
     "style_define": "architecture/architecture-style.md",
     "design_decide": "architecture/design-decisions.md",
     "design_integrate": "architecture/architecture-integrated.md",
+    "satam_analyze": "architecture/satam.md",
 }
 
 
@@ -68,6 +69,7 @@ async def get_workflow_state(project_code: str) -> Dict[str, Any]:
     chosen = arch.get("chosenStyles") or {}
     normalized = arch.get("normalizedAttributes") or {}
     integrated_done = bool(arch.get("designIntegrated"))
+    satam_done = bool(arch.get("satamDone"))
 
     primary_styles = chosen.get("primary") or []
     secondary_styles = chosen.get("secondary") or []
@@ -86,6 +88,7 @@ async def get_workflow_state(project_code: str) -> Dict[str, Any]:
         "style_define": bool(primary_styles),
         "design_decide": (adsn_count + ddsn_count) > 0,
         "design_integrate": integrated_done,
+        "satam_analyze": satam_done or documents_present.get("architecture/satam.md", False),
     }
 
     state: Dict[str, Any] = {
@@ -148,6 +151,8 @@ def next_recommended_step(state: Dict[str, Any]) -> Optional[str]:
         return "design_decide"
     if not done.get("design_integrate"):
         return "design_integrate"
+    if not done.get("satam_analyze"):
+        return "satam_analyze"
     return None
 
 
@@ -173,6 +178,7 @@ def format_state_for_llm(state: Dict[str, Any]) -> str:
     lines.append(f"  {_mark(done.get('style_define'))} style_define (Primary {csc.get('primary',0)}/Sec {csc.get('secondary',0)}/Sup {csc.get('supporting',0)}, 문서 {_mark(docs.get('architecture/architecture-style.md'))})")
     lines.append(f"  {_mark(done.get('design_decide'))} design_decide (ADSN {state['adsnCount']}/DDSN {state['ddsnCount']}, 문서 {_mark(docs.get('architecture/design-decisions.md'))})")
     lines.append(f"  {_mark(done.get('design_integrate'))} design_integrate (문서 {_mark(docs.get('architecture/architecture-integrated.md'))})")
+    lines.append(f"  {_mark(done.get('satam_analyze'))} satam_analyze (문서 {_mark(docs.get('architecture/satam.md'))})")
 
     nxt = state["nextRecommendedStep"]
     if nxt:

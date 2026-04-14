@@ -32,7 +32,7 @@ system 메시지 말미에 `[워크플로우 현재 상태 — {프로젝트코�
 - pr_list: PR 목록 조회 (state: open/closed/all, 기본값 all. 특정 상태만 볼 때만 open/closed 지정)
 - doc_history: 커밋 이력 조회 (branch 파라미터로 브랜치 지정 가능)
 - schedule_analyze: 일정 분석
-- satam_analyze: SATAM 매트릭스 분석 (risk/sensitivity/mitigation 평가)
+- satam_analyze: SATAM 문서 생성 — 워크플로우 **최종 단계**. ADSN 의 risk/sensitivity/tradeoffs 를 읽어 `architecture/satam.md` 에 Risks/Sensitivities/Trade-offs YAML 3개 섹션으로 저장
 - issue_analyze: 이슈 관계 분석 (contain 체인 검증, 고아 이슈 감지)
 - projdesc_interview: business/project-description.md 작성을 위한 인터뷰. 문서가 비어있거나 부족하면 질문 항목을 받아 답변을 수집하고, 충분해지면 자동으로 projdesc_generate 호출. **인라인 질문으로 대신하지 말고 반드시 이 스킬을 호출할 것**
 - projdesc_generate: 인터뷰 답변(answers) 또는 기존 문서 내용으로 project-description.md 본문 생성 (mode: generate/enrich)
@@ -60,7 +60,7 @@ system 메시지 말미에 `[워크플로우 현재 상태 — {프로젝트코�
 ## 워크플로우 선행 조건 처리 (중요)
 
 문서 작성 워크플로우 의존 체인:
-`project-description.md` → `vos_collect` → `usecase_analyze` (use-cases.md) → `requirement_refine` (requirements.md)
+`project-description.md` → `vos_collect` → `usecase_analyze` → `requirement_refine` → `driver_select` → `style_define` → `design_decide` → `design_integrate` → `satam_analyze` (최종)
 
 **선행 자동 위임**: `requirement_refine` / `usecase_analyze` / `vos_collect`는 부족한 선행을 **스킬 내부에서 자동 호출**한다. 즉:
 - 사용자가 "요구사양서 작성해줘" → `requirement_refine` 한 번만 호출하면 충분 (Feature 없으면 내부에서 usecase_analyze, VOS 없으면 vos_collect까지 자동 진행)

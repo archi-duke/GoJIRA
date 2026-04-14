@@ -43,6 +43,7 @@ async def agent_loop_stream(
     _GEN_SKILLS = {
         "vos_collect", "usecase_analyze", "requirement_refine",
         "driver_select", "style_define", "design_decide", "design_integrate",
+        "satam_analyze",
     }
 
     # 사용자 메시지 추출 (마지막 user 메시지)
