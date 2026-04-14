@@ -80,8 +80,8 @@
 ## 2. Driver 별 상세 근거
 
 ### FR_NNN / QA_NNN / CNST_NNN — (이슈 요약)
-- **QAD {score} 근거**: ...
-- **QAI {score} 근거**: ...
+- **QAD {{score}} 근거**: ...
+- **QAI {{score}} 근거**: ...
 - **risk**: ...
 - **sensitivity**: ...
 
@@ -104,7 +104,7 @@
 {{
   "drivers": [
     {{
-      "key": "{code}-27",
+      "key": "{code}-N",
       "qad": 4,
       "qai": 5,
       "priority": 4.5,

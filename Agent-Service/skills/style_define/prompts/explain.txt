@@ -56,7 +56,7 @@
 
 ## 3. 스타일별 선정 근거
 
-### 3.1 {Primary 스타일 A}
+### 3.1 {{Primary 스타일 A}}
 - **적합 신호**: fit_signals 매칭 항목
 - **품질속성 영향**: 주요 positive/negative 효과
 - **트레이드오프**: pros / cons 요약
@@ -67,7 +67,7 @@
 
 ## 4. 조합 설계
 
-- Primary 간 조합: {스타일A} + {스타일B} — {reason}
+- Primary 간 조합: {{스타일A}} + {{스타일B}} — {{reason}}
 - Primary + Supporting 조합: ...
 - 제외한 스타일과 이유: ...
 
