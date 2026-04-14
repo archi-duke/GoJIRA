@@ -42,6 +42,29 @@ async def agent_loop_stream(
             user_message = m.get("content", "")
             break
 
+    # 워크플로우 상태 주입 (Belief State)
+    # 사용자 메시지에서 프로젝트 코드가 감지되면, 현재 진행 상태 요약을 system 메시지로 주입.
+    # LLM 이 '계속' 같은 모호한 입력에서 다음 단계 스킬을 정확히 선택하도록 돕는다.
+    # design-agent.md §10, design-workflow.md §10 참조.
+    try:
+        from core.workflow_state import detect_project_code, get_workflow_state, format_state_for_llm
+        detected_code = detect_project_code(user_message)
+        if detected_code:
+            state = get_workflow_state(detected_code)
+            state_text = format_state_for_llm(state)
+            # 기존 system 메시지 뒤에 덧붙임 (맨 앞에 새 system 추가 시 기존 톤/규칙과 순서 어긋날 수 있음)
+            injected = False
+            for i, m in enumerate(messages):
+                if m.get("role") == "system":
+                    messages[i] = {"role": "system", "content": m.get("content", "") + "\n\n" + state_text}
+                    injected = True
+                    break
+            if not injected:
+                messages.insert(0, {"role": "system", "content": state_text})
+    except Exception:
+        # 상태 조회 실패는 치명적이지 않음 — 조용히 무시하고 기존 흐름 유지
+        pass
+
     # 1차 스킬 선별 (키워드 + description 매칭)
     tools = registry.select_tools(user_message)
 

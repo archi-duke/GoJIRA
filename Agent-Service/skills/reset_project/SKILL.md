@@ -13,9 +13,6 @@ projectCode:
 confirm:
   type: boolean
   description: "true로 설정해야 실제 실행. false 또는 미지정 시 dry-run으로 영향 범위만 반환."
-user:
-  type: string
-  description: "사용자 ID (사용자 브랜치 docs/{user} 처리용)"
 resetIssues:
   type: boolean
   description: "이슈(DB+JIRA) 초기화 여부. 기본 true."

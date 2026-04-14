@@ -287,7 +287,83 @@ Agent-Service의 LLM 오케스트레이션 스킬(`vos_collect`, `usecase_analyz
 
 ---
 
-## 10. 핵심 결정 요약
+## 10. 워크플로우 상태 인지와 자동 위임
+
+### 10.1 배경
+
+워크플로우 스킬은 순차 의존 체인(projdesc → vos_collect → usecase_analyze → requirement_refine → driver_select → style_define → design_decide → design_integrate)을 형성한다. 에이전트가 "계속", "진행해줘" 같은 모호한 사용자 입력을 받았을 때, **현재 체인의 어느 단계에 와 있는지** 를 알아야 다음 단계 스킬을 정확히 호출할 수 있다.
+
+이전 설계에는 두 개 메커니즘만 있었다:
+
+- **Scratchpad (턴 내부)**: 한 턴 내 ReACT 추론에서 Thought/Action/Observation 누적. 턴 경계를 넘으면 휘발.
+- **Option C 자동 위임 (backward)**: 하위 스킬이 선행 산출 부족을 발견하면 상위 스킬을 직접 호출. 예: `requirement_refine` → `usecase_analyze` → `vos_collect`.
+
+이 두 가지만으로는 **"이미 완료된 단계를 반복 호출"** 오류를 막지 못했다. 예: `vos_collect` 성공 후 사용자가 "계속" 이라고 하면, LLM 은 직전 메시지 맥락만 보고 다시 `vos_collect` 를 호출하는 사례 발생.
+
+### 10.2 채택 — 워크플로우 상태 주입 (Belief State)
+
+매 사용자 턴 시작 직전, 프로젝트 코드가 식별되면 **워크플로우 진행 상태 요약** 을 system 메시지에 주입한다.
+
+```
+[워크플로우 현재 상태 — {projectCode}]
+- projdesc: ✓ 저장됨
+- VOS: 13건 (vos_collect 완료)
+- Feature: 0건                ← 다음 단계
+- Requirement: 0건
+- Drivers: 0건
+- chosenStyles: 미정
+- ADSN/DDSN: 0건
+
+다음 권장 스킬: usecase_analyze
+```
+
+효과: LLM 이 "계속" 입력에서 현재 상태를 근거로 정확한 다음 스킬 호출. 중복 호출 방지.
+
+설계 상세는 [`docs/design-agent.md §10 상태 관리`](./design-agent.md) 참조.
+
+### 10.3 Option C 자동 위임과의 관계
+
+| 메커니즘 | 방향 | 주체 | 발동 조건 |
+|---------|------|------|----------|
+| Option C 자동 위임 | backward (하위 → 상위) | 스킬 executor | 선행 산출물 누락 감지 |
+| 워크플로우 상태 주입 | forward (LLM 의 다음 스킬 선택) | streaming layer | 매 턴 시작 |
+
+두 메커니즘은 **상호 보완**:
+- 상태 주입이 LLM 의 정확한 다음 단계 선택을 돕는다.
+- Option C 는 LLM 선택이 빗나가도(또는 사용자가 중간 단계를 건너뛴 스킬 직접 호출해도) 자동 복구.
+- 상태 주입만으로는 "사용자가 requirement_refine 을 바로 호출했는데 VOS 가 없는 경우" 를 해결할 수 없음 → Option C 필요.
+- Option C 만으로는 "이미 완료된 단계 재호출" 을 방지할 수 없음 → 상태 주입 필요.
+
+### 10.4 next_recommended_step 결정 규칙
+
+```python
+# 의사 코드
+def next_recommended_step(state):
+    if not state.projdesc_exists: return "projdesc_interview"
+    if state.vos_count == 0:      return "vos_collect"
+    if state.feature_count == 0:  return "usecase_analyze"
+    if state.requirement_count == 0: return "requirement_refine"
+    if state.driver_count == 0:   return "driver_select"
+    if not state.chosenStyles:    return "style_define"
+    if state.design_count["adsn"] + state.design_count["ddsn"] == 0:
+        return "design_decide"
+    # 디자인 통합/SATAM 은 사용자 명시 요청 시에만
+    return None
+```
+
+**주의**: 이 규칙은 **권장**일 뿐 LLM 이 반드시 따르는 것은 아님. 사용자 의도가 "새로운 VOS 검토" 같이 명시적이면 그대로 따라감. 권장은 모호한 입력("계속")에서만 강하게 작동.
+
+### 10.5 구현 위치
+
+| 파일 | 역할 |
+|------|------|
+| `core/workflow_state.py` (신규) | `get_workflow_state(project_code)` — DB/archSettings 조회해 상태 딕셔너리 반환, `format_state_for_llm()` 한국어 요약 생성, `next_recommended_step()` 계산 |
+| `agents/streaming.py` | Pass 1 추론 직전, 프로젝트 코드 식별 시 상태 요약을 system 메시지에 주입 |
+| `prompts/system.txt` | "[워크플로우 현재 상태] 가 주입되면 반드시 확인하고, next_recommended_step 을 우선 고려" 지침 추가 |
+
+---
+
+## 11. 핵심 결정 요약
 
 1. **단일 진실 출처**: 워크플로우 문서가 검증 기준/정책의 권위 출처
 2. **자연어 우선**: YAML/JSON 블록 금지, 마크다운 불릿으로 표현
@@ -296,3 +372,4 @@ Agent-Service의 LLM 오케스트레이션 스킬(`vos_collect`, `usecase_analyz
 5. **score 기반 판정**: LLM 단일 종합 점수, critical은 점수 무관 결격
 6. **하드 상한으로 안전성 보장**: max_iter 5회 클램프, 파싱 실패 시 현재 결과 종료
 7. **문서 ID는 docId로 우회 후 치환**: LLM 응답에 `docId` 필수, executor가 이슈 생성 후 실제 subkey로 기계 치환 (옵션 A 채택)
+8. **워크플로우 상태 주입 (Belief State)**: 매 턴 프로젝트의 진행 상태를 요약해 LLM 에 주입. 모호한 "계속" 입력에서 중복 호출 방지. Option C 자동 위임과 상호 보완 관계

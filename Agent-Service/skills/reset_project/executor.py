@@ -42,6 +42,30 @@ _TEMPLATES = {
         "## Integrated Design Views\n\n(작성 필요)\n\n"
         "## SATAM (Sensitivity, Architecture Tradeoff Analysis)\n\n(작성 필요)\n"
     ),
+    "architecture/drivers.md": (
+        "# Architecture Drivers\n\n"
+        "아키텍처 결정에 영향이 큰 요구사항(Driver)의 선정 결과를 기록하는 문서입니다.\n"
+        "driver_select 스킬이 생성합니다.\n\n"
+        "## 선정 Driver 목록\n\n(작성 필요)\n"
+    ),
+    "architecture/architecture-style.md": (
+        "# 시스템 아키텍처 스타일\n\n"
+        "선정된 시스템 스타일(Primary/Secondary/Supporting)과 근거를 기록하는 문서입니다.\n"
+        "style_define 스킬이 생성합니다.\n\n"
+        "## 추천 요약\n\n(작성 필요)\n"
+    ),
+    "architecture/design-decisions.md": (
+        "# 설계 결정 (Architectural & Detailed Design)\n\n"
+        "Design Point 별 설계 대안 비교와 결정 결과를 기록하는 문서입니다.\n"
+        "design_decide 스킬이 생성합니다.\n\n"
+        "## Design Point 요약\n\n(작성 필요)\n"
+    ),
+    "architecture/architecture-integrated.md": (
+        "# 통합 설계 뷰 (Integrated Design Views)\n\n"
+        "논리/프로세스/배포/개발 관점의 통합 설계를 기록하는 문서입니다.\n"
+        "design_integrate 스킬이 생성합니다.\n\n"
+        "## 개요\n\n(작성 필요)\n"
+    ),
 }
 
 
@@ -111,7 +135,7 @@ async def execute(params: dict, user: str) -> dict:
         issues().delete_many({"key": {"$regex": f"^{re.escape(code)}-"}})
         projects().update_one(
             {"jiraCodes.main.jiraCode": code},
-            {"$set": {"issues": []}},
+            {"$set": {"issues": []}, "$unset": {"archSettings": ""}},
         )
 
     saved_files = []

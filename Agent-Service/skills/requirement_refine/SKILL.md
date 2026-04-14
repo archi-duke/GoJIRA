@@ -10,9 +10,6 @@ projectCode:
   type: string
   description: "프로젝트 코드 (예: GOJIRA)"
   required: true
-user:
-  type: string
-  description: "요청 사용자 ID (문서 브랜치/저장용)"
 ```
 
 ## 절차

@@ -13,8 +13,6 @@ Phase 3 ⑦ 설계안 결정.
 projectCode:
   type: string
   required: true
-user:
-  type: string
 ```
 
 ## 선행 의존

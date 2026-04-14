@@ -13,8 +13,6 @@ Phase 3 ⑧ 디자인 통합.
 projectCode:
   type: string
   required: true
-user:
-  type: string
 ```
 
 ## 선행 의존

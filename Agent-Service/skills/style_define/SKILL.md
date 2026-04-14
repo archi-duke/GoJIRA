@@ -16,8 +16,6 @@ projectCode:
 normalizedAttributes:
   type: object
   description: "{attr: level} 형식. 생략 시 프로젝트의 archSettings.normalizedAttributes 사용, 그것도 없으면 driver_select 자동 위임"
-user:
-  type: string
 ```
 
 ## 동작

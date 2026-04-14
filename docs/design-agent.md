@@ -230,7 +230,86 @@ Claude SDK 채택은 불가하지만 다음은 차용 가능:
 
 ---
 
-## 10. 핵심 설계 원칙 (요약)
+## 10. 상태 관리 (State Management)
+
+### 10.1 ReACT 의 3단계 상태 관리
+
+| 수준 | 이름 | 메커니즘 | 범위 |
+|------|------|---------|------|
+| 1 | Scratchpad | (Thought / Action / Observation) triple 을 프롬프트에 이어붙임 | 턴 내부 |
+| 2 | Belief State | 외부 시스템(DB/API/문서)에서 현재 상태를 조회해 매 턴 context 에 주입 | 세션·프로젝트 |
+| 3 | Explicit Plan / Workflow Graph | Plan 을 1급 객체로 영속화, 각 노드의 상태(pending/in_progress/done/blocked) 추적, 재시작·재개·분기 지원 | 장기 워크플로우 |
+
+실무 대부분은 **수준 1 + 2 조합**. 수준 3 은 워크플로우가 길고 중단/재개/재시도가 잦을 때 가치가 있음.
+
+### 10.2 현재 상태와 발견된 문제
+
+현 에이전트는 **수준 1 만** 구현됨. Scratchpad 는 ReACT 2-pass 추론에서 충분히 작동하지만, **턴 경계를 넘는 상태 공유가 없다**. 다음과 같은 증상 발생:
+
+- 사용자 "계속", "진행해줘" 같은 모호한 입력에서, 이전 턴에 `vos_collect` 가 성공했다는 사실을 LLM 이 prompt 문맥(assistant 메시지)으로만 추정 → 재호출 선택 오류
+- 외부(다른 사용자/세션)에서 이슈가 변경되어도 인지 불가
+- 재시작 시 직전 세션의 진행 위치 유실
+
+**근본 원인**: MongoDB 에 진실 상태(VOS/Feature/Requirement/archSettings)가 있는데 LLM 만 모름.
+
+### 10.3 채택 방향: 수준 2 (Belief State) 추가
+
+**설계**:
+
+```python
+# core/workflow_state.py (신규)
+def get_workflow_state(project_code: str) -> dict:
+    return {
+        "projdesc_exists": bool,
+        "vos_count": int,
+        "feature_count": int,
+        "requirement_count": int,
+        "driver_count": int,          # Requirement 중 driverSelected=true
+        "chosenStyles": dict | None,  # projects.archSettings.chosenStyles
+        "design_count": {"adsn": int, "ddsn": int},
+        "next_recommended_step": str, # 계산된 다음 워크플로우 스킬
+    }
+```
+
+**주입 지점**: `agents/streaming.py` Pass 1 추론 직전, 사용자 메시지에서 프로젝트 코드가 식별되면 위 상태를 한국어 요약으로 system 메시지에 덧붙임.
+
+**효과**:
+- LLM 이 "이미 VOS 13 건 / Feature 0 건" 을 인지 → "계속" = `usecase_analyze` 호출로 결정
+- 외부 변경 반영 (다른 세션에서 이슈 삭제 등)
+- 기존 ReACT 구조·스킬 변경 없음 — 주입 레이어만 얇게 추가
+
+### 10.4 향후 수준 3 (PDCA 모드) 준비
+
+수준 3 은 **PDCA (Plan-Do-Check-Act)** 로 구체화 예정. 거대 목표("과제 하나 완성") 또는 피드백 루프("SATAM 리스크 → 설계 수정 → 재평가")처럼 단순 선형 워크플로우로 표현할 수 없는 시나리오를 겨냥.
+
+| PDCA | 수준 3 요소 |
+|------|-----------|
+| Plan | 목표 → 태스크 그래프 분해, 각 노드의 예상 산출/검증 기준 정의 |
+| Do | 각 태스크를 스킬로 실행 |
+| Check | 산출물이 계획된 기준을 만족하는가 (critique 의 상위 개념 — 전체 목표 대비 편차) |
+| Act | 편차 시 plan 재작성 + 재실행 루프 |
+
+**설계 포인트**:
+- Plan 을 1급 객체(`plans` collection)로 영속화 — checkpointing / 재시작 자연스러움
+- Check 는 스킬 내부 critique 와 구분: critique = "산출물 품질", Check = "목표 대비 편차"
+- Act 의 두 분기: minor deviation → 노드 재실행, major deviation → plan 재작성 (replanner)
+- Replanner 무한 루프 방지: hard cap + 사람 에스컬레이션
+
+### 10.5 단계적 진화 로드맵
+
+```
+Now     : 수준 1 (Scratchpad) + 수준 2 (Belief State) 얇게 추가
+Next    : 수준 2 안정화 · 워크플로우 상태 포맷 정제
+Later   : 수준 3 (PDCA) — 거대 목표·피드백 루프에만 선택 적용
+```
+
+**원칙**: 수준 2 의 `workflow_state` 가 만드는 Belief State 는 그대로 수준 3 의 **Check 단계 관측(observation) 입력** 으로 재활용된다. 수준 2 는 수준 3 의 자산이지 부채가 아님.
+
+단순 선형 워크플로우에 PDCA 를 씌우면 부담만 늘고 이익 없음. PDCA 는 **목표 모호성** 또는 **자동 재시도 루프** 가 가치 있을 때 적용.
+
+---
+
+## 11. 핵심 설계 원칙 (요약)
 
 1. **자체 ReACT 유지** — LLM 종속 회피, 멀티 벤더 어댑터 지원
 2. **스킬은 기능 단위로 격리** — SKILL.md(메타) + executor.py(구현) + prompts(LLM 지시) 3계층
@@ -238,6 +317,7 @@ Claude SDK 채택은 불가하지만 다음은 차용 가능:
 4. **이슈 생성은 항상 사전 확인 → 분기 처리** — 중복 생성 방지, 폐기는 마킹 우선
 5. **산출 문서 본문은 채팅에 출력하지 않음** — 파일 저장 + 1~3줄 요약 보고
 6. **`prompts/system.txt`이 단일 진실 출처** — 이슈 생성 규칙, 응답 스타일, 워크플로우 처리 지침 통합
+7. **상태 관리는 Belief State(수준 2) 까지 현재 채택** — LLM 이 매 턴 프로젝트의 진실 상태를 알고 판단. 수준 3(PDCA) 은 목표 모호성·피드백 루프 시나리오에만 선택 적용
 
 ---
 
