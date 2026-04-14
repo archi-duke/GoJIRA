@@ -45,6 +45,22 @@ attributes:
   simple_crud: [low, medium, high]
   data_volume: [low, medium, high]
   domain_complexity: [low, medium, high]
+  long_running_job: [low, medium, high]
+  stateful_heavy: [low, medium, high]
+  short_lifecycle: [low, medium, high]
+  long_term_maintenance: [low, medium, high]
+
+  # 프론트엔드 특화
+  large_ui_codebase: [low, medium, high]
+  polyglot_frontend_tech: [low, medium, high]
+  strict_ui_consistency: [low, medium, high]
+
+  # 인프라/규모
+  service_count: [low, medium, high]
+  multi_cluster: [low, medium, high]
+  inter_service_traffic_control: [low, medium, high]
+  observability_requirement: [low, medium, high]
+  strong_vendor_independence: [low, medium, high]
 
   # 조직/운영
   team_size: [small, medium, large]
