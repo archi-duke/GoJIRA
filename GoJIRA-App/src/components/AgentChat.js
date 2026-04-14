@@ -122,7 +122,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     setMessages(prev => [
       ...prev,
       { role: 'user', content: text },
-      { role: 'process', steps: [], open: true },
+      { role: 'process', steps: [], open: false },
     ]);
     setLoading(true);
 
@@ -152,6 +152,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           break;
         case 'reasoning':
           addStep({ type: 'reasoning', data, ts });
+          // Thought 단계는 별도 채팅 메시지로 노출 (모든 사용자 그룹)
+          // 마지막 Thought는 done 시점에 제거 (최종 답변과 중복 방지)
+          if ((data.step || 'thought') === 'thought' && data.content) {
+            setMessages(prev => [...prev, { role: 'thought', content: data.content }]);
+          }
           break;
         case 'tool_call':
           addStep({ type: 'tool_call', data, ts });
@@ -184,26 +189,63 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         case 'done':
           finalActions = data.actions || [];
           setMessages(prev => {
-            const filtered = prev.filter(m => !m._streaming);
-            const updated = filtered.map(m =>
+            // 1) streaming 메시지 제거
+            let next = prev.filter(m => !m._streaming);
+            // 2) 마지막 thought 메시지 제거 (최종 답변과 중복될 가능성 차단)
+            const lastThoughtIdx = next.map(m => m.role).lastIndexOf('thought');
+            if (lastThoughtIdx >= 0) {
+              next = [...next.slice(0, lastThoughtIdx), ...next.slice(lastThoughtIdx + 1)];
+            }
+            // 3) 작업 과정 접힘 유지
+            next = next.map(m =>
               m.role === 'process' && m.steps.length > 0 ? { ...m, open: false } : m
             );
-            return [...updated, {
+            return [...next, {
               role: 'assistant',
               content: data.reply || contentBuf,
               actions: finalActions,
             }];
           });
-          // applyToEditor: 생성된 문서를 편집기로 전달 (창은 닫지 않음 — 이후 진행 내용을 계속 볼 수 있도록)
-          if (window.opener && finalActions.length > 0) {
-            const docAction = finalActions.find(a => a.result && a.result.applyToEditor);
-            if (docAction) {
-              window.opener.postMessage({
-                type: 'gojira-doc-apply',
-                filePath: docAction.result.filePath,
-                content: docAction.result.content,
-              }, '*');
-            }
+          // applyToEditor / documentSaved: 자동 위임/연쇄 호출 결과까지 재귀 탐색하여
+          // 생성된 모든 문서를 편집기로 통지
+          if (finalActions.length > 0) {
+            const sent = new Set();
+            // 같은 origin 통신 채널 (같은 창에 임베드된 경우, 또는 popup 모두 커버)
+            let bc = null;
+            try { bc = new BroadcastChannel('gojira-doc'); } catch {}
+            const dispatch = (payload) => {
+              if (window.opener) {
+                try { window.opener.postMessage(payload, '*'); } catch {}
+              }
+              if (bc) {
+                try { bc.postMessage(payload); } catch {}
+              }
+              // 같은 창 내 다른 컴포넌트(임베디드 시) — window.postMessage 자체에도 전달
+              try { window.postMessage(payload, '*'); } catch {}
+            };
+            const visit = (node) => {
+              if (!node || typeof node !== 'object') return;
+              if (node.applyToEditor && node.filePath && node.content && !sent.has(node.filePath)) {
+                dispatch({
+                  type: 'gojira-doc-apply',
+                  filePath: node.filePath,
+                  content: node.content,
+                });
+                sent.add(node.filePath);
+              } else if (node.documentSaved && !sent.has(node.documentSaved)) {
+                dispatch({
+                  type: 'gojira-doc-reload',
+                  filePath: node.documentSaved,
+                });
+                sent.add(node.documentSaved);
+              }
+              for (const v of Object.values(node)) {
+                if (Array.isArray(v)) v.forEach(visit);
+                else if (v && typeof v === 'object') visit(v);
+              }
+            };
+            finalActions.forEach(a => visit(a.result));
+            if (bc) setTimeout(() => bc.close(), 200);
           }
           break;
         case 'error':
@@ -474,6 +516,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 if (msg.role === 'process') {
                   const rendered = renderProcess(msg, i);
                   return rendered ? <div key={i} className="ac-msg ac-msg-process">{rendered}</div> : null;
+                }
+                if (msg.role === 'thought') {
+                  return (
+                    <div key={i} className="ac-msg ac-msg-thought">
+                      <div className="ac-msg-content">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
+                      </div>
+                    </div>
+                  );
                 }
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>

@@ -60,6 +60,11 @@
 .ac-session-date { font-size: 11px; color: #999; margin-top: 3px; }
 .ac-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 13px; }
 
+/* Thought 메시지 (작업 과정 중간 추론 노출) */
+.ac-msg-thought { align-self: flex-start; max-width: 90%; }
+.ac-msg-thought .ac-msg-content { background: #fafafa; color: #555; border-left: 3px solid #c0c0c0; border-radius: 4px; padding: 8px 12px; font-size: 12.5px; line-height: 1.55; font-style: italic; }
+.ac-msg-thought .ac-msg-content p { margin: 3px 0; }
+
 /* Inline Process (질문과 답변 사이) */
 .ac-msg-process { align-self: flex-start; max-width: 95%; width: 100%; }
 .ac-process { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; overflow: hidden; font-size: 11px; }

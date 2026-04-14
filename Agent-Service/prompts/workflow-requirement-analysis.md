@@ -26,7 +26,7 @@ Requirement 이슈 + requirements.md
 VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 ```
 
-각 단계는 **생성 → 비판적 평가 → 수정 루프**를 내장한다 (아래 "품질 검증 루프" 섹션 참조).
+각 단계는 **생성 → 검증(critique) → 수정 루프**를 내장한다 (아래 "품질 검증 루프" 섹션 참조).
 
 ---
 
@@ -35,10 +35,12 @@ VOS —(contains)→ Feature —(contains)→ Requirement (FR / NFR / CNST)
 본 워크플로우의 모든 생성 단계(① ~ ③)는 다음 루프를 거친다:
 
 ```
-[생성] ──→ [비판적 평가] ──pass?──▶ 완료
+[생성] ──→ [검증(critique)] ──pass?──▶ 완료
             │
-            └─ fail ─→ [수정] ─→ [재평가] … (최대 N회)
+            └─ fail ─→ [수정] ─→ [재검증] … (최대 N회)
 ```
+
+평가 결과 형식: `{"score": 0.0~1.0, "pass": bool, "critical": [...], "suggestions": [...], "reasoning": "..."}` — `critical`이 비어있고 `score >= threshold`면 통과.
 
 **검증 정책의 단일 진실 출처**: 각 단계의 **검증 기준** / **검증 정책** 섹션이 권위 있는 출처다. executor가 본 문서를 읽어 그 텍스트를 critique LLM 프롬프트에 그대로 주입한다.
 

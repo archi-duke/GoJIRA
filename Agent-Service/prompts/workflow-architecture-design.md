@@ -23,38 +23,45 @@ Phase 4: 설계 평가
 
 ---
 
-## 공통 원칙 — 생성 단계의 비판적 평가 루프
+## 공통 원칙 — 생성 단계의 검증 루프
 
 모든 생성 단계(VOS 도출, Use Case 분석, Requirement 정제, 설계안 결정, SATAM 평가 등)는 다음 루프를 거친다:
 
 ```
-[생성] → [비판적 평가] ──pass?──▶ 완료
-           │
-           └─ fail → [수정] → [재평가]  (최대 N회)
+[생성] → [검증(critique)] ──pass?──▶ 완료
+            │
+            └─ fail → [수정] → [재검증]  (최대 N회)
 ```
 
-- 생성 직후 **비판적 평가자(critic)** 관점에서 결과물의 품질/규칙 준수/누락 여부를 점검
-- 평가는 `{"pass": true/false, "issues": [...], "reasoning": "..."}` 형식의 구조화된 JSON
-- 실패 시 지적된 issues를 반영하여 수정 → 재평가 반복
-- **최대 반복 제한** (기본 2회)으로 비용 통제, 평가 파싱 실패 시 현재 결과로 종료
-- 최종 산출물에 `critiqueTrail`을 포함하여 검증 이력 추적 가능
+- 각 단계는 `**검증 기준**:`(criteria)과 `**검증 정책**:`(policy) 섹션을 가진다 — 단일 진실 출처(SSOT)
+- 코드는 워크플로우 문서에서 두 섹션을 추출해 critique LLM 프롬프트에 그대로 주입
+- 평가 결과는 `{"score": 0.0~1.0, "pass": bool, "critical": [...], "suggestions": [...], "reasoning": "..."}` JSON
+- pass 판정: `critical`이 비어있고 `score >= threshold`일 때 통과
+- **검증 정책**은 글로벌 기본값을 따르며, 단계별 예외만 명시
+- 최종 산출물에 `critiqueTrail`을 포함해 검증 이력 추적
 
-**공용 헬퍼**: `skills/critique.py` — `iterate_generate_critique(generate_prompt, critique_fn, revise_fn, max_iter)`
+**글로벌 기본 정책** (`prompts/system.txt`에서 관리, 단계별 예외가 우선):
+- 점수 임계값 0.8 이상까지 반복 (최대 2회 수정)
+- 최종 실패 시 마지막 생성물을 그대로 사용하되 사용자에게 임계값 미달 알림
+- 평가 파싱 실패 시 현재 결과로 종료 (무한 루프 방지)
+- 하드 상한: max_iter 5회 클램프
 
-**각 단계의 평가 기준**은 하위 워크플로우 문서 또는 해당 섹션에 명시한다.
+**공용 헬퍼**: `skills/critique.py` — `iterate_generate_critique(...)`, `load_step_policy(workflow_md, step_heading)`
+
+표준 섹션 형식 및 정책 파싱 규칙 상세는 [`docs/design-workflow.md`](../../docs/design-workflow.md) 참조.
 
 현재 구현 상태:
 - ✅ Phase 1 (VOS/Use Case/Requirement) — `vos_collect`, `usecase_analyze`, `requirement_refine`에 적용됨
-- ⏳ Phase 2~4 — 구조 결정/설계/SATAM 스킬은 향후 추가 시 동일 패턴 적용
+- ⏳ Phase 2~4 — 구조 결정/설계/SATAM 스킬은 향후 추가 시 동일 표준 적용
 
-상세는 [`workflow-requirement-analysis.md`](./workflow-requirement-analysis.md)의 "품질 검증 루프" 섹션 참조.
+Phase 1 단계별 검증 기준/정책은 [`workflow-requirement-analysis.md`](./workflow-requirement-analysis.md) 참조.
 
 ---
 
 ## Phase 1: 요구 분석
 
 > **상세 워크플로우**: [`workflow-requirement-analysis.md`](./workflow-requirement-analysis.md)
-> ②~④ 단계의 구체적 절차(VOS 도출 → Use Case/Feature 분석 → Requirement 정제), 산출 문서 양식, 자동 결정된 NFR Measure의 검토 흐름, 비판적 평가 기준 등을 다룬다.
+> ②~④ 단계의 구체적 절차(VOS 도출 → Use Case/Feature 분석 → Requirement 정제), 산출 문서 양식, 자동 결정된 NFR Measure의 검토 흐름, 단계별 검증 기준/정책 등을 다룬다.
 
 ### ① 과제 소개 분석 (Project Description Analysis)
 
@@ -157,6 +164,14 @@ Phase 4: 설계 평가
 - 우선순위가 높은 순서대로 Architecture Driver를 선정
 - 선정된 Requirement에 risk/sensitivity를 설정
 
+**검증 기준**:
+- NFR/FR/CNST 각 영역에서 누락 없이 후보가 검토되었는가
+- QAD/QAI 점수에 명확한 근거가 제시되었는가 (단순 추정/임의값 금지)
+- Driver 선정 결과가 시스템 핵심 품질속성을 고르게 대표하는가 (편향 없음)
+- 우선순위 산정 가중치가 프로젝트 특성과 일치하는가
+
+**검증 정책**: 기본 정책 적용
+
 **완료 기준**: 5~10개 내외의 Architecture Driver가 식별되고, QAD/QAI 평가 및 우선순위가 지정됨
 
 ---
@@ -173,6 +188,14 @@ Phase 4: 설계 평가
   - 예: Layered, Microservice, Event-Driven, Pipe-and-Filter, Client-Server 등
 - Driver와의 적합성을 기준으로 스타일을 선정
 - 선정 근거를 문서화
+
+**검증 기준**:
+- 후보 스타일 2개 이상을 비교 검토했는가
+- 선정 스타일이 주요 Architecture Driver를 모두 만족시킬 수 있는가
+- 트레이드오프(선정되지 않은 스타일의 약점/강점)가 명시되어 있는가
+- 선정 근거가 Driver와 1:1로 추적 가능한가
+
+**검증 정책**: 기본 정책 적용
 
 **완료 기준**: architecture.md에 Architecture Style과 선정 근거가 기술됨
 
@@ -201,6 +224,15 @@ Phase 4: 설계 평가
 
 **관계**: Requirement —(contains)→ ADSN / DDSN
 
+**검증 기준**:
+- 모든 주요 Architecture Driver가 최소 1개의 디자인 포인트로 다루어졌는가
+- 각 디자인 포인트에 대안(approach) 2개 이상이 비교되었는가
+- 선정 설계안의 트레이드오프가 명시되어 있는가
+- ADSN/DDSN 분류가 적절한가 (ADSN은 구조 결정, DDSN은 상세 결정)
+- Requirement 와의 contain 관계가 누락 없이 연결되었는가
+
+**검증 정책**: 기본 정책 적용
+
 **완료 기준**: 주요 디자인 포인트별 설계안이 결정되고 근거가 기술됨
 
 ---
@@ -220,6 +252,14 @@ Phase 4: 설계 평가
   - **개발 관점 (Development View)**: 모듈 구조, 패키지 의존성
 - 관점 간 일관성을 검증
 - architecture.md에 통합하여 기술
+
+**검증 기준**:
+- 최소 2개 이상의 관점이 기술되었는가 (논리/프로세스/배포/개발 중)
+- 각 관점이 ADSN/DDSN 결정과 일관되는가
+- 관점 간 모순 (예: 논리 모듈 ↔ 배포 단위 충돌) 없이 통합되었는가
+- 다이어그램/도식이 서술과 일치하는가
+
+**검증 정책**: 기본 정책 적용
 
 **완료 기준**: architecture.md에 최소 2개 이상의 관점에서 통합 설계가 기술됨
 
@@ -241,6 +281,14 @@ Phase 4: 설계 평가
   - **Risk**: 설계 결정에 따른 위험 요소
   - **Mitigation**: 위험 경감 조치
 - 미경감 리스크가 있으면 설계안 재검토 (⑦로 피드백)
+
+**검증 기준**:
+- 모든 Architecture Driver(특히 NFR)가 매트릭스에 포함되었는가
+- 각 sensitivity/risk 평가에 정성적/정량적 근거가 있는가
+- 식별된 risk마다 mitigation이 제시되거나 수용 근거가 명시되었는가
+- 미경감 risk가 남아 있을 때 ⑦ 피드백 필요성이 명시되었는가
+
+**검증 정책**: 점수 임계값 0.85 이상까지 반복 (최대 3회), 최종 실패 시 사용자에게 알리고 워크플로우 중단
 
 **완료 기준**: 모든 Architecture Driver에 대해 sensitivity/risk가 평가되고, 미경감 리스크가 없거나 수용 근거가 기술됨
 

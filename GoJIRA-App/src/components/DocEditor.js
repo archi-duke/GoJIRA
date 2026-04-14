@@ -116,8 +116,41 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         }
       }, 300);
     }
+    // 워크플로우 스킬이 docs/{user}에 직접 저장한 경우 — 편집기 새로고침
+    async function handleDocReload(e) {
+      if (e.data?.type !== 'gojira-doc-reload') return;
+      const { filePath } = e.data;
+      if (!filePath) return;
+      try {
+        const branch = `docs/${user}`;
+        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(filePath)}&ref=${encodeURIComponent(branch)}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        const text = d.content ? decodeBase64(d.content) : '';
+        setSelectedFile(filePath);
+        setSelectedMainOnly(false);
+        setContent(text);
+        setOriginal(text);
+        setEditMode(false);
+        refreshDocState();
+      } catch {}
+    }
     window.addEventListener('message', handleDocApply);
-    return () => window.removeEventListener('message', handleDocApply);
+    window.addEventListener('message', handleDocReload);
+    // BroadcastChannel: 같은 origin 다른 창(popup 채팅) → DocEditor 통지
+    let bc = null;
+    try {
+      bc = new BroadcastChannel('gojira-doc');
+      bc.onmessage = (e) => {
+        if (e.data?.type === 'gojira-doc-apply') handleDocApply({ data: e.data });
+        else if (e.data?.type === 'gojira-doc-reload') handleDocReload({ data: e.data });
+      };
+    } catch {}
+    return () => {
+      window.removeEventListener('message', handleDocApply);
+      window.removeEventListener('message', handleDocReload);
+      if (bc) bc.close();
+    };
   }, [projectCode, user]); // eslint-disable-line
 
   // 문서 상태 갱신 통합 함수 — 트리 로드 + fileStatus 재계산

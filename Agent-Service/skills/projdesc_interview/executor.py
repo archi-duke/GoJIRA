@@ -40,16 +40,22 @@ async def execute(params: dict, user: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # 답변이 충분하면 projdesc_generate 호출 안내
+    # 답변이 충분하면 projdesc_generate 직접 위임 (Option C)
     if answers:
         missing = [q for q in INTERVIEW_QUESTIONS if q["id"] not in answers or not answers[q["id"]].strip()]
         if not missing:
+            from skills.projdesc_generate.executor import execute as projdesc_generate_execute
+            gen_result = await projdesc_generate_execute(
+                {"projectCode": code, "answers": answers, "mode": "generate"},
+                user,
+            )
             return {
                 "projectCode": code,
-                "status": "ready",
-                "message": "인터뷰 완료! 답변을 바탕으로 과제 설명 문서를 생성합니다.",
+                "status": "generated",
+                "message": "인터뷰 완료 → 과제 설명 문서 생성됨",
                 "answers": answers,
-                "nextAction": "projdesc_generate",
+                "delegatedTo": "projdesc_generate",
+                "generateResult": gen_result,
             }
         else:
             return {
