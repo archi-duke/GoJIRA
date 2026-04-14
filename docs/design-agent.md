@@ -250,7 +250,7 @@ Claude SDK 채택은 불가하지만 다음은 차용 가능:
 - 외부(다른 사용자/세션)에서 이슈가 변경되어도 인지 불가
 - 재시작 시 직전 세션의 진행 위치 유실
 
-**근본 원인**: MongoDB 에 진실 상태(VOS/Feature/Requirement/archSettings)가 있는데 LLM 만 모름.
+**근본 원인**: 진실 상태(VOS/Feature/Requirement/archSettings)는 **Git YAML(이슈) + MongoDB(프로젝트 메타)** 에 존재하지만 LLM 에게는 prompt 문맥만 있을 뿐 직접 연결이 없음.
 
 ### 10.3 채택 방향: 수준 2 (Belief State) 추가
 
@@ -272,6 +272,13 @@ def get_workflow_state(project_code: str) -> dict:
 ```
 
 **주입 지점**: `agents/streaming.py` Pass 1 추론 직전, 사용자 메시지에서 프로젝트 코드가 식별되면 위 상태를 한국어 요약으로 system 메시지에 덧붙임.
+
+**상태 원천**:
+- 이슈 카운트/필드 — MongoDB `issues` **캐시** 조회 (원천은 git `data/issues/*.yaml`, 캐시는 sync 훅으로 동기 유지)
+- `archSettings` (chosenStyles, satamDone, designIntegrated 등 플래그) — MongoDB `projects`
+- 문서 존재 여부 — Gitea 트리 조회
+
+`completedSteps` 계산은 이슈 카운트 + `archSettings` 플래그 조합. git YAML 을 직접 읽지 않고 캐시에서 읽기 때문에 hot path 성능 유지.
 
 **효과**:
 - LLM 이 "이미 VOS 13 건 / Feature 0 건" 을 인지 → "계속" = `usecase_analyze` 호출로 결정

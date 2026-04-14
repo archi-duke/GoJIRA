@@ -30,7 +30,8 @@ GoJIRA는 JIRA Datacenter 기반 프로젝트 관리, 설계문서 형상관리,
 | Platform-App | React | :3000 | 통합 컨테이너 (Host) — Account, Notice, Repository |
 | GoJIRA-App | React | :3001 | 프로젝트 관리 SPA (Remote) — Module Federation |
 | Gitea | Go | - | 설계문서 형상관리 (GitHub API 호환) |
-| MongoDB | - | - | 공용 데이터 저장소 |
+| MongoDB | - | - | 프로젝트 메타/사용자/세션/이슈 캐시 저장소 |
+| Git (과제 docs repo) | - | - | 이슈(YAML) 원천 저장소 — 이력/머지 관리 |
 | JIRA DC | Java | - | 외부 이슈 추적 시스템 |
 
 ---
@@ -74,11 +75,11 @@ C4Container
         Container(platform, "Platform-API", "Go :9000", "인증, 계정, 공지, DocRepo, SSE/WS")
         Container(api, "GoJIRA-API", "Go :9001", "이슈 CRUD, 프로젝트, 동기화")
         Container(agent, "Agent-Service", "Python :9002", "AI 오케스트레이터, 16스킬")
-        ContainerDb(mongo, "MongoDB", "gojira DB", "공용 데이터 저장소")
+        ContainerDb(mongo, "MongoDB", "gojira DB", "프로젝트/사용자/세션 + 이슈 캐시")
     }
 
     System_Ext(jira, "JIRA DC")
-    System_Ext(gitea, "Gitea")
+    System_Ext(gitea, "Gitea (이슈 YAML + 문서)")
     System_Ext(adfs, "ADFS")
 
     Rel(user, app, "HTTPS")
@@ -86,10 +87,11 @@ C4Container
     Rel(app, api, "REST")
     Rel(app, agent, "REST / SSE")
     Rel(platform, mongo, "Read/Write")
-    Rel(api, mongo, "Read/Write")
+    Rel(api, mongo, "Read/Write (캐시)")
+    Rel(api, gitea, "이슈 YAML 원천 Read/Write")
     Rel(agent, api, "REST (스킬 실행)")
     Rel(api, jira, "양방향 동기화")
-    Rel(platform, gitea, "GitHub API v1")
+    Rel(platform, gitea, "문서 GitHub API v1")
     Rel(platform, adfs, "SAML/OAuth")
 ```
 
@@ -419,8 +421,9 @@ graph LR
 
 #### NFR-06: 가용성
 
-- JIRA DC 연결 실패 시 로컬 MongoDB 캐시 데이터로 서비스 지속
-- Gitea 연결 실패 시 캐시된 문서 데이터 제공
+- JIRA DC 연결 실패 시 로컬 MongoDB 캐시 + 이슈 YAML (git) 로 서비스 지속
+- Gitea 연결 실패 시: 이슈 캐시는 Mongo 에서 계속 제공, 쓰기는 연결 복구 후 재시도 큐잉
+- Mongo 이슈 캐시 손상 시: `git pull` 후 전체 리빌드 가능 (git 이 진실 원천)
 - 외부 시스템 복구 시 자동 동기화 재개
 
 ---
@@ -431,7 +434,7 @@ graph LR
 |----|---------|------|
 | CNST-01 | JIRA DC REST API v2 호환 | GoJIRA-API는 JIRA Datacenter REST API v2 스펙을 준수해야 한다 |
 | CNST-02 | Gitea API v1 (GitHub REST API 호환) | Platform-API의 DocRepo는 Gitea API v1을 사용하며, GitHub REST API와 호환된다 |
-| CNST-03 | MongoDB 단일 DB | 모든 서비스는 `gojira` 단일 데이터베이스를 공유한다 |
+| CNST-03 | 하이브리드 저장소 | **이슈는 Git YAML** (각 과제 docs repo `data/issues/<subkey>.yaml`) 을 원천으로 하고, 프로젝트 메타/사용자/세션/이슈 캐시는 MongoDB `gojira` 단일 DB 를 공유한다. Mongo `issues` 는 git 파생 캐시로 직접 쓰기 금지 |
 | CNST-04 | 브라우저 지원 | Chrome 및 Edge 최신 버전만 지원한다 |
 
 ---
@@ -445,21 +448,24 @@ sequenceDiagram
     participant User as 사용자
     participant App as GoJIRA-App
     participant API as GoJIRA-API
-    participant DB as MongoDB
+    participant Git as Gitea (이슈 YAML)
+    participant DB as MongoDB (캐시)
     participant JIRA as JIRA DC
 
     Note over API,JIRA: Pull 동기화 (30초 주기)
     loop 30초 주기
         API->>JIRA: GET /rest/api/2/search (변경분)
         JIRA-->>API: 변경된 이슈 목록
-        API->>DB: Upsert 이슈
+        API->>Git: data/issues/<subkey>.yaml 저장 (user 브랜치)
+        API->>DB: 캐시 upsert (sync 훅)
         API->>App: SSE 이벤트 (이슈 변경 알림)
     end
 
     Note over User,JIRA: Push 동기화 (사용자 수정)
     User->>App: 이슈 수정
     App->>API: PUT /issues/{id}
-    API->>DB: 이슈 업데이트
+    API->>Git: data/issues/<subkey>.yaml 저장 + 커밋
+    API->>DB: 캐시 갱신
     API-->>App: 200 OK
     loop 30초 주기
         API->>JIRA: PUT /rest/api/2/issue/{key}

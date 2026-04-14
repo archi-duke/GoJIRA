@@ -244,6 +244,30 @@ pie title 구현 진행 상태
 
 ## 5. 미착수 작업
 
+### 5.0 Storage Phase 1: 이슈 YAML 저장소 전환 (진행 예정, 2026 Q2)
+
+> 목표: 이슈 원천을 MongoDB → Git(YAML) 로 이전. Mongo `issues` 는 파생 캐시로 재정의. 프로젝트 메타/세션/잡/사용자는 Mongo 유지.
+
+**근거**
+- 이슈는 이력/diff/PR 리뷰 가치가 큼. 과제당 100~3000건 규모는 git 처리에 부담 없음.
+- 기존 docs repo 재활용 — `data/issues/<subkey>.yaml`.
+- `docs/issue-yaml-schema.md` 참조.
+
+**Epic 5.0 체크리스트**
+
+- [ ] 이슈 YAML 스키마 확정 (`docs/issue-yaml-schema.md`) — pydantic 모델
+- [ ] Export 스크립트: Mongo `issues` → git `data/issues/*.yaml` (과제별 일괄). 전수 검증
+- [ ] Agent-Service `core/issuestore.py`: YAML read/write 어댑터 (pymongo 인터페이스 호환 shim)
+- [ ] Platform-API(Go) 대응 모듈: 이슈 CRUD 경로에서 Gitea commit 추가
+- [ ] Dual-write 단계: YAML + Mongo 동시 쓰기, 파리티 검증 로그 수집 (1~2주 관측)
+- [ ] Read 전환: `issuestore.find/count` 가 Mongo 캐시를 우선 사용. YAML 은 cold path & 리빌드용
+- [ ] Mongo `issues` 를 "캐시" 로 재정의: 직접 쓰기 금지 규칙 추가, sync 훅만 쓰기
+- [ ] 머지 훅: user 브랜치 → main 머지 시 변경된 YAML 재파싱해 Mongo 캐시 갱신
+- [ ] 충돌 UI: DocEditor 에 이슈 YAML 충돌 배너 + 수동 해결 흐름
+- [ ] 리빌드 커맨드: `python -m core.issuestore rebuild <projectCode>` — git 에서 Mongo 전체 재구성
+- [ ] JIRA DC 동기화 경로 조정: JIRA → YAML → 캐시 순으로 upsert
+- [ ] 문서 개정 완료 표시: design-platform §6, requirements §CNST-03, design-agent §10 (완료)
+
 ### 5.1 Agent Phase 5: 확장
 
 | 항목 | 설명 | 예상 기간 |

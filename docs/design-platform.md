@@ -435,9 +435,49 @@ sequenceDiagram
 
 ---
 
-## 6. 데이터베이스 설계
+## 6. 데이터 저장소 설계
 
-> MongoDB 7.0, 데이터베이스: `gojira`
+> **하이브리드 구조** — 이슈는 Git(YAML), 나머지는 MongoDB 7.0 (`gojira`).
+
+### 6.0 저장소 역할 분담 (2026-04-15 개정)
+
+| 데이터 | 원천 | 사유 |
+|--------|------|------|
+| **이슈** (VOS / Feature / Requirement / ADSN / DDSN) | **Git YAML** (각 과제 docs repo `data/issues/<subkey>.yaml`) | 이력/diff/PR 리뷰 가치, 과제당 100~3000건 규모로 git 처리 충분 |
+| 프로젝트 메타 (archSettings, chosenStyles, satamDone 등 워크플로우 플래그) | MongoDB `projects` | 워크플로우 휘발성 플래그. 이력 가치 낮음 |
+| 사용자/권한/조직/공지 | MongoDB | 트랜잭션/TTL 필요 |
+| 에이전트 세션/잡/로그 | MongoDB | 고빈도 쓰기, 이력 가치 낮음, TTL 적용 |
+| 문서 (business/*.md, architecture/*.md) | Git | 기존부터 git 관리 |
+
+Mongo `issues` 컬렉션은 **git → Mongo 단방향 동기화된 파생 캐시**. 손상/유실 시 `git pull` 후 전체 리빌드. 쓰기는 반드시 git 을 경유한 뒤 sync 훅이 캐시 갱신.
+
+#### 쓰기 흐름
+```mermaid
+sequenceDiagram
+    participant S as Skill/UI
+    participant API as Platform-API (or Agent-Service)
+    participant Git as docs repo
+    participant DB as MongoDB (issues cache)
+
+    S->>API: 이슈 수정 요청
+    API->>Git: data/issues/<subkey>.yaml 저장 (user 브랜치 커밋)
+    API->>DB: 동일 내용 upsert (캐시 갱신)
+    API-->>S: 성공
+```
+
+#### 읽기 흐름
+- 조회/카운트 쿼리는 **MongoDB 캐시**에서 처리 (기존 인터페이스 보존, 성능 유지).
+- 단일 이슈 상세 읽기는 캐시 우선, 주기적으로 git 과 해시 비교해 drift 감지.
+
+#### 머지/동기화
+- 사용자 브랜치 → main 머지 시: 변경된 `data/issues/*.yaml` 재파싱해 Mongo 캐시 갱신.
+- 머지 충돌:
+  - **이슈 파일 단위 격리** (파일명=`subkey`) — 같은 이슈 동시 수정만 충돌.
+  - 기본 `ours` + UI 충돌 배너로 사용자 재작업 유도.
+
+#### 스키마
+- `docs/issue-yaml-schema.md` 참조. 공통 필드 + issueType별 확장.
+- pydantic 기반 검증, 미지 필드 허용 (forward compat).
 
 ### 6.1 컬렉션 ERD
 
@@ -574,7 +614,7 @@ erDiagram
 | notifications | Platform-API | userId + read, createdAt (TTL 7일) |
 | editSessions | Platform-API | projectCode + userId, lastHeartbeat |
 | docLinks | Platform-API | taskId, docRepoId |
-| issues | GoJIRA-API | key (unique) |
+| issues | GoJIRA-API (캐시) | key (unique) — git YAML 파생 캐시, 직접 쓰기 금지 (sync 훅 경유) |
 | projects | GoJIRA-API | jiraCodes.main.jiraCode |
 | comments | GoJIRA-API | issueKey |
 | accounts | GoJIRA-API | jiraID |
@@ -591,8 +631,8 @@ erDiagram
 | 서비스 | 쓰기 컬렉션 | 읽기 전용 |
 |--------|-------------|-----------|
 | Platform-API | users, authGroups, orgUnits, notices, notifications, editSessions, docLinks, userProjects, userConnections | - |
-| GoJIRA-API | issues, projects, comments, accounts | users (권한 확인) |
-| Agent-Service | agent_sessions, agent_jobs, agent_logs | issues, projects (스킬 실행) |
+| GoJIRA-API | projects, comments, accounts (issues 는 git→캐시 sync 훅만 쓰기) | users (권한 확인) |
+| Agent-Service | agent_sessions, agent_jobs, agent_logs (이슈 원천 쓰기는 git repo) | projects, issues(캐시) |
 
 ---
 
