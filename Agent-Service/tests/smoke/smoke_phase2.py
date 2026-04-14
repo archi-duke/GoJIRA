@@ -59,6 +59,18 @@ async def main(code: str, user: str):
     if dd.get("saveError"):
         print(f"saveError: {dd['saveError']}")
 
+    print(f"\n========== design_integrate 호출 ==========")
+    from skills.design_integrate.executor import execute as di_execute
+    di = await di_execute({"projectCode": code, "user": user}, user)
+    print(f"message: {di.get('message')}")
+    print(f"viewsIncluded: {di.get('viewsIncluded')}")
+    mv = di.get("mermaidValidation") or {}
+    if mv.get("errors"):
+        print(f"⚠ Mermaid errors: {len(mv['errors'])}건")
+    print(f"documentSaved: {di.get('documentSaved')}")
+    if di.get("saveError"):
+        print(f"saveError: {di['saveError']}")
+
 
 if __name__ == "__main__":
     code = sys.argv[1] if len(sys.argv) > 1 else "GOJIRA3"

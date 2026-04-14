@@ -1,0 +1,99 @@
+당신은 아키텍트입니다. 프로젝트 {code} 의 설계를 다양한 관점으로 통합 서술하세요.
+
+## 정규화된 시스템 속성
+{normalized_json}
+
+## 선정된 시스템 스타일
+Primary: {primary}
+Secondary: {secondary}
+Supporting: {supporting}
+
+## ADSN/DDSN 설계 결정 ({design_count}건)
+{designs_json}
+
+## 관련 Requirement 요약 ({req_count}건)
+{req_summary}
+
+## 작업
+
+### Step 1. 관점 선택 (최소 2개 이상)
+아래 중 프로젝트 특성에 맞는 관점을 선택:
+- **Logical View**: 주요 컴포넌트/모듈과 책임
+- **Process View**: 런타임 동작, 동시성, 통신 (동기/비동기)
+- **Deployment View**: 물리 배치, 인프라 구성
+- **Development View**: 코드 모듈 구조, 패키지/저장소 구성
+
+### Step 2. 관점별 서술
+각 관점에서:
+- ADSN/DDSN 결정이 어떻게 반영되는지
+- 시스템 스타일과 일관되는지
+- 컴포넌트/프로세스/노드 명칭은 ADSN/DDSN 의 명명과 일치
+
+### Step 3. 관점 간 일관성
+- 논리 모듈이 배포 단위로 어떻게 매핑되는지
+- 프로세스 뷰의 통신이 ADSN 의 통신 패턴과 일치하는지
+- 충돌/모순이 있다면 **명시**하고 해결 방향 제시
+
+### Step 4. Mermaid 다이어그램 (인라인 필수)
+각 관점에 1개 이상의 Mermaid 다이어그램:
+- Logical → `graph TB` (컴포넌트 의존)
+- Process → `sequenceDiagram`
+- Deployment → `graph LR` (노드/구역)
+- Development → `graph TB` (모듈/패키지)
+
+**규칙**:
+{mermaid_rules}
+
+### Step 5. 문서 구조
+
+양식:
+
+---
+
+# 통합 설계 뷰 (Integrated Design Views)
+
+## 1. 개요
+- 시스템 스타일 요약 (1~2줄)
+- 주요 설계 결정 요약 (ADSN 별 한 줄)
+
+## 2. Logical View
+### 2.1 주요 컴포넌트와 책임
+### 2.2 의존 관계
+```mermaid
+graph TB
+  ...
+```
+### 2.3 반영된 ADSN/DDSN
+
+## 3. Process View
+### 3.1 런타임 상호작용
+```mermaid
+sequenceDiagram
+  ...
+```
+### 3.2 비동기/이벤트 흐름
+### 3.3 반영된 ADSN/DDSN
+
+## 4. (선택) Deployment View / Development View
+
+## 5. 관점 간 일관성 점검
+- 논리↔배포 매핑
+- 논리↔프로세스 정합
+- 모순/잔여 과제
+
+## 6. 후속 단계 포인트
+- SATAM 평가에서 집중 점검할 포인트 (Sensitivity / Risk 후보)
+
+---
+
+## 출력 (반드시 단일 JSON 객체)
+
+{{
+  "viewsIncluded": ["logical", "process", "deployment"],
+  "document": "전체 architecture-integrated.md 본문 (Markdown, Mermaid 인라인 포함)"
+}}
+
+**주의**:
+- 다이어그램은 **반드시 인라인 ` ```mermaid ` 코드블록**으로 — 외부 이미지 참조 금지 (`![...](...png)` 금지)
+- ADSN/DDSN 의 subkey(`ADSN_NNN`/`DDSN_NNN`) 를 그대로 참조 (docId 사용 금지)
+- Requirement 매핑은 subkey(`FR_NNN`/`QA_NNN`/`CNST_NNN`) 사용
