@@ -187,6 +187,23 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  // 외부 변경(SSE push) 으로 현재 열린 파일 재로드. 편집 중이면 건너뜀.
+  async function reloadSelectedFile() {
+    if (!selectedFile) return;
+    if (editMode && content !== original) return;  // 작성 중인 변경은 보호
+    const ref = selectedMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
+    try {
+      const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(ref)}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      const text = d.content ? decodeBase64(d.content) : '';
+      if (text !== content) {
+        setContent(text);
+        setOriginal(text);
+      }
+    } catch {}
+  }
+
   // 진입 시 초기 파일 확인 → 사용자 브랜치 생성 → 트리 비교 (순차 실행)
   useEffect(() => {
     if (!hasRepo) return;
@@ -206,9 +223,11 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         const data = JSON.parse(e.data);
         if (data.type === 'project_alert' && data.projectCode === projectCode) {
           refreshDocState();
+          reloadSelectedFile();
         }
         if (data.type === 'push' && data.repo) {
           refreshDocState();
+          reloadSelectedFile();
         }
       } catch {}
     });
