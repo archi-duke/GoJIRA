@@ -39,6 +39,8 @@ async def execute(params: dict, user: str) -> dict:
             answers = json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
         except json.JSONDecodeError:
             pass
+    # 키 정규화 — LLM 이 한국어 label 로 보내는 경우 영문 id 로 매핑
+    answers = _normalize_keys(answers)
 
     # 답변이 충분하면 projdesc_generate 직접 위임 (Option C)
     if answers:
@@ -81,6 +83,39 @@ async def execute(params: dict, user: str) -> dict:
         "message": "과제 설명이 비어 있거나 부족합니다. 자동 생성을 위해 몇 가지 질문에 답해주세요.",
         "questions": [{"id": q["id"], "label": q["label"], "question": q["question"]} for q in INTERVIEW_QUESTIONS],
     }
+
+
+def _normalize_keys(answers: dict) -> dict:
+    """LLM 이 한국어 label 또는 다른 표기로 보낸 키를 영문 id 로 정규화.
+
+    매핑 우선순위:
+    1. 정확히 영문 id 와 일치
+    2. label 과 일치
+    3. label 의 공백 제거 후 일치
+    4. 영문 id substring 포함
+    """
+    if not isinstance(answers, dict):
+        return {}
+    label_to_id = {q["label"]: q["id"] for q in INTERVIEW_QUESTIONS}
+    label_nospace_to_id = {q["label"].replace(" ", ""): q["id"] for q in INTERVIEW_QUESTIONS}
+    valid_ids = {q["id"] for q in INTERVIEW_QUESTIONS}
+
+    out = {}
+    for k, v in answers.items():
+        ks = str(k).strip()
+        if ks in valid_ids:
+            out[ks] = v
+        elif ks in label_to_id:
+            out[label_to_id[ks]] = v
+        elif ks.replace(" ", "") in label_nospace_to_id:
+            out[label_nospace_to_id[ks.replace(" ", "")]] = v
+        else:
+            kl = ks.lower()
+            for vid in valid_ids:
+                if vid in kl:
+                    out[vid] = v
+                    break
+    return out
 
 
 def _is_template_only(content: str) -> bool:
