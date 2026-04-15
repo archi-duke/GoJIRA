@@ -49,6 +49,10 @@ def agent_logs() -> Collection:
     return get_db()["agent_logs"]
 
 
+def workflow_jobs() -> Collection:
+    return get_db()["workflow_jobs"]
+
+
 def ensure_indexes():
     """TTL 인덱스 등 필수 인덱스 생성."""
     from pymongo import ASCENDING
@@ -65,6 +69,17 @@ def ensure_indexes():
     agent_jobs().create_index(
         [("updatedAt", ASCENDING)],
         expireAfterSeconds=int(timedelta(days=30).total_seconds()),
+        background=True,
+    )
+
+    # workflow_jobs: 90일 TTL (과제 장기 진행 고려)
+    workflow_jobs().create_index(
+        [("updatedAt", ASCENDING)],
+        expireAfterSeconds=int(timedelta(days=90).total_seconds()),
+        background=True,
+    )
+    workflow_jobs().create_index(
+        [("projectCode", ASCENDING), ("workflowId", ASCENDING), ("status", ASCENDING)],
         background=True,
     )
 
