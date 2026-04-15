@@ -59,10 +59,25 @@ async def agent_loop_stream(
 
     # 사용자 메시지 추출 (마지막 user 메시지)
     user_message = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            user_message = m.get("content", "")
+    last_user_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "user":
+            user_message = messages[i].get("content", "") or ""
+            last_user_idx = i
             break
+
+    # `/btw` prefix — 이번 turn 한정 워크플로우 모드 우회 (free-form 단건 작업)
+    # 세션/대화/워크플로우 job 은 그대로 유지. advance/stage 전이 스킵.
+    btw_mode = False
+    if isinstance(user_message, str):
+        stripped = user_message.lstrip()
+        if stripped.startswith("/btw"):
+            btw_mode = True
+            rest = stripped[4:].lstrip()
+            user_message = rest
+            if last_user_idx >= 0:
+                messages[last_user_idx] = {**messages[last_user_idx], "content": rest}
+            log.info("/btw 모드 활성 — workflow 우회")
 
     # 워크플로우 상태 주입 (Belief State) + Phase B 엔진 job 결합
     detected_code = None
@@ -110,7 +125,17 @@ async def agent_loop_stream(
     required_skills = []
     workflow_mode = False
     workflow_allowed: set = set()
-    if workflow_job and workflow_job.get("status") in ("in_progress", "pending", "paused"):
+    if btw_mode and workflow_job:
+        # 워크플로우 진행 중이라도 이번 turn 은 free-form — 전체 스킬 노출
+        messages.append({
+            "role": "system",
+            "content": (
+                "[워크플로우 엔진] 이번 요청은 `/btw` 로 지시된 워크플로우 밖 단건 작업이다. "
+                f"현재 stage({workflow_job.get('currentStage')}) 전이는 평가하지 않는다. "
+                "요청에 맞는 free-form 스킬을 호출하라."
+            ),
+        })
+    if (not btw_mode) and workflow_job and workflow_job.get("status") in ("in_progress", "pending", "paused"):
         cur_stage = workflow_job.get("currentStage")
         try:
             from core.workflows import get_stage
@@ -343,7 +368,7 @@ async def agent_loop_stream(
                 # Phase B — stage 스킬 결과로 engine 전이 평가 (9단계 전면, belief-state fallback)
                 # fn_name 이 현재 stage 주 skill 과 다르더라도 advance 를 호출해 belief state 에서
                 # 자동 전이 조건을 확인하도록 한다 (예: projdesc_generate → projdesc 완료).
-                if workflow_job and fn_name in _STAGE_SKILLS and isinstance(skill_result, dict):
+                if (not btw_mode) and workflow_job and fn_name in _STAGE_SKILLS and isinstance(skill_result, dict):
                     try:
                         from core import workflow_engine
                         from core.workflows import get_stage
