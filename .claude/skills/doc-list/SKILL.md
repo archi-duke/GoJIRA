@@ -22,10 +22,14 @@ export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 ```
 
 ## 조회
+🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
+
 ```bash
 curl -s "${PLATFORM_API}/DocRepo/${CODE}/tree?ref=$(printf %s "$REF" | jq -sRr @uri)" \
   -H "X-User-Id: ${USER}" \
-  | jq '[.[] | {path, name, type, lastCommit: (.lastCommit // null)}]'
+  > /tmp/gojira_doctree.json
+
+jq '[.[] | {path, name, type, lastCommit: (.lastCommit // null)}]' /tmp/gojira_doctree.json
 ```
 
 결과를 한국어로 정리: 파일 수 → 경로/이름/최종 수정일 마크다운 표.

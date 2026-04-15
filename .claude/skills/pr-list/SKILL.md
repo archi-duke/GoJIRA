@@ -22,10 +22,14 @@ export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 ```
 
 ## 조회
+🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
+
 ```bash
 curl -s "${PLATFORM_API}/DocRepo/${CODE}/prs?state=${STATE}" \
   -H "X-User-Id: ${USER}" \
-  | jq '[.[] | {number, title, state, author: (.user.login // .author // null), head: (.head.ref // null)}]'
+  > /tmp/gojira_prs.json
+
+jq '[.[] | {number, title, state, author: (.user.login // .author // null), head: (.head.ref // null)}]' /tmp/gojira_prs.json
 ```
 
 결과를 한국어로 정리: PR 수 → 번호/제목/상태/작성자 마크다운 표.

@@ -18,14 +18,19 @@ export GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 ```
 
 ## NFR + ADSN 조회
+🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 로 필터.
+
 ```bash
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
   -H "X-User-Id: ${USER}" \
-  | jq '[.[]
-      | select((.issueType=="Requirement" and .reqType=="NFR")
-               or .issueType=="Architectural Design")
-      | {key, subkey, issueType, summary, risk, sensitivity, mitigation, tradeoffs}]'
+  > /tmp/gojira_issues.json
+
+jq '[.[]
+    | select((.issueType=="Requirement" and .reqType=="NFR")
+             or .issueType=="Architectural Design")
+    | {key, subkey, issueType, summary, risk, sensitivity, mitigation, tradeoffs}]' \
+  /tmp/gojira_issues.json
 ```
 
 ## 분석 항목

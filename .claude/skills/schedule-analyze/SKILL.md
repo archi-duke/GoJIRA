@@ -18,11 +18,15 @@ export GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 ```
 
 ## 조회
+🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
+
 ```bash
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
   -H "X-User-Id: ${USER}" \
-  | jq '[.[] | {key, subkey, issueType, summary, status, dueDate, startDate}]'
+  > /tmp/gojira_issues.json
+
+jq '[.[] | {key, subkey, issueType, summary, status, dueDate, startDate}]' /tmp/gojira_issues.json
 ```
 
 ## 분석
