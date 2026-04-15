@@ -34,6 +34,8 @@ async def execute(params: dict, user: str) -> dict:
     if not doc_content or _is_template_only(doc_content):
         return {
             "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "projdesc",
             "message": "프로젝트 관련 정보가 불충분합니다. 과제 설명 문서 작성을 먼저 진행해야 합니다.",
             "suggestSkill": "projdesc_interview",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
@@ -99,6 +101,7 @@ async def execute(params: dict, user: str) -> dict:
     if items is None:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "LLM 응답을 파싱할 수 없습니다.",
             "raw": raw[:500],
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
@@ -136,6 +139,7 @@ async def execute(params: dict, user: str) -> dict:
     })
     return {
         "projectCode": code,
+        "status": "completed",
         "existingCount": len(existing_vos),
         "created": buckets["created"],
         "reused": buckets["reused"],

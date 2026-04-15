@@ -62,7 +62,6 @@ async def execute(params: dict, user: str) -> dict:
     from core.progress import emit_progress
 
     # 1. 선행 확인
-    prereqs_ran: List[Dict[str, Any]] = []
     proj = projects().find_one(
         {"jiraCodes.main.jiraCode": code},
         {"archSettings": 1, "_id": 0},
@@ -79,40 +78,13 @@ async def execute(params: dict, user: str) -> dict:
          "qad": 1, "qai": 1, "priority": 1, "risk": 1, "sensitivity": 1, "_id": 0},
     ))
 
-    need_delegate = (not drivers) or (not chosen) or (not normalized)
-    if need_delegate:
-        await emit_progress("design_decide", "선행(Driver / Style) 부족 — style_define 선행 실행")
-        from skills.style_define.executor import execute as style_define_execute
-        sd = await style_define_execute(params, user)
-        prereqs_ran.append({"skill": "style_define", "result": sd})
-        if sd.get("suggestSkill"):
-            return {
-                **sd,
-                "prerequisitesRan": (sd.get("prerequisitesRan") or []) + prereqs_ran,
-                "blockedAt": sd.get("blockedAt") or "style_define",
-            }
-        prereqs_ran = (sd.get("prerequisitesRan") or []) + prereqs_ran
-        # 재조회
-        proj = projects().find_one(
-            {"jiraCodes.main.jiraCode": code},
-            {"archSettings": 1, "_id": 0},
-        ) or {}
-        arch = proj.get("archSettings") or {}
-        chosen = arch.get("chosenStyles") or {}
-        normalized = arch.get("normalizedAttributes") or {}
-        drivers = list(issues().find(
-            {"key": {"$regex": f"^{re.escape(code)}-"},
-             "issueType": "Requirement",
-             "driverSelected": True},
-            {"key": 1, "subkey": 1, "summary": 1, "reqtype": 1,
-             "qad": 1, "qai": 1, "priority": 1, "risk": 1, "sensitivity": 1, "_id": 0},
-        ))
-
     if not drivers or not chosen or not normalized:
         return {
             "projectCode": code,
-            "message": "선행 산출물이 여전히 부족합니다 (drivers / chosenStyles / normalizedAttributes).",
-            "prerequisitesRan": prereqs_ran,
+            "status": "blocked",
+            "blockedAt": "style_define",
+            "suggestSkill": "style_define",
+            "message": "선행 산출물이 부족합니다 (drivers / chosenStyles / normalizedAttributes). style_define 을 먼저 실행하세요.",
         }
 
     # 전체 Requirement (relatedRequirements 유효성 검증용)
@@ -192,9 +164,9 @@ async def execute(params: dict, user: str) -> dict:
     if not parsed:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "LLM 응답을 파싱할 수 없습니다.",
             "raw": raw[:500],
-            "prerequisitesRan": prereqs_ran,
         }
 
     designs = parsed.get("designs") or []
@@ -280,6 +252,7 @@ async def execute(params: dict, user: str) -> dict:
 
     return {
         "projectCode": code,
+        "status": "completed",
         "created": buckets["created"],
         "reused": buckets["reused"],
         "modified": buckets["modified"],
@@ -291,6 +264,5 @@ async def execute(params: dict, user: str) -> dict:
         "critiqueTrail": critique_trail,
         "docIdMap": docid_map,
         "leftoverDocIds": leftover_doc_ids,
-        "prerequisitesRan": prereqs_ran,
         "message": msg,
     }

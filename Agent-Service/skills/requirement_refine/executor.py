@@ -70,6 +70,8 @@ async def execute(params: dict, user: str) -> dict:
     if _is_template_only(desc):
         return {
             "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "projdesc",
             "message": "프로젝트 관련 정보가 불충분합니다. 과제 설명 문서 작성을 먼저 진행해야 합니다.",
             "suggestSkill": "projdesc_interview",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
@@ -82,36 +84,15 @@ async def execute(params: dict, user: str) -> dict:
          "alternativeflow": 1, "exceptionflow": 1, "postcondition": 1, "_id": 0},
     ))
     from core.progress import emit_progress
-    prereqs_ran = []
     if not feat_list:
-        # 선행 위임: Feature 없으면 usecase_analyze를 먼저 자동 실행 (이는 다시 vos_collect로 위임 가능)
-        await emit_progress("requirement_refine", "Feature가 없어 usecase_analyze 선행 실행")
-        from skills.usecase_analyze.executor import execute as usecase_analyze_execute
-        uc_result = await usecase_analyze_execute(params, user)
-        prereqs_ran.append({"skill": "usecase_analyze", "result": uc_result})
-        # 더 상위 선행이 막혔으면 그대로 위로 전파 (예: projdesc_interview 필요)
-        if uc_result.get("suggestSkill"):
-            return {
-                **uc_result,
-                "prerequisitesRan": (uc_result.get("prerequisitesRan") or []) + prereqs_ran,
-                "blockedAt": uc_result.get("blockedAt") or "usecase_analyze",
-            }
-        # 위임 결과 → Feature 목록 재조회
-        feat_list = list(issues().find(
-            {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Feature"},
-            {"key": 1, "summary": 1, "description": 1,
-             "actor": 1, "precondition": 1, "basicflow": 1,
-             "alternativeflow": 1, "exceptionflow": 1, "postcondition": 1, "_id": 0},
-        ))
-        if not feat_list:
-            return {
-                "projectCode": code,
-                "message": "Use Case 분석 후에도 Feature가 도출되지 않았습니다.",
-                "prerequisitesRan": prereqs_ran,
-                "created": [], "reused": [], "modified": [], "markedForDeletion": [],
-            }
-        # 하위 위임에서 prereqs_ran을 흡수
-        prereqs_ran = (uc_result.get("prerequisitesRan") or []) + prereqs_ran
+        return {
+            "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "usecase_analyze",
+            "suggestSkill": "usecase_analyze",
+            "message": "Feature 가 없습니다. usecase_analyze 를 먼저 실행하세요.",
+            "created": [], "reused": [], "modified": [], "markedForDeletion": [],
+        }
 
     vos_list = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
@@ -176,6 +157,7 @@ async def execute(params: dict, user: str) -> dict:
     if not parsed:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "LLM 응답을 파싱할 수 없습니다.",
             "raw": raw[:500],
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
@@ -288,8 +270,10 @@ async def execute(params: dict, user: str) -> dict:
     tsum = trail_summary(critique_trail)
     if tsum:
         msg_parts.append(tsum)
+    needs_review = bool(auto_measure_items) or bool(buckets["markedForDeletion"])
     return {
         "projectCode": code,
+        "status": "partial" if needs_review else "completed",
         "created": buckets["created"],
         "reused": buckets["reused"],
         "modified": buckets["modified"],
@@ -299,10 +283,9 @@ async def execute(params: dict, user: str) -> dict:
         "documentSaved": saved_path,
         "saveError": save_error,
         "autoMeasureItems": auto_measure_items,
-        "needsReview": bool(auto_measure_items) or bool(buckets["markedForDeletion"]),
+        "needsReview": needs_review,
         "critiqueTrail": critique_trail,
         "docIdMap": docid_map,
         "leftoverDocIds": leftover_doc_ids,
-        "prerequisitesRan": prereqs_ran,
         "message": " / ".join(msg_parts),
     }

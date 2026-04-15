@@ -27,6 +27,9 @@ async def execute(params: dict, user: str) -> dict:
     if not adsn_issues:
         return {
             "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "design_decide",
+            "suggestSkill": "design_decide",
             "message": "ADSN(Architectural Design) 이슈가 없습니다. design_decide 를 먼저 실행하세요.",
             "adsnCount": 0,
         }
@@ -100,6 +103,8 @@ async def execute(params: dict, user: str) -> dict:
 
     return {
         "projectCode": code,
+        "status": "completed",
+        "satamDone": True,
         "adsnCount": len(adsn_inputs),
         "updatedCount": len(updated_keys),
         "riskCount": risk_total,

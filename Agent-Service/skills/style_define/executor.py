@@ -3,8 +3,6 @@
 import os
 import re
 import json
-from typing import Dict, Any, List
-
 from core.database import projects
 from clients.platform_api import PlatformClient
 from skills.helpers import load_prompt
@@ -48,7 +46,6 @@ async def execute(params: dict, user: str) -> dict:
     from core.progress import emit_progress
 
     # 1. normalizedAttributes 확보
-    prereqs_ran: List[Dict[str, Any]] = []
     normalized = params.get("normalizedAttributes") or {}
     if not normalized:
         proj = projects().find_one(
@@ -58,24 +55,13 @@ async def execute(params: dict, user: str) -> dict:
         normalized = (proj.get("archSettings") or {}).get("normalizedAttributes") or {}
 
     if not normalized:
-        await emit_progress("style_define", "정규화 속성 없음 — driver_select 선행 실행")
-        from skills.driver_select.executor import execute as driver_select_execute
-        ds = await driver_select_execute(params, user)
-        prereqs_ran.append({"skill": "driver_select", "result": ds})
-        if ds.get("suggestSkill"):
-            return {
-                **ds,
-                "prerequisitesRan": (ds.get("prerequisitesRan") or []) + prereqs_ran,
-                "blockedAt": ds.get("blockedAt") or "driver_select",
-            }
-        normalized = ds.get("normalizedAttributes") or {}
-        prereqs_ran = (ds.get("prerequisitesRan") or []) + prereqs_ran
-        if not normalized:
-            return {
-                "projectCode": code,
-                "message": "driver_select 후에도 정규화 속성이 비어있습니다.",
-                "prerequisitesRan": prereqs_ran,
-            }
+        return {
+            "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "driver_select",
+            "suggestSkill": "driver_select",
+            "message": "정규화 속성이 없습니다. driver_select 를 먼저 실행하세요.",
+        }
 
     # 2. 카탈로그 로드 + 검증
     catalog = load_catalog()
@@ -83,9 +69,9 @@ async def execute(params: dict, user: str) -> dict:
     if problems:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "카탈로그 검증 실패",
             "catalogProblems": problems,
-            "prerequisitesRan": prereqs_ran,
         }
 
     await emit_progress("style_define", "점수 엔진 실행 중")
@@ -161,10 +147,10 @@ async def execute(params: dict, user: str) -> dict:
     if not parsed:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "LLM 응답을 파싱할 수 없습니다.",
             "raw": raw[:500],
             "recommendation": rec,
-            "prerequisitesRan": prereqs_ran,
         }
 
     chosen = parsed.get("chosen") or {}
@@ -214,6 +200,7 @@ async def execute(params: dict, user: str) -> dict:
 
     return {
         "projectCode": code,
+        "status": "completed",
         "chosen": chosen,
         "recommendation": {
             "primary": rec["primary"],
@@ -227,6 +214,5 @@ async def execute(params: dict, user: str) -> dict:
         "documentSaved": saved_path,
         "saveError": save_error,
         "critiqueTrail": critique_trail,
-        "prerequisitesRan": prereqs_ran,
         "message": msg,
     }

@@ -88,31 +88,15 @@ async def execute(params: dict, user: str) -> dict:
     ))
 
     from core.progress import emit_progress
-    prereqs_ran = []
     if not req_list:
-        await emit_progress("driver_select", "Requirement 없음 — requirement_refine 선행 실행")
-        from skills.requirement_refine.executor import execute as requirement_refine_execute
-        rr = await requirement_refine_execute(params, user)
-        prereqs_ran.append({"skill": "requirement_refine", "result": rr})
-        if rr.get("suggestSkill"):
-            return {
-                **rr,
-                "prerequisitesRan": (rr.get("prerequisitesRan") or []) + prereqs_ran,
-                "blockedAt": rr.get("blockedAt") or "requirement_refine",
-            }
-        req_list = list(issues().find(
-            {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Requirement"},
-            {"key": 1, "subkey": 1, "summary": 1, "description": 1, "reqtype": 1,
-             "qa": 1, "measure": 1, "_id": 0},
-        ))
-        if not req_list:
-            return {
-                "projectCode": code,
-                "message": "requirement_refine 후에도 Requirement 가 없습니다.",
-                "prerequisitesRan": prereqs_ran,
-                "drivers": [], "normalizedAttributes": {},
-            }
-        prereqs_ran = (rr.get("prerequisitesRan") or []) + prereqs_ran
+        return {
+            "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "requirement_refine",
+            "suggestSkill": "requirement_refine",
+            "message": "Requirement 가 없습니다. requirement_refine 을 먼저 실행하세요.",
+            "drivers": [], "normalizedAttributes": {},
+        }
 
     feat_list = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Feature"},
@@ -165,6 +149,7 @@ async def execute(params: dict, user: str) -> dict:
     if not parsed:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "LLM 응답을 파싱할 수 없습니다.",
             "raw": raw[:500],
             "drivers": [], "normalizedAttributes": {},
@@ -250,6 +235,7 @@ async def execute(params: dict, user: str) -> dict:
 
     return {
         "projectCode": code,
+        "status": "completed",
         "drivers": drivers,
         "normalizedAttributes": normalized,
         "updated": updated,
@@ -257,6 +243,5 @@ async def execute(params: dict, user: str) -> dict:
         "saveError": save_error,
         "priorityWeight": {"qad": w_qad, "qai": w_qai},
         "critiqueTrail": critique_trail,
-        "prerequisitesRan": prereqs_ran,
         "message": msg,
     }

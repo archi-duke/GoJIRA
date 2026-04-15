@@ -3,8 +3,6 @@
 import os
 import re
 import json
-from typing import Dict, Any, List
-
 from core.database import issues, projects
 from clients.platform_api import PlatformClient
 from skills.helpers import load_prompt
@@ -42,7 +40,6 @@ async def execute(params: dict, user: str) -> dict:
     from core.progress import emit_progress
 
     # 1. 선행 확인
-    prereqs_ran: List[Dict[str, Any]] = []
     designs = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"},
          "issueType": {"$in": ["Architectural Design", "Detailed Design"]}},
@@ -60,37 +57,12 @@ async def execute(params: dict, user: str) -> dict:
     normalized = arch.get("normalizedAttributes") or {}
 
     if not designs or not chosen:
-        await emit_progress("design_integrate", "설계 이슈 / 스타일 부족 — design_decide 선행 실행")
-        from skills.design_decide.executor import execute as design_decide_execute
-        dd = await design_decide_execute(params, user)
-        prereqs_ran.append({"skill": "design_decide", "result": dd})
-        if dd.get("suggestSkill"):
-            return {
-                **dd,
-                "prerequisitesRan": (dd.get("prerequisitesRan") or []) + prereqs_ran,
-                "blockedAt": dd.get("blockedAt") or "design_decide",
-            }
-        prereqs_ran = (dd.get("prerequisitesRan") or []) + prereqs_ran
-        designs = list(issues().find(
-            {"key": {"$regex": f"^{re.escape(code)}-"},
-             "issueType": {"$in": ["Architectural Design", "Detailed Design"]}},
-            {"key": 1, "subkey": 1, "issueType": 1, "summary": 1, "description": 1,
-             "designLevel": 1, "designPoint": 1, "decision": 1, "decisionRationale": 1,
-             "tradeoffs": 1, "risk": 1, "sensitivity": 1, "_id": 0},
-        ))
-        proj = projects().find_one(
-            {"jiraCodes.main.jiraCode": code},
-            {"archSettings": 1, "_id": 0},
-        ) or {}
-        arch = proj.get("archSettings") or {}
-        chosen = arch.get("chosenStyles") or {}
-        normalized = arch.get("normalizedAttributes") or {}
-
-    if not designs:
         return {
             "projectCode": code,
-            "message": "설계 이슈가 여전히 없습니다.",
-            "prerequisitesRan": prereqs_ran,
+            "status": "blocked",
+            "blockedAt": "design_decide",
+            "suggestSkill": "design_decide",
+            "message": "설계 이슈 / 스타일 선행 산출물이 부족합니다. design_decide 를 먼저 실행하세요.",
         }
 
     req_list = list(issues().find(
@@ -166,9 +138,9 @@ async def execute(params: dict, user: str) -> dict:
     if not parsed:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "LLM 응답을 파싱할 수 없습니다.",
             "raw": raw[:500],
-            "prerequisitesRan": prereqs_ran,
         }
 
     views = parsed.get("viewsIncluded") or []
@@ -224,11 +196,11 @@ async def execute(params: dict, user: str) -> dict:
 
     return {
         "projectCode": code,
+        "status": "completed",
         "viewsIncluded": views,
         "documentSaved": saved_path,
         "saveError": save_error,
         "mermaidValidation": mermaid_validation,
         "critiqueTrail": critique_trail,
-        "prerequisitesRan": prereqs_ran,
         "message": msg,
     }

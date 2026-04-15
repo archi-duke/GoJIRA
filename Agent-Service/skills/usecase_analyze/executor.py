@@ -69,6 +69,8 @@ async def execute(params: dict, user: str) -> dict:
     if not desc or _is_template_only(desc):
         return {
             "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "projdesc",
             "message": "프로젝트 관련 정보가 불충분합니다. 과제 설명 문서 작성을 먼저 진행해야 합니다.",
             "suggestSkill": "projdesc_interview",
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
@@ -80,32 +82,15 @@ async def execute(params: dict, user: str) -> dict:
         {"key": 1, "summary": 1, "description": 1, "client": 1, "_id": 0},
     ))
     from core.progress import emit_progress
-    prereqs_ran = []
     if not vos_list:
-        # 선행 위임: VOS가 없으면 vos_collect를 먼저 자동 실행
-        await emit_progress("usecase_analyze", "VOS가 없어 vos_collect 선행 실행")
-        from skills.vos_collect.executor import execute as vos_collect_execute
-        vos_result = await vos_collect_execute(params, user)
-        prereqs_ran.append({"skill": "vos_collect", "result": vos_result})
-        # 더 상위 선행이 막혔으면 (예: projdesc 부족) 그대로 위로 전파
-        if vos_result.get("suggestSkill"):
-            return {
-                **vos_result,
-                "prerequisitesRan": prereqs_ran,
-                "blockedAt": "vos_collect",
-            }
-        # vos_collect 성공 — VOS 목록 재조회
-        vos_list = list(issues().find(
-            {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
-            {"key": 1, "summary": 1, "description": 1, "client": 1, "_id": 0},
-        ))
-        if not vos_list:
-            return {
-                "projectCode": code,
-                "message": "VOS 수집 후에도 등록된 이해관계자 요구사항이 없습니다.",
-                "prerequisitesRan": prereqs_ran,
-                "created": [], "reused": [], "modified": [], "markedForDeletion": [],
-            }
+        return {
+            "projectCode": code,
+            "status": "blocked",
+            "blockedAt": "vos_collect",
+            "suggestSkill": "vos_collect",
+            "message": "VOS가 수집되어 있지 않습니다. vos_collect 를 먼저 실행하세요.",
+            "created": [], "reused": [], "modified": [], "markedForDeletion": [],
+        }
 
     existing_features = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Feature"},
@@ -171,6 +156,7 @@ async def execute(params: dict, user: str) -> dict:
     if not parsed:
         return {
             "projectCode": code,
+            "status": "failed",
             "message": "LLM 응답을 파싱할 수 없습니다.",
             "raw": raw[:500],
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
@@ -260,6 +246,7 @@ async def execute(params: dict, user: str) -> dict:
         docid_note = f" / ⚠ 미치환 docId {len(leftover_doc_ids)}건: {', '.join(leftover_doc_ids[:5])}"
     return {
         "projectCode": code,
+        "status": "completed",
         "created": buckets["created"],
         "reused": buckets["reused"],
         "modified": buckets["modified"],
@@ -270,7 +257,6 @@ async def execute(params: dict, user: str) -> dict:
         "saveError": save_error,
         "critiqueTrail": critique_trail,
         "mermaidValidation": mermaid_validation,
-        "prerequisitesRan": prereqs_ran,
         "docIdMap": docid_map,
         "leftoverDocIds": leftover_doc_ids,
         "message": base_msg + (f" / {tsum}" if tsum else "") + mermaid_note + docid_note,

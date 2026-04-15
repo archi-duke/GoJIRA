@@ -53,7 +53,8 @@ async def execute(params: dict, user: str) -> dict:
             )
             return {
                 "projectCode": code,
-                "status": "generated",
+                "status": "completed",
+                "interviewStatus": "generated",
                 "message": "인터뷰 완료 → 과제 설명 문서 생성됨",
                 "answers": answers,
                 "delegatedTo": "projdesc_generate",
@@ -62,7 +63,8 @@ async def execute(params: dict, user: str) -> dict:
         else:
             return {
                 "projectCode": code,
-                "status": "incomplete",
+                "status": "partial",
+                "interviewStatus": "incomplete",
                 "message": f"아직 {len(missing)}개 항목이 부족합니다.",
                 "answered": list(answers.keys()),
                 "remaining": [{"id": q["id"], "question": q["question"]} for q in missing],
@@ -72,14 +74,16 @@ async def execute(params: dict, user: str) -> dict:
     if has_content:
         return {
             "projectCode": code,
-            "status": "sufficient",
+            "status": "completed",
+            "interviewStatus": "sufficient",
             "message": "과제 설명 문서에 내용이 있습니다. 필요하면 보강을 진행할 수 있습니다.",
             "existingContent": doc_content[:500],
         }
 
     return {
         "projectCode": code,
-        "status": "needs_interview",
+        "status": "partial",
+        "interviewStatus": "needs_interview",
         "message": "과제 설명이 비어 있거나 부족합니다. 자동 생성을 위해 몇 가지 질문에 답해주세요.",
         "questions": [{"id": q["id"], "label": q["label"], "question": q["question"]} for q in INTERVIEW_QUESTIONS],
     }

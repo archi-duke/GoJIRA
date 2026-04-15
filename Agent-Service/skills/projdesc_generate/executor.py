@@ -38,7 +38,9 @@ async def execute(params: dict, user: str) -> dict:
         # answers/content 없이 호출됨 — 인터뷰가 선행되어야 함
         return {
             "projectCode": code,
-            "status": "needs_interview",
+            "status": "blocked",
+            "blockedAt": "projdesc_interview",
+            "interviewStatus": "needs_interview",
             "suggestSkill": "projdesc_interview",
             "message": (
                 "프로젝트 설명을 생성하려면 먼저 인터뷰로 답변을 수집해야 합니다. "
@@ -93,6 +95,7 @@ async def _generate(code: str, answers: dict, user: str) -> dict:
 
     return {
         "projectCode": code,
+        "status": "completed",
         "mode": "generate",
         "applyToEditor": True,
         "message": "과제 설명 문서가 생성되었습니다." + (
@@ -132,6 +135,7 @@ async def _enrich(code: str, content: str, user: str) -> dict:
 
     return {
         "projectCode": code,
+        "status": "completed",
         "mode": "enrich",
         "applyToEditor": True,
         "message": "과제 설명 문서가 보강되었습니다.",
