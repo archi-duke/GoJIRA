@@ -35,7 +35,17 @@ async def execute(params: dict, user: str) -> dict:
         answers = json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
         return await _generate(code, answers, user)
     else:
-        raise ValueError("answers 또는 content 필수")
+        # answers/content 없이 호출됨 — 인터뷰가 선행되어야 함
+        return {
+            "projectCode": code,
+            "status": "needs_interview",
+            "suggestSkill": "projdesc_interview",
+            "message": (
+                "프로젝트 설명을 생성하려면 먼저 인터뷰로 답변을 수집해야 합니다. "
+                "projdesc_interview(projectCode=...) 를 호출해 질문을 받고, "
+                "사용자 답변을 모은 뒤 다시 projdesc_generate(answers=...) 로 호출하세요."
+            ),
+        }
 
 
 async def _generate(code: str, answers: dict, user: str) -> dict:
