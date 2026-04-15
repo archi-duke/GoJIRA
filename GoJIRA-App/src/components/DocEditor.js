@@ -255,9 +255,11 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
   // 외부 변경(SSE push) 으로 현재 열린 파일 재로드. 편집 중이면 건너뜀.
-  async function reloadSelectedFile() {
+  // SSE 구독 콜백이 매 렌더의 state 를 참조하도록 ref 경유.
+  const reloadRef = React.useRef(null);
+  reloadRef.current = async () => {
     if (!selectedFile) return;
-    if (editMode && content !== original) return;  // 작성 중인 변경은 보호
+    if (editMode && content !== original) return;
     const ref = selectedMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
     try {
       const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(ref)}`);
@@ -269,7 +271,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         setOriginal(text);
       }
     } catch {}
-  }
+  };
+  async function reloadSelectedFile() { return reloadRef.current && reloadRef.current(); }
 
   // 진입 시 초기 파일 확인 → 사용자 브랜치 생성 → 트리 비교 (순차 실행)
   useEffect(() => {

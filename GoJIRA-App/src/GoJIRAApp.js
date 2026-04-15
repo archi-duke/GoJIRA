@@ -17,9 +17,31 @@ try {
   createEventQueue = () => ({ push: () => {}, clear: () => {} });
 }
 
+// GoJIRA-API 가 /Issue* 엔드포인트에서 user 를 필수로 요구하므로 (403 방지),
+// 전역 fetch 에 X-User-Id 를 자동 주입. 모듈 로드 시점에 1회 설치 —
+// child useEffect(fetch) 가 parent useEffect 보다 먼저 실행되는 React 순서
+// 문제를 피한다. user 값은 GoJIRAApp mount 시 window 변수로 노출.
+if (typeof window !== 'undefined' && !window.__gojiraFetchWrapped) {
+  const orig = window.fetch;
+  window.__gojiraFetchWrapped = true;
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    const user = window.__gojiraUser;
+    if (url.includes('/Issue') && user) {
+      init = init || {};
+      const headers = new Headers(init.headers || {});
+      if (!headers.has('X-User-Id')) headers.set('X-User-Id', user);
+      init.headers = headers;
+    }
+    return orig.call(window, input, init);
+  };
+}
+
 export default function GoJIRAApp({ user, authority, resetKey }) {
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [projectAlert, setProjectAlert] = useState(null);
+
+  if (typeof window !== 'undefined') window.__gojiraUser = user;
 
   useEffect(() => {
     if (resetKey > 0) {
