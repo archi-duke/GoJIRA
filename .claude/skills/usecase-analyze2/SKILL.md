@@ -1,15 +1,25 @@
 ---
 name: usecase-analyze2
 description: VOS 를 Use Case/Feature 로 분석하여 이슈로 등록하고 business/use-cases.md 를 작성합니다. VOS 커버리지 자가검증(모든 VOS 최소 1 Feature 매핑) + self-loop(최대 3회) + VOS-Feature Contains 링크 생성. Claude Code 네이티브(curl/jq).
-argument-hint: "<projectCode> <user>"
 allowed-tools: Bash, Read
 ---
 
 ## 환경
-- `$1` projectCode (예: GOJIRA3)
-- `$2` user (예: batman)
-- `PLATFORM_API=http://localhost:9000/api/v2`
-- `GOJIRA_API=http://localhost:9001/api/v2`
+- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
+- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+
+## 인자 추출
+
+사용자 메시지에서 다음 값들을 추출해 **먼저** 환경변수로 export 한 뒤 아래 bash 블록들을 실행하라. 누락 시 사용자에게 되물어 확정하라.
+
+- `CODE` — projectCode (예: GOJIRA3)
+- `USER` — user (예: batman)
+
+예:
+```bash
+export CODE="GOJIRA3"
+export USER="batman"
+```
 
 ## 역할
 소프트웨어 아키텍트. **모든 VOS 가 최소 1 Feature 에 매핑되는 커버리지**를 책임진다.
@@ -19,7 +29,6 @@ allowed-tools: Bash, Read
 ## Step 0 — 데이터 수집
 
 ```bash
-CODE="$1"; USER="$2"
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 

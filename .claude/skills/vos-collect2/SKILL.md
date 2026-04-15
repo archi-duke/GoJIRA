@@ -1,7 +1,6 @@
 ---
 name: vos-collect2
 description: 프로젝트의 project-description.md를 분석해 이해관계자 요구사항(VOS)을 추출하고 VOS 이슈를 자동 생성합니다. Self-loop 자가검증(최대 3회) + best-so-far 채택. Claude Code 네이티브 실행 (curl/jq 기반).
-argument-hint: "<projectCode> <user>"
 allowed-tools: Bash, Read
 ---
 
@@ -9,8 +8,19 @@ allowed-tools: Bash, Read
 
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
-- `$1` = projectCode (예: GOJIRA3)
-- `$2` = user (예: batman) — `docs/{user}` 브랜치로 커밋, `X-User-Id` 헤더로 전송
+
+## 인자 추출
+
+사용자 메시지에서 다음 값들을 추출해 **먼저** 환경변수로 export 한 뒤 아래 bash 블록들을 실행하라. 누락 시 사용자에게 되물어 확정하라.
+
+- `CODE` — projectCode (예: GOJIRA3)
+- `USER` — user (예: batman) — `docs/{user}` 브랜치로 커밋, `X-User-Id` 헤더로 전송
+
+예:
+```bash
+export CODE="GOJIRA3"
+export USER="batman"
+```
 
 ## 역할
 
@@ -23,8 +33,6 @@ allowed-tools: Bash, Read
 ### project-description.md 읽기 (docs/{user} 우선, 없으면 main)
 
 ```bash
-CODE="$1"
-USER="$2"
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
