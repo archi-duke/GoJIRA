@@ -158,8 +158,8 @@ KEYWORD_MAP = {
 MIN_TOOLS = 3
 MAX_TOOLS = 10
 
-# 워크플로우 모드에서 항상 허용되는 읽기 전용 스킬 (free-form 제외)
-_WORKFLOW_READONLY = {"project_query"}
+# 워크플로우 모드에서 항상 허용되는 읽기 전용 / admin 스킬 (free-form 생성/수정은 제외)
+_WORKFLOW_READONLY = {"project_query", "reset_project", "ui_navigate"}
 
 
 class SkillRegistry:

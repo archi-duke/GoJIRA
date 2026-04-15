@@ -45,7 +45,7 @@ async def resolve_starting_stage(project_code: str, workflow_id: str = "business
     새 Job 생성 직후, 이미 일부 단계가 DB/파일에 존재할 경우 엔진이 그 지점부터 시작하도록.
     """
     wf = get_workflow(workflow_id)
-    state = await get_workflow_state(project_code)
+    state = await get_workflow_state(project_code)  # user 미지정 — 시작 단계 결정 용도라 main 만 조회로 충분
     done = state.get("completedSteps") or {}
     stage_to_flag = {
         "projdesc": "projdesc",
@@ -155,7 +155,11 @@ async def _verify_stage_completion(job: Dict[str, Any], stage_id: str) -> bool:
     flag = mapping.get(stage_id)
     if not flag:
         return True
-    state = await get_workflow_state(job["projectCode"])
+    state = await get_workflow_state(
+        job["projectCode"],
+        workflow_job=job,
+        user=job.get("createdBy"),
+    )
     return bool((state.get("completedSteps") or {}).get(flag))
 
 

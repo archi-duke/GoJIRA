@@ -40,7 +40,11 @@ def detect_project_code(message: str) -> Optional[str]:
     return None
 
 
-async def get_workflow_state(project_code: str, workflow_job: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def get_workflow_state(
+    project_code: str,
+    workflow_job: Optional[Dict[str, Any]] = None,
+    user: Optional[str] = None,
+) -> Dict[str, Any]:
     """프로젝트의 워크플로우 진행 상태를 구조화해 반환.
 
     비동기인 이유: DocRepo 에 문서 존재 여부를 확인하기 위해 platform_api 를 호출.
@@ -74,10 +78,14 @@ async def get_workflow_state(project_code: str, workflow_job: Optional[Dict[str,
     secondary_styles = chosen.get("secondary") or []
     supporting_styles = chosen.get("supporting") or []
 
-    # 문서 존재 여부 (DocRepo 조회)
-    documents_present = await _check_documents(project_code)
+    # 모든 작업은 사용자 브랜치(docs/{user}) 에서 진행되므로 user 브랜치를 우선 검사.
+    # user 가 명시되지 않으면 workflow_job.createdBy 사용.
+    effective_user = user or (workflow_job or {}).get("createdBy") or ""
+
+    # 문서 존재 여부 (DocRepo 조회 — user 브랜치 + main 합집합)
+    documents_present = await _check_documents(project_code, effective_user)
     # project-description 은 템플릿만 있으면 미완료로 간주
-    projdesc_real = await _has_real_projdesc(project_code)
+    projdesc_real = await _has_real_projdesc(project_code, effective_user)
 
     # 완료 플래그 — DB/파일 상태에서 파생
     completed_steps = {
@@ -134,31 +142,52 @@ async def get_workflow_state(project_code: str, workflow_job: Optional[Dict[str,
     return state
 
 
-async def _check_documents(project_code: str) -> Dict[str, bool]:
-    """산출 문서 존재 여부를 DocRepo 트리에서 확인. 실패 시 빈 dict."""
+async def _check_documents(project_code: str, user: str = "") -> Dict[str, bool]:
+    """산출 문서 존재 여부를 DocRepo 트리에서 확인.
+
+    모든 작업은 사용자 브랜치(docs/{user}) 에서 먼저 이뤄지므로 user 브랜치를 1순위로 조회.
+    main / user 브랜치 합집합으로 판단. 실패 시 빈 dict.
+    """
+    paths: set = set()
     try:
         from clients.platform_api import PlatformClient
         client = PlatformClient()
-        tree = await client.get_file_tree(project_code, ref="main")
-        # Gitea/Gogs 스타일: {tree: [{path, type: blob|tree, ...}]}
-        entries = tree.get("tree") if isinstance(tree, dict) else tree
-        paths = {e.get("path") for e in (entries or []) if isinstance(e, dict) and e.get("type") == "blob"}
+        refs = []
+        if user:
+            refs.append(f"docs/{user}")
+        refs.append("main")
+        for ref in refs:
+            try:
+                tree = await client.get_file_tree(project_code, ref=ref)
+                entries = tree.get("tree") if isinstance(tree, dict) else tree
+                for e in entries or []:
+                    if isinstance(e, dict) and e.get("type") == "blob":
+                        p = e.get("path")
+                        if p:
+                            paths.add(p)
+            except Exception:
+                continue
         return {doc: (doc in paths) for doc in _STEP_DOCS.values()}
     except Exception as e:
         log.warning("문서 존재 확인 실패: %s", e)
         return {doc: False for doc in _STEP_DOCS.values()}
 
 
-async def _has_real_projdesc(project_code: str) -> bool:
+async def _has_real_projdesc(project_code: str, user: str = "") -> bool:
     """project-description.md 가 템플릿이 아닌 실내용인지 확인.
 
-    main / user 브랜치 모두 검사. 어느 한 곳이라도 실내용이면 True.
+    모든 작업은 docs/{user} 브랜치에서 진행되므로 user 브랜치 우선 검사.
+    user / main 중 어느 한 곳이라도 실내용이면 True.
     """
     try:
         from clients.platform_api import PlatformClient
         from skills.helpers import is_template_only
         client = PlatformClient()
-        for ref in ("main",):
+        refs = []
+        if user:
+            refs.append(f"docs/{user}")
+        refs.append("main")
+        for ref in refs:
             try:
                 content = await client.get_file_content(project_code, "business/project-description.md", ref=ref)
                 if content and not is_template_only(content):

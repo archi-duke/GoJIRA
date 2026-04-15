@@ -767,7 +767,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   if (!hasRepo) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <CommonBar title={barTitle} onBack={onBack} nav={nav} />
+        <CommonBar title={barTitleText} onBack={onBack} nav={nav} />
         <div className="de-empty">설계문서 저장소가 없습니다. 프로젝트맵에서 설계문서를 먼저 생성하세요.</div>
       </div>
     );

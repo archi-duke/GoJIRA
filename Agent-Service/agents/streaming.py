@@ -84,7 +84,7 @@ async def agent_loop_stream(
                 log.info("workflow job: %s stage=%s", workflow_job.get("jobId"), workflow_job.get("currentStage"))
             except Exception as e:
                 log.warning("workflow job 로드 실패: %s", e)
-            state = await get_workflow_state(detected_code, workflow_job=workflow_job)
+            state = await get_workflow_state(detected_code, workflow_job=workflow_job, user=user_id)
             state_text = format_state_for_llm(state)
             log.info("워크플로우 상태 주입: code=%s stage=%s skill=%s completed=%s",
                      detected_code, state.get("currentStage"), state.get("currentStageSkill"),
@@ -152,7 +152,12 @@ async def agent_loop_stream(
                     yield evt
 
                 # Pass 1 추론 결과로 스킬 재선별 (추론에서 언급된 스킬 반영)
-                tools = registry.select_tools(user_message, extra_context=thought, required=required_skills)
+                tools = registry.select_tools(
+                    user_message, extra_context=thought,
+                    required=required_skills,
+                    workflow_mode=workflow_mode,
+                    workflow_allowed=workflow_allowed,
+                )
 
                 # 추론이 사용자에게 질문하는 형태라면 Pass 2 건너뛰고 텍스트 답변으로 종료.
                 # 단, belief state 기준 워크플로우 진행 중이면 이를 무시하고 Pass 2 진입
@@ -354,9 +359,13 @@ async def agent_loop_stream(
                                     ),
                                 })
                                 # 다음 stage 의 tools 로 재선별 (같은 턴 내 연속 진행 — R5)
+                                # 후속 turn 의 Pass 1 재선별이 이전 stage 로 되돌아가지 않도록
+                                # workflow_allowed / required_skills 상위 변수도 갱신한다.
                                 new_allowed = {next_skill}
                                 if next_stage == "projdesc":
                                     new_allowed.update({"projdesc_interview", "projdesc_generate"})
+                                workflow_allowed = new_allowed
+                                required_skills = [next_skill]
                                 tools = registry.select_tools(
                                     user_message,
                                     required=[next_skill],
