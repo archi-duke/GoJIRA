@@ -2,114 +2,149 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"gopkg.in/yaml.v3"
 
+	"gojira-api/clients"
 	"gojira-api/db"
-	"gojira-api/jiraclient"
 	"gojira-api/models"
 )
 
-// POST /api/v{version}/Issue
+// data/issues/<subkey>.yaml 경로 (Python issuestore._yaml_path 와 동일 규칙).
+var _subkeySafe = regexp.MustCompile(`[^A-Za-z0-9_\-]+`)
+
+func issueYamlPath(subkey string) string {
+	safe := _subkeySafe.ReplaceAllString(subkey, "_")
+	return "data/issues/" + safe + ".yaml"
+}
+
+// POST /api/v{version}/Issue — 이슈 생성.
+//
+// 동작 변경 (YAML 진실 원천):
+//  1. key / subkey 자체 할당 (JIRA 호출 제거)
+//  2. YAML 직렬화 → docs/{user} 브랜치 커밋
+//  3. Mongo 캐시 upsert + project.issues 배열 갱신
+//
+// JIRA 푸시는 별도 기능(/Issue/push-jira, 추후)에서 처리.
 func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.IssueCreateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	user, ok := resolveUser(r, req.User)
+	if !ok {
+		respondError(w, http.StatusForbidden, "user required")
+		return
+	}
 	if req.Summary == "" {
 		respondError(w, http.StatusBadRequest, "summary is required")
 		return
 	}
-
+	if req.IssueType == "" {
+		respondError(w, http.StatusBadRequest, "issueType is required")
+		return
+	}
 	prjKey := req.ProjectKey
 	if prjKey == "" {
 		prjKey = req.PrjID
+	}
+	if prjKey == "" {
+		respondError(w, http.StatusBadRequest, "prjID/projectKey required")
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	if req.IssueType == "" {
-		respondError(w, http.StatusBadRequest, "issueType is required")
+	// 1) key 할당
+	num, err := db.NextIssueNum(ctx, prjKey)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "key 할당 실패: "+err.Error())
 		return
 	}
+	key := fmt.Sprintf("%s-%d", prjKey, num)
 
-	// JIRA에 이슈 생성
-	fields := map[string]interface{}{
-		"summary":   req.Summary,
-		"issuetype": map[string]string{"name": req.IssueType},
+	// 2) subkey 할당 (미전달 시 issueType 매핑)
+	subkey := req.SubKey
+	if subkey == "" {
+		prefix := db.SubkeyPrefix(req.IssueType, req.ReqType)
+		if prefix == "" {
+			respondError(w, http.StatusBadRequest, "subkey required for issueType "+req.IssueType)
+			return
+		}
+		subkey, err = db.NextSubkey(ctx, prjKey, prefix)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "subkey 할당 실패: "+err.Error())
+			return
+		}
 	}
-	if req.Desc != "" {
-		fields["description"] = req.Desc
-	}
-	if len(req.Labels) > 0 {
-		fields["labels"] = req.Labels
+
+	// 3) YAML doc build
+	now := time.Now().Format("2006-01-02T15:04:05.000+0900")
+	doc := map[string]interface{}{
+		"key":         key,
+		"subkey":      subkey,
+		"issueType":   req.IssueType,
+		"summary":     req.Summary,
+		"description": req.Desc,
+		"status":      "To Do",
+		"priority":    "Medium",
+		"labels":      req.Labels,
+		"created":     now,
+		"updated":     now,
 	}
 	if req.ReqType != "" && req.ReqType != "null" {
-		fields["customfield_12555"] = map[string]string{"value": req.ReqType}
-	}
-	if req.SubKey != "" {
-		fields["customfield_15209"] = req.SubKey
-	}
-	if prjKey != "" {
-		fields["project"] = map[string]string{"key": prjKey}
+		doc["reqtype"] = req.ReqType
 	}
 
-	log.Printf("create issue: project=%s, issueType=%s, reqtype=%s, subkey=%s", prjKey, req.IssueType, req.ReqType, req.SubKey)
-
-	result, err := jiraclient.CreateIssue(fields)
+	yamlBytes, err := yaml.Marshal(doc)
 	if err != nil {
-		respondError(w, http.StatusBadGateway, "JIRA 이슈 생성 실패: "+err.Error())
+		respondError(w, http.StatusInternalServerError, "yaml marshal: "+err.Error())
 		return
 	}
 
-	jiraKey, _ := result["key"].(string)
-	if jiraKey == "" {
-		respondError(w, http.StatusBadGateway, "JIRA에서 키를 받지 못했습니다")
+	// 4) YAML 커밋 (user 브랜치)
+	msg := fmt.Sprintf("[issue] %s %s", key, truncate(req.Summary, 40))
+	if err := clients.SaveFile(prjKey, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
+		respondError(w, http.StatusBadGateway, "YAML 저장 실패: "+err.Error())
 		return
 	}
 
-	// JIRA에서 전체 이슈 정보 가져와서 MongoDB에 저장
-	doc := bson.M{
-		"key":       jiraKey,
-		"issueType": req.IssueType,
-		"subkey":    req.SubKey,
-		"summary":   req.Summary,
-		"labels":    req.Labels,
-		"reqtype":   req.ReqType,
-		"_dirty":    false,
-		"_syncedAt": time.Now(),
+	// 5) Mongo 캐시 upsert (실패해도 YAML 이 진실이므로 경고만)
+	cacheDoc := bson.M{}
+	for k, v := range doc {
+		cacheDoc[k] = v
 	}
-	if req.Desc != "" {
-		doc["description"] = req.Desc
+	cacheDoc["_dirty"] = false
+	cacheDoc["_syncedAt"] = time.Now()
+	if err := db.UpsertIssue(ctx, key, cacheDoc); err != nil {
+		log.Printf("cache upsert warn key=%s: %v", key, err)
 	}
-
-	jiraIssue, err := jiraclient.GetIssue(jiraKey)
-	if err == nil {
-		doc = db.TransformToCache(jiraIssue)
-		doc["_dirty"] = false
-		doc["_syncedAt"] = time.Now()
+	if err := db.AddIssueToProject(ctx, prjKey, key); err != nil {
+		log.Printf("project.issues add warn key=%s: %v", key, err)
 	}
 
-	db.UpsertIssue(ctx, jiraKey, doc)
-
-	// 프로젝트 issues 배열에 키 추가
-	db.AddIssueToProject(ctx, prjKey, jiraKey)
-
-	log.Printf("created JIRA issue %s (subkey: %s)", jiraKey, req.SubKey)
-	respondJSON(w, http.StatusOK, map[string]string{"key": jiraKey, "subkey": req.SubKey})
+	log.Printf("created issue %s subkey=%s user=%s (YAML)", key, subkey, user)
+	respondJSON(w, http.StatusOK, map[string]string{"key": key, "subkey": subkey})
 }
 
-// GET /api/v{version}/Issue — read from MongoDB
+// GET /api/v{version}/Issue — Mongo 캐시 read.
 func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.IssueGetRequest
 	if err := parseXBody(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid XBody header")
+		return
+	}
+	if _, ok := resolveUser(r, req.User); !ok {
+		respondError(w, http.StatusForbidden, "user required")
 		return
 	}
 
@@ -131,7 +166,6 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 		filter = nil
 	}
 
-	// Filter by project: lookup issues array from projects collection
 	if req.PrjID != "" {
 		prjDoc := db.FindProjectByCode(ctx, req.PrjID)
 		if prjDoc != nil {
@@ -172,7 +206,6 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Strip internal fields from response
 	cleaned := make([]bson.M, 0, len(issues))
 	for _, issue := range issues {
 		delete(issue, "_id")
@@ -184,56 +217,114 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, cleaned)
 }
 
-// PUT /api/v{version}/Issue — update in MongoDB, mark dirty
+// PUT /api/v{version}/Issue — 필드 업데이트.
+//
+// 동작: Mongo 캐시 문서 로드 → Data 병합 → YAML 재생성 → user 브랜치 커밋 → 캐시 업데이트.
+// JIRA 동기화는 제거. 추후 별도 push 플로우에서 처리.
 func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.IssueUpdateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	user, ok := resolveUser(r, req.User)
+	if !ok {
+		respondError(w, http.StatusForbidden, "user required")
+		return
+	}
 	if req.Key == "" {
 		respondError(w, http.StatusBadRequest, "key is required")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	// Build field updates (flat cache schema — no "fields." prefix)
-	updates := bson.M{}
-	for k, v := range req.Data {
-		updates[k] = v
-	}
-	updates["_dirty"] = true
-
-	if err := db.UpdateIssueFields(ctx, req.Key, updates); err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+	existing, err := db.FindIssueByKey(ctx, req.Key)
+	if err != nil || existing == nil {
+		respondError(w, http.StatusNotFound, "issue not found: "+req.Key)
 		return
 	}
-	db.SyncIssueToJira(req.Key, req.Data)
+
+	subkey, _ := existing["subkey"].(string)
+	if subkey == "" {
+		respondError(w, http.StatusConflict, "issue has no subkey — cannot locate YAML")
+		return
+	}
+	code := keyToProjectCode(req.Key)
+	if code == "" {
+		respondError(w, http.StatusBadRequest, "cannot derive project code from key")
+		return
+	}
+
+	// 병합 — 내부 필드 제외
+	merged := bson.M{}
+	for k, v := range existing {
+		if k == "_id" || k == "_dirty" || k == "_syncedAt" {
+			continue
+		}
+		merged[k] = v
+	}
+	for k, v := range req.Data {
+		merged[k] = v
+	}
+	merged["updated"] = time.Now().Format("2006-01-02T15:04:05.000+0900")
+
+	yamlBytes, err := yaml.Marshal(merged)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "yaml marshal: "+err.Error())
+		return
+	}
+
+	msg := fmt.Sprintf("[issue] update %s", req.Key)
+	if err := clients.SaveFile(code, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
+		respondError(w, http.StatusBadGateway, "YAML 저장 실패: "+err.Error())
+		return
+	}
+
+	merged["_dirty"] = false
+	merged["_syncedAt"] = time.Now()
+	if err := db.UpsertIssue(ctx, req.Key, merged); err != nil {
+		log.Printf("cache upsert warn key=%s: %v", req.Key, err)
+	}
+
 	respondJSON(w, http.StatusOK, "issue updated")
 }
 
-// DELETE /api/v{version}/Issue — delete from MongoDB and JIRA
+// DELETE /api/v{version}/Issue — 이슈 삭제.
+//
+// 자기 과제 이슈: YAML 삭제 → 캐시 삭제 → 모든 프로젝트 issues 배열에서 제거.
+// 타 과제 이슈(링크만 걸려있는 경우): 현재 프로젝트 issues 배열에서만 제거.
+// JIRA 삭제 호출은 제거.
 func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.IssueDeleteRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	user, ok := resolveUser(r, req.User)
+	if !ok {
+		respondError(w, http.StatusForbidden, "user required")
+		return
+	}
 	if req.Key == "" {
 		respondError(w, http.StatusBadRequest, "key is required")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	// 이슈 key의 prefix와 요청 프로젝트 코드 비교
 	isOwnIssue := req.PrjID != "" && strings.HasPrefix(req.Key, req.PrjID+"-")
 
 	if isOwnIssue {
-		// 자기 과제 이슈: DB에서 삭제 + 모든 프로젝트 issues 배열에서 제거
+		existing, _ := db.FindIssueByKey(ctx, req.Key)
+		subkey, _ := (existing)["subkey"].(string)
+		if subkey != "" {
+			if err := clients.DeleteFile(req.PrjID, issueYamlPath(subkey), fmt.Sprintf("[issue] delete %s", req.Key), user); err != nil {
+				log.Printf("YAML delete warn key=%s: %v", req.Key, err)
+			}
+		}
 		if err := db.DeleteIssueByKey(ctx, req.Key); err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -245,18 +336,29 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 				db.RemoveIssueFromProject(ctx, code, req.Key)
 			}
 		}
-		// Async delete from JIRA
-		go func() {
-			if err := jiraclient.DeleteIssue(req.Key); err != nil {
-				log.Printf("async JIRA delete %s failed: %v", req.Key, err)
-			}
-		}()
 	} else {
-		// 타 과제 이슈: 프로젝트 목록에서만 제거 (DB/JIRA 삭제 안 함)
 		if req.PrjID != "" {
 			db.RemoveIssueFromProject(ctx, req.PrjID, req.Key)
 		}
 	}
 
 	respondJSON(w, http.StatusOK, "issue deleted")
+}
+
+// ── 유틸 ──
+
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+func keyToProjectCode(key string) string {
+	idx := strings.LastIndex(key, "-")
+	if idx <= 0 {
+		return ""
+	}
+	return key[:idx]
 }

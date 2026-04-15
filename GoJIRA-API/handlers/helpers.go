@@ -72,3 +72,18 @@ func parseXBody(r *http.Request, v interface{}) error {
 	}
 	return json.Unmarshal([]byte(xbody), v)
 }
+
+// resolveUser — 요청 user 추출. 우선순위: 명시값(body.User) → X-User-Id → user 쿼리.
+// 비어있으면 false 반환. 호출 측이 403 응답.
+func resolveUser(r *http.Request, bodyUser string) (string, bool) {
+	if bodyUser != "" {
+		return bodyUser, true
+	}
+	if v := r.Header.Get("X-User-Id"); v != "" {
+		return v, true
+	}
+	if v := r.URL.Query().Get("user"); v != "" {
+		return v, true
+	}
+	return "", false
+}

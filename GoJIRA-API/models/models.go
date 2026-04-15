@@ -11,23 +11,27 @@ type IssueCreateRequest struct {
 	Desc       string   `json:"desc,omitempty"`
 	Labels     []string `json:"labels,omitempty"`
 	SubKey     string   `json:"subkey,omitempty"`
+	User       string   `json:"user,omitempty"`
 }
 
 type IssueGetRequest struct {
 	PrjID    string `json:"prjID"`
 	InfoType string `json:"infoType"`
 	Query    string `json:"query,omitempty"`
+	User     string `json:"user,omitempty"`
 }
 
 type IssueUpdateRequest struct {
 	PrjID string                 `json:"prjID"`
 	Key   string                 `json:"key"`
 	Data  map[string]interface{} `json:"data"`
+	User  string                 `json:"user,omitempty"`
 }
 
 type IssueDeleteRequest struct {
 	PrjID string `json:"prjID"`
 	Key   string `json:"key"`
+	User  string `json:"user,omitempty"`
 }
 
 type LabelRequest struct {
