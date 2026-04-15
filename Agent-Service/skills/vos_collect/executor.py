@@ -1,20 +1,68 @@
-"""VOS 수집 스킬 — project-description.md 분석 → VOS 이슈 도출 (mode 분기 + critique 루프)."""
+"""VOS 수집 스킬 v2 — SKILL.md 통합 방식.
+
+LLM 이 내부에서 generate → self-critique → revise → best-so-far 를
+단일 호출로 수행. Python 은 IO 와 결과 파싱만 담당.
+"""
 
 import os
 import re
 import json
+from typing import Any, Dict, List, Optional
 
 from core.database import issues
+from core.llm import call_llm
 from clients.platform_api import PlatformClient
 from skills.helpers import (
     create_issue, dispatch_by_mode,
     is_template_only as _is_template_only,
-    load_prompt,
 )
-from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
+from skills.critique import load_step_policy
 
 
 _SKILL_DIR = os.path.dirname(__file__)
+_SKILL_MD_PATH = os.path.join(_SKILL_DIR, "SKILL.md")
+
+
+def _load_skill_md() -> str:
+    with open(_SKILL_MD_PATH, encoding="utf-8") as f:
+        text = f.read()
+    # YAML frontmatter 제거 (LLM 에는 본문만 전달)
+    m = re.match(r"^---\n.*?\n---\n(.*)$", text, re.DOTALL)
+    return m.group(1) if m else text
+
+
+def _build_prompt(skill_body: str, code: str, desc: str, existing_vos: list,
+                  criteria: str, policy_text: str) -> str:
+    desc_trunc = (desc or "")[:6000]
+    existing_json = json.dumps(existing_vos, ensure_ascii=False, indent=2)
+    return (
+        f"{skill_body}\n\n"
+        f"---\n\n"
+        f"## 주입 데이터\n\n"
+        f"### projectCode\n{code}\n\n"
+        f"### project_description (앞부분 6000자)\n{desc_trunc}\n\n"
+        f"### existing_vos ({len(existing_vos)}건)\n```json\n{existing_json}\n```\n\n"
+        f"### criteria\n{criteria}\n\n"
+        f"### policy\n{policy_text}\n\n"
+        f"이제 위 `실행 흐름` 섹션대로 수행하고, 지정된 JSON 형식 한 개만 출력하라."
+    )
+
+
+def _extract_json_object(raw: str) -> Optional[Dict[str, Any]]:
+    """LLM 응답에서 JSON 오브젝트 추출. 바깥 설명문/마크다운 허용."""
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # 가장 바깥 {...} 블록 추출
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group())
+    except json.JSONDecodeError:
+        return None
 
 
 async def execute(params: dict, user: str) -> dict:
@@ -23,14 +71,13 @@ async def execute(params: dict, user: str) -> dict:
         raise ValueError("projectCode 필수")
 
     req_user = params.get("user", user)
+    from core.progress import emit_progress
 
-    # 1. project-description.md 조회
+    # 1. project-description.md 조회 (docs/{user} → main 순서)
     client = PlatformClient()
-    doc_content = await client.get_file_content(code, "business/project-description.md", ref="main")
+    doc_content = await client.get_file_content(code, "business/project-description.md", ref=f"docs/{req_user}")
     if not doc_content or _is_template_only(doc_content):
-        user_content = await client.get_file_content(code, "business/project-description.md", ref=f"docs/{req_user}")
-        if user_content and not _is_template_only(user_content):
-            doc_content = user_content
+        doc_content = await client.get_file_content(code, "business/project-description.md", ref="main")
     if not doc_content or _is_template_only(doc_content):
         return {
             "projectCode": code,
@@ -41,73 +88,42 @@ async def execute(params: dict, user: str) -> dict:
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
 
-    from core.progress import emit_progress
-    await emit_progress("vos_collect", "VOS 수집 시작 — 과제 설명 분석 중")
+    await emit_progress("vos_collect", "VOS 수집 시작 — 과제 설명 분석 중 (v2 self-loop)")
 
-    # 2. 기존 VOS 이슈 조회 (LLM 컨텍스트)
+    # 2. 기존 VOS 조회
     existing_vos = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "VOS"},
         {"key": 1, "summary": 1, "description": 1, "client": 1, "_id": 0},
     ))
     existing_keys = {v["key"] for v in existing_vos}
 
-    # 3. 생성 + 비판적 평가 루프
-    truncated = doc_content[:6000]
-    existing_json = json.dumps(existing_vos, ensure_ascii=False, indent=2)
-
-    generate_prompt = load_prompt(_SKILL_DIR, "generate").format(
-        code=code,
-        truncated=truncated,
-        existing_count=len(existing_vos),
-        existing_json=existing_json,
-    )
-
-    critique_tpl = load_prompt(_SKILL_DIR, "critique")
-    revise_tpl = load_prompt(_SKILL_DIR, "revise")
-
-    # 워크플로우 문서에서 검증 기준/정책 로드 (단일 진실 출처)
+    # 3. 워크플로우 검증 정책 로드
     policy = load_step_policy("workflow-requirement-analysis.md", "VOS 도출")
 
-    context_block = (
-        f"## 원본 과제 설명 (요약)\n{truncated[:3000]}\n\n"
-        f"## 기존 VOS\n{existing_json}"
+    # 4. SKILL.md + 주입 데이터로 단일 LLM 호출 (self-loop 내장)
+    skill_body = _load_skill_md()
+    prompt = _build_prompt(
+        skill_body, code, doc_content, existing_vos,
+        policy.get("criteria", ""), policy.get("policy_text", ""),
     )
+    raw = await call_llm(prompt)
 
-    def _critique_prompt(draft: str) -> str:
-        return critique_tpl.format(
-            context_block=context_block,
-            draft=draft,
-            criteria=policy["criteria"],
-            policy=policy["policy_text"],
-        )
-
-    def _revise_prompt(draft: str, critique: dict) -> str:
-        issues_text = "\n".join(f"- {i}" for i in critique.get("issues", []))
-        return revise_tpl.format(
-            desc_trunc=truncated[:3000],
-            existing_json=existing_json,
-            draft=draft,
-            issues_text=issues_text,
-        )
-
-    raw, critique_trail = await iterate_generate_critique(
-        generate_prompt, _critique_prompt, _revise_prompt,
-        max_iter=policy["max_iter"],
-        threshold=policy["threshold"],
-        on_fail=policy["on_fail"],
-    )
-
-    items = _extract_json_list(raw)
-    if items is None:
+    result = _extract_json_object(raw)
+    if not result or "finalItems" not in result:
         return {
             "projectCode": code,
             "status": "failed",
-            "message": "LLM 응답을 파싱할 수 없습니다.",
+            "message": "LLM 응답 파싱 실패.",
             "raw": raw[:500],
             "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
 
-    # 4. mode 분기 처리
+    final_items: List[dict] = result.get("finalItems") or []
+    iterations = result.get("iterations") or []
+    stop_reason = result.get("stopReason", "")
+    unresolved = result.get("unresolvedCritical") or []
+
+    # 5. mode 분기 처리
     async def _create_fn(item):
         client_val = item.get("client", "")
         return await create_issue(
@@ -129,43 +145,9 @@ async def execute(params: dict, user: str) -> dict:
                 updates[f] = v
         return updates
 
-    buckets = await dispatch_by_mode(items, existing_keys, _create_fn, _update_fields_fn, user)
+    buckets = await dispatch_by_mode(final_items, existing_keys, _create_fn, _update_fields_fn, user)
 
-    tsum = trail_summary(critique_trail)
-    msg = _summarize(buckets) + (f" — {tsum}" if tsum else "")
-    await emit_progress("vos_collect", f"VOS 수집 완료 — {msg}", **{
-        "createdCount": len(buckets["created"]),
-        "reusedCount": len(buckets["reused"]),
-    })
-    return {
-        "projectCode": code,
-        "status": "completed",
-        "existingCount": len(existing_vos),
-        "created": buckets["created"],
-        "reused": buckets["reused"],
-        "modified": buckets["modified"],
-        "markedForDeletion": buckets["markedForDeletion"],
-        "critiqueTrail": critique_trail,
-        "message": msg,
-    }
-
-
-def _extract_json_list(raw: str):
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, list) else None
-    except json.JSONDecodeError:
-        m = re.search(r'\[.*\]', raw, re.DOTALL)
-        if m:
-            try:
-                data = json.loads(m.group())
-                return data if isinstance(data, list) else None
-            except json.JSONDecodeError:
-                return None
-    return None
-
-
-def _summarize(buckets: dict) -> str:
+    # 6. 요약
     parts = []
     if buckets["created"]:
         parts.append(f"신규 {len(buckets['created'])}건")
@@ -175,4 +157,33 @@ def _summarize(buckets: dict) -> str:
         parts.append(f"수정 {len(buckets['modified'])}건")
     if buckets["markedForDeletion"]:
         parts.append(f"⚠ 삭제마킹 {len(buckets['markedForDeletion'])}건")
-    return "VOS — " + (", ".join(parts) if parts else "변경 없음")
+    msg = "VOS — " + (", ".join(parts) if parts else "변경 없음")
+
+    iter_summary = ""
+    if iterations:
+        best_iter = result.get("selectedIter")
+        iter_summary = f" (iter {len(iterations)}회, best=iter{best_iter}, stop={stop_reason})"
+
+    await emit_progress("vos_collect", f"VOS 수집 완료 — {msg}{iter_summary}", **{
+        "createdCount": len(buckets["created"]),
+        "reusedCount": len(buckets["reused"]),
+    })
+
+    status = "completed"
+    if unresolved:
+        status = "partial"
+
+    return {
+        "projectCode": code,
+        "status": status,
+        "existingCount": len(existing_vos),
+        "created": buckets["created"],
+        "reused": buckets["reused"],
+        "modified": buckets["modified"],
+        "markedForDeletion": buckets["markedForDeletion"],
+        "iterations": iterations,
+        "selectedIter": result.get("selectedIter"),
+        "stopReason": stop_reason,
+        "unresolvedCritical": unresolved,
+        "message": msg + iter_summary,
+    }
