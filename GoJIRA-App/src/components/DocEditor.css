@@ -68,6 +68,19 @@
 .de-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .de-textarea { flex: 1; width: 100%; border: none; outline: none; resize: none; padding: 16px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; box-sizing: border-box; overflow: auto; }
 .de-preview { flex: 1; overflow: auto; padding: 16px; font-size: 14px; line-height: 1.7; min-height: 0; }
+
+/* YAML 전용 뷰어 */
+.de-yaml { font-family: 'Consolas', 'Monaco', 'SF Mono', monospace; font-size: 13px; line-height: 1.6; margin: 0; padding: 4px 0; white-space: pre; tab-size: 2; color: #2c3e50; background: transparent; }
+.de-yaml-line { white-space: pre; }
+.de-yaml-key { color: #b08000; font-weight: 600; }
+.de-yaml-colon { color: #888; }
+.de-yaml-bullet { color: #8e44ad; font-weight: 600; }
+.de-yaml-string { color: #1a7f37; }
+.de-yaml-literal { color: #cf222e; }
+.de-yaml-block { color: #6f42c1; font-weight: 600; }
+.de-yaml-flow { color: #0550ae; }
+.de-yaml-value { color: #2c3e50; }
+.de-yaml-comment { color: #6e7781; font-style: italic; }
 .de-preview pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
 .de-preview-mainonly { opacity: 0.4; }
 .de-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 15px; }

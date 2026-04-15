@@ -26,6 +26,65 @@ function decodeBase64(base64) {
   return new TextDecoder('utf-8').decode(bytes);
 }
 
+// 가벼운 YAML 뷰어 — 들여쓰기 보존 + 키/값/주석/문자열 색상화 (라인 단위 정규식)
+function YamlView({ text }) {
+  const lines = (text || '').split('\n');
+  return (
+    <pre className="de-yaml">
+      {lines.map((raw, i) => (
+        <div key={i} className="de-yaml-line">{renderYamlLine(raw)}</div>
+      ))}
+    </pre>
+  );
+}
+
+function renderYamlLine(line) {
+  // 주석
+  const cm = line.match(/^(\s*)(#.*)$/);
+  if (cm) {
+    return (<><span>{cm[1]}</span><span className="de-yaml-comment">{cm[2]}</span></>);
+  }
+  // 리스트 시작 "- "
+  const listMatch = line.match(/^(\s*)(-\s+)(.*)$/);
+  if (listMatch) {
+    return (
+      <>
+        <span>{listMatch[1]}</span>
+        <span className="de-yaml-bullet">{listMatch[2]}</span>
+        {renderYamlValue(listMatch[3])}
+      </>
+    );
+  }
+  // key: value
+  const kv = line.match(/^(\s*)([^\s:][^:]*?)(\s*:)(\s*)(.*)$/);
+  if (kv) {
+    const [, indent, key, colon, sp, value] = kv;
+    return (
+      <>
+        <span>{indent}</span>
+        <span className="de-yaml-key">{key}</span>
+        <span className="de-yaml-colon">{colon}</span>
+        <span>{sp}</span>
+        {renderYamlValue(value)}
+      </>
+    );
+  }
+  return <span>{line || '\u00A0'}</span>;
+}
+
+function renderYamlValue(v) {
+  if (v === '' || v === undefined) return null;
+  // 인용 문자열
+  if (/^['"].*['"]$/.test(v)) return <span className="de-yaml-string">{v}</span>;
+  // 숫자/불린/null
+  if (/^(true|false|null|~|\d+(\.\d+)?)$/.test(v)) return <span className="de-yaml-literal">{v}</span>;
+  // 블록 스칼라 표시
+  if (/^[|>][-+]?\d*$/.test(v)) return <span className="de-yaml-block">{v}</span>;
+  // flow 시퀀스/맵 [...] {...}
+  if (/^[\[{].*[\]}]$/.test(v)) return <span className="de-yaml-flow">{v}</span>;
+  return <span className="de-yaml-value">{v}</span>;
+}
+
 export default function DocEditor({ project, user, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
   const projectCode = project?.jiraCodes?.main?.jiraCode || '';
   const hasRepo = !!project?.documents?.repoName;
@@ -923,28 +982,32 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                     onChange={e => setContent(e.target.value)} spellCheck={false} />
                 ) : (
                   <div className={`de-preview ${selectedMainOnly ? 'de-preview-mainonly' : ''}`}>
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        code({ className, children, ...props }) {
-                          const lang = /language-(\w+)/.exec(className || '')?.[1];
-                          if (lang === 'mermaid') {
-                            return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
-                          }
-                          return <code className={className} {...props}>{children}</code>;
-                        },
-                        pre({ children, ...props }) {
-                          // mermaid 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
-                          const arr = React.Children.toArray(children);
-                          const only = arr.length === 1 ? arr[0] : null;
-                          const cls = only?.props?.className || '';
-                          if (cls.includes('language-mermaid')) {
-                            return <>{children}</>;
-                          }
-                          return <pre {...props}>{children}</pre>;
-                        },
-                      }}
-                    >{content}</ReactMarkdown>
+                    {/\.ya?ml$/i.test(selectedFile || '') ? (
+                      <YamlView text={content} />
+                    ) : (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          code({ className, children, ...props }) {
+                            const lang = /language-(\w+)/.exec(className || '')?.[1];
+                            if (lang === 'mermaid') {
+                              return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
+                            }
+                            return <code className={className} {...props}>{children}</code>;
+                          },
+                          pre({ children, ...props }) {
+                            // mermaid 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
+                            const arr = React.Children.toArray(children);
+                            const only = arr.length === 1 ? arr[0] : null;
+                            const cls = only?.props?.className || '';
+                            if (cls.includes('language-mermaid')) {
+                              return <>{children}</>;
+                            }
+                            return <pre {...props}>{children}</pre>;
+                          },
+                        }}
+                      >{content}</ReactMarkdown>
+                    )}
                   </div>
                 )}
               </div>
