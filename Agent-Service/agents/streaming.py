@@ -45,6 +45,13 @@ async def agent_loop_stream(
         "driver_select", "style_define", "design_decide", "design_integrate",
         "satam_analyze",
     }
+    # Phase B — 워크플로우 stage 에 매핑되는 스킬. 이 스킬들은 jobId 자동 주입 + advance 전이 평가 대상.
+    _STAGE_SKILLS = {
+        "projdesc_interview", "projdesc_generate",
+        "vos_collect", "usecase_analyze", "requirement_refine",
+        "driver_select", "style_define", "design_decide", "design_integrate",
+        "satam_analyze",
+    }
 
     # 사용자 메시지 추출 (마지막 user 메시지)
     user_message = ""
@@ -92,6 +99,16 @@ async def agent_loop_stream(
             log.info("워크플로우 상태 주입 스킵: 프로젝트 코드 미감지")
     except Exception as e:
         log.warning("워크플로우 상태 주입 실패: %s", e)
+
+    # Phase B — workflow job 로드/시작 (projdesc 단계만 우선 엔진 연동)
+    workflow_job = None
+    if detected_code and state:
+        try:
+            from core import workflow_engine
+            workflow_job = workflow_engine.load_or_start_job(detected_code, created_by=user_id)
+            log.info("workflow job: %s stage=%s", workflow_job.get("jobId"), workflow_job.get("currentStage"))
+        except Exception as e:
+            log.warning("workflow job 로드 실패: %s", e)
 
     # 1차 스킬 선별 (키워드 + description 매칭)
     # belief state 의 nextRecommendedStep 은 반드시 tools 후보에 포함시켜
@@ -238,6 +255,10 @@ async def agent_loop_stream(
             except json.JSONDecodeError:
                 fn_args = {}
 
+            # Phase B — 워크플로우 stage 스킬에는 jobId 자동 주입
+            if workflow_job and fn_name in _STAGE_SKILLS:
+                fn_args.setdefault("jobId", workflow_job["jobId"])
+
             # 도구 호출 시작 알림
             yield _sse("tool_call", {"tool": fn_name, "params": fn_args, "turn": turn})
 
@@ -290,6 +311,24 @@ async def agent_loop_stream(
                     tool_result_data["_action"] = skill_result["_action"]
                     tool_result_data["_payload"] = {k: v for k, v in skill_result.items() if k != "_action"}
                 yield _sse("tool_result", tool_result_data)
+
+                # Phase B — stage 스킬 결과로 engine 전이 평가
+                # 현재는 projdesc 단계만 엔진 연동 (Step 2). 이후 단계는 점진 이전.
+                _CURRENT_ENGINE_STAGES = {"projdesc"}
+                if (workflow_job and fn_name in _STAGE_SKILLS and isinstance(skill_result, dict)
+                        and workflow_job.get("currentStage") in _CURRENT_ENGINE_STAGES):
+                    try:
+                        from core import workflow_engine
+                        adv = await workflow_engine.advance(workflow_job, skill_result)
+                        workflow_job = adv["job"]
+                        if adv.get("transitioned"):
+                            yield _sse("progress", {
+                                "skill": "workflow_engine",
+                                "message": f"단계 전이: → {adv.get('nextStage') or '완료'}",
+                                "currentStage": workflow_job.get("currentStage"),
+                            })
+                    except Exception as e:
+                        log.warning("engine.advance 실패: %s", e)
 
             except Exception as e:
                 duration = int(time.time() * 1000) - start_ms

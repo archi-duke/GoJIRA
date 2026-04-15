@@ -1,9 +1,17 @@
-"""프로젝트 설명 문서 인터뷰 스킬 — 문서 상태 점검 + 질문 생성."""
+"""프로젝트 설명 문서 인터뷰 스킬 — 문서 상태 점검 + 질문 생성.
+
+Phase B: jobId 가 함께 전달되면 workflow_jobs.stageState.projdesc.answers 에
+서버측으로 답변을 누적한다. LLM 은 매 턴 부분 답변만 보내도 된다.
+"""
 
 import json
+import logging
 import re
 
 from clients.platform_api import PlatformClient
+from core import job_store
+
+log = logging.getLogger("agent.skills.projdesc_interview")
 
 
 INTERVIEW_QUESTIONS = [
@@ -21,6 +29,7 @@ async def execute(params: dict, user: str) -> dict:
         raise ValueError("projectCode 필수")
 
     answers_raw = params.get("answers", "")
+    job_id = params.get("jobId") or params.get("job_id")
 
     # 기존 문서 확인
     client = PlatformClient()
@@ -41,6 +50,26 @@ async def execute(params: dict, user: str) -> dict:
             pass
     # 키 정규화 — LLM 이 한국어 label 로 보내는 경우 영문 id 로 매핑
     answers = _normalize_keys(answers)
+
+    # jobId 가 있으면 누적 상태와 병합 (Phase B)
+    accumulated = {}
+    if job_id:
+        job = job_store.get_job(job_id)
+        if job:
+            existing = ((job.get("stageState") or {}).get("projdesc") or {}).get("answers") or {}
+            accumulated = dict(existing)
+            if answers:
+                accumulated.update({k: v for k, v in answers.items() if v})
+                job_store.update_stage_state(job_id, "projdesc", {
+                    "status": "collecting",
+                    "answers": accumulated,
+                })
+                job_store.append_history(job_id, {
+                    "stage": "projdesc",
+                    "action": "answers_merged",
+                    "keys": list(answers.keys()),
+                })
+            answers = accumulated
 
     # 답변이 충분하면 projdesc_generate 직접 위임 (Option C)
     if answers:
