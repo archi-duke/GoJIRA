@@ -163,11 +163,59 @@ class SkillRegistry:
     def __init__(self):
         self._skills: Dict[str, SkillDef] = {}
         self._order: List[str] = []
+        self._embeddings: Dict[str, List[float]] = {}  # name → vector
+        self._embed_built = False
 
     def register(self, skill: SkillDef):
         if skill.name not in self._skills:
             self._order.append(skill.name)
         self._skills[skill.name] = skill
+        # 등록 후 임베딩 캐시는 첫 사용 시 lazy 빌드
+
+    def _build_embeddings(self):
+        """모든 스킬 description 임베딩 1회 빌드."""
+        from core import embeddings as emb
+        if not emb.is_enabled():
+            self._embed_built = True
+            return
+        skills = self.list_all()
+        texts = [f"{s.name}: {s.description}" for s in skills]
+        try:
+            vecs = emb.embed_batch(texts)
+            for s, v in zip(skills, vecs):
+                self._embeddings[s.name] = v
+            log.info("스킬 임베딩 캐시 빌드: %d 개", len(vecs))
+        except Exception as e:
+            log.warning("임베딩 빌드 실패: %s — 키워드만 사용", e)
+        self._embed_built = True
+
+    def _semantic_candidates(self, message: str) -> Set[str]:
+        """사용자 메시지 임베딩과 코사인 top-N 스킬 이름 집합."""
+        from core import embeddings as emb
+        if not emb.is_enabled():
+            return set()
+        if not self._embed_built:
+            self._build_embeddings()
+        if not self._embeddings:
+            return set()
+        try:
+            qvec = emb.embed(message)
+        except Exception as e:
+            log.warning("메시지 임베딩 실패: %s", e)
+            return set()
+        if not qvec:
+            return set()
+        scored = []
+        for name, vec in self._embeddings.items():
+            score = emb.cosine(qvec, vec)
+            scored.append((score, name))
+        scored.sort(reverse=True)
+        top_n = emb.get_top_n()
+        min_s = emb.get_min_score()
+        out = {name for score, name in scored[:top_n] if score >= min_s}
+        log.info("semantic top-%d (min %.2f): %s",
+                 top_n, min_s, [(round(s, 3), n) for s, n in scored[:top_n]])
+        return out
 
     def get(self, name: str) -> Optional[SkillDef]:
         return self._skills.get(name)
@@ -199,6 +247,11 @@ class SkillRegistry:
         for keyword, skill_names in KEYWORD_MAP.items():
             if keyword in text:
                 matched.update(skill_names)
+
+        # 1.5 임베딩 의미 유사도 — 키워드 사전 누락 보완
+        sem = self._semantic_candidates(text)
+        if sem:
+            matched.update(sem)
 
         # 2. description 매칭 — 스킬 description에서 메시지 단어와 겹치는 것
         # 일반적인 단어(프로젝트, 분석 등)를 제외하고 매칭
