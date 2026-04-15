@@ -1,34 +1,75 @@
-"""디자인 통합 스킬 — ADSN/DDSN + Style → architecture/architecture-integrated.md (문서만)."""
+"""디자인 통합 스킬 v2 — SKILL.md 통합 self-loop.
+
+LLM 이 generate → self-critique → revise → best-so-far 를 단일 호출로 수행.
+Python 은 IO, Mermaid 재검증, 문서 저장만 담당. 이슈는 건드리지 않는다.
+"""
 
 import os
 import re
 import json
+from typing import Any, Dict, Optional
+
 from core.database import issues, projects
+from core.llm import call_llm
 from clients.platform_api import PlatformClient
-from skills.helpers import load_prompt
-from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
+from skills.critique import load_step_policy
 from skills.mermaid_utils import (
     get_mermaid_rules, validate_document_mermaid, build_mermaid_fix_prompt,
 )
-from core.llm import call_llm
 
 
 _SKILL_DIR = os.path.dirname(__file__)
+_SKILL_MD_PATH = os.path.join(_SKILL_DIR, "SKILL.md")
 
 
-def _extract_json_obj(raw: str):
+def _load_skill_md() -> str:
+    with open(_SKILL_MD_PATH, encoding="utf-8") as f:
+        text = f.read()
+    m = re.match(r"^---\n.*?\n---\n(.*)$", text, re.DOTALL)
+    return m.group(1) if m else text
+
+
+def _build_prompt(skill_body: str, code: str, chosen: dict, normalized: dict,
+                  designs: list, req_list: list,
+                  criteria: str, policy_text: str, mermaid_rules: str) -> str:
+    chosen_json = json.dumps(chosen, ensure_ascii=False, indent=2)
+    normalized_json = json.dumps(normalized, ensure_ascii=False, indent=2)
+    designs_json = json.dumps(designs, ensure_ascii=False, indent=2)
+    req_summary = json.dumps(
+        [{"key": r.get("key"), "subkey": r.get("subkey", ""),
+          "reqtype": r.get("reqtype", ""), "summary": r.get("summary", "")}
+         for r in req_list],
+        ensure_ascii=False, indent=2,
+    )
+    return (
+        f"{skill_body}\n\n"
+        f"---\n\n"
+        f"## 주입 데이터\n\n"
+        f"### projectCode\n{code}\n\n"
+        f"### chosen_styles\n```json\n{chosen_json}\n```\n\n"
+        f"### normalized_attributes\n```json\n{normalized_json}\n```\n\n"
+        f"### designs ({len(designs)}건, ADSN/DDSN)\n```json\n{designs_json}\n```\n\n"
+        f"### req_summary ({len(req_list)}건)\n```json\n{req_summary}\n```\n\n"
+        f"### criteria\n{criteria}\n\n"
+        f"### policy\n{policy_text}\n\n"
+        f"### mermaid_rules\n{mermaid_rules}\n\n"
+        f"이제 위 `실행 흐름` 섹션대로 수행하고 지정된 JSON 하나만 출력하라."
+    )
+
+
+def _extract_json_obj(raw: str) -> Optional[Dict[str, Any]]:
+    raw = raw.strip()
     try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else None
+        return json.loads(raw)
     except json.JSONDecodeError:
-        m = re.search(r'\{.*\}', raw, re.DOTALL)
-        if m:
-            try:
-                data = json.loads(m.group())
-                return data if isinstance(data, dict) else None
-            except json.JSONDecodeError:
-                return None
-    return None
+        pass
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group())
+    except json.JSONDecodeError:
+        return None
 
 
 async def execute(params: dict, user: str) -> dict:
@@ -39,7 +80,7 @@ async def execute(params: dict, user: str) -> dict:
 
     from core.progress import emit_progress
 
-    # 1. 선행 확인
+    # 1. 선행 산출물 수집
     designs = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"},
          "issueType": {"$in": ["Architectural Design", "Detailed Design"]}},
@@ -70,83 +111,37 @@ async def execute(params: dict, user: str) -> dict:
         {"key": 1, "subkey": 1, "summary": 1, "reqtype": 1, "_id": 0},
     ))
 
-    await emit_progress("design_integrate", "디자인 통합 문서 작성 시작")
+    await emit_progress("design_integrate", "디자인 통합 시작 (v2 self-loop)")
 
-    designs_json = json.dumps(designs, ensure_ascii=False, indent=2)
-    req_summary = json.dumps(
-        [{"key": r["key"], "subkey": r.get("subkey", ""),
-          "reqtype": r.get("reqtype", ""), "summary": r.get("summary", "")}
-         for r in req_list],
-        ensure_ascii=False, indent=2,
-    )
-    normalized_json = json.dumps(normalized, ensure_ascii=False, indent=2)
-
-    generate_prompt = load_prompt(_SKILL_DIR, "generate").format(
-        code=code,
-        normalized_json=normalized_json,
-        primary=", ".join(chosen.get("primary") or []),
-        secondary=", ".join(chosen.get("secondary") or []),
-        supporting=", ".join(chosen.get("supporting") or []),
-        design_count=len(designs),
-        designs_json=designs_json,
-        req_count=len(req_list),
-        req_summary=req_summary,
-        mermaid_rules=get_mermaid_rules(),
-    )
-
-    critique_tpl = load_prompt(_SKILL_DIR, "critique")
-    revise_tpl = load_prompt(_SKILL_DIR, "revise")
-
+    # 2. 정책 로드 + SKILL.md + 주입 데이터로 단일 LLM 호출
     policy = load_step_policy(
         "workflow-architecture-design.md",
         "디자인 통합 (Integrated Design Views)",
     )
-
-    context_block = (
-        f"## 선정 스타일\n{json.dumps(chosen, ensure_ascii=False)}\n\n"
-        f"## 설계 결정 요약\n"
-        + "\n".join(
-            f"- {d.get('subkey','')}: {d.get('summary','')}"
-            for d in designs
-        )
+    skill_body = _load_skill_md()
+    prompt = _build_prompt(
+        skill_body, code, chosen, normalized, designs, req_list,
+        policy.get("criteria", ""), policy.get("policy_text", ""),
+        get_mermaid_rules(),
     )
-
-    def _critique_prompt(draft: str) -> str:
-        return critique_tpl.format(
-            context_block=context_block,
-            draft=draft[:8000],
-            criteria=policy["criteria"],
-            policy=policy["policy_text"],
-        )
-
-    def _revise_prompt(draft: str, critique: dict) -> str:
-        issues_text = "\n".join(f"- {i}" for i in critique.get("issues", []))
-        return revise_tpl.format(
-            designs_json=designs_json,
-            draft=draft[:10000],
-            issues_text=issues_text,
-        )
-
-    raw, critique_trail = await iterate_generate_critique(
-        generate_prompt, _critique_prompt, _revise_prompt,
-        max_iter=policy["max_iter"],
-        threshold=policy["threshold"],
-        on_fail=policy["on_fail"],
-    )
+    raw = await call_llm(prompt)
 
     parsed = _extract_json_obj(raw)
-    if not parsed:
+    if not parsed or "finalDocument" not in parsed:
         return {
             "projectCode": code,
             "status": "failed",
-            "message": "LLM 응답을 파싱할 수 없습니다.",
+            "message": "LLM 응답 파싱 실패.",
             "raw": raw[:500],
         }
 
-    views = parsed.get("viewsIncluded") or []
-    document = parsed.get("document") or ""
+    document = parsed.get("finalDocument") or ""
+    views = parsed.get("finalViews") or []
+    iterations = parsed.get("iterations") or []
+    stop_reason = parsed.get("stopReason", "")
+    unresolved = parsed.get("unresolvedCritical") or []
 
-    # Mermaid 정적 검증 + 1회 자동 수정
+    # 3. Mermaid 정적 검증 + 1회 자동 수정
     mermaid_validation = validate_document_mermaid(document)
     if not mermaid_validation["valid"] and document:
         try:
@@ -158,6 +153,7 @@ async def execute(params: dict, user: str) -> dict:
         except Exception:
             pass
 
+    # 4. 문서 저장 + 완료 플래그
     client = PlatformClient()
     saved_path = None
     save_error = None
@@ -167,11 +163,10 @@ async def execute(params: dict, user: str) -> dict:
                 code,
                 "architecture/architecture-integrated.md",
                 document,
-                f"디자인 통합 ({len(views)} views)",
+                f"디자인 통합 ({len(views)} views, v2)",
                 req_user,
             )
             saved_path = "architecture/architecture-integrated.md"
-            # 완료 플래그 저장 — workflow_state.next_recommended_step() 에서 중복 호출 방지용
             projects().update_one(
                 {"jiraCodes.main.jiraCode": code},
                 {"$set": {"archSettings.designIntegrated": True,
@@ -180,27 +175,36 @@ async def execute(params: dict, user: str) -> dict:
         except Exception as e:
             save_error = str(e)
 
-    tsum = trail_summary(critique_trail)
+    # 5. 요약
     parts = [f"관점 {len(views)}개 ({', '.join(views)})"]
     if saved_path:
         parts.append("architecture-integrated.md 저장 완료")
     elif save_error:
         parts.append(f"문서 저장 실패: {save_error}")
     if mermaid_validation.get("errors"):
-        parts.append(f"⚠ Mermaid 검증 경고 {len(mermaid_validation['errors'])}건")
-    if tsum:
-        parts.append(tsum)
-    msg = " / ".join(parts)
+        parts.append(f"⚠ Mermaid 경고 {len(mermaid_validation['errors'])}건")
+    base_msg = " / ".join(parts)
 
-    await emit_progress("design_integrate", f"디자인 통합 완료 — {msg}")
+    iter_info = ""
+    if iterations:
+        iter_info = f" (iter {len(iterations)}회, best=iter{parsed.get('selectedIter')}, stop={stop_reason})"
+
+    await emit_progress("design_integrate", f"디자인 통합 완료 — {base_msg}")
+
+    status = "completed"
+    if unresolved:
+        status = "partial"
 
     return {
         "projectCode": code,
-        "status": "completed",
+        "status": status,
         "viewsIncluded": views,
         "documentSaved": saved_path,
         "saveError": save_error,
+        "iterations": iterations,
+        "selectedIter": parsed.get("selectedIter"),
+        "stopReason": stop_reason,
+        "unresolvedCritical": unresolved,
         "mermaidValidation": mermaid_validation,
-        "critiqueTrail": critique_trail,
-        "message": msg,
+        "message": base_msg + iter_info,
     }
