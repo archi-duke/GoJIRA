@@ -128,8 +128,11 @@ async def agent_loop_stream(
                 # Pass 1 추론 결과로 스킬 재선별 (추론에서 언급된 스킬 반영)
                 tools = registry.select_tools(user_message, extra_context=thought, required=required_skills)
 
-                # 추론이 사용자에게 질문하는 형태라면 Pass 2 건너뛰고 텍스트 답변으로 종료
-                if _is_user_question(thought):
+                # 추론이 사용자에게 질문하는 형태라면 Pass 2 건너뛰고 텍스트 답변으로 종료.
+                # 단, belief state 기준 워크플로우 진행 중이면 이를 무시하고 Pass 2 진입
+                # (LLM 이 인터뷰 질문을 인라인 작성 → projdesc_interview 호출 기회 상실 방지)
+                workflow_pending = bool(required_skills)  # nextRecommendedStep 이 있으면 워크플로우 진행 중
+                if _is_user_question(thought) and not workflow_pending:
                     final_content = _strip_reasoning(thought)
                     for chunk in _split_chunks(final_content, 80):
                         yield _sse("content", {"text": chunk})
