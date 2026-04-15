@@ -312,21 +312,24 @@ async def agent_loop_stream(
                     tool_result_data["_payload"] = {k: v for k, v in skill_result.items() if k != "_action"}
                 yield _sse("tool_result", tool_result_data)
 
-                # Phase B — stage 스킬 결과로 engine 전이 평가
-                # 현재는 projdesc 단계만 엔진 연동 (Step 2). 이후 단계는 점진 이전.
-                _CURRENT_ENGINE_STAGES = {"projdesc"}
-                if (workflow_job and fn_name in _STAGE_SKILLS and isinstance(skill_result, dict)
-                        and workflow_job.get("currentStage") in _CURRENT_ENGINE_STAGES):
+                # Phase B — stage 스킬 결과로 engine 전이 평가 (9단계 전면 연동)
+                # 현재 stage 의 skill 과 호출된 fn_name 이 일치할 때만 advance.
+                # 이를 통해 사용자가 "이슈 1건 추가" 같은 free-form 호출을 해도 stage 가 잘못 전이되지 않음.
+                if workflow_job and fn_name in _STAGE_SKILLS and isinstance(skill_result, dict):
                     try:
                         from core import workflow_engine
-                        adv = await workflow_engine.advance(workflow_job, skill_result)
-                        workflow_job = adv["job"]
-                        if adv.get("transitioned"):
-                            yield _sse("progress", {
-                                "skill": "workflow_engine",
-                                "message": f"단계 전이: → {adv.get('nextStage') or '완료'}",
-                                "currentStage": workflow_job.get("currentStage"),
-                            })
+                        from core.workflows import get_stage
+                        cur = workflow_job.get("currentStage")
+                        stage_def = get_stage(workflow_job["workflowId"], cur) if cur else None
+                        if stage_def and fn_name == stage_def["skill"]:
+                            adv = await workflow_engine.advance(workflow_job, skill_result)
+                            workflow_job = adv["job"]
+                            if adv.get("transitioned"):
+                                yield _sse("progress", {
+                                    "skill": "workflow_engine",
+                                    "message": f"단계 전이: {cur} → {adv.get('nextStage') or '완료'}",
+                                    "currentStage": workflow_job.get("currentStage"),
+                                })
                     except Exception as e:
                         log.warning("engine.advance 실패: %s", e)
 
