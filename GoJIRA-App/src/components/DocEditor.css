@@ -34,6 +34,8 @@
 .de-sidebar-header { padding: 8px 12px; font-size: 11px; color: #888; border-bottom: 1px solid #eee; display: flex; align-items: center; }
 .de-folder-header { padding: 6px 12px; font-size: 12px; font-weight: 600; color: #555; background: #f0f0f0; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .de-folder-icon { font-size: 13px; }
+.de-folder-toggle { display: inline-block; width: 12px; font-size: 9px; color: #888; margin-right: 2px; user-select: none; }
+.de-folder-header:hover { background: #e8e8e8; }
 .de-file { padding: 6px 12px; font-size: 12px; cursor: pointer; overflow: hidden; white-space: nowrap; display: flex; align-items: center; }
 .de-file:hover { background: #eee; }
 .de-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }

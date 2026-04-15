@@ -105,6 +105,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [pendingFiles, setPendingFiles] = useState(new Set());
   const [globalEditMode, setGlobalEditMode] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
+  const [collapsedFolders, setCollapsedFolders] = useState(() => new Set());
+  const toggleFolder = (path) => {
+    setCollapsedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  };
   const [diffMode, setDiffMode] = useState(false);
   const [diffTab, setDiffTab] = useState('semantic');
   const [mainContent, setMainContent] = useState('');
@@ -865,21 +873,19 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             </div>
           )}
           {(() => {
-            // 폴더별 그룹화
-            const folders = {};
-            const rootFiles = [];
+            // 다단 폴더 트리 구성
+            const root = { dirs: {}, files: [] };
             items.forEach(item => {
-              const slash = item.path.indexOf('/');
-              if (slash > 0) {
-                const folder = item.path.substring(0, slash);
-                if (!folders[folder]) folders[folder] = [];
-                folders[folder].push(item);
-              } else {
-                rootFiles.push(item);
+              const parts = item.path.split('/');
+              let node = root;
+              for (let i = 0; i < parts.length - 1; i++) {
+                const seg = parts[i];
+                if (!node.dirs[seg]) node.dirs[seg] = { dirs: {}, files: [] };
+                node = node.dirs[seg];
               }
+              node.files.push({ ...item, _name: parts[parts.length - 1] });
             });
-            const folderNames = Object.keys(folders).sort();
-            const renderFile = (item, displayName) => {
+            const renderFile = (item) => {
               const st = (activeTab === 'workspace' && !item._mainOnly) ? fileStatus[item.path] : null;
               const isMainOnly = item._mainOnly;
               return (
@@ -889,7 +895,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                   {activeTab === 'workspace' && (isMainOnly
                     ? <span className="de-file-badge de-badge-mainonly">M</span>
                     : statusBadge(item.path))}
-                  <span className="de-file-name">{displayName || item.path}</span>
+                  <span className="de-file-name">{item._name || item.path}</span>
                   {activeTab === 'workspace' && globalEditMode && (
                     <span className="de-file-actions">
                       <button className="de-file-act" title="이름 변경" onClick={e => { e.stopPropagation(); handleRenameFile(item.path); }}>✎</button>
@@ -899,23 +905,34 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 </div>
               );
             };
-            return (
-              <>
-                {folderNames.map(folder => (
-                  <React.Fragment key={folder}>
-                    <div className="de-folder-header">
-                      <span className="de-folder-icon">📁</span> {folder}
-                    </div>
-                    {folders[folder].map(item => (
-                      <div key={item.path} style={{ paddingLeft: 16 }}>
-                        {renderFile(item, item.path.substring(folder.length + 1))}
-                      </div>
-                    ))}
-                  </React.Fragment>
-                ))}
-                {rootFiles.map(item => renderFile(item))}
-              </>
-            );
+            const renderNode = (node, prefix, depth) => {
+              const dirNames = Object.keys(node.dirs).sort();
+              return (
+                <>
+                  {dirNames.map(name => {
+                    const fullPath = prefix ? `${prefix}/${name}` : name;
+                    const collapsed = collapsedFolders.has(fullPath);
+                    return (
+                      <React.Fragment key={fullPath}>
+                        <div className="de-folder-header"
+                          style={{ paddingLeft: 12 + depth * 12, cursor: 'pointer' }}
+                          onClick={() => toggleFolder(fullPath)}>
+                          <span className="de-folder-toggle">{collapsed ? '▶' : '▼'}</span>
+                          <span className="de-folder-icon">📁</span> {name}
+                        </div>
+                        {!collapsed && (
+                          <div style={{ paddingLeft: (depth + 1) * 12 }}>
+                            {renderNode(node.dirs[name], fullPath, depth + 1)}
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                  {node.files.map(item => renderFile(item))}
+                </>
+              );
+            };
+            return renderNode(root, '', 0);
           })()}
         </div>
         <div className="de-main">
