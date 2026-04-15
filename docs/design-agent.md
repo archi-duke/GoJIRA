@@ -305,14 +305,45 @@ def get_workflow_state(project_code: str) -> dict:
 ### 10.5 단계적 진화 로드맵
 
 ```
-Now     : 수준 1 (Scratchpad) + 수준 2 (Belief State) 얇게 추가
-Next    : 수준 2 안정화 · 워크플로우 상태 포맷 정제
-Later   : 수준 3 (PDCA) — 거대 목표·피드백 루프에만 선택 적용
+Now     : 수준 1 (Scratchpad) + 수준 2 (Belief State) + 수준 3 부분 (Workflow State Machine — Phase B)
+Next    : Phase B Step 4~5 완결 (라우팅 분리, 문서 정합성)
+Later   : 수준 3 PDCA 확장 — 거대 목표·피드백 루프에만 선택 적용
 ```
 
 **원칙**: 수준 2 의 `workflow_state` 가 만드는 Belief State 는 그대로 수준 3 의 **Check 단계 관측(observation) 입력** 으로 재활용된다. 수준 2 는 수준 3 의 자산이지 부채가 아님.
 
 단순 선형 워크플로우에 PDCA 를 씌우면 부담만 늘고 이익 없음. PDCA 는 **목표 모호성** 또는 **자동 재시도 루프** 가 가치 있을 때 적용.
+
+### 10.6 Phase B — 워크플로우 State Machine (완료)
+
+수준 2 만으로는 "LLM 이 본인이 어느 단계에 있는지 매번 추론해야" 하는 구조라, 순환/누락이 발생. Phase B 에서 **엔진이 통제권을 갖고, LLM 은 현재 stage 내부만 수행** 하는 구조로 전환.
+
+**핵심 구성 요소**
+
+| 구성 | 파일 | 책임 |
+|------|------|------|
+| 워크플로우 정의 | `core/workflows/business_design.py` | 9-stage 시퀀스 (projdesc → vos → usecase → requirement → driver → style → design_decide → design_integrate → satam) |
+| Job 저장소 | `core/job_store.py` + `workflow_jobs` 컬렉션 | 활성 Job 1건 + stage 별 상태/히스토리 영속화 (TTL 90일) |
+| 실행 엔진 | `core/workflow_engine.py` | load/start, advance, belief-state 기반 completion 검증, 전이 |
+| 상태 주입 | `core/workflow_state.py` | `docs/{user}` 브랜치 1순위 조회로 belief state 계산 + `[엔진 상태]` 주입 |
+| tool 필터 | `skills/registry.py` `select_tools(workflow_mode, workflow_allowed)` | 워크플로우 모드에선 현재 stage 주 skill + `project_query`/`reset_project`/`ui_navigate` 만 노출 |
+
+**실행 흐름 (agents/streaming.py)**
+
+1. 사용자 입력에서 프로젝트 코드 감지 → `load_or_start_job` 으로 Job 획득
+2. belief state 조회 (workflow_job + user 전달) → `[엔진 상태] 현재 stage = X / 호출할 스킬 = Y` system 메시지 주입
+3. `workflow_mode=True` 로 tools 제한, `MAX_TURNS = stage_count × 3 + 5` 로 동적 산정
+4. LLM 이 stage skill 호출 → `advance(skill_result)` → belief state 재검증 → 전이
+5. 전이 성공 시 imperative system 메시지 주입 + tools 재선별 + 상위 locals (workflow_allowed/required_skills) 갱신 — 같은 턴 내 연속 진행
+
+**핵심 설계 결정**
+
+- **엔진이 통제, LLM 은 stage 내부만** — 반복 루프·단계 건너뛰기 방지
+- **belief state 는 `docs/{user}` 브랜치 1순위** — Agent 가 쓰는 브랜치와 판정 출처 일치
+- **advance 는 fn_name 매칭 없이도 belief state 로 completion 판정** — 보조 skill 이 사실상 stage 완료시킨 경우에도 전이
+- **`/btw` prefix** — 진행 중 단건 free-form 요청 시 그 turn 만 workflow 우회 (Job/대화 유지, advance 스킵)
+
+**완료 단계**: Step 0 (계약 표준화) → Step 1 (엔진 골격) → Step 2 (projdesc 통합) → Step 3 (9단계 전면 연동) → 엔진 통제 근본 수정 → `/btw` 라우팅 (Step 4 완료).
 
 ---
 
@@ -325,6 +356,7 @@ Later   : 수준 3 (PDCA) — 거대 목표·피드백 루프에만 선택 적�
 5. **산출 문서 본문은 채팅에 출력하지 않음** — 파일 저장 + 1~3줄 요약 보고
 6. **`prompts/system.txt`이 단일 진실 출처** — 이슈 생성 규칙, 응답 스타일, 워크플로우 처리 지침 통합
 7. **상태 관리는 Belief State(수준 2) 까지 현재 채택** — LLM 이 매 턴 프로젝트의 진실 상태를 알고 판단. 수준 3(PDCA) 은 목표 모호성·피드백 루프 시나리오에만 선택 적용
+8. **장기 워크플로우는 엔진 통제, LLM 은 stage 내부만** — Phase B State Machine (`workflow_engine`) 이 전이를 통제하고, tool 화이트리스트로 LLM 행동 범위를 고정. `/btw` 로 단건 free-form 우회.
 
 ---
 

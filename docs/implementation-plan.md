@@ -218,6 +218,24 @@ pie title 구현 진행 상태
 | 개발용 | reset_project | 명시 지시 필수 |
 | UI | ui_navigate | 자동 |
 
+### 3.9 Agent Phase B: 워크플로우 State Machine (완료, 2026-04)
+
+> 목표: 수준 2 Belief State 만으로는 LLM 이 매 턴 단계를 재추론해야 하는 구조 → **엔진이 전이 통제, LLM 은 stage 내부 작업만** 수행하도록 전환. 반복 루프·단계 건너뛰기·free-form 누출 제거.
+
+- [x] **Step 0** — 9개 워크플로우 스킬 출력 계약 표준화 (`status` = completed/partial/blocked/failed). 자동 선행 위임 로직(170줄) 제거 → 엔진이 전이 결정
+- [x] **Step 1** — 엔진 골격: `core/workflows/business_design.py` (9-stage 정의), `core/workflow_engine.py` (load/advance), `core/job_store.py` + `workflow_jobs` 컬렉션 (TTL 90일)
+- [x] **Step 2** — projdesc stage 엔진 연동 + 서버 측 답변 누적 (`stageState.projdesc.answers` 영속화)
+- [x] **Step 3** — 9단계 전면 `engine.advance` 연동, belief-state 기반 completion 재판정
+- [x] **엔진 통제 근본 수정** — `engine.currentStage` 우선, `workflow_mode` 로 tool 화이트리스트 강제(`registry.select_tools(workflow_mode=True)`), advance 후 상위 locals/tools 재선별 (턴 경계 regression 방지)
+- [x] **MAX_TURNS 동적 산정** — `stage_count × 3 + 5` 로 stage 증가 시 자동 확장
+- [x] **`docs/{user}` 브랜치 1순위 조회** — Agent 가 쓰는 브랜치와 belief state 판정 출처 일치 (`_has_real_projdesc` 등)
+- [x] **VOS orphan 자동 catch** — usecase_analyze 에 coverage 검증 + Feature.relatedVOS 재사용 + 토큰 유사도 fallback 링크
+- [x] **Step 4 `/btw` 라우팅 분리** — 워크플로우 진행 중 단건 free-form 요청 시 그 turn 만 workflow 우회 (Job/대화 연속성 유지, advance 스킵)
+
+**검증 (2026-04-15, 브라우저)**: projdesc → vos → usecase → requirement → driver → style 순차 자동 전이. Tool 화이트리스트 정확, free-form 누출 0, 반복 루프 0.
+
+**관련 문서**: `docs/design-agent.md §10.6`, `docs/agent-workflow-evolution.md`
+
 ---
 
 ## 4. 진행 중인 작업
