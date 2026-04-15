@@ -1,30 +1,35 @@
 ---
 name: doc-diff
-description: main 브랜치와 사용자 브랜치 간의 문서 차이를 분석합니다
+description: main 브랜치와 사용자 브랜치(docs/{user}) 간의 문서 차이를 분석합니다.
 allowed-tools: Bash
 ---
 
-main 브랜치와 사용자 브랜치 간의 문서 차이를 분석합니다.
+Platform-API `/DocRepo/{code}/file` 로 두 브랜치의 파일을 가져와 diff 합니다.
 
-## 인자 추출
+## 환경
+- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 
-사용자 메시지에서 다음 값들을 추출해 **먼저** 환경변수로 export 한 뒤 아래 bash 블록을 실행하라. 누락 시 사용자에게 되물어 확정하라.
-
-- `CODE` — projectCode (예: GOJIRA)
+## 인자
+- `CODE` — projectCode
+- `USER` — X-User-Id
 - `FILE` — 비교할 문서 경로 (예: `business/project-description.md`)
 
-예:
 ```bash
 export CODE="GOJIRA3"
+export USER="batman"
 export FILE="business/project-description.md"
+export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 ```
 
-## 문서 비교
-
+## 파일 조회 + diff
 ```bash
-gojira-cli doc diff --project "$CODE" --file "$FILE"
+fetch() {
+  curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=$(printf %s "$FILE" | jq -sRr @uri)&ref=$(printf %s "$1" | jq -sRr @uri)" \
+    -H "X-User-Id: ${USER}" | jq -r '.content // ""' | base64 -d 2>/dev/null
+}
+fetch main > /tmp/doc-main.txt
+fetch "docs/${USER}" > /tmp/doc-user.txt
+diff -u /tmp/doc-main.txt /tmp/doc-user.txt || true
 ```
 
-결과를 한국어로 정리합니다:
-- 추가/삭제/수정된 내용을 구분하여 보여줍니다
-- 변경 요약을 제공합니다
+결과를 한국어로 정리: 추가/삭제/수정 구분 + 요약.

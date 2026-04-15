@@ -15,6 +15,17 @@ permission:
 - 사용자 메시지에서 `projectCode` (예: `GOJIRA3`)와 `user` (예: `batman`) 를 추출해 스킬 실행 환경변수로 export 한다.
 - 없으면 되물어 확정한 뒤 스킬을 호출한다.
 
+## 백엔드 API 주소 (절대 추측 금지)
+
+항상 아래 값을 사용한다. 다른 포트를 시도하지 말 것:
+- `PLATFORM_API=http://localhost:9000/api/v2`
+- `GOJIRA_API=http://localhost:9001/api/v2`
+- 모든 쓰기 호출에 `X-User-Id: ${USER}` 헤더 필수
+
+## 데이터 조회는 반드시 스킬 경유
+
+이슈 개수/목록 같은 단순 조회도 `issue-query`, `project-query` 등 등록된 스킬을 사용한다. 직접 localhost 포트 추측해 curl 하지 말 것.
+
 ## ⚠️ 스킬 실행 규칙 (절대 위반 금지)
 
 `skill` 툴로 SKILL.md 를 로드하는 것만으로는 **아무 일도 일어나지 않는다**. SKILL.md 본문은 지시문이고, 실제 API 호출·이슈 생성·문서 저장은 네가 **`bash` 툴로 직접 실행** 해야 한다.

@@ -20,26 +20,35 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
 
     assistant message 완료(step-finish) 감지 시 done 을 yield 하고 종료.
     """
-    final_text_parts: list[str] = []
+    final_text_by_part: dict[str, str] = {}
+    text_part_order: list[str] = []
     actions: list[dict] = []
     # session 이벤트 먼저
     yield _sse("session", {"sessionId": gojira_session_id})
 
     turn = 0
     seen_tool_ids: set[str] = set()
+    # session.idle 또는 finish=="stop" 일 때만 종료
+    TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
 
     async for evt in opencode_events:
         t = evt.get("type")
         if t != "message.part.updated":
-            # assistant 완료 감지 (message.updated + finish)
             if t == "message.updated":
                 info = evt.get("properties", {}).get("info", {})
-                if info.get("role") == "assistant" and info.get("finish"):
-                    yield _sse("done", {
-                        "reply": "".join(final_text_parts).strip(),
-                        "actions": actions,
-                    })
+                fin = info.get("finish")
+                if info.get("role") == "assistant" and fin in TERMINAL_FINISHES:
+                    reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
+                    yield _sse("done", {"reply": reply, "actions": actions})
                     return
+            elif t == "session.status":
+                st = evt.get("properties", {}).get("status", {}).get("type")
+                # 보조 종료 신호: idle 이고 최근 text 가 있으면 종료
+                if st == "idle" and final_text_by_part:
+                    reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
+                    if reply:
+                        yield _sse("done", {"reply": reply, "actions": actions})
+                        return
             continue
 
         part = evt.get("properties", {}).get("part", {})
@@ -47,21 +56,19 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
 
         if ptype == "text":
             txt = part.get("text", "")
-            # OpenCode 는 delta 가 아니라 누적 텍스트 — 변경분을 UI 에 내려보내기 위해
-            # part id 별 마지막 길이를 추적
             pid = part.get("id")
-            prev_len = translate._text_cache.get(pid, 0) if hasattr(translate, "_text_cache") else 0
-            if not hasattr(translate, "_text_cache"):
-                translate._text_cache = {}
-            if len(txt) > prev_len:
-                delta = txt[prev_len:]
-                translate._text_cache[pid] = len(txt)
+            prev = final_text_by_part.get(pid, "")
+            if len(txt) > len(prev):
+                delta = txt[len(prev):]
                 yield _sse("content", {"text": delta})
-                # final 누적(복원용)
-                if pid in [p.get("id") for p in []]:
-                    pass
-            # final 저장 (마지막 값이 전체)
-            _add_or_update_text(final_text_parts, pid, txt)
+            if pid not in final_text_by_part:
+                text_part_order.append(pid)
+            final_text_by_part[pid] = txt
+
+        elif ptype == "reasoning":
+            txt = part.get("text") or part.get("content") or ""
+            if txt:
+                yield _sse("reasoning", {"turn": turn, "step": "thought", "content": txt[-200:]})
 
         elif ptype == "tool":
             state = part.get("state", {})
