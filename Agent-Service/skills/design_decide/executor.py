@@ -234,7 +234,7 @@ async def execute(params: dict, user: str) -> dict:
             for req_key in (entry["item"].get("relatedRequirements") or []):
                 if req_key in valid_req_keys:
                     try:
-                        await link_issues(req_key, design_key, "contains")
+                        await link_issues(req_key, design_key, "contains", user=user)
                         linked.append({"from": req_key, "to": design_key})
                     except Exception:
                         pass

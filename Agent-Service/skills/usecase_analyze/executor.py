@@ -224,7 +224,7 @@ async def execute(params: dict, user: str) -> dict:
             for vos_key in (entry["item"].get("relatedVOS") or []):
                 if vos_key in valid_vos_keys:
                     try:
-                        await link_issues(vos_key, feat_key, "contains")
+                        await link_issues(vos_key, feat_key, "contains", user=user)
                         linked.append({"from": vos_key, "to": feat_key})
                     except Exception:
                         pass

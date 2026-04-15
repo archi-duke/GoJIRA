@@ -235,7 +235,7 @@ async def execute(params: dict, user: str) -> dict:
             for fk in (item.get("relatedFeatures") or []):
                 if fk in valid_feat_keys:
                     try:
-                        await link_issues(fk, req_key, "contains")
+                        await link_issues(fk, req_key, "contains", user=user)
                         linked.append({"from": fk, "to": req_key})
                     except Exception:
                         pass

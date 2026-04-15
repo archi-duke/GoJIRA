@@ -387,11 +387,11 @@ def _next_link_id() -> str:
     return str(mx + 1)
 
 
-async def link_issues(from_key: str, to_key: str, link_type: str = "contains") -> dict:
+async def link_issues(from_key: str, to_key: str, link_type: str = "contains", user: str = "anonymous") -> dict:
     """두 이슈를 JIRA 표준 형식으로 양방향 link 한다.
 
     `from_key` 가 outward(상위/부모), `to_key` 가 inward(하위/자식).
-    양쪽 YAML 각각 커밋 (2건).
+    양쪽 YAML 각각 커밋 (2건). user 는 git 사용자 브랜치 결정.
     """
     if not from_key or not to_key or not link_type:
         raise ValueError("from_key, to_key, link_type 필수")
@@ -409,11 +409,6 @@ async def link_issues(from_key: str, to_key: str, link_type: str = "contains") -
         ln = IssueLink(id=link_id, type=type_obj, inwardIssue=IssueLinkRef(key=from_key))
         doc.issueLinks = list(doc.issueLinks) + [ln]
 
-    await _load_mutate_save(from_key, reporter_for_link(), f"[link] {from_key}→{to_key} ({link_type})", _mut_from)
-    await _load_mutate_save(to_key, reporter_for_link(), f"[link] {from_key}→{to_key} ({link_type})", _mut_to)
+    await _load_mutate_save(from_key, user, f"[link] {from_key}→{to_key} ({link_type})", _mut_from)
+    await _load_mutate_save(to_key, user, f"[link] {from_key}→{to_key} ({link_type})", _mut_to)
     return {"linkId": link_id, "fromKey": from_key, "toKey": to_key, "linkType": type_name}
-
-
-def reporter_for_link() -> str:
-    """link 는 호출자 user 정보가 없는 경우가 있어 기본 값 사용."""
-    return "system"
