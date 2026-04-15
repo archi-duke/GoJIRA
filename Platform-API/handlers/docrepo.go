@@ -748,6 +748,14 @@ func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	// 프로젝트 알림: 브랜치 커밋 발생 → branchAlert 갱신
 	db.UpdateProjectField(ctx, code, "gitLastCommit", time.Now())
 	go UpdateBranchAlert(owner, name, code, userId)
+	// SSE 브로드캐스트 — 사용자 브랜치 쓰기 발생 시 DocEditor 자동 갱신용
+	BroadcastDocEvent(map[string]interface{}{
+		"type":        "user_doc_update",
+		"projectCode": code,
+		"user":        userId,
+		"path":        body.Path,
+		"branch":      branch,
+	})
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -782,6 +790,14 @@ func DocRepoFileDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	BroadcastDocEvent(map[string]interface{}{
+		"type":        "user_doc_update",
+		"projectCode": code,
+		"user":        userId,
+		"path":        body.Path,
+		"branch":      branch,
+		"deleted":     true,
+	})
 	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 

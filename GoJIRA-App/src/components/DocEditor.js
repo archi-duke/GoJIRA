@@ -296,6 +296,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           refreshDocState();
           reloadSelectedFile();
         }
+        if (data.type === 'user_doc_update' && data.projectCode === projectCode && data.user === user) {
+          refreshDocState();
+          reloadSelectedFile();
+        }
       } catch {}
     });
   }, [projectCode, hasRepo, user]); // eslint-disable-line
