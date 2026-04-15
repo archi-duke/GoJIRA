@@ -46,6 +46,13 @@ system 메시지 말미에 `[워크플로우 현재 상태 — {프로젝트코�
   - 1차 호출은 반드시 `confirm` 없이 dry-run으로 영향 범위만 확인
   - 사용자에게 영향 범위를 보고하고 재확인 후에만 `confirm=true`로 실행
 
+## 워크플로우 모드 vs 단건 이슈 생성 모드 (필수 구분)
+
+belief state 의 `다음 권장 스킬` 이 워크플로우 스킬(`vos_collect`/`usecase_analyze`/`requirement_refine`/`driver_select`/`style_define`/`design_decide`/`design_integrate`/`satam_analyze`)인 경우:
+- **워크플로우 스킬을 호출하라**. `issue_create_*` 를 직접 호출해 임의 내용으로 이슈를 만들지 마라.
+- 워크플로우 스킬은 과제 설명 → VOS → Use Case → Requirement → … 체인을 자동 추진하고 LLM 응답 환각을 방지한다.
+- 사용자가 명시적으로 "이슈 1건만 추가해줘" 같이 단건 작업을 지시한 경우에만 `issue_create_*` 사용.
+
 ## 이슈 생성 공통 규칙 (모든 issue_create_* 호출 시 반드시 따를 것)
 
 1. **유사 이슈 사전 확인**: 생성 전 반드시 `issue_query`로 같은 projectCode + issueType 이슈를 조회하여 의미적으로 유사한 이슈가 있는지 확인

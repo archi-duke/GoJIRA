@@ -94,7 +94,14 @@ async def agent_loop_stream(
         log.warning("워크플로우 상태 주입 실패: %s", e)
 
     # 1차 스킬 선별 (키워드 + description 매칭)
-    tools = registry.select_tools(user_message)
+    # belief state 의 nextRecommendedStep 은 반드시 tools 후보에 포함시켜
+    # LLM 이 issue_create_* 같은 저수준 스킬로 빠지지 않도록 한다.
+    required_skills = []
+    if state and state.get("nextRecommendedStep"):
+        required_skills.append(state["nextRecommendedStep"])
+    if state and not (state.get("completedSteps") or {}).get("projdesc"):
+        required_skills.append("projdesc_interview")
+    tools = registry.select_tools(user_message, required=required_skills)
 
     # thinking 계열 모델은 내부 추론을 수행하므로 별도 Pass 1 (명시적 ReACT 외재화) 불필요.
     # Pass 2 (tool_choice="auto") 단일 호출로 충분.
@@ -119,7 +126,7 @@ async def agent_loop_stream(
                     yield evt
 
                 # Pass 1 추론 결과로 스킬 재선별 (추론에서 언급된 스킬 반영)
-                tools = registry.select_tools(user_message, extra_context=thought)
+                tools = registry.select_tools(user_message, extra_context=thought, required=required_skills)
 
                 # 추론이 사용자에게 질문하는 형태라면 Pass 2 건너뛰고 텍스트 답변으로 종료
                 if _is_user_question(thought):

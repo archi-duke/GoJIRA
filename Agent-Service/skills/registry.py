@@ -183,7 +183,7 @@ class SkillRegistry:
         """프론트엔드 /Agent/tools 응답용."""
         return [_to_tool_info(s) for s in self.list_all()]
 
-    def select_tools(self, message: str, extra_context: str = "") -> List[dict]:
+    def select_tools(self, message: str, extra_context: str = "", required: List[str] = None) -> List[dict]:
         """사용자 메시지 기반으로 관련 스킬만 선별하여 OpenAI tool 형식 반환.
 
         1. 키워드 매칭으로 후보 스킬 선별
@@ -218,6 +218,11 @@ class SkillRegistry:
 
         # 4. 항상 포함 스킬
         expanded.update(ALWAYS_INCLUDE)
+        # 4.5 호출자가 명시한 필수 스킬 (belief state nextRecommendedStep 등)
+        if required:
+            for r in required:
+                if r in self._index:
+                    expanded.add(r)
 
         # 5. 범위 보정
         if len(expanded) < MIN_TOOLS:
