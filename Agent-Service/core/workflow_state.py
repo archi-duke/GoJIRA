@@ -76,10 +76,12 @@ async def get_workflow_state(project_code: str) -> Dict[str, Any]:
 
     # 문서 존재 여부 (DocRepo 조회)
     documents_present = await _check_documents(project_code)
+    # project-description 은 템플릿만 있으면 미완료로 간주
+    projdesc_real = await _has_real_projdesc(project_code)
 
     # 완료 플래그 — DB/파일 상태에서 파생
     completed_steps = {
-        "projdesc": documents_present.get("business/project-description.md", False),
+        "projdesc": projdesc_real,
         "vos_collect": vos_count > 0,
         "usecase_analyze": feature_count > 0,
         "requirement_refine": requirement_count > 0,
@@ -131,6 +133,28 @@ async def _check_documents(project_code: str) -> Dict[str, bool]:
     except Exception as e:
         log.warning("문서 존재 확인 실패: %s", e)
         return {doc: False for doc in _STEP_DOCS.values()}
+
+
+async def _has_real_projdesc(project_code: str) -> bool:
+    """project-description.md 가 템플릿이 아닌 실내용인지 확인.
+
+    main / user 브랜치 모두 검사. 어느 한 곳이라도 실내용이면 True.
+    """
+    try:
+        from clients.platform_api import PlatformClient
+        from skills.helpers import is_template_only
+        client = PlatformClient()
+        for ref in ("main",):
+            try:
+                content = await client.get_file_content(project_code, "business/project-description.md", ref=ref)
+                if content and not is_template_only(content):
+                    return True
+            except Exception:
+                pass
+        return False
+    except Exception as e:
+        log.warning("projdesc 실내용 확인 실패: %s", e)
+        return False
 
 
 def next_recommended_step(state: Dict[str, Any]) -> Optional[str]:
