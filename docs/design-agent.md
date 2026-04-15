@@ -1,370 +1,389 @@
-# Agent-Service 아키텍처 설계 문서
+# Agent-Service 아키텍처 설계 문서 (OpenCode 기반)
 
-본 문서는 Agent-Service의 동작 구조, 설계 결정, 그리고 향후 진화 방향에 대한 논의를 정리한 설계 자료다.
+본 문서는 GoJIRA AI 에이전트 백엔드의 동작 구조, 설계 결정을 정리한 설계 자료다. 기존 자체 ReACT 루프 기반 Agent-Service 를 **OpenCode 서버 기반** 으로 전면 전환한다.
 
 ---
 
 ## 1. 개요
 
-Agent-Service는 GoJIRA 프로젝트 관리 시스템의 AI 에이전트 백엔드다. 사용자 자연어 요청을 받아 ReACT(Reasoning + Acting) 루프로 도구를 호출하고, 결과를 한국어로 종합해 응답한다.
+GoJIRA 에이전트는 사용자 자연어 요청을 받아 도메인 스킬을 호출하고, 결과를 한국어로 종합해 응답한다. LLM 호출·ReACT 루프·스킬 디스패치 엔진은 **OpenCode 서버** 가 담당하고, GoJIRA 측은 UI 계약 유지용 얇은 어댑터만 유지한다.
 
-**주요 구성**:
-- `routers/agent.py` — 자체 구현한 ReACT 루프, 시스템 프롬프트 로딩, SSE 스트리밍
-- `skills/` — 19개 도메인 스킬 (각 스킬은 SKILL.md + executor.py + prompts/ 구조)
-- `skills/registry.py` — 스킬 등록 및 요청 기반 선별
-- `prompts/system.txt` — 에이전트 최상위 시스템 프롬프트
-- `clients/` — GoJIRA-API HTTP 클라이언트
-
----
-
-## 2. 스킬(Skill) 구조
-
-### 2.1 디렉터리 레이아웃
-
-```
-skills/<skill_name>/
-├── SKILL.md          # Claude Code 표준 형식 (frontmatter + 본문)
-├── executor.py       # Python 실행 로직
-└── prompts/          # 내부 LLM 호출용 프롬프트 (선택)
-    ├── generate.txt
-    └── critique.txt
-```
-
-### 2.2 두 가지 스킬 부류
-
-| 부류 | 예시 | 동작 방식 |
-|------|------|----------|
-| **단순 CRUD 스킬** | `issue_query`, `issue_create_*`, `issue_update`, `project_query`, `pr_list` | executor가 GoJIRA-API HTTP 호출 후 결과 반환 |
-| **LLM 오케스트레이션 스킬** | `vos_collect`, `usecase_analyze`, `requirement_refine`, `satam_analyze`, `projdesc_generate` | executor 내부에서 LLM을 호출, critique 루프로 검증, 산출 문서 파일 생성, 후속 이슈 등록까지 수행 |
-
-### 2.3 워크플로우 의존 체인 (LLM 오케스트레이션 스킬)
-
-```
-project-description.md → vos_collect → usecase_analyze → requirement_refine
-```
-
-- 하위 스킬은 선행 산출물이 부족하면 **스킬 내부에서 자동 호출**한다 (`prerequisitesRan` 필드에 기록)
-- 예외: `project-description.md` 부족은 멀티턴 인터뷰가 필요하므로 자동 위임 불가 → `projdesc_interview` 호출을 에이전트에 위임
+**구성 요소**:
+- **UI (`GoJIRA-App/src/components/AgentChat.js`)** — 기존 `POST /Agent/chat/stream` SSE 계약 유지
+- **Agent-Service (슬림 어댑터)** — `routers/agent.py` + `opencode_bridge/` — 세션 매핑, SSE 이벤트 번역, 워크플로우 stage 주입
+- **OpenCode 서버 (`opencode serve`)** — LLM 호출, ReACT 루프, 스킬 discover/실행
+- **스킬 (`.claude/skills/*2/SKILL.md`)** — curl/jq 기반 self-contained, OpenCode 가 자동 discover
+- **Platform-API (:9000)** — DocRepo(Git 기반 문서), 사용자 브랜치 (`docs/{user}`)
+- **GoJIRA-API (:9001)** — Issue CRUD/Link, JIRA DC v2 호환
 
 ---
 
-## 3. 에이전트 루프 (ReACT)
-
-### 3.1 자체 구현 방식
-
-`routers/agent.py`가 직접 ReACT 루프를 구현한다:
+## 2. 아키텍처
 
 ```
-1. system 프롬프트 + 사용자 메시지로 messages 구성
-2. LLM 호출 (Anthropic/OpenAI 등 자체 어댑터)
-3. tool_calls 파싱
-4. executor.run() 디스패치
-5. tool 결과를 messages에 append
-6. LLM 재호출 → 2~5 반복
-7. tool_calls 없으면 최종 답변 반환
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser (GoJIRA-App) — AgentChat.js                            │
+│  POST /Agent/chat/stream ◀── SSE (session/reasoning/            │
+│                               tool_call/tool_result/            │
+│                               content/done)                     │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ HTTP + SSE (계약 불변)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Agent-Service (슬림 어댑터, FastAPI)                           │
+│   · 세션 매핑 (Mongo: gojiraSessionId ↔ openCodeSessionId)      │
+│   · 워크플로우 stage 주입 (system prompt prefix)                │
+│   · SSE 이벤트 번역 (OpenCode → UI 포맷)                        │
+└────────┬───────────────────────────────┬────────────────────────┘
+         │ REST                          │ SSE (GET /event)
+         │ POST /session                 │
+         │ POST /session/:id/prompt_async│
+         ▼                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  ╔═══════════════════════════════════════════════════════════╗  │
+│  ║                OpenCode Server (:4096)                    ║  │
+│  ║  ┌─────────────────────────────────────────────────────┐  ║  │
+│  ║  │ Session Manager   (/session, /message, /event)      │  ║  │
+│  ║  │ Primary Agent     ← .opencode/agents/gojira.md      │  ║  │
+│  ║  │ LLM Runtime (ReACT 내장, provider ← opencode.json)  │  ║  │
+│  ║  │ Skill Registry (기동 시 .claude/skills 자동 스캔)   │  ║  │
+│  ║  │ Tool Executor (Bash/Read — curl/jq 스니펫 실행)     │  ║  │
+│  ║  └────────────────────┬────────────────────────────────┘  ║  │
+│  ╚═══════════════════════╪═══════════════════════════════════╝  │
+└──────────────────────────┼──────────────────────────────────────┘
+                           │ curl (X-User-Id 헤더)
+            ┌──────────────┴──────────────┐
+            ▼                             ▼
+┌──────────────────────┐      ┌────────────────────────┐
+│  Platform-API :9000  │      │  GoJIRA-API :9001      │
+│   · DocRepo (Git)    │      │   · Issue CRUD/Link    │
+│   · docs/{user} 브랜치│      │   · JIRA DC 호환       │
+└──────────────────────┘      └────────────────────────┘
+
+┌─────────── 외부 LLM (OpenCode 가 직접 호출) ───────────┐
+│  OpenAI / Anthropic / Gemini / LiteLLM (사내 프록시)   │
+└────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 시스템 프롬프트
-
-`prompts/system.txt`이 모든 ReACT 호출의 system 메시지로 주입된다 ([routers/agent.py:31](../Agent-Service/routers/agent.py#L31)).
-
-주요 규칙:
-- ReACT content 작성 강제 (도구 호출 전 사고 과정 명시)
-- 추측 금지, 항상 도구로 실제 데이터 확인
-- 이슈 생성 공통 규칙 (유사 이슈 사전 확인 → 분기 처리)
-- 워크플로우 선행 자동 위임 처리 지침
-- 산출 문서 본문을 채팅에 그대로 출력 금지
-- 응답 스타일 (한국어, 간결, 친근한 톤)
+**데이터 흐름 한 줄**: UI → Agent-Service(어댑터) → OpenCode(LLM+ReACT+스킬) → Platform/GoJIRA API
 
 ---
 
-## 4. 스킬 선별 (Tool Filtering)
+## 3. OpenCode 동작 방식
 
-### 4.1 동작 방식
+### 3.1 기동
+```
+OPENCODE_SERVER_PASSWORD=*** opencode serve --port 4096 --hostname 127.0.0.1
+```
+- 기동 시 `.opencode/agents/`, `.claude/skills/`, `.opencode/skills/` 자동 스캔 → 내부 레지스트리 적재
+- TUI 없음. REST + SSE HTTP 서버로 상주
+- OpenAPI 스펙: `GET /doc`
 
-`registry.select_tools()` ([skills/registry.py:153](../Agent-Service/skills/registry.py#L153))가 매 요청마다 19개 전체 스킬 중 5~9개만 LLM에 노출한다.
+### 3.2 엔드포인트
 
-**5단계 파이프라인**:
-1. **KEYWORD_MAP 하드코딩 매칭** (메인 신호) — 키워드 → 스킬 이름 사전 매핑
-2. **description 단어 겹침 매칭** (보조) — 메시지 단어와 description이 2개 이상 겹치면 포함
-3. **SKILL_GROUPS 확장** — 매칭된 스킬이 속한 그룹의 다른 스킬도 추가
-4. **ALWAYS_INCLUDE** — 항상 포함되는 스킬 (예: project_query)
-5. **MIN/MAX 범위 보정** — 너무 적으면 전체, 너무 많으면 우선순위로 절단
+| 용도 | 엔드포인트 |
+|---|---|
+| 세션 생성 | `POST /session` `{parentID?, title?}` |
+| 메시지(비동기+스트림) | `POST /session/:id/prompt_async` → 204, 이후 `GET /event` 수신 |
+| 메시지(동기) | `POST /session/:id/message` `{messageID?, model?, agent?, parts}` |
+| 이벤트 스트림 | `GET /event` (SSE, 첫 이벤트 `server.connected`) |
+| 세션 조회/삭제 | `GET/DELETE /session/:id` |
+| 슬래시 커맨드 | `POST /session/:id/command` |
 
-### 4.2 2-Pass 재선별 (스트리밍)
+### 3.3 세션 내부 처리
 
-`agents/streaming.py`는 Pass 1 추론 결과를 바탕으로 한 번 더 스킬을 재선별해 Pass 2에 전달한다.
+```
+[사용자 메시지 수신]
+      ▼
+[primary agent 로드 — .opencode/agents/gojira.md 본문 = system prompt]
+[등록된 skill 목록을 tool 스키마로 LLM 에 제시]
+      ▼
+[LLM 호출]  ← opencode.json 의 provider/model
+      ▼
+LLM 판단:
+  (a) 텍스트 응답만       → message.part(text) 이벤트 스트림
+  (b) skill 호출 필요     → tool_call 이벤트
+                         → 해당 SKILL.md 본문을 agent 컨텍스트에 주입
+                         → Bash/Read 권한으로 curl/jq 스니펫 실제 실행
+                         → tool_result 이벤트
+                         → 루프 재진입 (ReACT 내장)
+      ▼
+[최종 답변 완료] → message.updated(completed)
+```
 
-### 4.3 Claude Code 방식과의 비교
-
-| 항목 | Agent-Service | Claude Code |
-|------|--------------|-------------|
-| 1차 선별 기준 | 하드코딩 KEYWORD_MAP | description 텍스트만 |
-| description 활용 | 보조 (단어 겹침 카운트) | 유일한 신호 |
-| 스킬 그룹 | 코드에 정의 | 없음 (LLM이 알아서) |
-| 신규 스킬 추가 시 | KEYWORD_MAP/GROUPS 갱신 필요 | SKILL.md 추가만으로 끝 |
-| 결정 주체 | Python 룰 + LLM | LLM 단독 |
-
-**평가**:
-- **장점**: 결정론적, 토큰 사용 적음, 디버깅 용이
-- **단점**: 신규 스킬 추가 시 코드 수정 필요, "description이 곧 진실"이라는 Claude Code 철학과 어긋남
+즉 OpenCode 가 기존 Agent-Service 의 ReACT 루프 + LLM 호출 + 스킬 디스패치 역할을 **통째로 대체**.
 
 ---
 
-## 5. 비판적 평가 루프 (Critique Loop)
+## 4. 스킬 체계
 
-생성 단계 스킬(VOS, Use Case, Requirement, 설계안 등)은 다음 루프를 거친다:
+### 4.1 저장 위치 (OpenCode 자동 discover)
+- `.claude/skills/<name>/SKILL.md` — **본 프로젝트 기본** (Claude Code 호환)
+- `.opencode/skills/<name>/SKILL.md` — OpenCode 전용 (필요 시)
+- `~/.config/opencode/skills/<name>/SKILL.md` — 글로벌
 
+OpenCode 필수 frontmatter: `name`, `description`. `allowed-tools` 는 Claude Code 와 동일하게 해석. Unknown 필드는 무시.
+
+### 4.2 스킬 구조 (self-contained)
 ```
-[생성] → [비판적 평가] ──pass?──▶ 완료
-           │
-           └─ fail → [수정] → [재평가]  (최대 N회)
+.claude/skills/<name>/SKILL.md
+---
+name: <name>
+description: <1~1024자>
+argument-hint: "<projectCode> <user>"
+allowed-tools: Bash, Read
+---
+# 본문: curl/jq 기반 실행 지시문
 ```
 
-- 평가 결과: `{"pass": true/false, "issues": [...], "reasoning": "..."}` 형식의 JSON
-- 최대 반복 제한 (기본 2회)으로 비용 통제
-- 최종 산출물에 `critiqueTrail`을 포함하여 검증 이력 추적
-- 공용 헬퍼: `skills/critique.py`의 `iterate_generate_critique()`
+Python executor 없음. LLM 이 SKILL.md 본문을 따라 Bash 로 curl 실행.
 
-현재 적용 범위:
-- ✅ Phase 1 (VOS/Use Case/Requirement) — `vos_collect`, `usecase_analyze`, `requirement_refine`
-- ⏳ Phase 2~4 (구조 결정/설계/SATAM) — 향후 추가 시 동일 패턴
+### 4.3 현재 스킬 목록 (skill_v2 브랜치)
+
+**워크플로우 스킬 (self-loop 내장)**
+- `vos-collect2` — VOS 수집
+- `usecase-analyze2` — Use Case/Feature 분석 (VOS 커버리지 매트릭스 자가검증)
+- `requirement-refine2` — FR/NFR/CNST 요구사항 정제
+- `driver-select2` — Requirement 중 ASR 마킹 (ArchitectureDriver 이슈 생성하지 않음)
+- `style-define2` — 아키텍처 스타일 추천 (카탈로그 점수 규칙을 본문에 서술)
+- `design-decide2` — ADR 기반 설계 결정
+- `design-integrate2` — 통합 설계 문서 작성 (이슈 없음)
+- `satam-analyze2` — ADSN risk/sensitivity/mitigation 필드 업데이트
+
+**이슈 생성 스킬 (타입별 분리)**
+- `issue-create-vos`
+- `issue-create-feature`
+- `issue-create-requirement`
+- `issue-create-design`
+
+**프리폼 스킬**
+- `projdesc-interview` — 5개 질문 뱅크 기반 대화형
+- `projdesc-generate` — 비대화 문서 생성
+- `doc-history`
+- `reset-project` — `disable-model-invocation: true` + dry-run 기본 + `confirm=true` 가드
+
+**이식 보류**
+- `ui-navigate` — Agent-Service SSE → 브라우저 BroadcastChannel 의존. Platform-API 에 `POST /api/events/navigate` 엔드포인트 신설 필요
+
+### 4.4 Self-loop 정책 (워크플로우 스킬 공통)
+- `score_effective = score − 0.5 × |critical|`, pass 임계 0.8
+- 최대 3 iter (초안 1 + 수정 2)
+- 종료 조건: pass | iter 3 소진 | 같은 critical 2회 연속 재발 | 새 수정이 이전 best 보다 낮은 score
+- **best-so-far**: 매 iter 의 `(items, score_effective)` 기록 → 최댓값 iter 채택
+- LLM 단일 호출 내부에서 generate → self-critique → revise 수행
+
+### 4.5 공통 규약
+- 모든 쓰기 curl 에 `X-User-Id: ${USER}` 헤더 필수 (403 방지)
+- 문서 저장: `PUT /DocRepo/{code}/file` + X-User-Id → 자동으로 `docs/{user}` 브랜치
+- 이슈 생성: `POST /Issue` → 응답 key 수신 → 부가 필드 `PUT /Issue` 로 업데이트
+- 링크 타입: `Contains(WBSGantt)` (JIRA DC 표준)
+- Mermaid 코드블록 필수 (`graph TB` for Use Case Diagram — `classDiagram` 금지)
 
 ---
 
-## 6. 이슈 생성 공통 규칙
+## 5. Primary Agent 정의
 
-`prompts/system.txt`의 "이슈 생성 공통 규칙"이 권위 있는 출처. 각 `issue_create_*` 스킬의 SKILL.md에서 이를 참조한다.
+`.opencode/agents/gojira.md`
 
-**핵심 규칙**:
-1. 생성 전 반드시 `issue_query`로 유사 이슈 사전 확인
-2. 분기 처리:
-   - 유사 이슈 없음 → `issue_create_*` 호출
-   - 유사 이슈 있음, 동일 → 기존 키 안내
-   - 유사 이슈 있음, 보강 필요 → `issue_update` + 코멘트
-   - 폐기 대상 → `mark_for_deletion` (실삭제는 사용자 명시 지시 시만)
-3. 삭제 마킹: summary에 `[Deletion Required] ` 접두 + label `del_req` 추가
-4. 사용자 직접 삭제 지시 시만 `issue_delete` (hard delete)
+```yaml
+---
+description: GoJIRA 프로젝트 관리 도우미. 이슈·문서·워크플로우를 실행한다.
+mode: primary
+model: <opencode.json 기본값>
+permission:
+  bash: allow
+  edit: ask
+---
+[역할·규칙 본문]
+- 사용자 입력에 프로젝트 코드(GOJIRA*, 또는 명시적 code) 포함 여부 확인
+- 이슈 생성 전 issue_query 로 유사 이슈 사전 확인, 분기 처리
+- 산출 문서 본문은 채팅에 출력하지 말고 파일 저장 + 요약 보고
+- 현재 워크플로우 stage (어댑터 주입) 안에서만 동작
+- 응답은 한국어, 간결, 친근한 톤
+```
 
 ---
 
-## 7. 이슈 체계 (Contain Chain)
+## 6. Agent-Service 어댑터 (슬림 레이어)
 
-```
-VOS —(contains)→ Feature —(contains)→ Requirement —(contains)→ ADSN / DDSN
-                                          ├── FR (기능)
-                                          ├── NFR (품질속성)
-                                          └── CNST (제약)
-```
+### 6.1 유지되는 API (UI 계약 불변)
 
-### 연결 규칙
+| 엔드포인트 | 동작 |
+|---|---|
+| `POST /api/v2/Agent/chat/stream` | OpenCode 세션에 메시지 전달 + SSE 이벤트 번역 |
+| `POST /api/v2/Agent/chat` | 동기 버전 (내부적으로 `/session/:id/message`) |
+| `GET /api/v2/Agent/sessions` | Mongo 세션 목록 |
+| `GET /api/v2/Agent/session/:id` | 세션 복원 |
+| `GET /api/v2/Agent/tools` | OpenCode skill 레지스트리를 UI 포맷으로 변환 |
 
-| Requirement 분류 | ASR 라벨 | 필수 하위 이슈 |
-|-----------------|----------|---------------|
-| NFR (품질속성) | 무관 | ADSN 1개 이상 |
-| 임의 타입 | `ASR` 라벨 있음 | ADSN 1개 이상 |
-| FR (기능) | `ASR` 라벨 없음 | ADSN 또는 DDSN 1개 이상 |
-| CNST (제약) | — | 하위 이슈 불필요 |
+### 6.2 SSE 이벤트 매핑
 
-상세는 [`prompts/workflow-architecture-design.md`](../Agent-Service/prompts/workflow-architecture-design.md) 참조.
+| OpenCode (GET /event) | UI SSE |
+|---|---|
+| `server.connected` | (skip) |
+| `session.updated` | `session` `{sessionId}` |
+| `message.part.updated` (reasoning) | `reasoning` `{turn, step, content}` |
+| `message.part.updated` (tool_call) | `tool_call` + `progress` |
+| `message.part.updated` (tool_result) | `tool_result` `{tool, status, duration_ms, summary}` |
+| `message.part.updated` (text delta) | `content` `{text}` |
+| `message.updated` (completed) | `done` `{reply, actions}` |
+| error | `error` `{message}` |
 
----
+### 6.3 세션 매핑
+Mongo `agent_sessions` 컬렉션에 `{gojiraSessionId, openCodeSessionId, userId, createdAt, messages[]}`. 첫 요청 시 OpenCode `POST /session` 호출 결과 ID 를 매핑 저장.
 
-## 8. .claude/skills와의 관계
-
-GoJIRA 리포에는 두 가지 스킬 시스템이 공존한다:
-
-| 항목 | `.claude/skills/` | `Agent-Service/skills/` |
-|------|------------------|------------------------|
-| 호스트 | Claude Code (CLI/IDE) | Agent-Service (자체 ReACT) |
-| 실행 방식 | SKILL.md 지시문에 따라 Claude가 직접 수행 | executor.py가 Python으로 실행 |
-| 주요 도구 | `gojira-cli` (subprocess) | GoJIRA-API HTTP 클라이언트 |
-| LLM 호출 | Claude Code의 Claude | Agent-Service 내부 LLM 어댑터 |
-| 형식 호환성 | 표준 Claude Code SKILL.md | 동일 형식으로 변환 완료 (커밋 7d2cd22) |
-
-### 이식 가능성
-
-- **단순 CRUD 스킬**: SKILL.md만 다듬으면 거의 그대로 이식 가능
-- **LLM 오케스트레이션 스킬**: executor의 critique 루프, 선행 자동 위임, 결정론적 JSON 파싱이 Python 코드에 의존 → Claude로 옮기면 LLM 지시문으로 풀어야 해서 동작 일관성 손실. **재설계 필요**
+### 6.4 사용자 컨텍스트 (`X-User-Id`)
+스킬이 curl 에 `X-User-Id: ${USER}` 를 사용. 전달 방식:
+- 어댑터가 `/prompt_async` 호출 시 parts 에 `user=batman` 컨텍스트 prefix 포함
+- 스킬 본문은 `$USER` 또는 인자 `$2` 로 수신 → 기존 방식 유지
 
 ---
 
-## 9. 향후 진화 방향에 대한 검토
+## 7. 워크플로우 상태 관리 (State Machine)
 
-### 9.1 Claude Agent SDK 채택 검토
+단순 선형 워크플로우에서도 "LLM 이 본인이 어느 단계인지 매번 추론" 은 순환·누락을 유발. **엔진이 통제권을 갖고, LLM 은 현재 stage 내부만 수행** 하는 구조 유지.
 
-**검토 결과: 채택 불가**
+### 7.1 구성
 
-| 항목 | 자체 ReACT (현재) | Claude Agent SDK |
-|------|------------------|------------------|
-| 코드 양 | 많음 | 크게 줄어듦 |
-| 컨텍스트 관리/스트리밍/캐시 | 직접 구현 | SDK 자동 |
-| 멀티 LLM 지원 | 가능 | Anthropic 전용 |
-| 동작 통제권 | 100% 우리 손 | SDK에 일부 양도 |
+| 구성 | 위치 | 책임 |
+|---|---|---|
+| 워크플로우 정의 | `Agent-Service/core/workflows/business_design.py` | 9-stage 시퀀스 (projdesc → vos → usecase → requirement → driver → style → design_decide → design_integrate → satam) |
+| Job 저장소 | `Agent-Service/core/job_store.py` + `workflow_jobs` 컬렉션 | 활성 Job + stage 상태/히스토리 영속화 (TTL 90일) |
+| 실행 엔진 | `Agent-Service/core/workflow_engine.py` | load/start, advance, belief-state 검증, 전이 |
+| Belief State | `Agent-Service/core/workflow_state.py` | `docs/{user}` 브랜치 우선 조회 |
+| stage 주입 | 어댑터 `opencode_bridge/` | OpenCode 세션 메시지에 `[엔진 상태] 현재 stage=X / 호출할 스킬=Y` 시스템 메시지 prefix |
 
-**불가 사유**: 사내 정책상 특정 LLM 벤더 종속을 받아들일 수 없음. 자체 ReACT 유지 + LLM 어댑터 추상화 방향으로 계속 발전.
+### 7.2 실행 흐름
 
-### 9.2 gojira-cli로의 일원화 검토
+1. 사용자 입력에서 프로젝트 코드 감지 → `load_or_start_job`
+2. Belief State 조회 → `[엔진 상태]` system 메시지 구성
+3. 어댑터가 OpenCode `POST /session/:id/prompt_async` 호출 시 메시지 prefix 로 삽입
+4. OpenCode 가 stage skill 호출 → tool_result 도착
+5. 어댑터가 `advance(skill_result)` → belief state 재검증 → 전이
+6. 전이 성공 시 다음 stage 지시를 system 메시지로 추가 주입 (같은 세션 내 연속 진행)
 
-**부분 일원화는 의미 있음**:
-- 단순 CRUD 스킬은 gojira-cli 위임으로 통일 가능 → DRY 효과
-- LLM 오케스트레이션 스킬은 executor 유지 필요
-
-**전면 치환은 비추천**: subprocess 호출 오버헤드, 스트리밍 단절, LLM 호출 불가능
-
-### 9.3 스킬 선별 방식 개선 검토
-
-현재 KEYWORD_MAP 기반 → description 기반(또는 2-pass) 전환은 검토 가치 있음:
-- **장점**: 신규 스킬 추가가 SKILL.md 작성만으로 완결, Claude Code 철학과 일치
-- **단점**: 토큰 비용 증가, 결정 비결정론화
-
-판단 기준: 스킬 수가 계속 늘어날 예정이라면 description 기반 전환이 유리. 안정적이면 현 방식 유지.
-
-### 9.4 차용 가능한 패턴 (LLM 종속 무관)
-
-Claude SDK 채택은 불가하지만 다음은 차용 가능:
-- SKILL.md 표준 형식 (이미 적용)
-- MCP 도구 스펙
-- critique 루프 패턴 (이미 적용)
-- 메모리/플랜 기능을 우리 방식으로 재구현
-
----
-
-## 10. 상태 관리 (State Management)
-
-### 10.1 ReACT 의 3단계 상태 관리
-
-| 수준 | 이름 | 메커니즘 | 범위 |
-|------|------|---------|------|
-| 1 | Scratchpad | (Thought / Action / Observation) triple 을 프롬프트에 이어붙임 | 턴 내부 |
-| 2 | Belief State | 외부 시스템(DB/API/문서)에서 현재 상태를 조회해 매 턴 context 에 주입 | 세션·프로젝트 |
-| 3 | Explicit Plan / Workflow Graph | Plan 을 1급 객체로 영속화, 각 노드의 상태(pending/in_progress/done/blocked) 추적, 재시작·재개·분기 지원 | 장기 워크플로우 |
-
-실무 대부분은 **수준 1 + 2 조합**. 수준 3 은 워크플로우가 길고 중단/재개/재시도가 잦을 때 가치가 있음.
-
-### 10.2 현재 상태와 발견된 문제
-
-현 에이전트는 **수준 1 만** 구현됨. Scratchpad 는 ReACT 2-pass 추론에서 충분히 작동하지만, **턴 경계를 넘는 상태 공유가 없다**. 다음과 같은 증상 발생:
-
-- 사용자 "계속", "진행해줘" 같은 모호한 입력에서, 이전 턴에 `vos_collect` 가 성공했다는 사실을 LLM 이 prompt 문맥(assistant 메시지)으로만 추정 → 재호출 선택 오류
-- 외부(다른 사용자/세션)에서 이슈가 변경되어도 인지 불가
-- 재시작 시 직전 세션의 진행 위치 유실
-
-**근본 원인**: 진실 상태(VOS/Feature/Requirement/archSettings)는 **Git YAML(이슈) + MongoDB(프로젝트 메타)** 에 존재하지만 LLM 에게는 prompt 문맥만 있을 뿐 직접 연결이 없음.
-
-### 10.3 채택 방향: 수준 2 (Belief State) 추가
-
-**설계**:
-
-```python
-# core/workflow_state.py (신규)
-def get_workflow_state(project_code: str) -> dict:
-    return {
-        "projdesc_exists": bool,
-        "vos_count": int,
-        "feature_count": int,
-        "requirement_count": int,
-        "driver_count": int,          # Requirement 중 driverSelected=true
-        "chosenStyles": dict | None,  # projects.archSettings.chosenStyles
-        "design_count": {"adsn": int, "ddsn": int},
-        "next_recommended_step": str, # 계산된 다음 워크플로우 스킬
-    }
-```
-
-**주입 지점**: `agents/streaming.py` Pass 1 추론 직전, 사용자 메시지에서 프로젝트 코드가 식별되면 위 상태를 한국어 요약으로 system 메시지에 덧붙임.
-
-**상태 원천**:
-- 이슈 카운트/필드 — MongoDB `issues` **캐시** 조회 (원천은 git `data/issues/*.yaml`, 캐시는 sync 훅으로 동기 유지)
-- `archSettings` (chosenStyles, satamDone, designIntegrated 등 플래그) — MongoDB `projects`
-- 문서 존재 여부 — Gitea 트리 조회
-
-`completedSteps` 계산은 이슈 카운트 + `archSettings` 플래그 조합. git YAML 을 직접 읽지 않고 캐시에서 읽기 때문에 hot path 성능 유지.
-
-**효과**:
-- LLM 이 "이미 VOS 13 건 / Feature 0 건" 을 인지 → "계속" = `usecase_analyze` 호출로 결정
-- 외부 변경 반영 (다른 세션에서 이슈 삭제 등)
-- 기존 ReACT 구조·스킬 변경 없음 — 주입 레이어만 얇게 추가
-
-### 10.4 향후 수준 3 (PDCA 모드) 준비
-
-수준 3 은 **PDCA (Plan-Do-Check-Act)** 로 구체화 예정. 거대 목표("과제 하나 완성") 또는 피드백 루프("SATAM 리스크 → 설계 수정 → 재평가")처럼 단순 선형 워크플로우로 표현할 수 없는 시나리오를 겨냥.
-
-| PDCA | 수준 3 요소 |
-|------|-----------|
-| Plan | 목표 → 태스크 그래프 분해, 각 노드의 예상 산출/검증 기준 정의 |
-| Do | 각 태스크를 스킬로 실행 |
-| Check | 산출물이 계획된 기준을 만족하는가 (critique 의 상위 개념 — 전체 목표 대비 편차) |
-| Act | 편차 시 plan 재작성 + 재실행 루프 |
-
-**설계 포인트**:
-- Plan 을 1급 객체(`plans` collection)로 영속화 — checkpointing / 재시작 자연스러움
-- Check 는 스킬 내부 critique 와 구분: critique = "산출물 품질", Check = "목표 대비 편차"
-- Act 의 두 분기: minor deviation → 노드 재실행, major deviation → plan 재작성 (replanner)
-- Replanner 무한 루프 방지: hard cap + 사람 에스컬레이션
-
-### 10.5 단계적 진화 로드맵
-
-```
-Now     : 수준 1 (Scratchpad) + 수준 2 (Belief State) + 수준 3 부분 (Workflow State Machine — Phase B)
-Next    : Phase B Step 4~5 완결 (라우팅 분리, 문서 정합성)
-Later   : 수준 3 PDCA 확장 — 거대 목표·피드백 루프에만 선택 적용
-```
-
-**원칙**: 수준 2 의 `workflow_state` 가 만드는 Belief State 는 그대로 수준 3 의 **Check 단계 관측(observation) 입력** 으로 재활용된다. 수준 2 는 수준 3 의 자산이지 부채가 아님.
-
-단순 선형 워크플로우에 PDCA 를 씌우면 부담만 늘고 이익 없음. PDCA 는 **목표 모호성** 또는 **자동 재시도 루프** 가 가치 있을 때 적용.
-
-### 10.6 Phase B — 워크플로우 State Machine (완료)
-
-수준 2 만으로는 "LLM 이 본인이 어느 단계에 있는지 매번 추론해야" 하는 구조라, 순환/누락이 발생. Phase B 에서 **엔진이 통제권을 갖고, LLM 은 현재 stage 내부만 수행** 하는 구조로 전환.
-
-**핵심 구성 요소**
-
-| 구성 | 파일 | 책임 |
-|------|------|------|
-| 워크플로우 정의 | `core/workflows/business_design.py` | 9-stage 시퀀스 (projdesc → vos → usecase → requirement → driver → style → design_decide → design_integrate → satam) |
-| Job 저장소 | `core/job_store.py` + `workflow_jobs` 컬렉션 | 활성 Job 1건 + stage 별 상태/히스토리 영속화 (TTL 90일) |
-| 실행 엔진 | `core/workflow_engine.py` | load/start, advance, belief-state 기반 completion 검증, 전이 |
-| 상태 주입 | `core/workflow_state.py` | `docs/{user}` 브랜치 1순위 조회로 belief state 계산 + `[엔진 상태]` 주입 |
-| tool 필터 | `skills/registry.py` `select_tools(workflow_mode, workflow_allowed)` | 워크플로우 모드에선 현재 stage 주 skill + `project_query`/`reset_project`/`ui_navigate` 만 노출 |
-
-**실행 흐름 (agents/streaming.py)**
-
-1. 사용자 입력에서 프로젝트 코드 감지 → `load_or_start_job` 으로 Job 획득
-2. belief state 조회 (workflow_job + user 전달) → `[엔진 상태] 현재 stage = X / 호출할 스킬 = Y` system 메시지 주입
-3. `workflow_mode=True` 로 tools 제한, `MAX_TURNS = stage_count × 3 + 5` 로 동적 산정
-4. LLM 이 stage skill 호출 → `advance(skill_result)` → belief state 재검증 → 전이
-5. 전이 성공 시 imperative system 메시지 주입 + tools 재선별 + 상위 locals (workflow_allowed/required_skills) 갱신 — 같은 턴 내 연속 진행
-
-**핵심 설계 결정**
-
+### 7.3 핵심 설계 결정
 - **엔진이 통제, LLM 은 stage 내부만** — 반복 루프·단계 건너뛰기 방지
-- **belief state 는 `docs/{user}` 브랜치 1순위** — Agent 가 쓰는 브랜치와 판정 출처 일치
-- **advance 는 fn_name 매칭 없이도 belief state 로 completion 판정** — 보조 skill 이 사실상 stage 완료시킨 경우에도 전이
-- **`/btw` prefix** — 진행 중 단건 free-form 요청 시 그 turn 만 workflow 우회 (Job/대화 유지, advance 스킵)
+- **Belief State 는 `docs/{user}` 브랜치 1순위** — agent 쓰기 브랜치와 판정 출처 일치
+- **advance 는 belief state 기반 completion 판정** — 보조 skill 이 사실상 stage 완료시킨 경우에도 전이
+- **`/btw` prefix** — 그 turn 만 workflow 우회 (Job/대화 유지, advance 스킵)
 
-**완료 단계**: Step 0 (계약 표준화) → Step 1 (엔진 골격) → Step 2 (projdesc 통합) → Step 3 (9단계 전면 연동) → 엔진 통제 근본 수정 → `/btw` 라우팅 (Step 4 완료).
+### 7.4 수준별 상태 관리 (참고)
+
+| 수준 | 이름 | 적용 |
+|---|---|---|
+| 1 | Scratchpad (ReACT 내부) | OpenCode 가 세션 내부에서 자동 처리 |
+| 2 | Belief State | 어댑터가 stage 주입 시 프로젝트 진실 상태 포함 |
+| 3 | Workflow State Machine | 엔진 통제로 stage 전이 |
+| 3+ | PDCA (목표 모호성·피드백 루프) | 선택 적용, 미래 과제 |
 
 ---
 
-## 11. 핵심 설계 원칙 (요약)
+## 8. LLM 설정
 
-1. **자체 ReACT 유지** — LLM 종속 회피, 멀티 벤더 어댑터 지원
-2. **스킬은 기능 단위로 격리** — SKILL.md(메타) + executor.py(구현) + prompts(LLM 지시) 3계층
-3. **LLM 오케스트레이션은 Python에서 결정론적으로 통제** — critique 루프, 선행 자동 위임, 결정론적 JSON 파싱
-4. **이슈 생성은 항상 사전 확인 → 분기 처리** — 중복 생성 방지, 폐기는 마킹 우선
-5. **산출 문서 본문은 채팅에 출력하지 않음** — 파일 저장 + 1~3줄 요약 보고
-6. **`prompts/system.txt`이 단일 진실 출처** — 이슈 생성 규칙, 응답 스타일, 워크플로우 처리 지침 통합
-7. **상태 관리는 Belief State(수준 2) 까지 현재 채택** — LLM 이 매 턴 프로젝트의 진실 상태를 알고 판단. 수준 3(PDCA) 은 목표 모호성·피드백 루프 시나리오에만 선택 적용
-8. **장기 워크플로우는 엔진 통제, LLM 은 stage 내부만** — Phase B State Machine (`workflow_engine`) 이 전이를 통제하고, tool 화이트리스트로 LLM 행동 범위를 고정. `/btw` 로 단건 free-form 우회.
+**OpenCode 기본 설정 체계를 그대로 사용**. Agent-Service 쪽 LLM 설정 레이어(`llm.json`, `/Agent/llm` 전환 API) 는 **전면 제거**.
+
+- 설정 파일: `opencode.json` (프로젝트 루트) / `~/.config/opencode/opencode.json` (글로벌)
+- 병합 우선순위는 OpenCode 문서 그대로 (remote < global < custom < project < inline < managed)
+- 프로바이더·모델·API 키 관리 모두 OpenCode 규약 (`{env:...}`, `{file:...}` substitution 포함)
+- UI 에서 프로바이더/모델 전환이 필요하면 향후 요구 발생 시 OpenCode 의 공식 방식(설정 파일 편집 or 제공되는 API) 에 맞춰 검토. 현재 단계에서는 **GoJIRA 측 전용 전환 UI 미제공**
+
+---
+
+## 9. 제거되는 구성 요소
+
+OpenCode 채택으로 Agent-Service 는 다음을 **제거**:
+
+- `Agent-Service/agents/react.py` — ReACT 루프 (OpenCode 내장)
+- `Agent-Service/agents/streaming.py` — 2-pass 추론 (OpenCode 내장)
+- `Agent-Service/agents/orchestrator.py`
+- `Agent-Service/core/llm.py` + `llm.json` — LLM 어댑터 (opencode.json 대체)
+- `Agent-Service/skills/registry.py` — 스킬 선별 (OpenCode discover + description)
+- `Agent-Service/skills/dispatcher.py` — 디스패치 (OpenCode tool executor)
+- `Agent-Service/skills/<name>/executor.py` — 모든 Python executor (스킬 self-contained)
+- `Agent-Service/skills/<name>/prompts/` — 프롬프트 (SKILL.md 내부 흡수)
+- `Agent-Service/skills/critique.py` — critique 루프 (스킬 내부 self-loop)
+- LLM 프로바이더 전환 UI/API (`/Agent/llm`) — OpenCode 설정 체계로 일원화
+- `Agent-Service/skills/mermaid_utils.py` — Mermaid 검증 (SKILL.md 규약으로)
+- `Agent-Service/prompts/system.txt` — system 프롬프트 (primary agent md 로 이관)
+
+**유지**:
+- `routers/agent.py` (축소)
+- `core/workflow_engine.py`, `core/workflow_state.py`, `core/job_store.py`, `core/workflows/`
+- `opencode_bridge/` (신설)
+- Mongo 세션 저장소
+
+**규모 예상**: 현재 1만+ 줄 → 1~2천 줄
+
+---
+
+## 10. 이행 계획 (Phase)
+
+### Phase 0 — 스파이크 (3~4일)
+- [ ] `opencode serve` 기동, `/doc` OpenAPI 저장 → 이벤트명/payload 확정
+- [ ] `.opencode/agents/gojira.md` + 세션 생성 + 메시지 송신 smoke test
+- [ ] `.claude/skills/vos-collect2` 가 그대로 invoke 되는지 (user 인자 전달 방식 검증)
+- [ ] SSE 이벤트 번역 최소 어댑터 (FastAPI 100줄) 작성
+- [ ] UI 변경 없이 end-to-end 확인
+
+### Phase 1 — 어댑터 본체
+- `opencode_bridge/` 구현 (세션 매핑, 이벤트 번역, stage 주입)
+- `routers/agent.py` 의 `/chat/stream` 을 어댑터 호출로 교체
+- Mongo 세션 영속화 연결
+- LLM 설정은 OpenCode `opencode.json` 에 직접 구성 (GoJIRA 측 설정 레이어 없음)
+
+### Phase 2 — 워크플로우 엔진 통합
+- `workflow_engine` + `workflow_state` 를 어댑터 레이어에서 호출
+- stage 주입 메시지 포맷 확정
+- `/btw` prefix 라우팅
+
+### Phase 3 — 정리
+- `Agent-Service/skills/`, `agents/`, `core/llm.py`, `llm.json`, `prompts/system.txt` 제거
+- 문서·테스트 갱신
+- main 머지
+
+### Phase 4 — 후속
+- `ui-navigate` 부활 (Platform-API `POST /api/events/navigate` 엔드포인트 신설 후)
+- 토큰 사용량 / 품질 / 속도 실측 비교
+- PDCA 확장 (목표 모호성 시나리오에만 선택 적용)
+
+---
+
+## 11. 리스크 / 검증 포인트
+
+1. **OpenCode API 안정성** — 버전 고정 필수 (`opencode --version` 기록)
+2. **SSE 이벤트 의미 매칭** — `tool_call` 세밀도가 Agent-Service `progress` 를 대체 가능한지
+3. **멀티 세션 병행** — OpenCode 동시 세션 한도/격리
+4. **스킬 내 `X-User-Id`** — 실행 환경 env 주입 방식
+5. **워크플로우 stage 주입** — OpenCode 세션에 system 메시지 추가 삽입 가능 여부
+6. **인증/포트/로컬 바인딩** — OpenCode 서버 외부 노출 차단 (`127.0.0.1` + password)
+7. **스킬 discover 경로 우선순위** — `.claude/skills/` vs `.opencode/skills/` 충돌 방지
+8. **API 스키마 미확인 사항**:
+   - `POST /Issue` 가 priority/assignee 직접 수용 vs PUT 분리 필요
+   - NFR `environment` 필드 customfield 매핑
+   - `PUT /Project/${CODE}` archSettings.chosenStyles 엔드포인트 실존 여부
+
+---
+
+## 12. 핵심 설계 원칙
+
+1. **LLM 런타임은 OpenCode 에 위임** — ReACT/스킬 디스패치 자체 구현 폐기, UI 계약만 유지
+2. **스킬은 self-contained SKILL.md** — Python executor 없음, curl/jq 로 완결
+3. **스킬 경로 표준은 `.claude/skills/`** — Claude Code/OpenCode 양쪽 호환, 다른 하네스 이식 용이
+4. **LLM 설정은 OpenCode 체계 그대로** — GoJIRA 측 별도 설정 레이어 없음, `opencode.json` 이 단일 진실 출처
+5. **엔진이 워크플로우 stage 통제, LLM 은 stage 내부만** — 순환/누락 방지, tool 화이트리스트
+6. **Belief State 는 `docs/{user}` 브랜치 1순위** — agent 쓰기/읽기 출처 일치
+7. **이슈 생성은 사전 확인 → 분기** — 중복 방지, 폐기는 마킹 우선
+8. **산출 문서는 파일 저장, 채팅엔 요약만**
 
 ---
 
 ## 부록: 관련 파일
 
-- 시스템 프롬프트: [`prompts/system.txt`](../Agent-Service/prompts/system.txt)
-- 요구분석 워크플로우: [`prompts/workflow-requirement-analysis.md`](../Agent-Service/prompts/workflow-requirement-analysis.md)
-- 구조설계 워크플로우: [`prompts/workflow-architecture-design.md`](../Agent-Service/prompts/workflow-architecture-design.md)
-- 에이전트 라우터: [`routers/agent.py`](../Agent-Service/routers/agent.py)
-- 스킬 레지스트리: [`skills/registry.py`](../Agent-Service/skills/registry.py)
-- 스트리밍 오케스트레이터: [`agents/streaming.py`](../Agent-Service/agents/streaming.py), [`agents/orchestrator.py`](../Agent-Service/agents/orchestrator.py)
+- Primary agent: `.opencode/agents/gojira.md`
+- 프로바이더 설정: `opencode.json`
+- 스킬: `.claude/skills/*2/SKILL.md`
+- 어댑터: `Agent-Service/opencode_bridge/` (신설)
+- 라우터: `Agent-Service/routers/agent.py` (축소)
+- 워크플로우: `Agent-Service/core/workflow_engine.py`, `core/workflow_state.py`, `core/workflows/business_design.py`
+- UI: `GoJIRA-App/src/components/AgentChat.js`
