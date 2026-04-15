@@ -9,6 +9,6 @@ _USECASE_FIELDS = (
 )
 
 
-def execute(params: dict, user: str) -> dict:
+async def execute(params: dict, user: str) -> dict:
     extras = {f: params[f] for f in _USECASE_FIELDS if params.get(f)}
-    return create_issue("Feature", params, user, extras=extras or None)
+    return await create_issue("Feature", params, user, extras=extras or None)

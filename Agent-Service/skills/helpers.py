@@ -110,15 +110,20 @@ def add_issue_to_project(code: str, issue_key: str):
     )
 
 
-def create_issue(issue_type: str, params: dict, user: str, extras: Optional[dict] = None) -> dict:
+async def create_issue(issue_type: str, params: dict, user: str, extras: Optional[dict] = None) -> dict:
     """공용 이슈 생성 — 타입을 고정해서 받고 공통 필드를 채운다.
+
+    Git YAML 이 원천, Mongo 는 캐시. issuestore 경유.
 
     Args:
         issue_type: 이슈 타입 (VOS, Feature, Requirement, Architectural Design, Detailed Design)
         params: 사용자 입력 파라미터 (projectCode, summary, description, priority, assignee 등)
         user: 작성자
-        extras: 타입별 추가 필드 (예: reqtype). None이면 무시.
+        extras: 타입별 추가 필드 (예: reqtype, designLevel). None이면 무시.
     """
+    from core.issue_schema import IssueDoc
+    from core import issuestore
+
     code = params.get("projectCode", "")
     summary = params.get("summary", "")
     if not code or not summary:
@@ -127,8 +132,16 @@ def create_issue(issue_type: str, params: dict, user: str, extras: Optional[dict
     key = f"{code}-{get_next_issue_num(code)}"
     now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.000+0900")
 
-    doc = {
+    prefix = _resolve_subkey_prefix(issue_type, extras)
+    if not prefix:
+        # 안전망 — 알 수 없는 타입은 key 에서 파생
+        subkey = key.replace("-", "_")
+    else:
+        subkey = next_subkey(code, prefix)
+
+    doc_payload = {
         "key": key,
+        "subkey": subkey,
         "issueType": issue_type,
         "summary": summary,
         "description": params.get("description", ""),
@@ -141,20 +154,19 @@ def create_issue(issue_type: str, params: dict, user: str, extras: Optional[dict
         "labels": [],
         "issueLinks": [],
         "comments": [],
-        "_source": "gojira-agent",
+        "metadata": {"source": "gojira-agent"},
     }
     if extras:
-        doc.update(extras)
+        for k, v in extras.items():
+            if v is not None:
+                doc_payload[k] = v
 
-    prefix = _resolve_subkey_prefix(issue_type, extras)
-    if prefix:
-        doc["subkey"] = next_subkey(code, prefix)
-
-    issues().update_one({"key": key}, {"$set": doc}, upsert=True)
+    doc = IssueDoc.model_validate(doc_payload)
+    await issuestore.save_issue(doc, user, commit_message=f"[issue] 생성 {key} {summary[:40]}")
     add_issue_to_project(code, key)
     return {
         "key": key,
-        "subkey": doc.get("subkey", ""),
+        "subkey": subkey,
         "issueType": issue_type,
         "summary": summary,
         "status": "To Do",
@@ -169,44 +181,57 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S.000+0900")
 
 
-def add_comment(key: str, body: str, user: str) -> dict:
-    """이슈에 코멘트를 추가한다.
+async def _load_mutate_save(key: str, user: str, commit_msg: str, mutate) -> "IssueDoc":
+    """이슈 load → mutate(doc) → issuestore.save_issue. 내부 공용."""
+    from core import issuestore
+    doc = issuestore.get_issue(key)
+    if not doc:
+        raise ValueError(f"이슈 없음: {key}")
+    mutate(doc)
+    doc.updated = _now()
+    await issuestore.save_issue(doc, user, commit_message=commit_msg)
+    return doc
 
-    comments 필드가 없으면 update 시 자동 생성된다.
-    """
+
+async def add_comment(key: str, body: str, user: str) -> dict:
+    """이슈에 코멘트를 추가한다."""
     if not key or not body:
         raise ValueError("key, body 필수")
-    comment = {"author": user, "body": body, "created": _now()}
-    issues().update_one(
-        {"key": key},
-        {"$push": {"comments": comment}, "$set": {"updated": comment["created"]}},
-    )
-    return {"key": key, "comment": comment}
+    from core.issue_schema import Comment
+
+    now = _now()
+    comment = Comment(author=user, body=body, created=now)
+
+    def _mut(doc):
+        doc.comments = list(doc.comments) + [comment]
+
+    await _load_mutate_save(key, user, f"[comment] {key}", _mut)
+    return {"key": key, "comment": {"author": user, "body": body, "created": now}}
 
 
-def update_issue_with_history(key: str, updates: dict, reason: str, user: str) -> dict:
-    """이슈를 수정하고 변경 사유를 자동 코멘트로 남긴다.
-
-    Args:
-        key: 이슈 키
-        updates: $set 대상 필드 dict (summary/description/필드 등)
-        reason: 수정 사유 (코멘트로 기록됨)
-        user: 수정자
-    """
+async def update_issue_with_history(key: str, updates: dict, reason: str, user: str) -> dict:
+    """이슈를 수정하고 변경 사유를 자동 코멘트로 남긴다."""
     if not key or not updates:
         raise ValueError("key, updates 필수")
     if "key" in updates:
-        del updates["key"]  # key 변경 금지
-    updates["updated"] = _now()
-    issues().update_one({"key": key}, {"$set": updates})
+        del updates["key"]
 
-    fields = ", ".join(k for k in updates.keys() if k != "updated")
+    def _mut(doc):
+        for k, v in updates.items():
+            if hasattr(doc, k):
+                setattr(doc, k, v)
+            else:
+                # 모델에 없는 필드는 extra 로 보존
+                doc.__pydantic_extra__ = {**(doc.__pydantic_extra__ or {}), k: v}
+
+    await _load_mutate_save(key, user, f"[update] {key} — {reason}", _mut)
+    fields = ", ".join(k for k in updates.keys())
     body = f"[자동수정] {reason}\n변경 필드: {fields}"
-    add_comment(key, body, user)
+    await add_comment(key, body, user)
     return {"key": key, "updated": list(updates.keys()), "reason": reason}
 
 
-def mark_for_deletion(key: str, reason: str, user: str) -> dict:
+async def mark_for_deletion(key: str, reason: str, user: str) -> dict:
     """이슈를 삭제 마킹한다 (실제 삭제는 하지 않음).
 
     - summary 앞에 "[Deletion Required] " 접두 추가 (이미 있으면 유지)
@@ -215,25 +240,19 @@ def mark_for_deletion(key: str, reason: str, user: str) -> dict:
     """
     if not key or not reason:
         raise ValueError("key, reason 필수")
-    issue = issues().find_one({"key": key})
-    if not issue:
-        raise ValueError(f"이슈 없음: {key}")
 
-    summary = issue.get("summary", "")
-    new_summary = summary if summary.startswith(DELETION_PREFIX) else DELETION_PREFIX + summary
+    def _mut(doc):
+        if not doc.summary.startswith(DELETION_PREFIX):
+            doc.summary = DELETION_PREFIX + doc.summary
+        if DELETION_LABEL not in doc.labels:
+            doc.labels = list(doc.labels) + [DELETION_LABEL]
 
-    issues().update_one(
-        {"key": key},
-        {
-            "$set": {"summary": new_summary, "updated": _now()},
-            "$addToSet": {"labels": DELETION_LABEL},
-        },
-    )
-    add_comment(key, f"[삭제마킹] {reason}", user)
+    await _load_mutate_save(key, user, f"[delete-mark] {key} — {reason}", _mut)
+    await add_comment(key, f"[삭제마킹] {reason}", user)
     return {"key": key, "marked": True, "reason": reason}
 
 
-def dispatch_by_mode(
+async def dispatch_by_mode(
     items: list,
     existing_keys: set,
     create_fn,
@@ -274,7 +293,7 @@ def dispatch_by_mode(
                 updates = update_fields_fn(item) or {}
                 reason = item.get("modifyReason") or "내용 보강"
                 if updates:
-                    update_issue_with_history(existing_key, updates, reason, user)
+                    await update_issue_with_history(existing_key, updates, reason, user)
                 buckets["modified"].append({
                     "key": existing_key,
                     "item": item,
@@ -284,7 +303,7 @@ def dispatch_by_mode(
 
             elif mode == "delete_mark" and existing_key in existing_keys:
                 reason = item.get("deleteReason") or "분석 결과 폐기 대상"
-                mark_for_deletion(existing_key, reason, user)
+                await mark_for_deletion(existing_key, reason, user)
                 buckets["markedForDeletion"].append({
                     "key": existing_key,
                     "item": item,
@@ -293,7 +312,7 @@ def dispatch_by_mode(
 
             else:
                 # 기본: create (mode 미지정 또는 잘못된 existingKey 포함)
-                r = create_fn(item)
+                r = await create_fn(item)
                 buckets["created"].append({
                     "key": r["key"],
                     "item": item,
@@ -368,25 +387,33 @@ def _next_link_id() -> str:
     return str(mx + 1)
 
 
-def link_issues(from_key: str, to_key: str, link_type: str = "contains") -> dict:
-    """두 이슈를 JIRA 표준 형식으로 양방향 link한다.
+async def link_issues(from_key: str, to_key: str, link_type: str = "contains") -> dict:
+    """두 이슈를 JIRA 표준 형식으로 양방향 link 한다.
 
-    `from_key`가 outward(상위/부모), `to_key`가 inward(하위/자식).
-    저장 형식 (JIRA DC v2 호환):
-      from_key.issueLinks: {id, type:{name}, outwardIssue:{key:to_key}}
-      to_key.issueLinks:   {id, type:{name}, inwardIssue:{key:from_key}}
+    `from_key` 가 outward(상위/부모), `to_key` 가 inward(하위/자식).
+    양쪽 YAML 각각 커밋 (2건).
     """
     if not from_key or not to_key or not link_type:
         raise ValueError("from_key, to_key, link_type 필수")
+    from core.issue_schema import IssueLink, IssueLinkType, IssueLinkRef
+
     type_name = _LINK_TYPE_NAME.get(link_type, link_type)
     link_id = _next_link_id()
-    type_obj = {"name": type_name}
-    issues().update_one(
-        {"key": from_key},
-        {"$push": {"issueLinks": {"id": link_id, "type": type_obj, "outwardIssue": {"key": to_key}}}},
-    )
-    issues().update_one(
-        {"key": to_key},
-        {"$push": {"issueLinks": {"id": link_id, "type": type_obj, "inwardIssue": {"key": from_key}}}},
-    )
+    type_obj = IssueLinkType(name=type_name)
+
+    def _mut_from(doc):
+        ln = IssueLink(id=link_id, type=type_obj, outwardIssue=IssueLinkRef(key=to_key))
+        doc.issueLinks = list(doc.issueLinks) + [ln]
+
+    def _mut_to(doc):
+        ln = IssueLink(id=link_id, type=type_obj, inwardIssue=IssueLinkRef(key=from_key))
+        doc.issueLinks = list(doc.issueLinks) + [ln]
+
+    await _load_mutate_save(from_key, reporter_for_link(), f"[link] {from_key}→{to_key} ({link_type})", _mut_from)
+    await _load_mutate_save(to_key, reporter_for_link(), f"[link] {from_key}→{to_key} ({link_type})", _mut_to)
     return {"linkId": link_id, "fromKey": from_key, "toKey": to_key, "linkType": type_name}
+
+
+def reporter_for_link() -> str:
+    """link 는 호출자 user 정보가 없는 경우가 있어 기본 값 사용."""
+    return "system"

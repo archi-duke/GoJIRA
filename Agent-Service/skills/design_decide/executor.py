@@ -201,7 +201,7 @@ async def execute(params: dict, user: str) -> dict:
     document = parsed.get("document") or ""
 
     # 이슈 생성 (dispatch_by_mode)
-    def _create_fn(item):
+    async def _create_fn(item):
         level = (item.get("designLevel") or "Architectural")
         if level not in _DESIGN_LEVEL_TO_TYPE:
             raise ValueError(f"designLevel 은 Architectural/Detailed 만 허용: {level}")
@@ -213,7 +213,7 @@ async def execute(params: dict, user: str) -> dict:
         }
         extras = _item_extras(item)
         extras["designLevel"] = level
-        return create_issue(issue_type, create_params, user, extras=extras or None)
+        return await create_issue(issue_type, create_params, user, extras=extras or None)
 
     def _update_fields_fn(item):
         updates = {}
@@ -224,7 +224,7 @@ async def execute(params: dict, user: str) -> dict:
         updates.update(_item_extras(item))
         return updates
 
-    buckets = dispatch_by_mode(designs, existing_design_keys, _create_fn, _update_fields_fn, user)
+    buckets = await dispatch_by_mode(designs, existing_design_keys, _create_fn, _update_fields_fn, user)
 
     # Requirement contains ADSN/DDSN 링크
     linked = []
@@ -234,7 +234,7 @@ async def execute(params: dict, user: str) -> dict:
             for req_key in (entry["item"].get("relatedRequirements") or []):
                 if req_key in valid_req_keys:
                     try:
-                        link_issues(req_key, design_key, "contains")
+                        await link_issues(req_key, design_key, "contains")
                         linked.append({"from": req_key, "to": design_key})
                     except Exception:
                         pass

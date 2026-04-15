@@ -17,7 +17,7 @@ _ADSN_ONLY_FIELDS = (
 )
 
 
-def execute(params: dict, user: str) -> dict:
+async def execute(params: dict, user: str) -> dict:
     level = params.get("designLevel", "")
     if level not in _LEVEL_MAP:
         raise ValueError("designLevel은 Architectural 또는 Detailed여야 합니다")
@@ -28,4 +28,4 @@ def execute(params: dict, user: str) -> dict:
             if params.get(f):
                 extras[f] = params[f]
 
-    return create_issue(_LEVEL_MAP[level], params, user, extras=extras or None)
+    return await create_issue(_LEVEL_MAP[level], params, user, extras=extras or None)

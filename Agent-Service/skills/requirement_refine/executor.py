@@ -185,7 +185,7 @@ async def execute(params: dict, user: str) -> dict:
     document = parsed.get("document") or ""
 
     # mode 분기 처리
-    def _create_fn(item):
+    async def _create_fn(item):
         req_type = (item.get("reqType") or "").upper()
         if req_type not in ("FR", "NFR", "CNST"):
             raise ValueError(f"잘못된 reqType: {req_type}")
@@ -203,7 +203,7 @@ async def execute(params: dict, user: str) -> dict:
                     extras[f] = item[f]
             if item.get("measureAuto"):
                 extras["measureAuto"] = True
-        return create_issue("Requirement", params_for_create, user, extras=extras)
+        return await create_issue("Requirement", params_for_create, user, extras=extras)
 
     def _update_fields_fn(item):
         updates = {}
@@ -223,7 +223,7 @@ async def execute(params: dict, user: str) -> dict:
                 updates["measureAuto"] = bool(item["measureAuto"])
         return updates
 
-    buckets = dispatch_by_mode(req_items, existing_req_keys, _create_fn, _update_fields_fn, user)
+    buckets = await dispatch_by_mode(req_items, existing_req_keys, _create_fn, _update_fields_fn, user)
 
     # Feature contains Requirement 연결 (created/modified만)
     linked = []
@@ -235,7 +235,7 @@ async def execute(params: dict, user: str) -> dict:
             for fk in (item.get("relatedFeatures") or []):
                 if fk in valid_feat_keys:
                     try:
-                        link_issues(fk, req_key, "contains")
+                        await link_issues(fk, req_key, "contains")
                         linked.append({"from": fk, "to": req_key})
                     except Exception:
                         pass

@@ -105,9 +105,9 @@ async def execute(params: dict, user: str) -> dict:
         }
 
     # 4. mode 분기 처리
-    def _create_fn(item):
+    async def _create_fn(item):
         client_val = item.get("client", "")
-        return create_issue(
+        return await create_issue(
             "VOS",
             {
                 "projectCode": code,
@@ -126,7 +126,7 @@ async def execute(params: dict, user: str) -> dict:
                 updates[f] = v
         return updates
 
-    buckets = dispatch_by_mode(items, existing_keys, _create_fn, _update_fields_fn, user)
+    buckets = await dispatch_by_mode(items, existing_keys, _create_fn, _update_fields_fn, user)
 
     tsum = trail_summary(critique_trail)
     msg = _summarize(buckets) + (f" — {tsum}" if tsum else "")

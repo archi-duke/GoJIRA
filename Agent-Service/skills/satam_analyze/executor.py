@@ -77,14 +77,14 @@ async def execute(params: dict, user: str) -> dict:
         miti_yaml = _serialize_items(miti_items, counter=True)
 
         try:
-            issues().update_one(
-                {"key": key},
-                {"$set": {
-                    "risk": risk_yaml,
-                    "sensitivity": sens_yaml,
-                    "mitigation": miti_yaml,
-                }},
-            )
+            from core import issuestore
+            doc = issuestore.get_issue(key)
+            if not doc:
+                raise ValueError(f"이슈 없음: {key}")
+            doc.risk = risk_yaml
+            doc.sensitivity = sens_yaml
+            doc.mitigation = miti_yaml
+            await issuestore.save_issue(doc, user, commit_message=f"[satam] {key} R/S/M 업데이트")
             updated_keys.append(key)
             risk_total += len(risk_items)
             sens_total += len(sens_items)

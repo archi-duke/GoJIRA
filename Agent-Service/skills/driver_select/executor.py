@@ -33,12 +33,16 @@ def _extract_json_obj(raw: str):
     return None
 
 
-def _add_asr_label(issue_key: str):
-    """이슈에 ASR 라벨 추가 (중복 방지)."""
-    issues().update_one(
-        {"key": issue_key},
-        {"$addToSet": {"labels": _ASR_LABEL}},
-    )
+async def _add_asr_label(issue_key: str, user: str):
+    """이슈에 ASR 라벨 추가 (중복 방지). issuestore 경유."""
+    from core import issuestore
+    doc = issuestore.get_issue(issue_key)
+    if not doc:
+        return
+    if _ASR_LABEL in doc.labels:
+        return
+    doc.labels = list(doc.labels) + [_ASR_LABEL]
+    await issuestore.save_issue(doc, user, commit_message=f"[label] ASR {issue_key}")
 
 
 async def execute(params: dict, user: str) -> dict:
@@ -194,8 +198,8 @@ async def execute(params: dict, user: str) -> dict:
         if d.get("sensitivity"):
             updates["sensitivity"] = d["sensitivity"]
         try:
-            update_issue_with_history(key, updates, "Architecture Driver 선정", user)
-            _add_asr_label(key)
+            await update_issue_with_history(key, updates, "Architecture Driver 선정", user)
+            await _add_asr_label(key, user)
             # subkey 보강 (LLM 응답에 없을 수 있음)
             d.setdefault("subkey", req_by_key[key].get("subkey", ""))
             updated.append({"key": key, "qad": qad, "qai": qai, "priority": updates["priority"]})
@@ -205,7 +209,10 @@ async def execute(params: dict, user: str) -> dict:
     # 모든 NFR 에 ASR 라벨 자동 부여 (driver 로 선정되지 않았더라도)
     for r in req_list:
         if (r.get("reqtype") or "").upper() == "NFR":
-            _add_asr_label(r["key"])
+            try:
+                await _add_asr_label(r["key"], user)
+            except Exception:
+                pass
 
     # normalizedAttributes 를 프로젝트에 영속화 (style_define 재사용)
     if normalized:

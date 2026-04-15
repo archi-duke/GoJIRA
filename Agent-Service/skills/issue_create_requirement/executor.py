@@ -9,7 +9,7 @@ _NFR_FIELDS = (
 )
 
 
-def execute(params: dict, user: str) -> dict:
+async def execute(params: dict, user: str) -> dict:
     req_type = params.get("reqType", "")
     if req_type not in ("FR", "NFR", "CNST"):
         raise ValueError("reqType은 FR, NFR, CNST 중 하나여야 합니다")
@@ -22,4 +22,4 @@ def execute(params: dict, user: str) -> dict:
             if params.get(f):
                 extras[f] = params[f]
 
-    return create_issue("Requirement", params, user, extras=extras)
+    return await create_issue("Requirement", params, user, extras=extras)

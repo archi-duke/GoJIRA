@@ -194,7 +194,7 @@ async def execute(params: dict, user: str) -> dict:
             pass  # 실패해도 원본 유지
 
     # 4. mode 분기 처리
-    def _create_fn(item):
+    async def _create_fn(item):
         feature_params = {
             "projectCode": code,
             "summary": (item.get("summary") or "").strip(),
@@ -204,7 +204,7 @@ async def execute(params: dict, user: str) -> dict:
             if item.get(f):
                 feature_params[f] = item[f]
         extras = {f: feature_params[f] for f in _USECASE_FIELDS if feature_params.get(f)}
-        return create_issue("Feature", feature_params, user, extras=extras or None)
+        return await create_issue("Feature", feature_params, user, extras=extras or None)
 
     def _update_fields_fn(item):
         updates = {}
@@ -214,7 +214,7 @@ async def execute(params: dict, user: str) -> dict:
                 updates[f] = v
         return updates
 
-    buckets = dispatch_by_mode(features, existing_feature_keys, _create_fn, _update_fields_fn, user)
+    buckets = await dispatch_by_mode(features, existing_feature_keys, _create_fn, _update_fields_fn, user)
 
     # 5. VOS contains Feature 연결 (created/modified만)
     linked = []
@@ -224,7 +224,7 @@ async def execute(params: dict, user: str) -> dict:
             for vos_key in (entry["item"].get("relatedVOS") or []):
                 if vos_key in valid_vos_keys:
                     try:
-                        link_issues(vos_key, feat_key, "contains")
+                        await link_issues(vos_key, feat_key, "contains")
                         linked.append({"from": vos_key, "to": feat_key})
                     except Exception:
                         pass
