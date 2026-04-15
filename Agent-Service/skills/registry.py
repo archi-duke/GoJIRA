@@ -274,7 +274,7 @@ class SkillRegistry:
         # 4.5 호출자가 명시한 필수 스킬 (belief state nextRecommendedStep 등)
         if required:
             for r in required:
-                if r in self._index:
+                if r in self._skills:
                     expanded.add(r)
 
         # 5. 범위 보정
