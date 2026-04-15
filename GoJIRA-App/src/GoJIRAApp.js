@@ -43,28 +43,58 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
   }, []);
 
   // Agent 독립 창에서 보낸 네비게이션 명령 수신 (cross-origin postMessage + same-origin BroadcastChannel)
+  // minimal project 로 덮어쓰면 documents (repoName 등) 가 사라져 DocEditor 가 "저장소 없음" 으로 오판.
+  // → 기존 state/sessionStorage 의 full project 와 merge, 없으면 API 에서 조회 후 navigate.
   useEffect(() => {
-    function handleMessage(e) {
+    const API_BASE_URL = config.GOJIRA_API || config.API_BASE;
+    async function resolveProject(projectCode, projectName) {
+      const minimal = {
+        name: projectName || projectCode,
+        jiraCodes: { main: { jiraCode: projectCode } },
+      };
+      // 1. state 의 selectedProject 가 동일 코드면 재사용 (merge 로 name 만 갱신)
+      try {
+        const cur = selectedProject;
+        if (cur && cur.jiraCodes?.main?.jiraCode === projectCode && cur.documents) {
+          return { ...cur, name: projectName || cur.name };
+        }
+      } catch {}
+      // 2. sessionStorage 캐시 확인
+      try {
+        const cached = JSON.parse(sessionStorage.getItem('gojira_project') || 'null');
+        if (cached && cached.jiraCodes?.main?.jiraCode === projectCode && cached.documents) {
+          return { ...cached, name: projectName || cached.name };
+        }
+      } catch {}
+      // 3. API 조회 — /Project 전체 목록에서 코드 매칭
+      try {
+        const res = await fetch(`${API_BASE_URL}/Project`, { headers: { XBody: JSON.stringify({}) } });
+        const arr = await res.json();
+        if (Array.isArray(arr)) {
+          const full = arr.find(p => p?.jiraCodes?.main?.jiraCode === projectCode);
+          if (full) return full;
+        }
+      } catch {}
+      return minimal;
+    }
+
+    async function handleMessage(e) {
       if (e.data?.type === 'gojira-navigate' && e.data.projectCode && e.data.page) {
-        navigate(e.data.page, {
-          name: e.data.projectName || e.data.projectCode,
-          jiraCodes: { main: { jiraCode: e.data.projectCode } },
-        });
+        const p = await resolveProject(e.data.projectCode, e.data.projectName);
+        navigate(e.data.page, p);
       }
     }
     window.addEventListener('message', handleMessage);
     const ch = new BroadcastChannel('gojira-navigate');
-    ch.onmessage = (evt) => {
+    ch.onmessage = async (evt) => {
       const { projectCode, projectName, page: targetPage } = evt.data;
       if (projectCode && targetPage) {
-        navigate(targetPage, {
-          name: projectName || projectCode,
-          jiraCodes: { main: { jiraCode: projectCode } },
-        });
+        const p = await resolveProject(projectCode, projectName);
+        navigate(targetPage, p);
       }
     };
     return () => { window.removeEventListener('message', handleMessage); ch.close(); };
-  }, [navigate]);
+  }, [navigate, selectedProject]);
 
   const onNavigate = useCallback((target) => {
     navigate(target, selectedProject);

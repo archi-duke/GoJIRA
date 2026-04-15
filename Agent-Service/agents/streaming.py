@@ -15,6 +15,10 @@ from agents.utils import strip_reasoning as _strip_reasoning
 log = logging.getLogger("agent.streaming")
 
 MAX_TURNS = 10
+# 워크플로우 자동 연쇄 실행 시엔 워크플로우 stage 수 기반으로 동적 산정
+# (stage 당 1~2 turn + 인터뷰/재시도 버퍼 5)
+WORKFLOW_TURNS_PER_STAGE = 3
+WORKFLOW_TURNS_BUFFER = 5
 
 
 async def agent_loop_stream(
@@ -133,6 +137,16 @@ async def agent_loop_stream(
     # Pass 2 (tool_choice="auto") 단일 호출로 충분.
     from core.llm import is_thinking_model
     thinking_model = is_thinking_model()
+
+    # 워크플로우 자동 연쇄 실행 중이면 워크플로우 stage 수에 비례한 turn 예산 부여
+    if workflow_mode and workflow_job and max_turns == MAX_TURNS:
+        try:
+            from core.workflows import get_workflow
+            stage_count = len(get_workflow(workflow_job["workflowId"])["stages"])
+            max_turns = stage_count * WORKFLOW_TURNS_PER_STAGE + WORKFLOW_TURNS_BUFFER
+            log.info("workflow max_turns = %d (stages=%d)", max_turns, stage_count)
+        except Exception as e:
+            log.warning("max_turns 동적 산정 실패: %s — 기본값 유지", e)
 
     for turn in range(max_turns):
         yield _sse("thinking", {"turn": turn, "message": "추론 중..."})
