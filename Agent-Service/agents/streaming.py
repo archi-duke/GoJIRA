@@ -60,11 +60,10 @@ async def agent_loop_stream(
             user_message = m.get("content", "")
             break
 
-    # 워크플로우 상태 주입 (Belief State)
-    # 대화 이력 전체를 뒤에서부터 훑어 프로젝트 코드를 찾는다. 사용자가 "계속" 처럼
-    # 프로젝트 코드를 생략한 입력을 주어도 이전 턴에서 언급한 코드를 재사용.
-    # design-agent.md §10, design-workflow.md §10 참조.
+    # 워크플로우 상태 주입 (Belief State) + Phase B 엔진 job 결합
     detected_code = None
+    state = None
+    workflow_job = None
     try:
         from core.workflow_state import detect_project_code, get_workflow_state, format_state_for_llm
         for m in reversed(messages):
@@ -77,16 +76,19 @@ async def agent_loop_stream(
             detected_code = detect_project_code(content)
             if detected_code:
                 break
-        state = None
         if detected_code:
-            state = await get_workflow_state(detected_code)
+            # Phase B — workflow job 먼저 load/start (belief state 에 currentStage 주입 위해)
+            try:
+                from core import workflow_engine
+                workflow_job = workflow_engine.load_or_start_job(detected_code, created_by=user_id)
+                log.info("workflow job: %s stage=%s", workflow_job.get("jobId"), workflow_job.get("currentStage"))
+            except Exception as e:
+                log.warning("workflow job 로드 실패: %s", e)
+            state = await get_workflow_state(detected_code, workflow_job=workflow_job)
             state_text = format_state_for_llm(state)
-            log.info("워크플로우 상태 주입: code=%s next=%s vos=%d feat=%d req=%d drv=%d completed=%s",
-                     detected_code, state.get("nextRecommendedStep"),
-                     state.get("vosCount", 0), state.get("featureCount", 0),
-                     state.get("requirementCount", 0), state.get("driverCount", 0),
+            log.info("워크플로우 상태 주입: code=%s stage=%s skill=%s completed=%s",
+                     detected_code, state.get("currentStage"), state.get("currentStageSkill"),
                      [k for k, v in (state.get("completedSteps") or {}).items() if v])
-            # 기존 system 메시지 뒤에 덧붙임
             injected = False
             for i, m in enumerate(messages):
                 if m.get("role") == "system":
@@ -100,25 +102,32 @@ async def agent_loop_stream(
     except Exception as e:
         log.warning("워크플로우 상태 주입 실패: %s", e)
 
-    # Phase B — workflow job 로드/시작 (projdesc 단계만 우선 엔진 연동)
-    workflow_job = None
-    if detected_code and state:
-        try:
-            from core import workflow_engine
-            workflow_job = workflow_engine.load_or_start_job(detected_code, created_by=user_id)
-            log.info("workflow job: %s stage=%s", workflow_job.get("jobId"), workflow_job.get("currentStage"))
-        except Exception as e:
-            log.warning("workflow job 로드 실패: %s", e)
-
-    # 1차 스킬 선별 (키워드 + description 매칭)
-    # belief state 의 nextRecommendedStep 은 반드시 tools 후보에 포함시켜
-    # LLM 이 issue_create_* 같은 저수준 스킬로 빠지지 않도록 한다.
+    # Phase B — 워크플로우 모드에서 tools 강제 제한: 현재 stage 주 skill + 보조 skill 만 노출
     required_skills = []
-    if state and state.get("nextRecommendedStep"):
+    workflow_mode = False
+    workflow_allowed: set = set()
+    if workflow_job and workflow_job.get("status") in ("in_progress", "pending", "paused"):
+        cur_stage = workflow_job.get("currentStage")
+        try:
+            from core.workflows import get_stage
+            stage_def = get_stage(workflow_job["workflowId"], cur_stage)
+            required_skills.append(stage_def["skill"])
+            workflow_allowed.add(stage_def["skill"])
+            # projdesc stage 는 interview/generate 함께 노출 (답변 처리 위해)
+            if cur_stage == "projdesc":
+                workflow_allowed.update({"projdesc_interview", "projdesc_generate"})
+            workflow_mode = True
+        except Exception as e:
+            log.warning("stage tools 제한 실패: %s", e)
+    elif state and state.get("nextRecommendedStep"):
         required_skills.append(state["nextRecommendedStep"])
-    if state and not (state.get("completedSteps") or {}).get("projdesc"):
-        required_skills.append("projdesc_interview")
-    tools = registry.select_tools(user_message, required=required_skills)
+
+    tools = registry.select_tools(
+        user_message,
+        required=required_skills,
+        workflow_mode=workflow_mode,
+        workflow_allowed=workflow_allowed,
+    )
 
     # thinking 계열 모델은 내부 추론을 수행하므로 별도 Pass 1 (명시적 ReACT 외재화) 불필요.
     # Pass 2 (tool_choice="auto") 단일 호출로 충분.
@@ -312,24 +321,48 @@ async def agent_loop_stream(
                     tool_result_data["_payload"] = {k: v for k, v in skill_result.items() if k != "_action"}
                 yield _sse("tool_result", tool_result_data)
 
-                # Phase B — stage 스킬 결과로 engine 전이 평가 (9단계 전면 연동)
-                # 현재 stage 의 skill 과 호출된 fn_name 이 일치할 때만 advance.
-                # 이를 통해 사용자가 "이슈 1건 추가" 같은 free-form 호출을 해도 stage 가 잘못 전이되지 않음.
+                # Phase B — stage 스킬 결과로 engine 전이 평가 (9단계 전면, belief-state fallback)
+                # fn_name 이 현재 stage 주 skill 과 다르더라도 advance 를 호출해 belief state 에서
+                # 자동 전이 조건을 확인하도록 한다 (예: projdesc_generate → projdesc 완료).
                 if workflow_job and fn_name in _STAGE_SKILLS and isinstance(skill_result, dict):
                     try:
                         from core import workflow_engine
                         from core.workflows import get_stage
                         cur = workflow_job.get("currentStage")
-                        stage_def = get_stage(workflow_job["workflowId"], cur) if cur else None
-                        if stage_def and fn_name == stage_def["skill"]:
-                            adv = await workflow_engine.advance(workflow_job, skill_result)
-                            workflow_job = adv["job"]
-                            if adv.get("transitioned"):
-                                yield _sse("progress", {
-                                    "skill": "workflow_engine",
-                                    "message": f"단계 전이: {cur} → {adv.get('nextStage') or '완료'}",
-                                    "currentStage": workflow_job.get("currentStage"),
+                        adv = await workflow_engine.advance(workflow_job, skill_result, fn_name=fn_name)
+                        workflow_job = adv["job"]
+                        if adv.get("transitioned"):
+                            next_stage = workflow_job.get("currentStage")
+                            try:
+                                next_skill = get_stage(workflow_job["workflowId"], next_stage)["skill"] if not adv.get("completed") else None
+                            except Exception:
+                                next_skill = None
+                            yield _sse("progress", {
+                                "skill": "workflow_engine",
+                                "message": f"단계 전이: {cur} → {next_stage if not adv.get('completed') else '완료'}",
+                                "currentStage": next_stage,
+                            })
+                            # R4 — LLM 에 imperative 지시 주입 (다음 stage 의 skill 호출 강제)
+                            if next_skill:
+                                messages.append({
+                                    "role": "system",
+                                    "content": (
+                                        f"[워크플로우 엔진] {cur} 단계 완료. "
+                                        f"다음 stage: {next_stage}. "
+                                        f"반드시 `{next_skill}(projectCode=\"{workflow_job['projectCode']}\", jobId=\"{workflow_job['jobId']}\")` 를 호출하라. "
+                                        f"다른 도구 호출 금지."
+                                    ),
                                 })
+                                # 다음 stage 의 tools 로 재선별 (같은 턴 내 연속 진행 — R5)
+                                new_allowed = {next_skill}
+                                if next_stage == "projdesc":
+                                    new_allowed.update({"projdesc_interview", "projdesc_generate"})
+                                tools = registry.select_tools(
+                                    user_message,
+                                    required=[next_skill],
+                                    workflow_mode=True,
+                                    workflow_allowed=new_allowed,
+                                )
                     except Exception as e:
                         log.warning("engine.advance 실패: %s", e)
 

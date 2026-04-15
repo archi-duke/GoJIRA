@@ -79,10 +79,13 @@ def stage_state(job: Dict[str, Any], stage_id: str = None) -> Dict[str, Any]:
 
 # ---------- 전이 ----------
 
-async def advance(job: Dict[str, Any], skill_result: Dict[str, Any]) -> Dict[str, Any]:
+async def advance(job: Dict[str, Any], skill_result: Dict[str, Any], fn_name: str = "") -> Dict[str, Any]:
     """스킬 실행 결과를 받아 현재 stage 의 상태를 갱신하고 필요 시 다음 stage 로 전이.
 
     반환: { job, transitioned: bool, completed: bool, status: ..., nextStage: ... }
+
+    fn_name 이 현재 stage 의 주 skill 과 다르더라도, belief state 에서 completion 플래그가
+    true 로 바뀌어 있으면 자동 전이한다 (예: projdesc_generate 호출만으로 projdesc 완료).
     """
     job_id = job["jobId"]
     stage_id = job["currentStage"]
@@ -107,9 +110,13 @@ async def advance(job: Dict[str, Any], skill_result: Dict[str, Any]) -> Dict[str
         return {"job": job_store.get_job(job_id), "transitioned": False, "completed": False, "status": "blocked"}
 
     if status == "partial":
-        # 같은 stage 유지. stageState 만 업데이트하고 대기
+        # 같은 stage 유지. stageState 만 업데이트하되, belief state 상 완료됐으면 전이
         job_store.update_stage_state(job_id, stage_id, {"status": "partial"})
-        return {"job": job_store.get_job(job_id), "transitioned": False, "completed": False, "status": "partial"}
+        verified = await _verify_stage_completion(job, stage_id)
+        if not verified:
+            return {"job": job_store.get_job(job_id), "transitioned": False, "completed": False, "status": "partial"}
+        # belief state 가 완료로 바뀌었다 — 전이 진행
+        status = "completed"
 
     # completed — belief state 로 다시 한번 확인 후 전이
     verified = await _verify_stage_completion(job, stage_id)

@@ -158,6 +158,9 @@ KEYWORD_MAP = {
 MIN_TOOLS = 3
 MAX_TOOLS = 10
 
+# 워크플로우 모드에서 항상 허용되는 읽기 전용 스킬 (free-form 제외)
+_WORKFLOW_READONLY = {"project_query"}
+
 
 class SkillRegistry:
     def __init__(self):
@@ -231,7 +234,14 @@ class SkillRegistry:
         """프론트엔드 /Agent/tools 응답용."""
         return [_to_tool_info(s) for s in self.list_all()]
 
-    def select_tools(self, message: str, extra_context: str = "", required: List[str] = None) -> List[dict]:
+    def select_tools(
+        self,
+        message: str,
+        extra_context: str = "",
+        required: List[str] = None,
+        workflow_mode: bool = False,
+        workflow_allowed: Optional[Set[str]] = None,
+    ) -> List[dict]:
         """사용자 메시지 기반으로 관련 스킬만 선별하여 OpenAI tool 형식 반환.
 
         1. 키워드 매칭으로 후보 스킬 선별
@@ -239,7 +249,21 @@ class SkillRegistry:
         3. 스킬 그룹으로 관련 스킬 확장
         4. 항상 포함 스킬 추가
         5. MIN_TOOLS ~ MAX_TOOLS 범위 보정
+
+        workflow_mode=True 이면 1~3 단계를 건너뛰고 workflow_allowed + required + 최소 read-only 만 노출.
+        free-form 스킬(issue_create_*, issue_link 등) 이 후보에 오르지 못하게 함.
         """
+        # 워크플로우 모드: 명시된 스킬 + 읽기 전용 + required 만
+        if workflow_mode:
+            allowed = set(workflow_allowed or set())
+            allowed.update(_WORKFLOW_READONLY)
+            if required:
+                allowed.update(required)
+            selected = [s for s in self.list_all() if s.name in allowed]
+            log.info("select_tools[workflow]: %d 스킬 — %s",
+                     len(selected), [s.name for s in selected])
+            return [_to_openai_tool(s) for s in selected]
+
         text = (message + " " + extra_context).lower()
         matched: Set[str] = set()
 

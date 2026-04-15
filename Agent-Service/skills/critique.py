@@ -181,6 +181,12 @@ async def iterate_generate_critique(
     """
     max_iter = min(max(max_iter, 0), HARD_MAX_ITER)
 
+    # 개발/디버깅용: AGENT_SKIP_CRITIQUE=1 이면 평가 루프 건너뛰고 초안만 반환
+    import os
+    if os.environ.get("AGENT_SKIP_CRITIQUE", "").strip() in ("1", "true", "TRUE", "yes"):
+        draft = await call_llm(generate_prompt)
+        return draft, [{"iteration": 0, "skipped": True, "reason": "AGENT_SKIP_CRITIQUE env"}]
+
     draft = await call_llm(generate_prompt)
     trail: List[Dict[str, Any]] = []
 

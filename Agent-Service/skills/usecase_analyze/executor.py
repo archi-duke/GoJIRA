@@ -204,6 +204,7 @@ async def execute(params: dict, user: str) -> dict:
 
     # 5. VOS contains Feature 연결 (created/modified만)
     linked = []
+    covered_vos: set = set()
     for bucket_name in ("created", "modified"):
         for entry in buckets[bucket_name]:
             feat_key = entry["key"]
@@ -212,8 +213,61 @@ async def execute(params: dict, user: str) -> dict:
                     try:
                         await link_issues(vos_key, feat_key, "contains", user=user)
                         linked.append({"from": vos_key, "to": feat_key})
+                        covered_vos.add(vos_key)
                     except Exception:
                         pass
+    # 5.1 기존(reused) Feature 도 relatedVOS 로 연결 (커버리지 누락 방지)
+    for entry in buckets.get("reused", []):
+        feat_key = entry["key"]
+        for vos_key in (entry["item"].get("relatedVOS") or []):
+            if vos_key in valid_vos_keys and vos_key not in covered_vos:
+                try:
+                    await link_issues(vos_key, feat_key, "contains", user=user)
+                    linked.append({"from": vos_key, "to": feat_key})
+                    covered_vos.add(vos_key)
+                except Exception:
+                    pass
+
+    # 5.2 커버리지 검증 — 누락 VOS 를 가장 유사한 Feature 에 강제 연결 (fallback)
+    orphan_vos = [v for v in valid_vos_keys if v not in covered_vos]
+    fallback_linked = []
+    if orphan_vos and (buckets["created"] or buckets.get("reused") or buckets["modified"]):
+        # 모든 후보 Feature 풀 (created + modified + reused)
+        all_features = []
+        for bn in ("created", "modified", "reused"):
+            for entry in buckets.get(bn, []):
+                all_features.append(entry)
+        # 각 orphan VOS 에 대해 summary/description 유사도 기반으로 가장 적합한 Feature 선택
+        vos_by_key = {v["key"]: v for v in vos_list}
+        for vos_key in orphan_vos:
+            vos = vos_by_key.get(vos_key) or {}
+            vos_text = ((vos.get("summary") or "") + " " + (vos.get("description") or "")).lower()
+            if not vos_text.strip():
+                continue
+            best = None
+            best_score = 0
+            for entry in all_features:
+                item = entry.get("item") or {}
+                feat_text = ((item.get("summary") or "") + " " + (item.get("description") or "")).lower()
+                if not feat_text:
+                    continue
+                # 단순 토큰 겹침 (한글 2자+/영문 3자+ 토큰)
+                vw = set(re.findall(r'[가-힣]{2,}|[a-zA-Z_]{3,}', vos_text))
+                fw = set(re.findall(r'[가-힣]{2,}|[a-zA-Z_]{3,}', feat_text))
+                score = len(vw & fw)
+                if score > best_score:
+                    best_score = score
+                    best = entry
+            if best and best_score > 0:
+                try:
+                    await link_issues(vos_key, best["key"], "contains", user=user)
+                    linked.append({"from": vos_key, "to": best["key"]})
+                    covered_vos.add(vos_key)
+                    fallback_linked.append({"vos": vos_key, "feature": best["key"], "score": best_score})
+                except Exception:
+                    pass
+
+    still_orphan = [v for v in valid_vos_keys if v not in covered_vos]
 
     # 5.5 docId → subkey 치환 (문서 ID와 실제 이슈 subkey 동기화)
     docid_map = build_docid_subkey_map(buckets, existing_feature_by_key)
@@ -259,7 +313,16 @@ async def execute(params: dict, user: str) -> dict:
         "mermaidValidation": mermaid_validation,
         "docIdMap": docid_map,
         "leftoverDocIds": leftover_doc_ids,
-        "message": base_msg + (f" / {tsum}" if tsum else "") + mermaid_note + docid_note,
+        "coverage": {
+            "totalVos": len(valid_vos_keys),
+            "covered": len(covered_vos),
+            "orphan": len(still_orphan),
+            "orphanKeys": still_orphan[:20],
+            "fallbackLinked": fallback_linked,
+        },
+        "message": base_msg + (f" / {tsum}" if tsum else "") + mermaid_note + docid_note + (
+            f" / ⚠ orphan VOS {len(still_orphan)}건" if still_orphan else ""
+        ),
     }
 
 

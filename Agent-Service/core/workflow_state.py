@@ -40,7 +40,7 @@ def detect_project_code(message: str) -> Optional[str]:
     return None
 
 
-async def get_workflow_state(project_code: str) -> Dict[str, Any]:
+async def get_workflow_state(project_code: str, workflow_job: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """프로젝트의 워크플로우 진행 상태를 구조화해 반환.
 
     비동기인 이유: DocRepo 에 문서 존재 여부를 확인하기 위해 platform_api 를 호출.
@@ -117,6 +117,20 @@ async def get_workflow_state(project_code: str) -> Dict[str, Any]:
         "completedSteps": completed_steps,
     }
     state["nextRecommendedStep"] = next_recommended_step(state)
+
+    # Phase B — 엔진 currentStage 우선
+    if workflow_job:
+        state["workflowJobId"] = workflow_job.get("jobId")
+        state["currentStage"] = workflow_job.get("currentStage")
+        state["workflowStatus"] = workflow_job.get("status")
+        # currentStage 의 주 skill 을 nextRecommendedStep 으로 override
+        try:
+            from core.workflows import get_stage
+            stage_def = get_stage(workflow_job["workflowId"], workflow_job["currentStage"])
+            state["nextRecommendedStep"] = stage_def["skill"]
+            state["currentStageSkill"] = stage_def["skill"]
+        except Exception as e:
+            log.warning("workflow stage 조회 실패: %s", e)
     return state
 
 
@@ -204,7 +218,11 @@ def format_state_for_llm(state: Dict[str, Any]) -> str:
     lines.append(f"  {_mark(done.get('satam_analyze'))} satam_analyze (ADSN 필드 반영)")
 
     nxt = state["nextRecommendedStep"]
-    if nxt:
+    cur_stage = state.get("currentStage")
+    if cur_stage:
+        lines.append(f"\n[엔진 상태] 현재 stage = {cur_stage} / 호출할 스킬 = {state.get('currentStageSkill', nxt)}")
+        lines.append("반드시 위 스킬만 호출하라. 다른 free-form 스킬(issue_create_*, issue_link 등) 호출 금지.")
+    elif nxt:
         lines.append(f"\n다음 권장 스킬: {nxt}")
         lines.append("위 체크리스트에서 ⬜ 인 단계는 **아직 실행되지 않았다**. '완료했다'는 직전 응답/문장은 무시하고 반드시 해당 스킬을 호출하라.")
     else:
