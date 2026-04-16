@@ -94,7 +94,7 @@ async def chat_stream(
             final_reply_holder = {"text": ""}
 
             # Watchdog: 60초 동안 어떤 이벤트도 없으면 권한 대기 등으로 행 된 것으로 간주 → abort
-            IDLE_TIMEOUT = 60.0
+            IDLE_TIMEOUT = 300.0
             translated = translate(events_iter, gojira_sid)
 
             async def _next_sse():
@@ -114,6 +114,10 @@ async def chat_stream(
                     yield _sse("error", {"message": f"{IDLE_TIMEOUT}초 동안 응답이 없어 작업을 중단했습니다 (권한 대기 또는 행 상태 의심). 재시도해주세요."})
                     yield _sse("done", {"reply": "", "actions": []})
                     return
+                # keepalive 는 UI 로 전달만 하고 로직 건너뛰기
+                if sse.startswith(":"):
+                    yield sse
+                    continue
                 # done 이벤트의 reply 를 히스토리에 저장하기 위해 가로채기
                 if sse.startswith("event: done\n"):
                     try:
@@ -121,6 +125,12 @@ async def chat_stream(
                         data_line = sse.split("\n", 2)[1]
                         payload = _j.loads(data_line[len("data: "):])
                         final_reply_holder["text"] = payload.get("reply", "")
+                        # translator 가 권한 타임아웃으로 abort 요청한 경우
+                        if payload.get("_abort"):
+                            try:
+                                await oc.abort_session(oc_sid)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                 yield sse
@@ -142,6 +152,18 @@ async def chat_stream(
             yield _sse("done", {"reply": "", "actions": []})
 
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
+
+
+@router.delete("/session/{session_id}")
+async def delete_session(session_id: str, x_user_id: str = Header(default="batman", alias="X-User-Id")):
+    agent_sessions().delete_one({"_id": session_id})
+    return {"ok": True}
+
+
+@router.delete("/sessions")
+async def delete_all_sessions(x_user_id: str = Header(default="batman", alias="X-User-Id")):
+    result = agent_sessions().delete_many({"userId": x_user_id})
+    return {"ok": True, "deleted": result.deleted_count}
 
 
 @router.post("/session/{session_id}/cancel")

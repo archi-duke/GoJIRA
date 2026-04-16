@@ -8,11 +8,18 @@ OpenCode /event 포맷:
 """
 
 import json
+import time
 from typing import AsyncIterator
 
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+# SSE keepalive 주석 — UI 에게 무시되지만 watchdog 타이머를 리셋시킨다.
+_KEEPALIVE = ": keepalive\n\n"
+
+# 권한 대기 감지 시 abort 대신 에러 이벤트를 yield 한다.
+_PERMISSION_TIMEOUT = 60.0
 
 
 async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str):
@@ -30,9 +37,26 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
     seen_tool_ids: set[str] = set()
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
+    permission_asked_at: float = 0.0  # 권한 요청 시각 (0이면 미발생)
+    last_keepalive: float = 0.0
 
     async for evt in opencode_events:
         t = evt.get("type")
+
+        # 권한 대기 감지
+        if t == "permission.asked":
+            if permission_asked_at == 0.0:
+                permission_asked_at = time.monotonic()
+        elif t in ("permission.resolved", "permission.granted"):
+            permission_asked_at = 0.0
+
+        # 권한 대기가 _PERMISSION_TIMEOUT 초과 시 → abort 요청 (router 에서 처리)
+        if permission_asked_at > 0 and (time.monotonic() - permission_asked_at) > _PERMISSION_TIMEOUT:
+            yield _sse("error", {"message": f"OpenCode 권한 요청 대기 {_PERMISSION_TIMEOUT}초 초과 — 작업을 중단합니다."})
+            reply = "".join(final_text_by_part.get(pid, "") for pid in text_part_order).strip()
+            yield _sse("done", {"reply": reply, "actions": actions, "_abort": True})
+            return
+
         if t != "message.part.updated":
             if t == "message.updated":
                 info = evt.get("properties", {}).get("info", {})
@@ -49,6 +73,11 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
                     if reply:
                         yield _sse("done", {"reply": reply, "actions": actions})
                         return
+            # raw 이벤트가 계속 오고 있으면 keepalive 전송 (10초 간격)
+            now = time.monotonic()
+            if now - last_keepalive > 10.0:
+                last_keepalive = now
+                yield _KEEPALIVE
             continue
 
         part = evt.get("properties", {}).get("part", {})

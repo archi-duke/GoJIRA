@@ -639,6 +639,16 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               <input className="ac-search-input" value={searchQuery} onChange={handleSearch}
                 placeholder="대화 내용 검색..." autoFocus />
             </div>
+            {sessions.length > 0 && (
+              <div style={{ textAlign: 'right', padding: '0 8px 6px' }}>
+                <button style={{ background: 'none', border: 'none', color: '#c33', cursor: 'pointer', fontSize: '12px' }}
+                  onClick={async () => {
+                    if (!window.confirm('모든 대화 이력을 삭제하시겠습니까?')) return;
+                    await fetch(`${STREAM_API}/Agent/sessions`, { method: 'DELETE', headers: { 'X-User-Id': user || '' } });
+                    setSessions([]); setSessionId(null); sessionStorage.removeItem('agent_sessionId'); setMessages([]);
+                  }}>전체 삭제</button>
+              </div>
+            )}
             <div className="ac-session-list">
               {sessions.length === 0 ? (
                 <div className="ac-empty">대화 이력이 없습니다</div>
@@ -646,7 +656,17 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 <div key={s.sessionId || s.id} className={`ac-session-item ${(s.sessionId || s.id) === sessionId ? 'ac-session-active' : ''}`}
                   onClick={() => handleSelectSession(s.sessionId || s.id)}>
                   <div className="ac-session-title">{s.title}</div>
-                  <div className="ac-session-date">{s.updatedAt}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="ac-session-date">{s.updatedAt}</div>
+                    <button style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '11px' }}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const sid = s.sessionId || s.id;
+                        await fetch(`${STREAM_API}/Agent/session/${sid}`, { method: 'DELETE', headers: { 'X-User-Id': user || '' } });
+                        setSessions(prev => prev.filter(x => (x.sessionId || x.id) !== sid));
+                        if (sid === sessionId) { setSessionId(null); sessionStorage.removeItem('agent_sessionId'); setMessages([]); }
+                      }}>삭제</button>
+                  </div>
                 </div>
               ))}
             </div>

@@ -160,58 +160,55 @@ critical + suggestions 항목만 **국소 수정**. 나머지 원문 유지. 수
 
 ---
 
-## Step 5 — 이슈 생성 + 링크
+## Step 5 — 이슈 생성 + 링크 + 문서 저장
 
-### 5.1 Feature 이슈 생성 (create 모드)
+### ⚠️ 실행 규칙
+- **개별 curl POST/PUT 반복 절대 금지** — 반드시 batch 스크립트 사용.
+- 스크립트 경로: `${PROJECT_ROOT}/.claude/skills/_scripts/`
+
+### 5.1 Feature 이슈 일괄 생성
+
+create 모드 항목을 JSON 배열로 모아 batch 스크립트 **1회** 실행.
+`issue-batch-create.sh` 는 순차 POST + PUT(추가 필드) + 재시도를 자동 처리한다.
+
 ```bash
-RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
-{
-  "prjID": "${CODE}",
-  "issueType": "Feature",
-  "summary": "...",
-  "desc": "...",
-  "user": "${USER}"
-}
-EOF
-)
-KEY=$(echo "$RESP" | jq -r '.key')
+# items 에 actor/precondition/basicflow 등을 포함시키면 PUT 으로 자동 업데이트됨
+cat > /tmp/uc_items.json <<'JSON'
+[
+  {"issueType":"Feature","summary":"...","desc":"...","actor":"...","precondition":"...","basicflow":"...","alternativeflow":"...","exceptionflow":"...","postcondition":"..."},
+  ...
+]
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "${USER}" < /tmp/uc_items.json \
+  > /tmp/uc_result.json
+cat /tmp/uc_result.json
 ```
 
-이후 actor/precondition/basicflow/alternativeflow/exceptionflow/postcondition 은 PUT /Issue 로 업데이트:
-```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
-    --arg ac "$ACTOR" --arg pre "$PRECOND" --arg bf "$BASIC" --arg af "$ALT" --arg ef "$EXC" --arg po "$POST" \
-    '{prjID:$p, key:$k, user:$u, data:{actor:$ac, precondition:$pre, basicflow:$bf, alternativeflow:$af, exceptionflow:$ef, postcondition:$po}}')"
-```
+결과의 `keys` 배열에서 생성된 Feature key 목록 확인.
 
-### 5.2 VOS → Feature Contains 링크
-```bash
-curl -s -X POST "${GOJIRA_API}/Issue/link" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg iw "$VOS_KEY" --arg ow "$FEAT_KEY" --arg lt "Contains(WBSGantt)" --arg u "$USER" \
-    '{prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u}')"
-```
+### 5.2 VOS → Feature Contains 링크 일괄 생성
 
-링크 실패 시 **silent drop 금지** — 사용자에게 보고.
+```bash
+cat > /tmp/uc_links.json <<'JSON'
+[
+  {"inwardKey":"GOJIRA3-1","outwardKey":"GOJIRA3-21","linkType":"Contains(WBSGantt)"},
+  ...
+]
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" < /tmp/uc_links.json \
+  > /tmp/uc_link_result.json
+cat /tmp/uc_link_result.json
+```
 
 ### 5.3 docId → subkey 치환
-- 각 생성된 Feature 의 `subkey` (UC_001, UC_002...) 를 Step 1.7 의 docId 와 매핑
-- document 본문 중 `UC-1`, `UC-2` 같은 docId 를 실제 subkey 로 치환
-
-```bash
-# 예: "UC-1" → "UC_001"
-DOCUMENT=$(echo "$DOCUMENT" | sed "s/UC-1\b/UC_001/g")
-```
+- 각 생성된 Feature 의 `subkey` (UC_001, UC_002...) 를 document 본문의 docId 와 매핑
 
 ### 5.4 use-cases.md 저장
+
 ```bash
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg c "$DOCUMENT" '{path:"business/use-cases.md", content:$c, message:"Use Case 분석 (usecase-analyze2)"}')"
+echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/use-cases.md"
 ```
 
 ---
