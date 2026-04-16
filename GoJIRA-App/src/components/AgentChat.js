@@ -21,6 +21,22 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const abortRef = useRef(null);
+
+  async function handleCancel() {
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
+    if (sessionId) {
+      try {
+        await fetch(`${STREAM_API}/Agent/session/${sessionId}/cancel`, {
+          method: 'POST',
+          headers: { 'X-User-Id': user || '' },
+        });
+      } catch(_){}
+    }
+    setLoading(false);
+  }
 
   // LLM 모델 선택 상태
   const [llmActive, setLlmActive] = useState('');
@@ -344,10 +360,13 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     }
 
     try {
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       const res = await fetch(`${STREAM_API}/Agent/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
         body: JSON.stringify({ sessionId, message: sendText, context: sendContext }),
+        signal: ctrl.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -719,7 +738,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder="메시지를 입력하세요..." rows={1} />
-              <button className="ac-send" onClick={handleSend} disabled={loading || !input.trim()}>전송</button>
+              {loading ? (
+                <button className="ac-send" onClick={handleCancel} style={{ background: '#c33', color: '#fff' }}>중지</button>
+              ) : (
+                <button className="ac-send" onClick={handleSend} disabled={!input.trim()}>전송</button>
+              )}
             </div>
           </>
         )}

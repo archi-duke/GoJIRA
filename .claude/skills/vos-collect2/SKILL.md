@@ -4,6 +4,15 @@ description: 프로젝트의 project-description.md를 분석해 이해관계자
 allowed-tools: Bash, Read
 ---
 
+# 🚨 필수 실행 규칙
+
+1. 이 스킬은 **반드시 실제 이슈를 생성**해야 한다. 서술만 하고 끝내면 **실패**.
+2. Step 1~4 는 에이전트 내부 추론. 그러나 **Step 5 는 반드시 bash 실행**.
+3. Step 5 는 **절대 개별 `curl -X POST /Issue` 를 반복 호출하지 말 것** — Gitea git push race + subkey 충돌로 대량 실패한다. 반드시 `bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh"` 를 **한 번만** 호출해 배치 처리한다.
+4. 실행 순서: Step 0 (bash) → Step 1~4 (내부 추론) → **Step 5 (batch 스크립트 1회)** → Step 6 (최종 보고).
+5. Step 5 실행 없이 "점수 0.X 성공" 서술만 출력하면 **거짓 응답** — 절대 금지.
+6. 생성 후 GET /Issue 로 실제 count 를 재조회해 보고에 포함하라.
+
 ## 환경
 
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
@@ -144,50 +153,40 @@ critical + suggestions 항목만 **국소 수정**. 나머지는 원문 유지. 
 
 ## Step 5 — 이슈 생성 (최종 items 반영)
 
-각 `finalItem` 에 대해 mode 별 처리:
+### create (새 이슈 생성) — ⚠️ 반드시 batch 스크립트 사용
 
-### create (새 이슈 생성)
+개별 `curl -X POST` 를 **절대 반복 호출하지 말 것** — Gitea git push race + subkey 충돌 발생.
+대신 `finalItem` 중 `mode == "create"` 만 모아 JSON 배열로 한 파일에 쓰고, 아래 스크립트를 **한 번** 실행한다. 스크립트가 순차 POST + 재시도 + PUT(client/priority/assignee) 까지 처리한다.
+
 ```bash
-curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
-{
-  "prjID": "${CODE}",
-  "issueType": "VOS",
-  "summary": "요구사항 제목",
-  "desc": "요구사항 상세",
-  "user": "${USER}"
-}
-EOF
+# 1) 생성할 items 를 JSON 배열로 작성
+cat > /tmp/vos_items.json <<'JSON'
+[
+  {"issueType":"VOS","summary":"...","desc":"...","client":"alice.kim"},
+  {"issueType":"VOS","summary":"...","desc":"...","client":"bob.park"}
+]
+JSON
+
+# 2) 배치 스크립트 실행 (한 번만)
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "${USER}" < /tmp/vos_items.json \
+  > /tmp/vos_result.json
+cat /tmp/vos_result.json
 ```
 
-응답에서 `key`, `subkey` 기록.
+결과 JSON 에서 `keys` 배열 · `created` · `failed` · `errors` 를 최종 보고에 반영.
 
 ### modify (기존 이슈 업데이트)
 ```bash
 curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" \
   -H "X-User-Id: ${USER}" \
-  -d '{
-    "prjID": "'${CODE}'",
-    "key": "EXISTING_KEY",
-    "data": {"summary": "...", "description": "...", "client": "..."},
-    "user": "'${USER}'"
-  }'
+  -d "$(jq -n --arg p "$CODE" --arg k "EXISTING_KEY" --arg u "$USER" \
+    '{prjID:$p, key:$k, user:$u, data:{summary:"...", description:"...", client:"..."}}')"
 ```
 
 ### reuse / delete_mark
 - reuse: 아무 동작 안 함 (정보만 최종 보고에 포함)
 - delete_mark: 현재는 실제 삭제하지 않고 **경고로 보고** (사용자가 수동 결정)
-
-**`client` 필드** 는 현재 Create API 가 직접 받지 않음 → 생성 후 `PUT /Issue` 로 업데이트 (created key 사용):
-```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d '{"prjID":"'${CODE}'","key":"CREATED_KEY","data":{"client":"..."},"user":"'${USER}'"}'
-```
 
 ---
 

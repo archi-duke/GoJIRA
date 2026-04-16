@@ -93,7 +93,27 @@ async def chat_stream(
 
             final_reply_holder = {"text": ""}
 
-            async for sse in translate(events_iter, gojira_sid):
+            # Watchdog: 60초 동안 어떤 이벤트도 없으면 권한 대기 등으로 행 된 것으로 간주 → abort
+            IDLE_TIMEOUT = 60.0
+            translated = translate(events_iter, gojira_sid)
+
+            async def _next_sse():
+                return await translated.__anext__()
+
+            while True:
+                try:
+                    sse = await asyncio.wait_for(_next_sse(), timeout=IDLE_TIMEOUT)
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    log.warning(f"SSE watchdog timeout — aborting OpenCode session {oc_sid}")
+                    try:
+                        await oc.abort_session(oc_sid)
+                    except Exception:
+                        pass
+                    yield _sse("error", {"message": f"{IDLE_TIMEOUT}초 동안 응답이 없어 작업을 중단했습니다 (권한 대기 또는 행 상태 의심). 재시도해주세요."})
+                    yield _sse("done", {"reply": "", "actions": []})
+                    return
                 # done 이벤트의 reply 를 히스토리에 저장하기 위해 가로채기
                 if sse.startswith("event: done\n"):
                     try:
@@ -122,6 +142,17 @@ async def chat_stream(
             yield _sse("done", {"reply": "", "actions": []})
 
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
+
+
+@router.post("/session/{session_id}/cancel")
+async def cancel_session(session_id: str):
+    """진행 중인 세션 중단 — OpenCode abort 전달."""
+    doc = agent_sessions().find_one({"_id": session_id}) or {}
+    oc_sid = doc.get("openCodeSessionId")
+    if not oc_sid:
+        return {"ok": False, "reason": "no openCodeSessionId"}
+    ok = await oc.abort_session(oc_sid)
+    return {"ok": ok, "openCodeSessionId": oc_sid}
 
 
 @router.get("/sessions")

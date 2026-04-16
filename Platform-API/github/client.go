@@ -366,16 +366,29 @@ func CreateFileOnBranch(owner, repo, filePath, content, message, branch, userTok
 	var data []byte
 	var status int
 	var err error
-	if userToken != "" {
-		data, status, err = doRequestAs("POST", u, body, userToken)
-	} else {
-		data, status, err = doRequest("POST", u, body)
-	}
-	if err != nil {
-		return nil, err
+	// Gitea git-push 경쟁(cannot lock ref) 대비: 최대 5회 지수 백오프 재시도.
+	for attempt := 0; attempt < 5; attempt++ {
+		if userToken != "" {
+			data, status, err = doRequestAs("POST", u, body, userToken)
+		} else {
+			data, status, err = doRequest("POST", u, body)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if status < 400 {
+			break
+		}
+		// Gitea 는 race 에러 세부 메시지를 body 에 담지 않고 generic swagger URL 만 반환하는 경우가 있어
+		// 500 은 무조건 재시도 대상으로 처리 (idempotent 한 create 요청이므로 안전)
+		retriable := status == 500
+		if !retriable {
+			return nil, fmt.Errorf("create file failed (%d): %s", status, string(data))
+		}
+		time.Sleep(time.Duration(100*(1<<attempt)) * time.Millisecond)
 	}
 	if status >= 400 {
-		return nil, fmt.Errorf("create file failed (%d): %s", status, string(data))
+		return nil, fmt.Errorf("create file failed after retry (%d): %s", status, string(data))
 	}
 	result := map[string]interface{}{}
 	json.Unmarshal(data, &result)
@@ -392,12 +405,25 @@ func CreateOrUpdateFile(owner, repo, filePath, content, message, branch, sha str
 	if sha != "" {
 		body["sha"] = sha
 	}
-	data, status, err := doRequest("PUT", u, body)
-	if err != nil {
-		return nil, err
+	var data []byte
+	var status int
+	var err error
+	// Gitea git-push race(cannot lock ref) 대비: 최대 5회 지수 백오프 재시도
+	for attempt := 0; attempt < 5; attempt++ {
+		data, status, err = doRequest("PUT", u, body)
+		if err != nil {
+			return nil, err
+		}
+		if status < 400 {
+			break
+		}
+		if status != 500 {
+			return nil, fmt.Errorf("create/update file failed (%d): %s", status, string(data))
+		}
+		time.Sleep(time.Duration(100*(1<<attempt)) * time.Millisecond)
 	}
 	if status >= 400 {
-		return nil, fmt.Errorf("create/update file failed (%d): %s", status, string(data))
+		return nil, fmt.Errorf("create/update file failed after retry (%d): %s", status, string(data))
 	}
 	result := map[string]interface{}{}
 	json.Unmarshal(data, &result)
@@ -415,9 +441,18 @@ func CreateOrUpdateFileAs(owner, repo, filePath, content, message, branch, sha, 
 	if sha != "" {
 		body["sha"] = sha
 	}
-	data, status, err := doRequestAs("PUT", u, body, userToken)
-	if err != nil {
-		return nil, err
+	var data []byte
+	var status int
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		data, status, err = doRequestAs("PUT", u, body, userToken)
+		if err != nil {
+			return nil, err
+		}
+		if status < 400 || status != 500 {
+			break
+		}
+		time.Sleep(time.Duration(100*(1<<attempt)) * time.Millisecond)
 	}
 	if status >= 400 {
 		return nil, fmt.Errorf("create/update file failed (%d): %s", status, string(data))

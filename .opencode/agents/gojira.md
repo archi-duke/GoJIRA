@@ -15,16 +15,31 @@ permission:
 - 사용자 메시지에서 `projectCode` (예: `GOJIRA3`)와 `user` (예: `batman`) 를 추출해 스킬 실행 환경변수로 export 한다.
 - 없으면 되물어 확정한 뒤 스킬을 호출한다.
 
-## 백엔드 API 주소 (절대 추측 금지)
+## 환경변수 (절대 추측 금지)
 
-항상 아래 값을 사용한다. 다른 포트를 시도하지 말 것:
-- `PLATFORM_API=http://localhost:9000/api/v2`
-- `GOJIRA_API=http://localhost:9001/api/v2`
+bash 실행 시 항상 맨 앞에 export 한다:
+```bash
+export PROJECT_ROOT="/Users/dukekimm/Works/GoJIRA"
+export PLATFORM_API="http://localhost:9000/api/v2"
+export GOJIRA_API="http://localhost:9001/api/v2"
+```
 - 모든 쓰기 호출에 `X-User-Id: ${USER}` 헤더 필수
+- 스크립트 경로는 `${PROJECT_ROOT}/.claude/skills/_scripts/` 를 사용
 
-## 데이터 조회는 반드시 스킬 경유
+## 🚨 API URL 직접 추측 절대 금지
 
-이슈 개수/목록 같은 단순 조회도 `issue-query`, `project-query` 등 등록된 스킬을 사용한다. 직접 localhost 포트 추측해 curl 하지 말 것.
+**아래 행위는 전부 금지다:**
+- `curl ${GOJIRA_API}/projects/...`, `curl ${PLATFORM_API}/projects?code=...` 등 스킬에 없는 URL 을 만들어내는 것
+- `.env` 파일을 Read 로 열어 API 스펙을 추측하는 것
+- `/health`, `/docs/...` 등 존재 여부를 모르는 엔드포인트를 시도하는 것
+
+**올바른 방법**: 반드시 `skill` 툴로 해당 스킬을 먼저 로드하고, SKILL.md 에 적힌 curl/bash 블록을 그대로 실행한다.
+- 프로젝트 조회 → `skill(project-query)` → 내부 curl 실행
+- 이슈 조회 → `skill(issue-query)` → 내부 curl 실행
+- 문서 조회 → `skill(doc-list)` or `skill(doc-summarize)` → 내부 curl 실행
+- VOS 수집 → `skill(vos-collect2)` → 내부 Step 0~6 실행
+
+스킬 없이 curl 을 직접 호출하면 **100% 잘못된 URL** 로 404/500 이 나온다. 시간 낭비다.
 
 ## ⚠️ 스킬 실행 규칙 (절대 위반 금지)
 

@@ -59,6 +59,16 @@ async def inject_context(session_id: str, text: str, agent: str = "gojira") -> N
         r.raise_for_status()
 
 
+async def abort_session(session_id: str) -> bool:
+    """진행 중인 OpenCode 세션을 강제 중단."""
+    async with httpx.AsyncClient(timeout=10.0) as c:
+        r = await c.post(
+            f"{_base_url()}/session/{session_id}/abort",
+            headers=_auth_header(),
+        )
+        return r.status_code < 400
+
+
 async def stream_events(session_id: str) -> AsyncIterator[dict]:
     """OpenCode /event SSE 를 파싱해 이 세션 의 이벤트만 yield."""
     async with httpx.AsyncClient(timeout=None) as c:

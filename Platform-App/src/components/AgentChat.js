@@ -17,6 +17,22 @@ export default function AgentChat({ user, authority, context, onClose }) {
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const abortRef = useRef(null);
+
+  async function handleCancel() {
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
+    if (sessionId) {
+      try {
+        await fetch(`${STREAM_API}/Agent/session/${sessionId}/cancel`, {
+          method: 'POST',
+          headers: { 'X-User-Id': user || '' },
+        });
+      } catch(_){}
+    }
+    setLoading(false);
+  }
 
   // Master 그룹: authority.USR >= 15
   const isMaster = authority && (authority.USR || 0) >= 15;
@@ -134,10 +150,13 @@ export default function AgentChat({ user, authority, context, onClose }) {
     }
 
     try {
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       const res = await fetch(`${STREAM_API}/Agent/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
         body: JSON.stringify({ sessionId, message: text, context }),
+        signal: ctrl.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -397,7 +416,11 @@ export default function AgentChat({ user, authority, context, onClose }) {
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder="메시지를 입력하세요..." rows={1} />
-              <button className="ac-send" onClick={handleSend} disabled={loading || !input.trim()}>전송</button>
+              {loading ? (
+                <button className="ac-send" onClick={handleCancel} style={{ background: '#c33', color: '#fff' }}>중지</button>
+              ) : (
+                <button className="ac-send" onClick={handleSend} disabled={!input.trim()}>전송</button>
+              )}
             </div>
           </>
         )}

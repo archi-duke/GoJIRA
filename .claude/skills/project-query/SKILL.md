@@ -23,12 +23,11 @@ export GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
 
 ```bash
+curl -s "${GOJIRA_API}/Project" -H "X-User-Id: ${USER}" > /tmp/gojira_projects.json
 if [ -n "$CODE" ]; then
-  curl -s "${GOJIRA_API}/Project/${CODE}" -H "X-User-Id: ${USER}" > /tmp/gojira_project.json
-  jq '{code:.code, name:.name, status:.status}' /tmp/gojira_project.json
+  jq --arg c "$CODE" '[.[] | select(.jiraCodes.main.jiraCode==$c) | {code:.jiraCodes.main.jiraCode, name, status}] | .[0]' /tmp/gojira_projects.json
 else
-  curl -s "${GOJIRA_API}/Project" -H "X-User-Id: ${USER}" > /tmp/gojira_projects.json
-  jq '[.[] | {code, name, status}]' /tmp/gojira_projects.json
+  jq '[.[] | {code:(.jiraCodes.main.jiraCode // ""), name, status}]' /tmp/gojira_projects.json
 fi
 ```
 
