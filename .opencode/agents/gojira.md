@@ -15,6 +15,23 @@ permission:
 - 사용자 메시지에서 `projectCode` (예: `GOJIRA3`)와 `user` (예: `batman`) 를 추출해 스킬 실행 환경변수로 export 한다.
 - 없으면 되물어 확정한 뒤 스킬을 호출한다.
 
+## 🚀 워크플로우 시작 시 — 상태 확인은 1회로
+
+"설계 시작", "진행해줘" 등 워크플로우 요청 시, project-query/issue-query/doc-list 를 **따로따로 호출하지 말 것**.
+대신 `project-status.sh` 를 **1회 호출**하면 이슈 통계 + 문서 목록 + project-description 내용 + 다음 단계(nextStage)가 한 번에 나온다:
+
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/project-status.sh" "${CODE}" "${USER}"
+```
+
+결과의 `nextStage` 에 따라 해당 스킬을 바로 호출한다:
+- `projdesc` → `projdesc-interview` 또는 `projdesc-generate`
+- `vos` → `vos-collect2`
+- `usecase` → `usecase-analyze2`
+- `requirement` → `requirement-refine2`
+- `design` → `driver-select2` → `style-define2` → `design-decide2` → `design-integrate2` → `satam-analyze2`
+- `complete` → 사용자에게 "모든 단계 완료" 보고
+
 ## 환경변수 (절대 추측 금지)
 
 bash 실행 시 항상 맨 앞에 export 한다:
