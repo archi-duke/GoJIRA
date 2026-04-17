@@ -161,26 +161,25 @@ critical + suggestions 항목만 **국소 수정**. 나머지 원문 유지. 수
 
 ## Step 5 — 이슈 생성 + 링크
 
-### 5.1 설계 이슈 생성 (create 모드)
-```bash
-RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
-{
-  "prjID": "${CODE}",
-  "issueType": "Architectural Design",
-  "summary": "...",
-  "desc": "...",
-  "user": "${USER}"
-}
-EOF
-)
-KEY=$(echo "$RESP" | jq -r '.key')
-```
+### 5.1 설계 이슈 일괄 생성 (create 모드)
 
+create 모드 항목을 JSON 배열로 모아 batch 스크립트 **1회** 실행.
 `issueType` 은 `designLevel=Architectural` → `"Architectural Design"`, `Detailed` → `"Detailed Design"`.
 
-이후 도메인 필드(designPoint/approaches/decision/decisionRationale/tradeoffs/risk/sensitivity/designLevel) 는 PUT /Issue 로 업데이트:
+```bash
+cat > /tmp/design_items.json <<'JSON'
+[
+  {"issueType":"Architectural Design","summary":"...","desc":"..."},
+  {"issueType":"Detailed Design","summary":"...","desc":"..."}
+]
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "${USER}" < /tmp/design_items.json \
+  > /tmp/design_result.json
+cat /tmp/design_result.json
+```
+
+결과의 `keys` 배열에서 생성된 이슈 key 확인 후, 도메인 필드(designPoint/approaches/decision/decisionRationale/tradeoffs/risk/sensitivity/designLevel) 는 PUT /Issue 로 업데이트:
 ```bash
 curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
@@ -191,13 +190,19 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
     '{prjID:$p, key:$k, user:$u, data:{designPoint:$dp, approaches:($ap|tostring), decision:$dc, decisionRationale:$dr, tradeoffs:$tr, risk:$rk, sensitivity:$se, designLevel:$dl}}')"
 ```
 
-### 5.2 Requirement → Design Contains 링크
-각 설계의 `relatedRequirements` 의 각 req 키에 대해:
+### 5.2 Requirement → Design Contains 링크 일괄 생성
+각 설계의 `relatedRequirements` 에서 링크 JSON 배열을 구성해 batch 스크립트 **1회** 실행:
 ```bash
-curl -s -X POST "${GOJIRA_API}/Issue/link" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg iw "$REQ_KEY" --arg ow "$DESIGN_KEY" --arg lt "Contains(WBSGantt)" --arg u "$USER" \
-    '{prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u}')"
+cat > /tmp/design_links.json <<'JSON'
+[
+  {"inwardKey":"GOJIRA3-10","outwardKey":"GOJIRA3-30","linkType":"Contains(WBSGantt)"},
+  ...
+]
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" < /tmp/design_links.json \
+  > /tmp/design_link_result.json
+cat /tmp/design_link_result.json
 ```
 
 링크 실패 시 **silent drop 금지** — 사용자 보고.
@@ -210,9 +215,7 @@ DOCUMENT=$(echo "$DOCUMENT" | sed "s/ADSN-1\b/ADSN_001/g; s/DDSN-1\b/DDSN_001/g"
 
 ### 5.4 design-decisions.md 저장
 ```bash
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg c "$DOCUMENT" '{path:"architecture/design-decisions.md", content:$c, message:"설계 결정 (design-decide2)"}')"
+echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/design-decisions.md"
 ```
 
 ---

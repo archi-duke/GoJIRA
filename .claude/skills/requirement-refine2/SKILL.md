@@ -32,17 +32,11 @@ export USER="batman"
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
-# project-description.md (main 우선, 비면 docs/{user})
-DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=main" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-if [ -z "$DESC" ] || [ $(echo -n "$DESC" | wc -c) -lt 50 ]; then
-  DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=docs/${USER}" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-fi
+# project-description.md (docs/{user} 우선, fallback main — 스크립트 자동 처리)
+DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md" 2>/dev/null || true)
 
 # use-cases.md
-UC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/use-cases.md&ref=main" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-if [ -z "$UC" ] || [ $(echo -n "$UC" | wc -c) -lt 50 ]; then
-  UC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/use-cases.md&ref=docs/${USER}" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-fi
+UC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/use-cases.md" 2>/dev/null || true)
 
 echo "=== project-description.md ==="; echo "$DESC"
 echo; echo "=== use-cases.md ==="; echo "$UC"
@@ -162,28 +156,26 @@ critical + suggestions 만 **국소 수정**. 나머지 원문 유지. 수정 �
 
 ## Step 5 — 이슈 생성 + 링크 + 문서 저장
 
-### 5.1 Requirement 이슈 생성 (create)
+### 5.1 Requirement 이슈 일괄 생성 (create)
 
-FR / NFR / CNST 공통:
+FR / NFR / CNST 모든 create 모드 항목을 JSON 배열로 모아 batch 스크립트 **1회** 실행.
+`issue-batch-create.sh` 가 순차 POST + PUT(추가 필드) + 재시도를 자동 처리한다.
+
 ```bash
-RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
-{
-  "prjID": "${CODE}",
-  "issueType": "Requirement",
-  "summary": "요구사항 제목",
-  "desc": "요구사항 본문",
-  "reqType": "FR",
-  "user": "${USER}"
-}
-EOF
-)
-KEY=$(echo "$RESP" | jq -r '.key')
-SUBKEY=$(echo "$RESP" | jq -r '.subkey')
+# reqType / qa / source 등 추가 필드를 포함시키면 PUT 으로 자동 업데이트됨
+cat > /tmp/req_items.json <<'JSON'
+[
+  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"FR"},
+  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"NFR","qa":"...","source":"...","stimulus":"...","environment":"...","artifact":"...","response":"...","measure":"...","responseScenario":"...","measureAuto":false}
+]
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "${USER}" < /tmp/req_items.json \
+  > /tmp/req_result.json
+cat /tmp/req_result.json
 ```
 
-- NFR 은 추가로 PUT /Issue 로 QAS 필드 업데이트:
+결과의 `keys` 배열에서 생성된 Requirement key 목록 확인. NFR 의 QAS 필드는 생성 후 PUT /Issue 로 업데이트:
 ```bash
 curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
@@ -198,14 +190,20 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 - reuse: 무동작 (보고에만 포함)
 - delete_mark: 경고로 보고 (실제 삭제는 사용자 결정)
 
-### 5.2 Feature → Requirement Contains 링크
+### 5.2 Feature → Requirement Contains 링크 일괄 생성
 
-각 Requirement 의 `relatedFeatures` 순회 → Feature(outward) contains Requirement(inward):
+각 Requirement 의 `relatedFeatures` 에서 링크 JSON 배열을 구성해 batch 스크립트 **1회** 실행:
 ```bash
-curl -s -X POST "${GOJIRA_API}/Issue/link" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg iw "$REQ_KEY" --arg ow "$FEAT_KEY" --arg lt "Contains(WBSGantt)" --arg u "$USER" \
-    '{prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u}')"
+cat > /tmp/req_links.json <<'JSON'
+[
+  {"inwardKey":"GOJIRA3-21","outwardKey":"GOJIRA3-5","linkType":"Contains(WBSGantt)"},
+  ...
+]
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" < /tmp/req_links.json \
+  > /tmp/req_link_result.json
+cat /tmp/req_link_result.json
 ```
 
 링크 실패는 **silent drop 금지** — 최종 보고에 누락 건수 명시.
@@ -223,9 +221,7 @@ DOCUMENT=$(echo "$DOCUMENT" | sed "s/\bFR-1\b/FR_001/g" | sed "s/\bNFR-1\b/QA_00
 
 ### 5.4 requirements.md 저장
 ```bash
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg c "$DOCUMENT" '{path:"business/requirements.md", content:$c, message:"Requirement 정제 (requirement-refine2)"}')"
+echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/requirements.md"
 ```
 
 ---

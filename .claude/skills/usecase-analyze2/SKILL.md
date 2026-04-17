@@ -32,11 +32,8 @@ export USER="batman"
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
-# project-description.md (docs/{user} 우선)
-DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=docs/${USER}" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-if [ -z "$DESC" ] || [ $(echo -n "$DESC" | wc -c) -lt 50 ]; then
-  DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=main" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-fi
+# project-description.md (docs/{user} 우선, fallback main — 스크립트 자동 처리)
+DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md")
 echo "=== project-description.md ==="
 echo "$DESC"
 

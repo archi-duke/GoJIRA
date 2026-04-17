@@ -161,9 +161,7 @@ critical + suggestions 만 **국소 수정**. 점수 계산 결과(순위) 는 �
 
 ### 5.1 architecture/architecture-style.md 저장
 ```bash
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg c "$DOCUMENT" '{path:"architecture/architecture-style.md", content:$c, message:"시스템 스타일 정의 (style-define2)"}')"
+echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-style.md"
 ```
 
 ### 5.2 projects.archSettings.chosenStyles 업데이트

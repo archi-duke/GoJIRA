@@ -165,10 +165,7 @@ critical + suggestions 만 **국소 수정**. 나머지 원문 유지. 수정 �
 ## Step 5 — 문서 저장
 
 ```bash
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg c "$DOCUMENT" --arg m "디자인 통합 (design-integrate2, N views)" \
-    '{path:"architecture/architecture-integrated.md", content:$c, message:$m}')"
+echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-integrated.md"
 ```
 
 이슈는 **생성/수정하지 않는다**. `archSettings.designIntegrated=true` 플래그 설정은 서버 측에서 별도 처리 (native 스킬은 문서 저장까지만).

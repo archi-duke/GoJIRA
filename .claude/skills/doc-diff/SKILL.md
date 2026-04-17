@@ -23,12 +23,10 @@ export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 
 ## 파일 조회 + diff
 ```bash
-fetch() {
-  curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=$(printf %s "$FILE" | jq -sRr @uri)&ref=$(printf %s "$1" | jq -sRr @uri)" \
-    -H "X-User-Id: ${USER}" | jq -r '.content // ""' | base64 -d 2>/dev/null
-}
-fetch main > /tmp/doc-main.txt
-fetch "docs/${USER}" > /tmp/doc-user.txt
+# main 브랜치 문서 (doc-read.sh 는 docs/{user} fallback 하므로, main 고정을 위해 USER=main 전달)
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "main" "${FILE}" > /tmp/doc-main.txt 2>/dev/null || true
+# docs/{user} 브랜치 문서
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "${FILE}" > /tmp/doc-user.txt 2>/dev/null || true
 diff -u /tmp/doc-main.txt /tmp/doc-user.txt || true
 ```
 

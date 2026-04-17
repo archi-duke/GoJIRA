@@ -25,9 +25,7 @@ export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 
 ## 문서 읽기
 ```bash
-curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=$(printf %s "$FILE" | jq -sRr @uri)&ref=$(printf %s "$REF" | jq -sRr @uri)" \
-  -H "X-User-Id: ${USER}" \
-  | jq -r '.content // ""' | base64 -d
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "${FILE}"
 ```
 
 ## 요약 규칙

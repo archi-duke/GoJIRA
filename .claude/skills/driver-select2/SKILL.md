@@ -38,13 +38,8 @@ export USER="batman"
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
-# project-description.md (main 우선, 없으면 docs/{user})
-DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=main" \
-  -H "X-User-Id: ${USER}" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-if [ -z "$DESC" ] || [ $(echo -n "$DESC" | wc -c) -lt 50 ]; then
-  DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=docs/${USER}" \
-    -H "X-User-Id: ${USER}" | jq -r '.content // empty' | base64 -d 2>/dev/null)
-fi
+# project-description.md (docs/{user} 우선, fallback main — 스크립트 자동 처리)
+DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md" 2>/dev/null || true)
 echo "=== project-description.md ==="
 echo "$DESC"
 
@@ -206,9 +201,7 @@ echo "normalizedAttributes = $(echo $NORM_JSON | jq .)"
 
 ### 5.4 architecture/drivers.md 저장
 ```bash
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg c "$DOCUMENT" '{path:"architecture/drivers.md", content:$c, message:"Architecture Driver 선정 (driver-select2)"}')"
+echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/drivers.md"
 ```
 
 ---

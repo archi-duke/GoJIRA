@@ -42,12 +42,8 @@ export USER="batman"
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 
-EXISTING=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=docs/${USER}" \
-  | jq -r '.content // empty' | base64 -d 2>/dev/null)
-if [ -z "$EXISTING" ]; then
-  EXISTING=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=main" \
-    | jq -r '.content // empty' | base64 -d 2>/dev/null)
-fi
+# docs/{user} 우선, fallback main (스크립트 자동 처리)
+EXISTING=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md" 2>/dev/null || true)
 echo "---EXISTING---"; echo "$EXISTING"
 ```
 
@@ -102,23 +98,7 @@ echo "---EXISTING---"; echo "$EXISTING"
 완성된 마크다운을 `/tmp/projdesc.md` 로 기록(Write 도구)한 뒤:
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
-MODE="${MODE:-generate}"
-
-CONTENT_B64=$(base64 < /tmp/projdesc.md | tr -d '\n')
-
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
-{
-  "path": "business/project-description.md",
-  "branch": "docs/${USER}",
-  "content": "${CONTENT_B64}",
-  "message": "[projdesc-generate] ${MODE} 모드 산출",
-  "encoding": "base64"
-}
-EOF
+cat /tmp/projdesc.md | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/project-description.md"
 ```
 
 ---

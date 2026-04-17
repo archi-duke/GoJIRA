@@ -33,13 +33,8 @@ export USER="batman"
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 
-# docs/{user} 우선, 없으면 main
-DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=docs/${USER}" \
-  | jq -r '.content // empty' | base64 -d 2>/dev/null)
-if [ -z "$DESC" ] || [ "$(echo "$DESC" | wc -c)" -lt 50 ]; then
-  DESC=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/file?path=business/project-description.md&ref=main" \
-    | jq -r '.content // empty' | base64 -d 2>/dev/null)
-fi
+# docs/{user} 우선, fallback main (스크립트 자동 처리)
+DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md" 2>/dev/null || true)
 echo "---EXISTING---"; echo "$DESC" | head -80
 ```
 
@@ -106,23 +101,8 @@ echo "---EXISTING---"; echo "$DESC" | head -80
 확정된 마크다운을 `docs/{user}` 브랜치에 저장한다.
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
-
 # 마크다운 본문을 /tmp/projdesc.md 에 저장했다고 가정 (에이전트가 Write 로 기록하거나 heredoc 사용)
-CONTENT_B64=$(base64 < /tmp/projdesc.md | tr -d '\n')
-
-curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
-{
-  "path": "business/project-description.md",
-  "branch": "docs/${USER}",
-  "content": "${CONTENT_B64}",
-  "message": "[projdesc-interview] 인터뷰 기반 과제 설명 생성",
-  "encoding": "base64"
-}
-EOF
+cat /tmp/projdesc.md | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/project-description.md"
 ```
 
 저장 응답(status/commit) 확인 후 사용자에게 경로/브랜치 보고.
