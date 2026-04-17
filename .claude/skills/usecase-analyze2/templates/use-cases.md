@@ -137,6 +137,9 @@ sequenceDiagram
 
 ---
 
+### 문서 작성 규칙
+- **코드 블록 닫기 후 반드시 빈 줄 1개** — ` ``` ` 바로 뒤에 텍스트 이어붙이기 금지 (Mermaid parse error 원인)
+
 ### Mermaid 작성 규칙
 - Use Case Diagram: `graph TB` 사용 (**classDiagram 금지**)
 - Sequence Diagram 다중 수신자: `A-->>B, C: msg` 금지 → 개별 2줄로 분리

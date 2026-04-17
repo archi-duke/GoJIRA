@@ -31,7 +31,9 @@ for i in $(seq 0 $((COUNT - 1))); do
   ITEM=$(jq ".[$i]" <<< "$INPUT")
   SUM=$(jq -r '.summary' <<< "$ITEM")
   BODY=$(jq --arg p "$CODE" --arg u "$USER" \
-    '{prjID:$p, user:$u, issueType:.issueType, summary:.summary, desc:.desc}' <<< "$ITEM")
+    '{prjID:$p, user:$u, issueType:.issueType, summary:.summary, desc:.desc}
+     + (if .reqType then {reqType:.reqType} else {} end)
+     + (if .labels then {labels:.labels} else {} end)' <<< "$ITEM")
 
   RESP=""
   STATUS=""
