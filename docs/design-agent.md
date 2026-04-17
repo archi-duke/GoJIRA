@@ -342,7 +342,13 @@ OpenCode 채택으로 Agent-Service 는 다음을 **제거**:
 - 문서·테스트 갱신
 - main 머지
 
-### Phase 4 — 후속
+### Phase 4 — 로컬 Worktree 전환
+- GoJIRA-API / Platform-API: 이슈·문서 저장을 로컬 worktree write 로 전환 (Gitea API push 제거)
+- worktree 초기화 로직 (서버 시작 시 shallow clone, persistent volume)
+- PR 생성 API 에 commit + push 선행 단계 통합
+- UI 문서 조회 경로를 로컬 파일 읽기로 전환
+
+### Phase 5 — 후속
 - `ui-navigate` 부활 (Platform-API `POST /api/events/navigate` 엔드포인트 신설 후)
 - 토큰 사용량 / 품질 / 속도 실측 비교
 - PDCA 확장 (목표 모호성 시나리오에만 선택 적용)
@@ -365,16 +371,88 @@ OpenCode 채택으로 Agent-Service 는 다음을 **제거**:
 
 ---
 
-## 12. 핵심 설계 원칙
+## 12. 로컬 Worktree 아키텍처 (Git Push 지연)
+
+### 배경
+
+기존: 이슈 생성/문서 저장 시 매번 Gitea HTTP API 경유 → git commit + push 발생.
+- N건 이슈 = N번 push → **속도 병목 + git ref race condition**
+- 실측: 10건 이슈 Gitea API 경유 ~3초 + race 에러, 로컬 git 1회 push ~0.4초
+
+### 설계 변경
+
+```
+[변경 전]
+  POST /Issue → Mongo insert → Platform-API PUT /DocRepo/file → Gitea API (commit+push)
+  ↑ 매 이슈마다 push 1회
+
+[변경 후]
+  POST /Issue → Mongo insert + 로컬 worktree 에 YAML write (push 없음)
+  PUT /DocRepo/file → 로컬 worktree 에 파일 write (push 없음)
+  ...작업 계속...
+  POST /DocRepo/{code}/pr → git add + commit + push + PR 생성 (1회)
+```
+
+### 핵심 원칙
+
+1. **매 변경마다 push 하지 않는다** — git 은 버전 관리/배포 도구이지 실시간 저장소가 아님
+2. **Mongo 가 실시간 데이터**, YAML/문서 파일은 **발행용 산출물**
+3. **push 시점 = 발행(PR 생성)** — 사용자가 "PR 만들어줘" 할 때 commit + push + PR 을 일괄 수행
+4. **사용자 브랜치(`docs/{user}`)는 개인 작업 공간** — 원격 반영 없이 로컬 worktree 로 충분
+
+### Worktree 구조
+
+```
+서버 로컬:
+  /data/worktrees/{projectCode}/{user}/
+    ├── .git/                    ← shallow clone (서버 시작 시 1회)
+    ├── data/issues/VOS_001.yaml ← 이슈 YAML (로컬 write)
+    ├── business/use-cases.md    ← 문서 (로컬 write)
+    └── ...
+```
+
+- 프로젝트+사용자 조합별 worktree 분리 → 동시 작업 충돌 없음
+- 서버 재시작 시: persistent volume 이면 유지, 아니면 Mongo 에서 YAML 재생성
+
+### API 변경
+
+| 엔드포인트 | 변경 전 | 변경 후 |
+|---|---|---|
+| `POST /Issue` | Mongo + Gitea push | Mongo + **로컬 YAML write** |
+| `PUT /Issue` | Mongo + Gitea push | Mongo + **로컬 YAML update** |
+| `PUT /DocRepo/{code}/file` | Gitea push | **로컬 file write** |
+| `GET /DocRepo/{code}/file` | Gitea API read | **로컬 file read** (fallback: Gitea) |
+| `POST /DocRepo/{code}/pr` | PR 생성만 | **git add + commit + push** + PR 생성 |
+| `DELETE /Issue` | Mongo + Gitea delete | Mongo + **로컬 file delete** |
+
+### UI 영향
+
+- 문서 조회: 로컬 worktree 에서 직접 읽기 → 응답 속도도 개선
+- 발행 전 미리보기: 로컬 파일 서빙 (기존 API 경로 유지, 백엔드만 교체)
+- 발행 버튼: 기존 PR 생성 플로우에 commit+push 선행 단계 추가
+
+### 성능 기대
+
+| 시나리오 | 변경 전 | 변경 후 |
+|---|---|---|
+| VOS 10건 생성 | ~3초 + race | ~0.1초 |
+| usecase 5건 + 링크 10건 + 문서 1건 | ~5초 | ~0.2초 |
+| 발행 (commit+push+PR) | 즉시 (이미 push 됨) | ~0.5초 (1회 push) |
+| **총 워크플로우** | ~10초 + 에러 재시도 | **~0.8초** |
+
+---
+
+## 13. 핵심 설계 원칙
 
 1. **LLM 런타임은 OpenCode 에 위임** — ReACT/스킬 디스패치 자체 구현 폐기, UI 계약만 유지
 2. **스킬은 self-contained SKILL.md** — Python executor 없음, curl/jq 로 완결
 3. **스킬 경로 표준은 `.claude/skills/`** — Claude Code/OpenCode 양쪽 호환, 다른 하네스 이식 용이
 4. **LLM 설정은 OpenCode 체계 그대로** — GoJIRA 측 별도 설정 레이어 없음, `opencode.json` 이 단일 진실 출처
 5. **엔진이 워크플로우 stage 통제, LLM 은 stage 내부만** — 순환/누락 방지, tool 화이트리스트
-6. **Belief State 는 `docs/{user}` 브랜치 1순위** — agent 쓰기/읽기 출처 일치
+6. **Belief State 는 로컬 worktree 1순위** — Mongo 가 실시간 데이터, YAML/문서는 발행용 산출물. git push 는 발행 시점에만
 7. **이슈 생성은 사전 확인 → 분기** — 중복 방지, 폐기는 마킹 우선
 8. **산출 문서는 파일 저장, 채팅엔 요약만**
+9. **git push 는 발행(PR) 시 1회만** — 매 변경마다 push 하지 않음. race condition 원천 차단
 
 ---
 

@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -517,6 +520,16 @@ func DocRepoSyncBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 로컬 worktree 도 동기화: main 기준으로 hard reset
+	wtDir, _, wtErr := github.EnsureWorktree(owner, name, userId)
+	if wtErr == nil {
+		github.GitCmd(wtDir, "fetch", "origin")
+		github.GitCmd(wtDir, "reset", "--hard", "origin/main")
+		log.Printf("sync-branch: worktree reset to main — %s", wtDir)
+	} else {
+		log.Printf("sync-branch: worktree reset skip (no worktree): %v", wtErr)
+	}
+
 	// 알림 갱신
 	go UpdateBranchAlert(owner, name, code, userId)
 
@@ -663,6 +676,23 @@ func DocRepoTreeHandler(w http.ResponseWriter, r *http.Request) {
 	if ref == "" {
 		ref = "main"
 	}
+
+	// 사용자 브랜치 → 로컬 worktree 에서 트리 생성
+	if strings.HasPrefix(ref, "docs/") {
+		userID := strings.TrimPrefix(ref, "docs/")
+		wtDir, _, wtErr := github.EnsureWorktree(owner, name, userID)
+		if wtErr == nil {
+			entries := buildLocalTree(wtDir, "")
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"tree":        entries,
+				"total_count": len(entries),
+				"source":      "worktree",
+			})
+			return
+		}
+	}
+
+	// fallback: Gitea API
 	tree, err := github.GetTree(owner, name, ref)
 	if err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
@@ -671,7 +701,66 @@ func DocRepoTreeHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, tree)
 }
 
+// buildLocalTree — worktree 디렉토리를 재귀 탐색해 Gitea tree 호환 응답 생성.
+// sha 는 git blob hash (git hash-object 호환) 로 계산해 main 과 비교 가능하게 한다.
+func buildLocalTree(baseDir, prefix string) []map[string]interface{} {
+	var entries []map[string]interface{}
+	dir := filepath.Join(baseDir, prefix)
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return entries
+	}
+	for _, item := range items {
+		if item.Name() == ".git" {
+			continue
+		}
+		rel := item.Name()
+		if prefix != "" {
+			rel = prefix + "/" + item.Name()
+		}
+		if item.IsDir() {
+			entries = append(entries, map[string]interface{}{
+				"path": rel,
+				"type": "tree",
+				"mode": "040000",
+				"size": 0,
+			})
+			entries = append(entries, buildLocalTree(baseDir, rel)...)
+		} else {
+			info, _ := item.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+			fullPath := filepath.Join(baseDir, rel)
+			sha := gitBlobHash(fullPath)
+			entries = append(entries, map[string]interface{}{
+				"path": rel,
+				"type": "blob",
+				"mode": "100644",
+				"size": size,
+				"sha":  sha,
+			})
+		}
+	}
+	return entries
+}
+
+// gitBlobHash — git hash-object 호환 SHA-1 계산.
+func gitBlobHash(filePath string) string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+	header := fmt.Sprintf("blob %d\x00", len(data))
+	h := sha1.New()
+	h.Write([]byte(header))
+	h.Write(data)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // GET /DocRepo/{code}/file?path=...&ref=...
+// 사용자 브랜치(docs/{user}) 요청 시 로컬 worktree 우선, fallback 으로 Gitea API.
 func DocRepoFileHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -681,7 +770,27 @@ func DocRepoFileHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	content, err := github.GetFileContent(owner, name, r.URL.Query().Get("path"), r.URL.Query().Get("ref"))
+	filePath := r.URL.Query().Get("path")
+	ref := r.URL.Query().Get("ref")
+
+	// 사용자 브랜치 요청 시 로컬 worktree 우선 조회
+	// worktree 파일은 항상 UTF-8 plain text 로 저장되어 있다 (WriteWorktreeFile 보장).
+	// API 호환을 위해 base64 인코딩해서 반환.
+	if strings.HasPrefix(ref, "docs/") {
+		userID := strings.TrimPrefix(ref, "docs/")
+		if localContent, err := github.ReadWorktreeFile(owner, name, userID, filePath); err == nil {
+			encoded := base64.StdEncoding.EncodeToString([]byte(localContent))
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"path":    filePath,
+				"content": encoded,
+				"source":  "worktree",
+			})
+			return
+		}
+	}
+
+	// fallback: Gitea API
+	content, err := github.GetFileContent(owner, name, filePath, ref)
 	if err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
@@ -689,7 +798,10 @@ func DocRepoFileHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, content)
 }
 
-// PUT /DocRepo/{code}/file — 파일 수정 (사용자 브랜치에 커밋)
+// PUT /DocRepo/{code}/file — 파일 수정 (로컬 worktree 에 write, push 하지 않음)
+//
+// 변경: Gitea API 경유 commit+push 를 제거하고 로컬 worktree 에 직접 write.
+// push 는 PR 생성(POST /DocRepo/{code}/pr) 시 일괄 수행.
 func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	userId := r.Header.Get("X-User-Id")
@@ -709,46 +821,21 @@ func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	// 사용자 브랜치 (docs/{userId})
-	branch := "docs/" + userId
-	// 브랜치가 없으면 main에서 생성
-	if _, err := github.GetBranchRef(owner, name, branch); err != nil {
-		mainSHA, _ := github.GetBranchRef(owner, name, "main")
-		if mainSHA != "" {
-			github.CreateBranch(owner, name, branch, mainSHA)
-		}
-	}
-	// 현재 파일의 SHA (사용자 브랜치 기준, 없으면 main 기준)
-	sha := ""
-	existing, err := github.GetFileContent(owner, name, body.Path, branch)
-	if err == nil {
-		sha, _ = existing["sha"].(string)
-	} else {
-		existing, err = github.GetFileContent(owner, name, body.Path, "main")
-		if err == nil {
-			sha, _ = existing["sha"].(string)
-		}
-	}
-	// 사용자 토큰 가져오기
-	userToken := getUserToken(r)
-	// content를 base64로 인코딩
-	encoded := base64.StdEncoding.EncodeToString([]byte(body.Content))
-	var result map[string]interface{}
-	if sha == "" {
-		// 새 파일: POST (Gitea는 PUT에 SHA 필수)
-		result, err = github.CreateFileOnBranch(owner, name, body.Path, encoded, body.Message, branch, userToken)
-	} else {
-		// 기존 파일 수정: PUT
-		result, err = github.CreateOrUpdateFileAs(owner, name, body.Path, encoded, body.Message, branch, sha, userToken)
-	}
-	if err != nil {
-		respondError(w, http.StatusBadGateway, err.Error())
+
+	// worktree 확보 (없으면 자동 생성)
+	if _, _, err := github.EnsureWorktree(owner, name, userId); err != nil {
+		respondError(w, http.StatusInternalServerError, "worktree 생성 실패: "+err.Error())
 		return
 	}
-	// 프로젝트 알림: 브랜치 커밋 발생 → branchAlert 갱신
-	db.UpdateProjectField(ctx, code, "gitLastCommit", time.Now())
-	go UpdateBranchAlert(owner, name, code, userId)
-	// SSE 브로드캐스트 — 사용자 브랜치 쓰기 발생 시 DocEditor 자동 갱신용
+
+	// 로컬 파일 write (commit/push 없음)
+	if err := github.WriteWorktreeFile(owner, name, userId, body.Path, body.Content); err != nil {
+		respondError(w, http.StatusInternalServerError, "파일 저장 실패: "+err.Error())
+		return
+	}
+
+	// SSE 브로드캐스트 — UI DocEditor 자동 갱신
+	branch := "docs/" + userId
 	BroadcastDocEvent(map[string]interface{}{
 		"type":        "user_doc_update",
 		"projectCode": code,
@@ -756,10 +843,10 @@ func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		"path":        body.Path,
 		"branch":      branch,
 	})
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, map[string]string{"path": body.Path, "status": "saved"})
 }
 
-// DELETE /DocRepo/{code}/file — 파일 삭제 (사용자 브랜치에서)
+// DELETE /DocRepo/{code}/file — 파일 삭제 (로컬 worktree 에서, push 하지 않음)
 func DocRepoFileDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	userId := r.Header.Get("X-User-Id")
@@ -778,18 +865,31 @@ func DocRepoFileDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+
+	// 로컬 worktree 에서 파일 삭제
 	branch := "docs/" + userId
-	existing, err := github.GetFileContent(owner, name, body.Path, branch)
-	if err != nil {
-		respondError(w, http.StatusNotFound, "file not found")
-		return
+	wtDir, _, err := github.EnsureWorktree(owner, name, userId)
+	if err == nil {
+		fullPath := filepath.Join(wtDir, body.Path)
+		if removeErr := os.Remove(fullPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			respondError(w, http.StatusInternalServerError, "파일 삭제 실패: "+removeErr.Error())
+			return
+		}
+	} else {
+		// worktree 없으면 기존 Gitea API fallback
+		existing, err := github.GetFileContent(owner, name, body.Path, branch)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		sha, _ := existing["sha"].(string)
+		userToken := getUserToken(r)
+		if err := github.DeleteFileAs(owner, name, body.Path, body.Message, branch, sha, userToken); err != nil {
+			respondError(w, http.StatusBadGateway, err.Error())
+			return
+		}
 	}
-	sha, _ := existing["sha"].(string)
-	userToken := getUserToken(r)
-	if err := github.DeleteFileAs(owner, name, body.Path, body.Message, branch, sha, userToken); err != nil {
-		respondError(w, http.StatusBadGateway, err.Error())
-		return
-	}
+
 	BroadcastDocEvent(map[string]interface{}{
 		"type":        "user_doc_update",
 		"projectCode": code,
@@ -1099,6 +1199,19 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 	decodeJSON(r, &req)
 	if req.Base == "" {
 		req.Base = "main"
+	}
+
+	// 발행 전 로컬 worktree 변경사항을 commit + push (로컬 Worktree 아키텍처)
+	if strings.HasPrefix(req.Head, "docs/") {
+		userID := strings.TrimPrefix(req.Head, "docs/")
+		commitMsg := req.Title
+		if commitMsg == "" {
+			commitMsg = fmt.Sprintf("[%s] 설계문서 발행", code)
+		}
+		if err := github.CommitAndPush(owner, name, req.Head, commitMsg); err != nil {
+			log.Printf("PR 선행 commit+push 경고: %v", err)
+		}
+		_ = userID
 	}
 
 	// PR 생성 전 diff 확인 — head가 base의 ancestor이면 변경사항 없음

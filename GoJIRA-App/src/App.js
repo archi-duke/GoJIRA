@@ -85,7 +85,8 @@ function App() {
     const newSession = urlParams.get('newSession') === '1';
     const interviewPrompt = urlParams.get('interview') || '';
     const continueTo = urlParams.get('continueTo') || '';
-    return <AgentChat user={user} authority={authority} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} interviewPrompt={interviewPrompt} continueTo={continueTo} />;
+    const agentProjectCode = urlParams.get('project') || (selectedProject?.jiraCodes?.main?.jiraCode) || '';
+    return <AgentChat user={user} authority={authority} context={{ projectCode: agentProjectCode }} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} interviewPrompt={interviewPrompt} continueTo={continueTo} />;
   }
 
   let content;
