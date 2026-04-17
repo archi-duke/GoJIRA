@@ -105,8 +105,20 @@ graph TB
 ````
 
 금지: classDiagram 으로 UC 표현, 외부 이미지(`![...](...png)`) 참조, Mermaid 노드 ID 에 공백/한글 직접 사용.
+**Sequence Diagram 에서 다중 수신자 쉼표 금지**: `Game-->>User1, User2: 메시지` → 개별 2줄로 분리.
+**participant 에 반드시 `as` 키워드 사용**: `participant User2 as 후공 사용자` (O) / `participant User2 후공 사용자` (X)
 
-### 1.7 docId 부여
+### 1.7 문서 템플릿 (use-cases.md)
+
+**반드시** 아래 템플릿 파일의 구조를 따른다. 실행 전 먼저 읽어서 구조를 확인하라:
+
+```bash
+cat "${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
+```
+
+섹션/번호를 빠뜨리지 말 것. 특히 **모든 Feature 에 대해 Sequence Diagram 필수** — 누락 시 critical.
+
+### 1.8 docId 부여
 각 Feature 에 `docId: "UC-N"` (1부터 순차). document 본문의 모든 Feature 표기에 **동일 docId 사용**. "(Feature 이슈 키)" 칸에 docId 를 그대로 적음 (Step 5 에서 실제 key 로 치환).
 
 ### 1.8 relatedVOS + mode
@@ -128,7 +140,8 @@ VOS 목록의 **모든 키**가 최소 1 Feature 의 `relatedVOS` 에 포함되�
 - **VOS 1건이라도** 매핑 안 됨 (NFR 표기 시 면제)
 - Use Case Diagram 을 classDiagram 으로 작성
 - Context/Use Case/Sequence 중 2개 이상 누락
-- Mermaid 구문 오류
+- **Sequence Diagram 이 일부 Feature 에만 있고 나머지 누락** (모든 Feature 필수)
+- Mermaid 구문 오류 (쉼표 다중 수신자, `as` 누락 등)
 - 외부 이미지 참조
 - Feature 1건뿐인데 VOS 3건 이상 (과도 통합)
 - 모든 Feature 의 Actor 동일 (다른 Actor 누락)
