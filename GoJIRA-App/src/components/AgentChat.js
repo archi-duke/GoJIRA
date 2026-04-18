@@ -22,6 +22,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
+  const [showProcess, setShowProcess] = useState(true);
 
   async function handleCancel() {
     if (abortRef.current) {
@@ -241,11 +242,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           // thinking은 스피너 상태 유지 용도 (step에 추가하지 않음)
           break;
         case 'reasoning':
-          addStep({ type: 'reasoning', data, ts });
-          // Thought 단계는 별도 채팅 메시지로 노출 (모든 사용자 그룹)
-          // 마지막 Thought는 done 시점에 제거 (최종 답변과 중복 방지)
-          if ((data.step || 'thought') === 'thought' && data.content) {
-            setMessages(prev => [...prev, { role: 'thought', content: data.content }]);
+          if (showProcess) {
+            addStep({ type: 'reasoning', data, ts });
+            if ((data.step || 'thought') === 'thought' && data.content) {
+              setMessages(prev => [...prev, { role: 'thought', content: data.content }]);
+            }
           }
           break;
         case 'tool_call':
@@ -256,11 +257,14 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           break;
         case 'tool_result':
           addStep({ type: 'tool_result', data, ts });
+          // tool 실행 후 새 말풍선 시작 — 기존 streaming 메시지 확정
+          if (contentBuf) {
+            setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+            contentBuf = '';
+          }
           // ui_navigate 등 _action이 있으면 메인 앱에 전달
           if (data._action === 'navigate' && data._payload) {
-            // 같은 origin → BroadcastChannel
             try { const ch = new BroadcastChannel('gojira-navigate'); ch.postMessage(data._payload); ch.close(); } catch {}
-            // 다른 origin (Platform-App↔GoJIRA-App) → window.opener.postMessage
             if (window.opener) {
               window.opener.postMessage({ type: 'gojira-navigate', ...data._payload }, '*');
             }
@@ -269,6 +273,9 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         case 'content':
           contentBuf += data.text;
           setMessages(prev => {
+            // 사용자 입력 에코 필터 — assistant 가 user 메시지를 그대로 되풀이하면 스킵
+            const lastUser = [...prev].reverse().find(m => m.role === 'user');
+            if (lastUser && contentBuf.trim() === lastUser.content.trim()) return prev;
             const last = prev[prev.length - 1];
             if (last && last._streaming) {
               return [...prev.slice(0, -1), { ...last, content: contentBuf }];
@@ -687,10 +694,12 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               )}
               {messages.map((msg, i) => {
                 if (msg.role === 'process') {
+                  if (!showProcess) return null;
                   const rendered = renderProcess(msg, i);
                   return rendered ? <div key={i} className="ac-msg ac-msg-process">{rendered}</div> : null;
                 }
                 if (msg.role === 'thought') {
+                  if (!showProcess) return null;
                   return (
                     <div key={i} className="ac-msg ac-msg-thought">
                       <div className="ac-msg-content">
@@ -750,6 +759,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               }}
             />
             <div className="ac-input-area">
+              <button
+                onClick={() => setShowProcess(p => !p)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: '11px', color: showProcess ? '#e67e22' : '#999',
+                  padding: '2px 6px', marginRight: '4px', flexShrink: 0
+                }}
+                title={showProcess ? '추론 과정 감추기' : '추론 과정 보기'}
+              >{showProcess ? '◉' : '○'}</button>
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => {
                   setInput(e.target.value);

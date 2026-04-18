@@ -6,6 +6,10 @@
     "bash": "allow",
     "edit": "allow",
     "webfetch": "allow",
-    "external_directory": "allow"
+    "external_directory": "allow",
+    "question": "allow",
+    "task": "allow",
+    "plan_enter": "allow",
+    "plan_exit": "allow"
   }
 }

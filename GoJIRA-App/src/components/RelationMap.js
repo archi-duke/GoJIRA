@@ -45,20 +45,26 @@ function buildConnections(issues) {
   const keySet = new Set(issues.map((i) => i.key));
   const issueMap = {};
   issues.forEach((i) => { issueMap[i.key] = i; });
+  const colOrder = { VOS: 0, Feature: 1, Requirement: 2, 'Architectural Design': 3, 'Detailed Design': 3, Test: 4 };
   const conns = [];
   const seen = new Set();
   issues.forEach((issue) => {
     (issue.issueLinks || []).forEach((link) => {
-      const target = link.outwardIssue;
-      if (target && keySet.has(target.key)) {
-        const id = `${issue.key}->${target.key}`;
-        if (!seen.has(id)) {
-          const targetIssue = issueMap[target.key];
-          const sameType = targetIssue && targetIssue.issueType === issue.issueType;
-          conns.push({ id, linkId: link.id, from: issue.key, to: target.key, type: link.type?.name || '', sameType });
-          seen.add(id);
-        }
-      }
+      const targets = [link.outwardIssue, link.inwardIssue].filter(Boolean);
+      targets.forEach((target) => {
+        if (!keySet.has(target.key) || target.key === issue.key) return;
+        const pairId = [issue.key, target.key].sort().join('<>');
+        if (seen.has(pairId)) return;
+        seen.add(pairId);
+        const targetIssue = issueMap[target.key];
+        const sameType = targetIssue && targetIssue.issueType === issue.issueType;
+        // 왼쪽 칼럼 → 오른쪽 칼럼 방향으로 정렬
+        const myCol = colOrder[issue.issueType] ?? 99;
+        const tgtCol = colOrder[targetIssue?.issueType] ?? 99;
+        const from = myCol <= tgtCol ? issue.key : target.key;
+        const to = myCol <= tgtCol ? target.key : issue.key;
+        conns.push({ id: `${from}->${to}`, linkId: link.id, from, to, type: link.type?.name || '', sameType });
+      });
     });
   });
   // Same-type connections first (rendered behind), cross-type on top

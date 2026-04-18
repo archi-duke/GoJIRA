@@ -18,6 +18,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
+  const [showProcess, setShowProcess] = useState(true);
 
   async function handleCancel() {
     if (abortRef.current) {
@@ -110,17 +111,23 @@ export default function AgentChat({ user, authority, context, onClose }) {
           // thinking은 스피너 상태 유지 용도 (step에 추가하지 않음)
           break;
         case 'reasoning':
-          addStep({ type: 'reasoning', data, ts });
+          if (showProcess) addStep({ type: 'reasoning', data, ts });
           break;
         case 'tool_call':
           addStep({ type: 'tool_call', data, ts });
           break;
         case 'tool_result':
           addStep({ type: 'tool_result', data, ts });
+          if (contentBuf) {
+            setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+            contentBuf = '';
+          }
           break;
         case 'content':
           contentBuf += data.text;
           setMessages(prev => {
+            const lastUser = [...prev].reverse().find(m => m.role === 'user');
+            if (lastUser && contentBuf.trim() === lastUser.content.trim()) return prev;
             const last = prev[prev.length - 1];
             if (last && last._streaming) {
               return [...prev.slice(0, -1), { ...last, content: contentBuf }];
@@ -373,6 +380,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
               )}
               {messages.map((msg, i) => {
                 if (msg.role === 'process') {
+                  if (!showProcess) return null;
                   const rendered = renderProcess(msg, i);
                   return rendered ? <div key={i} className="ac-msg ac-msg-process">{rendered}</div> : null;
                 }
@@ -413,6 +421,15 @@ export default function AgentChat({ user, authority, context, onClose }) {
               <div ref={messagesEndRef} />
             </div>
             <div className="ac-input-area">
+              <button
+                onClick={() => setShowProcess(p => !p)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: '11px', color: showProcess ? '#e67e22' : '#999',
+                  padding: '2px 6px', marginRight: '4px', flexShrink: 0
+                }}
+                title={showProcess ? '추론 과정 감추기' : '추론 과정 보기'}
+              >{showProcess ? '◉' : '○'}</button>
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder="메시지를 입력하세요..." rows={1} />

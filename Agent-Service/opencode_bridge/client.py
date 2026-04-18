@@ -42,7 +42,7 @@ async def send_message_async(session_id: str, text: str, agent: str = "gojira") 
     async with httpx.AsyncClient(timeout=60.0) as c:
         r = await c.post(
             f"{_base_url()}/session/{session_id}/prompt_async",
-            json={"parts": [{"type": "text", "text": text}], "agent": agent},
+            json={"parts": [{"type": "text", "text": text}], **({"agent": agent} if agent else {})},
             headers={**_auth_header(), "Content-Type": "application/json"},
         )
         r.raise_for_status()
@@ -53,7 +53,7 @@ async def inject_context(session_id: str, text: str, agent: str = "gojira") -> N
     async with httpx.AsyncClient(timeout=30.0) as c:
         r = await c.post(
             f"{_base_url()}/session/{session_id}/prompt_async",
-            json={"noReply": True, "parts": [{"type": "text", "text": text}], "agent": agent},
+            json={"noReply": True, "parts": [{"type": "text", "text": text}], **({"agent": agent} if agent else {})},
             headers={**_auth_header(), "Content-Type": "application/json"},
         )
         r.raise_for_status()

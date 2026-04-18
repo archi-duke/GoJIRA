@@ -35,13 +35,6 @@ async def _ensure_opencode_session(gojira_sid: str, user: str) -> str:
     if oc_sid:
         return oc_sid
     oc_sid = await oc.create_session(title=f"GoJIRA {gojira_sid[:8]}")
-    # 사용자 컨텍스트를 noReply 로 주입 — 스킬 bash 에서 $USER 로 사용
-    await oc.inject_context(
-        oc_sid,
-        f"[SYSTEM CONTEXT] 현재 사용자의 knoxID(USER)는 `{user}` 입니다. "
-        f"스킬 실행 시 `export USER=\"{user}\"` 를 자동으로 사용하고, "
-        f"별도로 knoxID 를 되묻지 마세요.",
-    )
     agent_sessions().update_one(
         {"_id": gojira_sid},
         {
@@ -65,18 +58,8 @@ async def chat_stream(
 ):
     gojira_sid = req.session_id or str(uuid.uuid4())
     oc_sid = await _ensure_opencode_session(gojira_sid, x_user_id)
-    # 매 요청마다 사용자 + 프로젝트 컨텍스트 주입 (기존 세션에도 적용)
+    # 컨텍스트를 메시지 앞에 프리픽스로 삽입 (noReply 주입 대신 — noReply 가 UI 에 노출되는 문제 방지)
     project_code = (req.context or {}).get("projectCode", "")
-    ctx_parts = [
-        f"현재 사용자의 knoxID(USER)는 `{x_user_id}` 입니다.",
-        f"스킬 실행 시 `export USER=\"{x_user_id}\"` 를 자동으로 사용하고, knoxID 를 되묻지 마세요.",
-    ]
-    if project_code:
-        ctx_parts.append(
-            f"현재 프로젝트 코드(CODE)는 `{project_code}` 입니다. "
-            f"스킬 실행 시 `export CODE=\"{project_code}\"` 를 자동으로 사용하고, projectCode 를 되묻지 마세요."
-        )
-    await oc.inject_context(oc_sid, "[SYSTEM CONTEXT] " + " ".join(ctx_parts))
 
     # 메시지를 mongo 에 append (히스토리 보존)
     agent_sessions().update_one(
@@ -94,7 +77,7 @@ async def chat_stream(
             events_iter = oc.stream_events(oc_sid)
 
             # prompt_async 로 메시지 송신
-            await oc.send_message_async(oc_sid, req.message, agent="gojira")
+            await oc.send_message_async(oc_sid, req.message)
 
             final_reply_holder = {"text": ""}
 
