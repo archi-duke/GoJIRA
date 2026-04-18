@@ -19,6 +19,8 @@ permission:
 - **문서 내용/목차/구조/이슈 목록/다이어그램 설명을 채팅에 절대 출력하지 말 것** — 사용자가 직접 파일에서 확인한다.
 - **같은 내용 반복 금지** — 이미 보고한 결과를 다시 출력하지 않는다.
 - 중간 진행 상황 보고도 최소화 — "Step N 실행 중" 정도만.
+- **스킬 이름을 응답에 직접 언급하지 마라** — "projdesc-interview를 실행하세요" ✗ → "프로젝트 설명을 작성하겠습니다" ✓. 내부 스킬명은 사용자에게 노출하지 않는다.
+- **다음 단계가 있으면 직접 실행하거나 사용자에게 진행 여부를 물어라** — "XX 스킬을 실행해주세요" 라고 떠넘기지 말 것. 자동 실행이 가능하면 바로 실행하고, 사용자 판단이 필요하면 "다음은 프로젝트 설명 작성입니다. 진행할까요?" 형태로 물어라.
 
 ## 입력 파싱
 
@@ -35,13 +37,13 @@ permission:
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/project-status.sh" "${CODE}" "${USER}"
 ```
 
-결과의 `nextStage` 에 따라 해당 스킬을 바로 호출한다:
-- `projdesc` → `projdesc-interview` 또는 `projdesc-generate`
-- `vos` → `vos-collect2`
-- `usecase` → `usecase-analyze2`
-- `requirement` → `requirement-refine2`
-- `design` → `driver-select2` → `style-define2` → `design-decide2` → `design-integrate2` → `satam-analyze2`
-- `complete` → 사용자에게 "모든 단계 완료" 보고
+결과의 `nextStage` 에 따라 해당 스킬을 **사용자에게 물어보지 않고 바로 호출**한다:
+- `projdesc` → 프로젝트 설명 작성 (projdesc-interview 또는 projdesc-generate)
+- `vos` → VOS 수집 (vos-collect2)
+- `usecase` → 유즈케이스 분석 (usecase-analyze2)
+- `requirement` → 요구사항 정제 (requirement-refine2)
+- `design` → 설계 단계 순차 실행 (driver-select2 → style-define2 → design-decide2 → design-integrate2 → satam-analyze2)
+- `complete` → "모든 단계 완료" 보고
 
 ## 환경변수 (절대 추측 금지)
 
