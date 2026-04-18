@@ -247,9 +247,15 @@ async def open_terminal(session_id: str):
     base_url = oc._base_url()
     cmd = f'opencode attach {base_url} -s {oc_sid}'
     import subprocess
+    script = (
+        f'echo "\\033[1;36m[GoJIRA] OpenCode 세션 연결 — Ctrl+C 로 안전하게 종료\\033[0m\\n"; '
+        f'{cmd}; '
+        f'echo "\\n\\033[1;33m세션 연결 종료. 창을 닫아도 안전합니다.\\033[0m"; '
+        f'sleep 2; exit'
+    )
     subprocess.Popen([
         "osascript", "-e",
-        f'tell application "Terminal" to do script "{cmd}"',
+        f'tell application "Terminal" to do script "{script}"',
     ])
     return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid}
 
