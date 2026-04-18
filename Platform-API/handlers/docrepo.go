@@ -431,7 +431,15 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	branch := "docs/" + userId
-	// 이미 있는지 브랜치 목록에서 확인
+
+	// 로컬 worktree 가 이미 존재하면 Gitea 없이도 성공
+	if _, _, wtErr := github.EnsureWorktree(owner, name, userId); wtErr == nil {
+		go UpdateBranchAlert(owner, name, code, userId)
+		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": false})
+		return
+	}
+
+	// Gitea 에서 브랜치 목록 확인
 	branchList, _ := github.ListBranches(owner, name)
 	branches, _ := branchList.([]interface{})
 	branchExists := false
@@ -449,7 +457,6 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if branchExists {
-		// 기존 브랜치 — main과 비교하여 알림 갱신
 		go UpdateBranchAlert(owner, name, code, userId)
 		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": false})
 		return
@@ -463,7 +470,6 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("ensure-branch: %s/%s branch=%s 생성 (from main=%s)", owner, name, branch, mainSHA[:8])
-	// 새 브랜치 — main과 동일하므로 알림 해제
 	go UpdateBranchAlert(owner, name, code, userId)
 	respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": true})
 }
@@ -695,7 +701,17 @@ func DocRepoTreeHandler(w http.ResponseWriter, r *http.Request) {
 	// fallback: Gitea API
 	tree, err := github.GetTree(owner, name, ref)
 	if err != nil {
-		respondError(w, http.StatusBadGateway, err.Error())
+		// Gitea 미가동 시 로컬 bare repo 에서 git ls-tree 로 대체
+		entries, lsErr := buildBareTree(owner, name, ref)
+		if lsErr != nil {
+			respondError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"tree":        entries,
+			"total_count": len(entries),
+			"source":      "local-bare",
+		})
 		return
 	}
 	respondJSON(w, http.StatusOK, tree)
@@ -744,6 +760,40 @@ func buildLocalTree(baseDir, prefix string) []map[string]interface{} {
 		}
 	}
 	return entries
+}
+
+// buildBareTree — 로컬 bare repo 에서 git ls-tree 로 트리를 생성 (Gitea 미가동 시 fallback).
+func buildBareTree(owner, name, ref string) ([]map[string]interface{}, error) {
+	bareDir := github.GetLocalRepoDir(owner, name)
+	out, err := github.GitCmd(bareDir, "ls-tree", "-r", "--long", ref)
+	if err != nil {
+		return nil, err
+	}
+	var entries []map[string]interface{}
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		// format: <mode> <type> <sha> <size>\t<path>
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		meta := strings.Fields(parts[0])
+		if len(meta) < 4 {
+			continue
+		}
+		size := int64(0)
+		fmt.Sscanf(meta[3], "%d", &size)
+		entries = append(entries, map[string]interface{}{
+			"path": parts[1],
+			"type": meta[1],
+			"mode": meta[0],
+			"sha":  meta[2],
+			"size": size,
+		})
+	}
+	return entries, nil
 }
 
 // gitBlobHash — git hash-object 호환 SHA-1 계산.

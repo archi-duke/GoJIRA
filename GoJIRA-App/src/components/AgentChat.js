@@ -244,9 +244,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         case 'reasoning':
           if (showProcess) {
             addStep({ type: 'reasoning', data, ts });
-            if ((data.step || 'thought') === 'thought' && data.content) {
-              setMessages(prev => [...prev, { role: 'thought', content: data.content }]);
-            }
           }
           break;
         case 'tool_call':
@@ -695,19 +692,55 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               {messages.map((msg, i) => {
                 if (msg.role === 'process') {
                   if (!showProcess) return null;
-                  const rendered = renderProcess(msg, i);
-                  return rendered ? <div key={i} className="ac-msg ac-msg-process">{rendered}</div> : null;
-                }
-                if (msg.role === 'thought') {
-                  if (!showProcess) return null;
+                  const steps = msg.steps || [];
+                  if (steps.length === 0 && !(loading && i === messages.findLastIndex(m => m.role === 'process'))) return null;
+                  const isRunning = loading && i === messages.findLastIndex(m => m.role === 'process');
                   return (
-                    <div key={i} className="ac-msg ac-msg-thought">
-                      <div className="ac-msg-content">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
+                    <div key={i} className="ac-msg ac-msg-process">
+                      <div className="ac-proc-body">
+                        {steps.map((step, j) => (
+                          <div key={j} className={`ac-proc-step ac-ps-${step.type}`}>
+                            {step.type === 'reasoning' && (
+                              <div className={`ac-ps-line ac-ps-reasoning ac-ps-${step.data.step || 'thought'}`}>
+                                <span className="ac-ps-tag ac-tag-reason">Thought</span>
+                                <span className="ac-ps-text">{step.data.content}</span>
+                              </div>
+                            )}
+                            {step.type === 'tool_call' && (
+                              <div className="ac-ps-line">
+                                <span className="ac-ps-tag ac-tag-call">CALL</span>
+                                <span className="ac-ps-text"><strong>{step.data.tool}</strong>
+                                  {Object.keys(step.data.params || {}).length > 0 && (
+                                    <span className="ac-ps-params"> ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})</span>
+                                  )}
+                                </span>
+                                <span className="ac-ps-ts">{step.ts}</span>
+                              </div>
+                            )}
+                            {step.type === 'tool_result' && (
+                              <div className="ac-ps-result-wrap">
+                                <div className="ac-ps-line" onClick={() => toggleDetail(i, j)} style={{cursor:'pointer'}}>
+                                  <span className={`ac-ps-tag ${step.data.status === 'success' ? 'ac-tag-ok' : 'ac-tag-err'}`}>
+                                    {step.data.status === 'success' ? 'OK' : 'ERR'}
+                                  </span>
+                                  <span className="ac-ps-text">{step.data.tool} &rarr; {step.data.summary}</span>
+                                  <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
+                                  {step.data.detail && <span className="ac-ps-expand">{step.detailOpen ? '\u25BC' : '...'}</span>}
+                                </div>
+                                {step.detailOpen && step.data.detail && <pre className="ac-ps-detail">{step.data.detail}</pre>}
+                              </div>
+                            )}
+                            {step.type === 'error' && (
+                              <div className="ac-ps-line"><span className="ac-ps-tag ac-tag-err">ERR</span><span className="ac-ps-text">{step.data.message}</span></div>
+                            )}
+                          </div>
+                        ))}
+                        {isRunning && <div className="ac-ps-line"><span className="ac-proc-spinner" /> <span className="ac-ps-text">작업 중...</span></div>}
                       </div>
                     </div>
                   );
                 }
+                if (msg.role === 'thought') return null;
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
                     <div className="ac-msg-content">
