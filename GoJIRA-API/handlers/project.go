@@ -88,8 +88,20 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 설계문서 저장소 자동 생성 (없으면)
-	ensureDocRepo(code, req.Name)
+	if req.Status == "Deleted" {
+		// 프로젝트 삭제 시 DocRepo(Gitea + 로컬 클론) 정리
+		go func() {
+			_, sc := callPlatform("DELETE", fmt.Sprintf("/DocRepo/%s/github", code), nil)
+			if sc >= 400 {
+				log.Printf("deleteDocRepo: 실패 for %s (status=%d)", code, sc)
+			} else {
+				log.Printf("deleteDocRepo: %s repo 삭제 완료", code)
+			}
+		}()
+	} else {
+		// 설계문서 저장소 자동 생성 (없으면)
+		ensureDocRepo(code, req.Name)
+	}
 
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
