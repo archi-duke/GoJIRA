@@ -246,17 +246,17 @@ async def open_terminal(session_id: str):
         return {"ok": False, "reason": "openCodeSessionId 없음"}
     base_url = oc._base_url()
     cmd = f'opencode attach {base_url} -s {oc_sid}'
-    import subprocess
-    script = (
-        f'echo "\\033[1;36m[GoJIRA] OpenCode 세션 연결 — Ctrl+C 로 안전하게 종료\\033[0m\\n"; '
-        f'{cmd}; '
-        f'echo "\\n\\033[1;33m세션 연결 종료. 창을 닫아도 안전합니다.\\033[0m"; '
-        f'sleep 2; exit'
-    )
-    subprocess.Popen([
-        "osascript", "-e",
-        f'tell application "Terminal" to do script "{script}"',
-    ])
+    import subprocess, tempfile
+    sh = tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False, prefix='gojira-term-')
+    sh.write(f'#!/bin/bash\n')
+    sh.write(f'echo -e "\\033[1;36m[GoJIRA] OpenCode 세션 연결 — Ctrl+C 로 안전하게 종료\\033[0m\\n"\n')
+    sh.write(f'{cmd}\n')
+    sh.write(f'echo -e "\\n\\033[1;33m세션 연결 종료. 창을 닫아도 안전합니다.\\033[0m"\n')
+    sh.write(f'sleep 2; exit\n')
+    sh.close()
+    import os
+    os.chmod(sh.name, 0o755)
+    subprocess.Popen(["open", "-a", "Terminal", sh.name])
     return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid}
 
 

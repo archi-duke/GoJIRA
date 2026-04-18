@@ -624,13 +624,18 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             </div>
           )}
           <div className="ac-header-btns">
-            {isMaster && sessionId && (
+            {isMaster && (
               <button className="ac-header-btn" onClick={async () => {
+                if (!sessionId) return;
                 try {
                   await fetch(`${STREAM_API}/Agent/session/${sessionId}/terminal`, { method: 'POST' });
                 } catch {}
-              }} title="터미널에서 OpenCode 세션 보기" style={{fontSize:'14px'}}>
-                ⌨
+              }} title="터미널에서 OpenCode 세션 보기" style={{opacity: sessionId ? 1 : 0.3}}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <polyline points="7 9 10 12 7 15" />
+                  <line x1="13" y1="15" x2="17" y2="15" />
+                </svg>
               </button>
             )}
             <button className="ac-header-btn" onClick={handleShowHistory} title="대화 이력">
