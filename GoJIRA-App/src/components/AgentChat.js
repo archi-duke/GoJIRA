@@ -52,8 +52,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const isMaster = authority && (authority.USR || 0) >= 15;
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: loading ? 'auto' : 'smooth' });
+  }, [messages, loading]);
 
   const loadSession = useCallback(async (sid) => {
     if (!sid) return;
@@ -242,9 +242,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           // thinking은 스피너 상태 유지 용도 (step에 추가하지 않음)
           break;
         case 'reasoning':
-          if (showProcess) {
-            addStep({ type: 'reasoning', data, ts });
-          }
+          addStep({ type: 'reasoning', data, ts });
           break;
         case 'tool_call':
           addStep({ type: 'tool_call', data, ts });
@@ -254,9 +252,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           break;
         case 'tool_result':
           addStep({ type: 'tool_result', data, ts });
-          // tool 실행 후 새 말풍선 시작 — 기존 streaming 메시지 확정
+          // tool 실행 후 contentBuf 리셋 — 다음 응답은 새로 시작
           if (contentBuf) {
-            setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+            if (!showProcess) {
+              setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+            }
             contentBuf = '';
           }
           // ui_navigate 등 _action이 있으면 메인 앱에 전달
@@ -269,34 +269,59 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           break;
         case 'content':
           contentBuf += data.text;
+          // process step에 content 누적 + streaming assistant도 유지 (토글 전환 대응)
           setMessages(prev => {
-            // 사용자 입력 에코 필터 — assistant 가 user 메시지를 그대로 되풀이하면 스킵
             const lastUser = [...prev].reverse().find(m => m.role === 'user');
             if (lastUser && contentBuf.trim() === lastUser.content.trim()) return prev;
-            const last = prev[prev.length - 1];
-            if (last && last._streaming) {
-              return [...prev.slice(0, -1), { ...last, content: contentBuf }];
+            // process step에 content 추가/갱신
+            const idx = prev.findLastIndex(m => m.role === 'process');
+            let next = [...prev];
+            if (idx >= 0) {
+              const proc = next[idx];
+              const steps = [...proc.steps];
+              const lastStep = steps[steps.length - 1];
+              if (lastStep && lastStep.type === 'content') {
+                steps[steps.length - 1] = { ...lastStep, data: { text: contentBuf } };
+              } else {
+                steps.push({ type: 'content', data: { text: contentBuf }, ts });
+              }
+              next = [...next.slice(0, idx), { ...proc, steps }, ...next.slice(idx + 1)];
             }
-            return [...prev, { role: 'assistant', content: contentBuf, _streaming: true }];
+            // streaming assistant 메시지도 유지 (추론 끈 상태용)
+            const last = next[next.length - 1];
+            if (last && last._streaming) {
+              next = [...next.slice(0, -1), { ...last, content: contentBuf }];
+            } else {
+              next = [...next, { role: 'assistant', content: contentBuf, _streaming: true }];
+            }
+            return next;
           });
           break;
         case 'done':
           finalActions = data.actions || [];
           setMessages(prev => {
-            // 1) streaming 메시지 제거
             let next = prev.filter(m => !m._streaming);
-            // 2) 마지막 thought 메시지 제거 (최종 답변과 중복될 가능성 차단)
-            const lastThoughtIdx = next.map(m => m.role).lastIndexOf('thought');
-            if (lastThoughtIdx >= 0) {
-              next = [...next.slice(0, lastThoughtIdx), ...next.slice(lastThoughtIdx + 1)];
+            next = next.filter(m => m.role !== 'thought');
+            // process step의 마지막 content를 최종 reply로 갱신
+            const reply = data.reply || contentBuf;
+            if (reply) {
+              const idx = next.findLastIndex(m => m.role === 'process');
+              if (idx >= 0) {
+                const proc = next[idx];
+                const steps = [...proc.steps];
+                const lastStep = steps[steps.length - 1];
+                if (lastStep && lastStep.type === 'content') {
+                  steps[steps.length - 1] = { ...lastStep, data: { text: reply } };
+                } else {
+                  steps.push({ type: 'content', data: { text: reply }, ts: '' });
+                }
+                next = [...next.slice(0, idx), { ...proc, steps }, ...next.slice(idx + 1)];
+              }
             }
-            // 3) 작업 과정 접힘 유지
-            next = next.map(m =>
-              m.role === 'process' && m.steps.length > 0 ? { ...m, open: false } : m
-            );
+            // 추론 끈 상태용 assistant 메시지도 추가
             return [...next, {
               role: 'assistant',
-              content: data.reply || contentBuf,
+              content: reply,
               actions: finalActions,
             }];
           });
@@ -733,6 +758,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                             {step.type === 'error' && (
                               <div className="ac-ps-line"><span className="ac-ps-tag ac-tag-err">ERR</span><span className="ac-ps-text">{step.data.message}</span></div>
                             )}
+                            {step.type === 'content' && (
+                              <div className="ac-msg-content ac-ps-content">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.data.text || ''}</ReactMarkdown>
+                              </div>
+                            )}
                           </div>
                         ))}
                         {isRunning && <div className="ac-ps-line"><span className="ac-proc-spinner" /> <span className="ac-ps-text">작업 중...</span></div>}
@@ -741,6 +771,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                   );
                 }
                 if (msg.role === 'thought') return null;
+                if (msg.role === 'assistant' && showProcess) return null;
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
                     <div className="ac-msg-content">
