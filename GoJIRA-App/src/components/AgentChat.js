@@ -373,49 +373,37 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     }
 
     try {
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      const res = await fetch(`${STREAM_API}/Agent/chat/stream`, {
+      // 1) 메시지 전송 (즉시 반환)
+      const sendRes = await fetch(`${STREAM_API}/Agent/chat/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
         body: JSON.stringify({ sessionId, message: sendText, context: sendContext }),
-        signal: ctrl.signal,
       });
+      if (!sendRes.ok) throw new Error(`전송 실패: ${sendRes.status}`);
+      const sendData = await sendRes.json();
+      const activeSid = sendData.sessionId;
+      if (activeSid) { setSessionId(activeSid); sessionStorage.setItem('agent_sessionId', activeSid); }
 
-      if (!res.ok || !res.body) {
-        const fb = await fetch(`${API}/Agent/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-          body: JSON.stringify({ sessionId, message: sendText, context: sendContext }),
-        });
-        const data = await fb.json();
-        if (data.sessionId) { setSessionId(data.sessionId); sessionStorage.setItem('agent_sessionId', data.sessionId); }
-        setMessages(prev => [
-          ...prev.filter(m => m.role !== 'process' || m.steps.length > 0),
-          { role: 'assistant', content: data.reply, actions: data.actions, suggestions: data.suggestions },
-        ]);
-        setLoading(false);
-        return;
-      }
+      // 2) EventSource 로 이벤트 수신 (별도 연결, 자동 재접속)
+      await new Promise((resolve, reject) => {
+        const evtUrl = `${STREAM_API}/Agent/session/${activeSid}/events`;
+        const es = new EventSource(evtUrl);
+        abortRef.current = { abort: () => { es.close(); resolve(); } };
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        let eventType = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) { eventType = line.slice(7).trim(); }
-          else if (line.startsWith('data: ') && eventType) {
-            try { handleSSE(eventType, JSON.parse(line.slice(6))); } catch {}
-            eventType = '';
-          }
+        function onEvent(e) {
+          try { handleSSE(e.type, JSON.parse(e.data)); } catch {}
+          if (e.type === 'done') { es.close(); resolve(); }
         }
-      }
+        ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'].forEach(
+          t => es.addEventListener(t, onEvent)
+        );
+        es.onerror = () => {
+          // EventSource 자동 재접속 시도 — CLOSED 상태면 종료
+          if (es.readyState === EventSource.CLOSED) {
+            resolve();
+          }
+        };
+      });
     } catch (err) {
       setMessages(prev => {
         const filtered = prev.filter(m => m.role !== 'process' || m.steps.length > 0);

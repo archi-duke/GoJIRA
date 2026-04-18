@@ -144,6 +144,99 @@ async def chat_stream(
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
 
+@router.post("/chat/send")
+async def chat_send(
+    req: ChatRequest,
+    request: Request,
+    x_user_id: str = Header(default="batman", alias="X-User-Id"),
+):
+    """메시지 전송만 수행 (이벤트는 /session/{id}/events 에서 수신)."""
+    gojira_sid = req.session_id or str(uuid.uuid4())
+    oc_sid = await _ensure_opencode_session(gojira_sid, x_user_id)
+
+    agent_sessions().update_one(
+        {"_id": gojira_sid},
+        {
+            "$push": {"messages": {"role": "user", "content": req.message, "timestamp": _now()}},
+            "$set": {"updatedAt": _now()},
+        },
+    )
+
+    await oc.send_message_async(oc_sid, req.message)
+    return {"sessionId": gojira_sid, "openCodeSessionId": oc_sid}
+
+
+@router.get("/session/{session_id}/events")
+async def session_events(session_id: str, x_user_id: str = Header(default="batman", alias="X-User-Id")):
+    """세션별 SSE 이벤트 스트림 — EventSource 로 연결, 자동 재접속 지원."""
+    doc = agent_sessions().find_one({"_id": session_id}) or {}
+    oc_sid = doc.get("openCodeSessionId")
+    if not oc_sid:
+        async def _err():
+            yield _sse("error", {"message": "세션에 연결된 OpenCode 세션이 없습니다."})
+        return StreamingResponse(_err(), media_type="text/event-stream")
+
+    async def sse_stream():
+        import asyncio
+        try:
+            events_iter = oc.stream_events(oc_sid)
+            translated = translate(events_iter, session_id)
+            IDLE_TIMEOUT = 300.0
+            final_reply_holder = {"text": ""}
+
+            async def _next_sse():
+                return await translated.__anext__()
+
+            while True:
+                try:
+                    sse = await asyncio.wait_for(_next_sse(), timeout=IDLE_TIMEOUT)
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    log.warning(f"events watchdog timeout — session {session_id}")
+                    try:
+                        await oc.abort_session(oc_sid)
+                    except Exception:
+                        pass
+                    yield _sse("error", {"message": "응답 대기 시간 초과"})
+                    yield _sse("done", {"reply": "", "actions": []})
+                    return
+                if sse.startswith(":"):
+                    yield sse
+                    continue
+                if sse.startswith("event: done\n"):
+                    try:
+                        import json as _j
+                        data_line = sse.split("\n", 2)[1]
+                        payload = _j.loads(data_line[len("data: "):])
+                        final_reply_holder["text"] = payload.get("reply", "")
+                        if payload.get("_abort"):
+                            try:
+                                await oc.abort_session(oc_sid)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                yield sse
+                if sse.startswith("event: done\n"):
+                    break
+
+            if final_reply_holder["text"]:
+                agent_sessions().update_one(
+                    {"_id": session_id},
+                    {
+                        "$push": {"messages": {"role": "assistant", "content": final_reply_holder["text"], "timestamp": _now()}},
+                        "$set": {"updatedAt": _now()},
+                    },
+                )
+        except Exception as e:
+            log.exception("session_events 실패")
+            yield _sse("error", {"message": f"이벤트 스트림 오류: {e}"})
+            yield _sse("done", {"reply": "", "actions": []})
+
+    return StreamingResponse(sse_stream(), media_type="text/event-stream")
+
+
 @router.delete("/session/{session_id}")
 async def delete_session(session_id: str, x_user_id: str = Header(default="batman", alias="X-User-Id")):
     agent_sessions().delete_one({"_id": session_id})
