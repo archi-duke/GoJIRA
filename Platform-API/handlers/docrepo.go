@@ -492,7 +492,26 @@ func DocRepoSyncBranchHandler(w http.ResponseWriter, r *http.Request) {
 
 	branch := "docs/" + userId
 
-	// 브랜치 목록에서 존재 확인 + main SHA 조회
+	// 로컬 worktree 가 있으면 로컬에서 직접 main merge (Gitea 불필요)
+	wtDir, _, wtErr := github.EnsureWorktree(owner, name, userId)
+	if wtErr == nil {
+		bareDir := github.GetLocalRepoDir(owner, name)
+		github.GitCmd(bareDir, "fetch", "origin")
+		github.GitCmd(wtDir, "checkout", "--", ".")
+		if out, mergeErr := github.GitCmd(wtDir, "merge", "main", "--no-edit"); mergeErr != nil {
+			// merge 실패 시 hard reset
+			github.GitCmd(wtDir, "merge", "--abort")
+			github.GitCmd(wtDir, "reset", "--hard", "main")
+			log.Printf("sync-branch: merge 실패, hard reset to main — %s: %s", wtDir, out)
+		} else {
+			log.Printf("sync-branch: worktree merged main — %s", wtDir)
+		}
+		go UpdateBranchAlert(owner, name, code, userId)
+		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "synced": true, "source": "local"})
+		return
+	}
+
+	// fallback: Gitea API 경유
 	branchList, _ := github.ListBranches(owner, name)
 	branches, _ := branchList.([]interface{})
 	branchExists := false
@@ -515,7 +534,6 @@ func DocRepoSyncBranchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 브랜치가 있으면 삭제 후 재생성 (main HEAD 기준)
 	if branchExists {
 		github.DeleteBranch(owner, name, branch)
 		time.Sleep(500 * time.Millisecond)
@@ -524,16 +542,6 @@ func DocRepoSyncBranchHandler(w http.ResponseWriter, r *http.Request) {
 	if err := github.CreateBranch(owner, name, branch, mainSHA); err != nil {
 		respondError(w, http.StatusBadGateway, "브랜치 동기화 실패: "+err.Error())
 		return
-	}
-
-	// 로컬 worktree 도 동기화: main 기준으로 hard reset
-	wtDir, _, wtErr := github.EnsureWorktree(owner, name, userId)
-	if wtErr == nil {
-		github.GitCmd(wtDir, "fetch", "origin")
-		github.GitCmd(wtDir, "reset", "--hard", "origin/main")
-		log.Printf("sync-branch: worktree reset to main — %s", wtDir)
-	} else {
-		log.Printf("sync-branch: worktree reset skip (no worktree): %v", wtErr)
 	}
 
 	// 알림 갱신
