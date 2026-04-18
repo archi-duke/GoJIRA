@@ -624,6 +624,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             </div>
           )}
           <div className="ac-header-btns">
+            {isMaster && sessionId && (
+              <button className="ac-header-btn" onClick={async () => {
+                try {
+                  await fetch(`${STREAM_API}/Agent/session/${sessionId}/terminal`, { method: 'POST' });
+                } catch {}
+              }} title="터미널에서 OpenCode 세션 보기" style={{fontSize:'14px'}}>
+                ⌨
+              </button>
+            )}
             <button className="ac-header-btn" onClick={handleShowHistory} title="대화 이력">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 0 11zM8.5 4H7v4.5l3.5 2 .75-1.23L8.5 7.5V4z"/></svg>
             </button>

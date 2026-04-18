@@ -237,6 +237,23 @@ async def session_events(session_id: str, x_user_id: str = Header(default="batma
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
 
+@router.post("/session/{session_id}/terminal")
+async def open_terminal(session_id: str):
+    """macOS Terminal.app 에서 해당 세션의 OpenCode attach 실행."""
+    doc = agent_sessions().find_one({"_id": session_id}) or {}
+    oc_sid = doc.get("openCodeSessionId")
+    if not oc_sid:
+        return {"ok": False, "reason": "openCodeSessionId 없음"}
+    base_url = oc._base_url()
+    cmd = f'opencode attach {base_url} -s {oc_sid}'
+    import subprocess
+    subprocess.Popen([
+        "osascript", "-e",
+        f'tell application "Terminal" to do script "{cmd}"',
+    ])
+    return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid}
+
+
 @router.delete("/session/{session_id}")
 async def delete_session(session_id: str, x_user_id: str = Header(default="batman", alias="X-User-Id")):
     agent_sessions().delete_one({"_id": session_id})
