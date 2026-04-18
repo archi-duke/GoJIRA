@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * TC2: 프로젝트 생성
+ * TC1: 프로젝트 생성
  *
  * 사전 조건:
  *   - Platform-App(:3000), GoJIRA-App(:3001), Platform-API(:9000), GoJIRA-API(:9001) 가동
@@ -13,14 +13,13 @@ const {
   dismissModals,
   switchUser,
   waitForRemoteLoad,
+  giteaRepoExists,
 } = require('./helpers');
 
 const PROJECT_NAME = 'E2E-TEST-PRJ';
 const JIRA_CODE = 'E2ETEST';
-const GITEA_BASE = 'http://localhost:3300';
-const GITEA_ORG = 'gojira';
 
-test.describe.serial('TC2: 프로젝트 생성', () => {
+test.describe.serial('TC1: 프로젝트 생성', () => {
   /** @type {import('@playwright/test').Page} */
   let page;
   /** @type {import('@playwright/test').BrowserContext} */
@@ -73,9 +72,17 @@ test.describe.serial('TC2: 프로젝트 생성', () => {
     await expect(codeInput).toBeVisible({ timeout: 5000 });
     await codeInput.fill(JIRA_CODE);
 
+    // 승인자(Auditor) 추가: duke.kimm
+    const auditorInput = page.locator('.dlg-auditor-input');
+    await expect(auditorInput).toBeVisible({ timeout: 5000 });
+    await auditorInput.fill('duke.kimm');
+    await auditorInput.press('Enter');
+    await page.waitForTimeout(300);
+
     // 검증: 입력값 반영
     await expect(nameInput).toHaveValue(PROJECT_NAME);
     await expect(codeInput).toHaveValue(JIRA_CODE);
+    await expect(page.locator('.dlg-auditor-tag', { hasText: 'duke.kimm' })).toBeVisible();
   });
 
   // ─────────────────────────────────────────────────
@@ -102,26 +109,14 @@ test.describe.serial('TC2: 프로젝트 생성', () => {
   });
 
   test('P2: Gitea에 과제 레포지토리 생성', async () => {
-    // Gitea API로 repo 존재 확인
-    const response = await page.request.get(
-      `${GITEA_BASE}/api/v1/repos/${GITEA_ORG}/${JIRA_CODE}`,
-      { failOnStatusCode: false }
-    );
-
-    // repo 이름이 JIRA_CODE로 시작하는 것을 찾기 (타임스탬프 접미사 포함)
-    if (response.status() === 404) {
-      // 타임스탬프 접미사가 붙은 경우 검색으로 찾기
-      const searchRes = await page.request.get(
-        `${GITEA_BASE}/api/v1/repos/search?q=${JIRA_CODE}`
-      );
-      expect(searchRes.status()).toBe(200);
-      const body = await searchRes.json();
-      const repos = body.data || body;
-      const found = repos.some((r) => r.name.startsWith(JIRA_CODE));
-      expect(found).toBeTruthy();
-    } else {
-      expect(response.status()).toBe(200);
+    // repo 생성은 비동기이므로 최대 10초 대기
+    let found = false;
+    for (let i = 0; i < 10; i++) {
+      found = await giteaRepoExists(page.request, JIRA_CODE);
+      if (found) break;
+      await page.waitForTimeout(1000);
     }
+    expect(found).toBeTruthy();
   });
 
   test('P3: Repository 메뉴에서 정보 확인', async () => {

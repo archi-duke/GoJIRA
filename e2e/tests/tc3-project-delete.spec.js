@@ -3,7 +3,7 @@
  * TC3: 프로젝트 삭제
  *
  * 사전 조건:
- *   - TC2(tc2-project-create.spec.js) 성공 — E2E-TEST-PRJ 프로젝트가 존재하는 상태
+ *   - TC1(tc1-project-create.spec.js) 성공 — E2E-TEST-PRJ 프로젝트가 존재하는 상태
  *   - Platform-App(:3000), GoJIRA-App(:3001), Platform-API(:9000), GoJIRA-API(:9001) 가동
  *   - Gitea(:3300) 정상 동작
  *
@@ -14,12 +14,11 @@ const {
   dismissModals,
   switchUser,
   waitForRemoteLoad,
+  giteaRepoExists,
 } = require('./helpers');
 
 const PROJECT_NAME = 'E2E-TEST-PRJ';
 const JIRA_CODE = 'E2ETEST';
-const GITEA_BASE = 'http://localhost:3300';
-const GITEA_ORG = 'gojira';
 
 test.describe.serial('TC3: 프로젝트 삭제', () => {
   /** @type {import('@playwright/test').Page} */
@@ -37,7 +36,7 @@ test.describe.serial('TC3: 프로젝트 삭제', () => {
   });
 
   // ─────────────────────────────────────────────────
-  // Step 1.1: 선행 조건 확인 — TC2에서 생성한 프로젝트 존재
+  // Step 1.1: 선행 조건 확인 — TC1에서 생성한 프로젝트 존재
   // ─────────────────────────────────────────────────
   test('Step 1.1: ProjectMap 진입 및 대상 프로젝트 확인', async () => {
     await page.goto('http://localhost:3000');
@@ -47,7 +46,7 @@ test.describe.serial('TC3: 프로젝트 삭제', () => {
     await waitForRemoteLoad(page);
     await dismissModals(page);
 
-    // TC2에서 생성한 프로젝트가 존재하는지 확인
+    // TC1에서 생성한 프로젝트가 존재하는지 확인
     const projectRow = page.locator('.pm-sidebar-row', { hasText: PROJECT_NAME });
     await expect(projectRow).toBeVisible({ timeout: 10_000 });
   });
@@ -56,8 +55,9 @@ test.describe.serial('TC3: 프로젝트 삭제', () => {
   // Step 1.2: 우클릭 → 삭제 클릭
   // ─────────────────────────────────────────────────
   test('Step 1.2: 우클릭 컨텍스트 메뉴에서 삭제 클릭', async () => {
-    // 대상 프로젝트 행 우클릭
+    // 사이드바의 프로젝트 행 우클릭
     const projectRow = page.locator('.pm-sidebar-row', { hasText: PROJECT_NAME });
+    await expect(projectRow).toBeVisible({ timeout: 5000 });
     await projectRow.click({ button: 'right' });
     await page.waitForTimeout(500);
 
@@ -102,14 +102,7 @@ test.describe.serial('TC3: 프로젝트 삭제', () => {
     // repo 삭제는 비동기 처리이므로 충분히 대기
     await page.waitForTimeout(3000);
 
-    // Gitea API로 repo 삭제 확인 — 검색 결과에 없어야 함
-    const searchRes = await page.request.get(
-      `${GITEA_BASE}/api/v1/repos/search?q=${JIRA_CODE}`
-    );
-    expect(searchRes.status()).toBe(200);
-    const body = await searchRes.json();
-    const repos = body.data || body;
-    const found = repos.some((r) => r.name.startsWith(JIRA_CODE));
+    const found = await giteaRepoExists(page.request, JIRA_CODE);
     expect(found).toBeFalsy();
   });
 });

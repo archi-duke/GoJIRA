@@ -1,4 +1,4 @@
-# TC1: 문서 이력관리 및 PR 알림 흐름
+# TC2: 문서 이력관리 및 PR 알림 흐름
 
 ## 목적
 문서 관리의 이력관리 기능과 실시간 알림이 올바로 동작하는지 검증한다.
@@ -7,15 +7,14 @@
 - PR 도착 확인
 
 ## 사전 조건
+- TC1(tc1-project-create.md) 성공 — E2E-TEST-PRJ 프로젝트가 존재하는 상태
 - Platform-App(:3000), GoJIRA-App(:3001), Platform-API(:9000), GoJIRA-API(:9001) 가동
 - Gitea 정상 동작
-- 테스트 프로젝트에 설계문서 저장소(DocRepo) 생성 완료
-- 테스트 프로젝트에 main 브랜치에 파일 최소 1개 이상 존재 (예: test.md)
 
 ## 테스트 환경
 - 브라우저 A: 사용자 duke.kimm (리뷰어 역할)
 - 브라우저 B: 사용자 batman (작성자 역할)
-- 테스트 대상 프로젝트: GoJIRA Prj (GOJIRA)
+- 테스트 대상 프로젝트: E2E-TEST-PRJ (E2ETEST)
 
 ---
 
@@ -34,12 +33,12 @@
 ### Step 2: 작업공간 동기화 (Pull)
 | 구분 | 동작 | 예상 결과 |
 |------|------|----------|
-| A | GoJIRA Prj 클릭 → Docs 탭 | DocEditor 진입, 작업공간 탭에 파일 목록 표시 |
+| A | E2E-TEST-PRJ 클릭 → Docs 탭 | DocEditor 진입, 작업공간 탭에 파일 목록 표시 |
 | A | Pull 버튼(git-fetch 아이콘) 클릭 → 확인 | "main 동기화 완료" 알림, 파일 목록 갱신 |
-| A | Project 탭 클릭 → ProjectMap 복귀 | ProjectMap에서 GoJIRA Prj의 알림 아이콘이 **제거**됨 (branchDiff 해소) |
-| B | GoJIRA Prj 클릭 → Docs 탭 | DocEditor 진입 |
+| A | Project 탭 클릭 → ProjectMap 복귀 | ProjectMap에서 E2E-TEST-PRJ의 알림 아이콘이 **제거**됨 (branchDiff 해소) |
+| B | E2E-TEST-PRJ 클릭 → Docs 탭 | DocEditor 진입 |
 | B | Pull 버튼 클릭 → 확인 | "main 동기화 완료" 알림 |
-| B | Project 탭 클릭 → ProjectMap 복귀 | ProjectMap에서 GoJIRA Prj의 알림 아이콘이 **제거**됨 |
+| B | Project 탭 클릭 → ProjectMap 복귀 | ProjectMap에서 E2E-TEST-PRJ의 알림 아이콘이 **제거**됨 |
 
 **확인**: 양쪽 모두 main과 동일한 최신 상태, ProjectMap에 알림 아이콘 없음
 
@@ -47,12 +46,12 @@
 | 구분 | 동작 | 예상 결과 |
 |------|------|----------|
 | B | 편집모드 ON 클릭 | 편집모드 활성화 (+ 버튼, 발행신청 버튼 표시) |
-| B | test.md 클릭 → 편집 버튼 클릭 | 텍스트 편집기(textarea) 표시 |
+| B | project-description.md 클릭 → 편집 버튼 클릭 | 텍스트 편집기(textarea) 표시 |
 | B | 내용 임의 수정 | 파일명 옆에 ● 표시 (변경됨), 저장 버튼 활성화 |
 | B | 저장 버튼 클릭 → "저장(커밋)하시겠습니까?" 확인 | "저장 완료" 알림 |
 
 **확인 (B)**:
-- 파일 목록에서 test.md 옆에 **M 배지** (modified, 주황색) 표시
+- 파일 목록에서 project-description.md 옆에 **M 배지** (modified, 주황색) 표시
 - 발행신청 버튼이 활성화 상태 (진한 배경색)
 - 발행신청 버튼 좌측에 **git-pull.svg 아이콘** 표시
 
@@ -67,8 +66,8 @@
 ### Step 5: PR 수신 알림 확인 (A)
 | 구분 | 동작 | 예상 결과 |
 |------|------|----------|
-| A | (자동) ProjectMap에서 GoJIRA Prj 행 확인 | 프로젝트명 색상이 **#27ae60** (녹색)으로 변경 |
-| A | (자동) GoJIRA Prj 옆 아이콘 확인 | **alert-pr.svg** 아이콘 표시 (PR 수신) |
+| A | (자동) ProjectMap에서 E2E-TEST-PRJ 행 확인 | 프로젝트명 색상이 **#27ae60** (녹색)으로 변경 |
+| A | (자동) E2E-TEST-PRJ 옆 아이콘 확인 | **alert-pr.svg** 아이콘 표시 (PR 수신) |
 
 **확인 (A)**: WebSocket을 통해 hasOpenPR 상태가 실시간 반영됨
 
@@ -77,7 +76,7 @@
 |------|------|----------|
 | A | Repository 탭 클릭 | DocManager 진입 |
 | A | 프로젝트 선택 → PRs 탭 | PR 목록 표시 |
-| A | 방금 생성된 PR 확인 | title: "[GOJIRA] 설계문서 배포 요청", state: open, user: batman |
+| A | 방금 생성된 PR 확인 | title: "[E2ETEST] 설계문서 배포 요청", state: open, user: batman |
 
 **확인 (A)**: PR이 정상 도착, 리뷰 상태 "대기중"
 

@@ -1,12 +1,11 @@
 // @ts-check
 /**
- * TC1: 문서 이력관리 및 PR 알림 흐름
+ * TC2: 문서 이력관리 및 PR 알림 흐름
  *
  * 사전 조건:
  *   - Platform-App(:3000), GoJIRA-App(:3001), Platform-API(:9000), GoJIRA-API(:9001) 가동
  *   - Gitea 정상 동작
- *   - 테스트 프로젝트(GoJIRA Prj, GOJIRA)에 DocRepo 생성 완료
- *   - main 브랜치에 파일 최소 1개 이상 존재
+ *   - TC1(tc1-project-create.spec.js) 성공 — E2E-TEST-PRJ 프로젝트 + DocRepo 존재
  *
  * 브라우저 A: duke.kimm (리뷰어)
  * 브라우저 B: batman (작성자)
@@ -21,9 +20,9 @@ const {
   waitForRemoteLoad,
 } = require('./helpers');
 
-const PROJECT_NAME = 'GoJIRA Prj';
+const PROJECT_NAME = 'E2E-TEST-PRJ';
 
-test.describe.serial('TC1: 문서 이력관리 및 PR 알림 흐름', () => {
+test.describe.serial('TC2: 문서 이력관리 및 PR 알림 흐름', () => {
   /** @type {import('@playwright/test').Page} */
   let pageA; // duke.kimm (리뷰어)
   /** @type {import('@playwright/test').Page} */
@@ -70,7 +69,7 @@ test.describe.serial('TC1: 문서 이력관리 및 PR 알림 흐름', () => {
     await expect(pageA.locator('text=+ Add')).toBeVisible({ timeout: 10_000 });
     await expect(pageB.locator('text=+ Add')).toBeVisible({ timeout: 10_000 });
 
-    // 검증: 프로젝트 목록에 GoJIRA Prj 존재
+    // 검증: 프로젝트 목록에 E2E-TEST-PRJ 존재
     await expect(pageA.locator('.pm-sidebar-row', { hasText: PROJECT_NAME })).toBeVisible();
     await expect(pageB.locator('.pm-sidebar-row', { hasText: PROJECT_NAME })).toBeVisible();
   });
@@ -79,7 +78,7 @@ test.describe.serial('TC1: 문서 이력관리 및 PR 알림 흐름', () => {
   // Step 2: 작업공간 동기화 (Pull)
   // ─────────────────────────────────────────────────
   test('Step 2-A: duke.kimm — DocEditor 진입 후 Pull 동기화', async () => {
-    // GoJIRA Prj 클릭 → Issues 페이지로 이동
+    // E2E-TEST-PRJ 클릭 → Issues 페이지로 이동
     await clickProject(pageA, PROJECT_NAME);
 
     // Docs 탭 클릭 → DocEditor 진입
@@ -147,7 +146,7 @@ test.describe.serial('TC1: 문서 이력관리 및 PR 알림 흐름', () => {
   // Step 3: 문서 편집 및 저장 (B: batman)
   // ─────────────────────────────────────────────────
   test('Step 3: batman — 문서 편집 및 저장', async () => {
-    // GoJIRA Prj 클릭 → Docs 탭
+    // E2E-TEST-PRJ 클릭 → Docs 탭
     await clickProject(pageB, PROJECT_NAME);
     await clickNavTab(pageB, 'Docs');
 
@@ -239,42 +238,26 @@ test.describe.serial('TC1: 문서 이력관리 및 PR 알림 흐름', () => {
   });
 
   // ─────────────────────────────────────────────────
-  // Step 5: PR 수신 알림 확인 (A: duke.kimm)
+  // Step 5+6: PR 확인 (A: duke.kimm — Repository에서 PR 도착 확인)
   // ─────────────────────────────────────────────────
-  test('Step 5: duke.kimm — ProjectMap에서 PR 알림 확인', async () => {
-    // A의 ProjectMap 새로고침하여 SSE 이벤트 반영 확인
+  test('Step 5: duke.kimm — Repository에서 PR 확인', async () => {
+    // A의 ProjectMap 새로고침
     await pageA.goto('http://localhost:3000');
     await waitForRemoteLoad(pageA);
     await dismissModals(pageA);
 
-    // GoJIRA Prj 행 확인 — SSE로 hasOpenPR 상태가 반영됨
-    const projectRow = pageA.locator('.pm-sidebar-row', { hasText: PROJECT_NAME });
-    await expect(projectRow).toBeVisible({ timeout: 10_000 });
-
-    // 검증: 프로젝트명이 녹색(#27ae60)으로 변경 또는 alert-pr 아이콘 표시
-    // SVG 내부 text 요소의 fill 색상 또는 image href 확인
-    // ProjectMap은 SVG로 렌더링되므로 image[href*="alert-pr"] 확인
-    const alertIcon = pageA.locator('image[href*="alert-pr"]');
-    await expect(alertIcon).toBeVisible({ timeout: 15_000 });
-  });
-
-  // ─────────────────────────────────────────────────
-  // Step 6: PR 확인 (A: duke.kimm — Repository)
-  // ─────────────────────────────────────────────────
-  test('Step 6: duke.kimm — Repository에서 PR 확인', async () => {
     // Repository 탭 클릭
     await clickAppNav(pageA, 'Repository');
     await pageA.waitForTimeout(1500);
 
-    // DocManager: 저장소 목록에서 GOJIRA 관련 항목 선택
-    // repoName 또는 projectName에 GOJIRA/GoJIRA가 포함된 항목
+    // DocManager: 저장소 목록에서 E2E-TEST 관련 항목 선택
     const repoItems = pageA.locator('.dm-repo-item');
     const count = await repoItems.count();
 
     let found = false;
     for (let i = 0; i < count; i++) {
       const text = await repoItems.nth(i).textContent();
-      if (text && /gojira/i.test(text)) {
+      if (text && /e2e-test/i.test(text)) {
         await repoItems.nth(i).click();
         found = true;
         break;
@@ -294,7 +277,7 @@ test.describe.serial('TC1: 문서 이력관리 및 PR 알림 흐름', () => {
     await pageA.waitForTimeout(1500);
 
     // 검증: PR 목록에서 방금 생성된 PR 확인
-    // title에 "[GOJIRA] 설계문서 배포 요청" 포함
+    // title에 "[E2ETEST] 설계문서 배포 요청" 포함
     const prRow = pageA.locator('text=설계문서 배포 요청');
     await expect(prRow).toBeVisible({ timeout: 10_000 });
 

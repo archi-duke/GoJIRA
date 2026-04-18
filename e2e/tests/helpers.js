@@ -69,6 +69,25 @@ async function waitForRemoteLoad(page) {
 
 const { expect } = require('@playwright/test');
 
+const GITEA_BASE = 'http://localhost:3300';
+const GITEA_ORG = 'gojira';
+const GITEA_TOKEN = process.env.GITEA_TOKEN || '58b690cf0c26186a06a752b5b18ba67f1d11b229';
+
+function giteaHeaders() {
+  return { Authorization: `token ${GITEA_TOKEN}` };
+}
+
+async function giteaRepoExists(request, jiraCode) {
+  const res = await request.get(
+    `${GITEA_BASE}/api/v1/repos/search?q=${jiraCode}`,
+    { headers: giteaHeaders() }
+  );
+  if (res.status() !== 200) return false;
+  const body = await res.json();
+  const repos = body.data || body;
+  return repos.some((r) => r.name.startsWith(jiraCode));
+}
+
 module.exports = {
   dismissModals,
   confirmModal,
@@ -77,4 +96,9 @@ module.exports = {
   clickNavTab,
   clickAppNav,
   waitForRemoteLoad,
+  GITEA_BASE,
+  GITEA_ORG,
+  GITEA_TOKEN,
+  giteaHeaders,
+  giteaRepoExists,
 };

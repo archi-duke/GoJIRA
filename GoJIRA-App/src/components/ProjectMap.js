@@ -458,6 +458,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
               className="pm-sidebar-row pm-sidebar-clickable"
               style={{ height: ROW_HEIGHT }}
               onClick={() => onProjectClick && onProjectClick(p)}
+              onContextMenu={(e) => handleContextMenu(e, p)}
               title={`${p.name} 이슈 보기`}
             >
               {p.name}

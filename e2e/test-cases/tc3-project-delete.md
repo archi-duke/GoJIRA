@@ -4,13 +4,13 @@
 ProjectMap에서 과제를 삭제하고, 설계문서 저장소(DocRepo)까지 정리되는지 검증한다.
 
 ## 사전 조건
-- TC2(tc2-project-create.md) 시나리오 성공 — 삭제 대상 프로젝트가 존재하는 상태
+- TC1(tc1-project-create.md) 시나리오 성공 — 삭제 대상 프로젝트가 존재하는 상태
 - Platform-App(:3000), GoJIRA-App(:3001), Platform-API(:9000), GoJIRA-API(:9001) 가동
 - Gitea(:3300) 정상 동작
 
 ## 테스트 환경
 - 브라우저: 사용자 batman
-- 테스트 대상: TC2에서 생성한 프로젝트 (예: E2E-TEST)
+- 테스트 대상: TC1에서 생성한 프로젝트 (예: E2E-TEST-PRJ)
 
 ---
 
