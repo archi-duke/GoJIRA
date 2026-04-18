@@ -26,6 +26,19 @@ def _auth_header() -> dict[str, str]:
     return {"Authorization": f"Basic {token}"}
 
 
+async def session_exists(session_id: str) -> bool:
+    """OpenCode 에 해당 세션이 존재하는지 확인."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            r = await c.get(
+                f"{_base_url()}/session/{session_id}",
+                headers=_auth_header(),
+            )
+            return r.status_code == 200
+    except Exception:
+        return False
+
+
 async def create_session(title: Optional[str] = None) -> str:
     async with httpx.AsyncClient(timeout=30.0) as c:
         r = await c.post(

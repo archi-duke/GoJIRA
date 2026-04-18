@@ -29,11 +29,13 @@ def _now():
 
 
 async def _ensure_opencode_session(gojira_sid: str, user: str) -> str:
-    """Mongo 세션에서 openCodeSessionId 를 찾거나 새로 생성."""
+    """Mongo 세션에서 openCodeSessionId 를 찾거나 새로 생성. stale 세션은 자동 교체."""
     doc = agent_sessions().find_one({"_id": gojira_sid}) or {}
     oc_sid = doc.get("openCodeSessionId")
-    if oc_sid:
+    if oc_sid and await oc.session_exists(oc_sid):
         return oc_sid
+    if oc_sid:
+        log.warning(f"OpenCode 세션 {oc_sid[:16]} 만료 — 새 세션 생성")
     oc_sid = await oc.create_session(title=f"GoJIRA {gojira_sid[:8]}")
     agent_sessions().update_one(
         {"_id": gojira_sid},
