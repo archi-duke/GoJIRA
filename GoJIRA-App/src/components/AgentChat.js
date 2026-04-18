@@ -759,7 +759,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                   );
                 }
                 if (msg.role === 'thought') return null;
-                if (msg.role === 'assistant' && showProcess) return null;
+                if (msg.role === 'assistant' && showProcess && messages.some(m => m.role === 'process')) return null;
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
                     <div className="ac-msg-content">
