@@ -302,23 +302,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           setMessages(prev => {
             let next = prev.filter(m => !m._streaming);
             next = next.filter(m => m.role !== 'thought');
-            // process step의 마지막 content를 최종 reply로 갱신
             const reply = data.reply || contentBuf;
-            if (reply) {
-              const idx = next.findLastIndex(m => m.role === 'process');
-              if (idx >= 0) {
-                const proc = next[idx];
-                const steps = [...proc.steps];
-                const lastStep = steps[steps.length - 1];
-                if (lastStep && lastStep.type === 'content') {
-                  steps[steps.length - 1] = { ...lastStep, data: { text: reply } };
-                } else {
-                  steps.push({ type: 'content', data: { text: reply }, ts: '' });
-                }
-                next = [...next.slice(0, idx), { ...proc, steps }, ...next.slice(idx + 1)];
-              }
-            }
-            // 추론 끈 상태용 assistant 메시지도 추가
             return [...next, {
               role: 'assistant',
               content: reply,
@@ -759,8 +743,10 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                               <div className="ac-ps-line"><span className="ac-ps-tag ac-tag-err">ERR</span><span className="ac-ps-text">{step.data.message}</span></div>
                             )}
                             {step.type === 'content' && (
-                              <div className="ac-msg-content ac-ps-content">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.data.text || ''}</ReactMarkdown>
+                              <div className="ac-msg ac-msg-assistant" style={{margin: '8px 0'}}>
+                                <div className="ac-msg-content">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.data.text || ''}</ReactMarkdown>
+                                </div>
                               </div>
                             )}
                           </div>
