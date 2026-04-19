@@ -94,7 +94,7 @@ qad: ""      # QA Difficulty
 ```yaml
 designLevel: Architectural     # Architectural | Detailed
 designPoint: "데이터 일관성 전략"
-decision: "SAGA 선정"
+decision: "SAGA 선정"          # 비어있지 않으면 최종 선택된 설계안
 decisionRationale: |
   ...
 approaches: |
@@ -102,6 +102,18 @@ approaches: |
   - name: "SAGA 패턴"
     pros: "..."
     cons: "..."
+
+# 설계 평가
+dmodel: ""                     # 디자인이 적용된 도메인 모델(시스템) 영역
+objectives: ""                 # 디자인의 주요 목표
+pros: ""                       # 디자인의 장점
+cons: ""                       # 디자인의 단점
+score: ""                      # 디자인의 평가 점수 (5점 또는 10점 기준)
+eval: ""                       # 디자인의 평가 내용
+
+# 다이어그램
+adiagram: ""                   # 정적 구조 다이어그램
+bdiagram: ""                   # 동적 동작 다이어그램
 
 # SATAM 관련 — satam_analyze 스킬이 생성
 risk: |
@@ -118,11 +130,11 @@ mitigation: |
     Counter Risk : ["R1:GOJIRA3-19"]
     Description : ...
 tradeoffs: ""                  # 원문(analysis 전). satam_analyze 후엔 mitigation 으로 구조화됨
-nonrisk: ""
+nonrisk: ""                    # 디자인이 좋은 영향을 주는 Requirement과 내용
 ```
 
 ### 3.5 Detailed Design (DDSN)
-ADSN 과 동일 필드 + `designLevel: Detailed`.
+ADSN 과 동일 필드 + `designLevel: Detailed`. 단, `dmodel`, `archdiagram`, `objectives`, `pros`, `cons`, `score`, `eval` 은 ADSN 전용.
 
 ## 4. 예약 / 무시 필드
 

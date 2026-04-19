@@ -157,7 +157,7 @@ critical + suggestions 만 **국소 수정**. 점수 계산 결과(순위) 는 �
 
 ---
 
-## Step 5 — 문서 저장 + chosenStyles 영속화
+## Step 5 — 문서 저장 + chosenStyles 영속화 + ADSN 생성
 
 ### 5.1 architecture/architecture-style.md 저장
 ```bash
@@ -171,6 +171,54 @@ curl -s -X PUT "${GOJIRA_API}/Project/${CODE}" \
   -d "$(jq -n --argjson ch "$CHOSEN_JSON" '{archSettings:{chosenStyles:$ch}}')"
 ```
 (`$CHOSEN_JSON` = `{"primary":[...],"secondary":[...],"supporting":[...]}`)
+
+### 5.3 검토된 모든 스타일을 ADSN 이슈로 생성
+
+top_n 이내 검토된 **모든** 스타일(Primary/Secondary/Supporting)에 대해 각각 ADSN(Architectural Design) 이슈를 생성한다.
+
+```bash
+cat > /tmp/style_adsn_items.json <<'JSON'
+[
+  {"issueType":"Architectural Design","summary":"시스템 스타일: {style_name}","desc":"..."},
+  ...
+]
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "${USER}" < /tmp/style_adsn_items.json \
+  > /tmp/style_adsn_result.json
+cat /tmp/style_adsn_result.json
+```
+
+생성된 ADSN 이슈의 도메인 필드를 업데이트:
+```bash
+curl -s -X PUT "${GOJIRA_API}/Issue" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+    --arg dp "$STYLE_NAME" --argjson ap "$ALTERNATIVES_JSON" \
+    --arg dc "$DECISION" --arg dr "$RATIONALE" --arg tr "$TRADEOFFS" \
+    --arg rk "$RISK" --arg se "$SENS" --arg dl "Architectural" \
+    --arg obj "$OBJECTIVES" --arg pr "$PROS" --arg cn "$CONS" \
+    --arg sc "$SCORE" --arg ev "$EVAL" --arg dm "$DMODEL" \
+    '{prjID:$p, key:$k, user:$u, data:{designPoint:$dp, approaches:($ap|tostring), decision:$dc, decisionRationale:$dr, tradeoffs:$tr, risk:$rk, sensitivity:$se, designLevel:$dl, objectives:$obj, pros:$pr, cons:$cn, score:$sc, eval:$ev, dmodel:$dm}}')"
+```
+
+**ADSN 필드 매핑**:
+| ADSN 필드 | 값 |
+|---|---|
+| `designPoint` | 스타일명 (예: "Event-Driven Architecture") |
+| `approaches` | 동일 scope 내 검토된 대안 스타일 목록과 비교 |
+| `decision` | 최종 선정 → **"최종선택"** (단독) / **"최종안 통합"** (복수 통합) / 미선정 → **"검토완료(미채택)"** |
+| `decisionRationale` | fit_signals 매치, 품질속성 영향, Driver 근거 요약 |
+| `objectives` | 해당 스타일의 주요 목표/역할 |
+| `pros` | 카탈로그 pros + fit_signals 기반 장점 |
+| `cons` | 카탈로그 cons + avoid_signals 기반 단점 |
+| `score` | 엔진 점수 (Step 1 결과) |
+| `eval` | Primary/Secondary/Supporting 분류 및 평가 요약 |
+| `dmodel` | 스타일이 적용되는 시스템 scope (system_structure/data/integration 등) |
+| `tradeoffs` | 카탈로그의 tradeoffs 기반 |
+| `risk` | avoid_signals 매치 항목, 전제조건 미충족 위험 |
+| `sensitivity` | 해당 스타일 변경 시 영향받는 Driver/속성 범위 |
+| `designLevel` | `"Architectural"` |
 
 ---
 

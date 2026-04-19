@@ -179,7 +179,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "
 cat /tmp/design_result.json
 ```
 
-결과의 `keys` 배열에서 생성된 이슈 key 확인 후, 도메인 필드(designPoint/approaches/decision/decisionRationale/tradeoffs/risk/sensitivity/designLevel) 는 PUT /Issue 로 업데이트:
+결과의 `keys` 배열에서 생성된 이슈 key 확인 후, 도메인 필드를 PUT /Issue 로 업데이트:
 ```bash
 curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
@@ -187,8 +187,28 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
     --arg dp "$DESIGN_POINT" --argjson ap "$APPROACHES_JSON" \
     --arg dc "$DECISION" --arg dr "$RATIONALE" --arg tr "$TRADEOFFS" \
     --arg rk "$RISK" --arg se "$SENS" --arg dl "$LEVEL" \
-    '{prjID:$p, key:$k, user:$u, data:{designPoint:$dp, approaches:($ap|tostring), decision:$dc, decisionRationale:$dr, tradeoffs:$tr, risk:$rk, sensitivity:$se, designLevel:$dl}}')"
+    --arg obj "$OBJECTIVES" --arg pr "$PROS" --arg cn "$CONS" \
+    --arg sc "$SCORE" --arg ev "$EVAL" --arg dm "$DMODEL" \
+    '{prjID:$p, key:$k, user:$u, data:{designPoint:$dp, approaches:($ap|tostring), decision:$dc, decisionRationale:$dr, tradeoffs:$tr, risk:$rk, sensitivity:$se, designLevel:$dl, objectives:$obj, pros:$pr, cons:$cn, score:$sc, eval:$ev, dmodel:$dm}}')"
 ```
+
+**ADSN/DDSN 필드 매핑**:
+| 필드 | 내용 |
+|---|---|
+| `designPoint` | Design Point 이름 |
+| `approaches` | 검토된 대안 목록 (JSON 문자열) |
+| `decision` | 선정된 대안명 |
+| `decisionRationale` | 선정 근거 (Driver 역추적 포함) |
+| `objectives` | 이 설계의 주요 목표 |
+| `pros` | 선정 대안의 장점 |
+| `cons` | 선정 대안의 단점 |
+| `score` | 평가 점수 |
+| `eval` | 평가 내용 요약 |
+| `dmodel` | 적용 도메인 모델/시스템 영역 |
+| `tradeoffs` | 트레이드오프 원문 |
+| `risk` | 위험 사항 |
+| `sensitivity` | 민감도 |
+| `designLevel` | `Architectural` 또는 `Detailed` |
 
 ### 5.2 Requirement → Design Contains 링크 일괄 생성
 각 설계의 `relatedRequirements` 에서 링크 JSON 배열을 구성해 batch 스크립트 **1회** 실행:

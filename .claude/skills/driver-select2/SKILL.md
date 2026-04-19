@@ -84,16 +84,16 @@ Requirement 가 0건이면 **중단** 하고 "requirement_refine 을 먼저 실�
 - `Business` — 사업 목표/비용/시장 제약
 
 ### 1.3 QAD / QAI (1~5 정수) + rationale
-- QAD: 비즈니스/품질 영향도
-- QAI: 기술/구조적 난이도
+- QAD (난이도): 구현·설계 관점의 기술적 난이도
+- QAI (중요도): 비즈니스·품질 관점의 중요도
 - 근거 없이 모두 동일 값 금지
 
 ### 1.4 Priority
 `priority = qad * W_QAD + qai * W_QAI`
 
-### 1.5 risk / sensitivity
-- risk: 드라이버가 유발할 수 있는 위험
-- sensitivity: 설계 결정 민감도
+### 1.5 중요도 / 난이도 (테이블 평가 컬럼)
+- 중요도: QAI 기반, 비즈니스·품질 관점에서 해당 점수를 부여한 사유를 한 줄로 기술
+- 난이도: QAD 기반, 구현·설계 관점에서 해당 점수를 부여한 사유를 한 줄로 기술
 
 ### 1.6 Driver 선정
 Priority 상위 5~10건. 단일 속성/카테고리 편향 금지.
@@ -116,11 +116,11 @@ Priority 상위 5~10건. 단일 속성/카테고리 편향 금지.
 # Architecture Drivers
 
 ## 1. 선정 Driver 목록
-| # | Requirement | 타입 | 카테고리 | 이슈 키 | QAD | QAI | Priority | risk | sensitivity |
+| # | Requirement | 타입 | 카테고리 | 이슈 키 | QAD | QAI | Priority | 중요도 | 난이도 |
 
 ## 2. Driver 별 상세 근거
 ### QA_001 — (이슈 요약)
-- QAD 근거 / QAI 근거 / risk / sensitivity
+- QAD 근거 / QAI 근거 / 중요도 / 난이도
 
 ## 3. 정규화된 시스템 속성 (style_define 입력)
 | 속성 | 값 | 근거 Requirement |
@@ -174,8 +174,8 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
   -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --argjson qad $QAD --argjson qai $QAI --argjson pri $PRIORITY \
-    --arg risk "$RISK" --arg sens "$SENS" \
-    '{prjID:$p, key:$k, user:$u, data:{qad:$qad, qai:$qai, priority:$pri, risk:$risk, sensitivity:$sens, driverSelected:true}}')"
+    --arg imp "$IMPORTANCE" --arg diff "$DIFFICULTY" \
+    '{prjID:$p, key:$k, user:$u, data:{qad:$qad, qai:$qai, priority:$pri, importance:$imp, difficulty:$diff, driverSelected:true}}')"
 ```
 
 ### 5.2 ASR 라벨 부여 (선정된 Driver + 모든 NFR)
