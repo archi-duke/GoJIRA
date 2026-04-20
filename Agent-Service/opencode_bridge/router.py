@@ -18,6 +18,7 @@ from core.database import agent_sessions
 
 from . import client as oc
 from .translator import translate, _sse
+from . import event_buffer as eb
 
 log = logging.getLogger("agent.opencode_bridge")
 
@@ -26,6 +27,14 @@ router = APIRouter(prefix="/api/v2/Agent", tags=["Agent"])
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+def _buffered_sse(session_id: str, event: str, data: dict) -> str:
+    """이벤트 버퍼에 저장하고 ID 포함 SSE 문자열 반환."""
+    import json
+    data_json = json.dumps(data, ensure_ascii=False, default=str)
+    eid = eb.push(session_id, event, data_json)
+    return f"id: {eid}\nevent: {event}\ndata: {data_json}\n\n"
 
 
 async def _ensure_opencode_session(gojira_sid: str, user: str) -> str:
@@ -238,7 +247,11 @@ async def chat_send(
 
 
 @router.get("/session/{session_id}/events")
-async def session_events(session_id: str, x_user_id: str = Header(default="batman", alias="X-User-Id")):
+async def session_events(
+    session_id: str,
+    request: Request,
+    x_user_id: str = Header(default="batman", alias="X-User-Id"),
+):
     """세션별 SSE 이벤트 스트림 — EventSource 로 연결, 자동 재접속 지원."""
     doc = agent_sessions().find_one({"_id": session_id}) or {}
     oc_sid = doc.get("openCodeSessionId")
@@ -247,9 +260,20 @@ async def session_events(session_id: str, x_user_id: str = Header(default="batma
             yield _sse("error", {"message": "세션에 연결된 OpenCode 세션이 없습니다."})
         return StreamingResponse(_err(), media_type="text/event-stream")
 
+    last_event_id = int(request.headers.get("Last-Event-ID", "0") or "0")
+
     async def sse_stream():
         import asyncio
         try:
+            # 재연결 시 놓친 이벤트 replay
+            if last_event_id > 0:
+                missed = eb.replay(session_id, last_event_id)
+                for evt in missed:
+                    yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['sse']}\n\n"
+                # done 이벤트가 이미 replay에 포함되면 스트림 종료
+                if any(e["type"] == "done" for e in missed):
+                    return
+
             events_iter = oc.stream_events(oc_sid)
             translated = translate(events_iter, session_id)
             IDLE_TIMEOUT = 300.0
@@ -326,21 +350,33 @@ async def session_events(session_id: str, x_user_id: str = Header(default="batma
                 if sse.startswith(":"):
                     yield sse
                     continue
-                # process step 수집
+                # 이벤트 버퍼 저장 + ID 부여
                 import json as _j
-                for evt_type in ("reasoning", "tool_call", "tool_result", "content"):
-                    if sse.startswith(f"event: {evt_type}\n"):
+                _evt_type = None
+                _evt_data = None
+                for _et in ("session", "thinking", "reasoning", "tool_call", "tool_result", "content", "done", "error"):
+                    if sse.startswith(f"event: {_et}\n"):
+                        _evt_type = _et
                         try:
-                            data_line = sse.split("\n", 2)[1]
-                            step_data = _j.loads(data_line[len("data: "):])
-                            process_steps.append({"type": evt_type, "data": step_data})
+                            _dl = sse.split("\n", 2)[1]
+                            _evt_data = _dl[len("data: "):]
+                        except Exception:
+                            _evt_data = "{}"
+                        break
+                if _evt_type:
+                    eid = eb.push(session_id, _evt_type, _evt_data or "{}")
+                    sse = f"id: {eid}\n{sse}"
+                # process step 수집
+                for evt_type in ("reasoning", "tool_call", "tool_result", "content"):
+                    if _evt_type == evt_type and _evt_data:
+                        try:
+                            process_steps.append({"type": evt_type, "data": _j.loads(_evt_data)})
                         except Exception:
                             pass
                         break
-                if sse.startswith("event: done\n"):
+                if _evt_type == "done":
                     try:
-                        data_line = sse.split("\n", 2)[1]
-                        payload = _j.loads(data_line[len("data: "):])
+                        payload = _j.loads(_evt_data)
                         final_reply_holder["text"] = payload.get("reply", "")
                         if payload.get("_abort"):
                             try:
@@ -350,7 +386,7 @@ async def session_events(session_id: str, x_user_id: str = Header(default="batma
                     except Exception:
                         pass
                 yield sse
-                if sse.startswith("event: done\n"):
+                if _evt_type == "done":
                     break
 
             msgs_to_push = []
