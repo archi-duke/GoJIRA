@@ -157,6 +157,7 @@ func main() {
 			r.Post("/{code}/edit/release", handlers.DocRepoEditReleaseHandler)
 			r.Post("/{code}/edit/rebase", handlers.DocRepoEditRebaseHandler)
 			r.Post("/{code}/conflict-resolve", handlers.DocRepoConflictResolveHandler)
+			r.Post("/{code}/open-folder", handlers.DocRepoOpenFolderHandler)
 		})
 
 		// DocLink — 향후 구현

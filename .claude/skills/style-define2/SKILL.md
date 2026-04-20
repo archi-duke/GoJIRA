@@ -198,8 +198,9 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
     --arg dc "$DECISION" --arg dr "$RATIONALE" --arg tr "$TRADEOFFS" \
     --arg rk "$RISK" --arg se "$SENS" --arg dl "Architectural" \
     --arg obj "$OBJECTIVES" --arg pr "$PROS" --arg cn "$CONS" \
-    --arg sc "$SCORE" --arg ev "$EVAL" --arg dm "$DMODEL" \
-    '{prjID:$p, key:$k, user:$u, data:{designPoint:$dp, approaches:($ap|tostring), decision:$dc, decisionRationale:$dr, tradeoffs:$tr, risk:$rk, sensitivity:$se, designLevel:$dl, objectives:$obj, pros:$pr, cons:$cn, score:$sc, eval:$ev, dmodel:$dm}}')"
+    --arg sc "$SCORE" --arg ev "$EVAL" \
+    --arg ad "$ADIAGRAM" --arg bd "$BDIAGRAM" \
+    '{prjID:$p, key:$k, user:$u, data:{designPoint:$dp, approaches:($ap|tostring), decision:$dc, decisionRationale:$dr, tradeoffs:$tr, risk:$rk, sensitivity:$se, designLevel:$dl, objectives:$obj, pros:$pr, cons:$cn, score:$sc, eval:$ev, adiagram:$ad, bdiagram:$bd}}')"
 ```
 
 **ADSN 필드 매핑**:
@@ -214,10 +215,11 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 | `cons` | 카탈로그 cons + avoid_signals 기반 단점 |
 | `score` | 엔진 점수 (Step 1 결과) |
 | `eval` | Primary/Secondary/Supporting 분류 및 평가 요약 |
-| `dmodel` | 스타일이 적용되는 시스템 scope (system_structure/data/integration 등) |
 | `tradeoffs` | 카탈로그의 tradeoffs 기반 |
 | `risk` | avoid_signals 매치 항목, 전제조건 미충족 위험 |
 | `sensitivity` | 해당 스타일 변경 시 영향받는 Driver/속성 범위 |
+| `adiagram` | Mermaid 구조 다이어그램 — 스타일의 정적 구조(컴포넌트/레이어 배치)를 `graph TB` 또는 `graph LR`로 표현. 필수 |
+| `bdiagram` | Mermaid 동작 다이어그램 — 스타일의 런타임 동작을 `sequenceDiagram` 또는 `graph LR`로 표현. 스타일 수준에서 동적 상호작용이 고유하게 정의되는 경우(예: Event-Driven의 이벤트 흐름, CQRS의 읽기/쓰기 분리 흐름) 작성. 동적 관점이 세부 설계 결정(DDSN)에 의해 구체화되는 스타일(예: Client-Server, Layered)은 생략 가능 |
 | `designLevel` | `"Architectural"` |
 
 ---

@@ -65,8 +65,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         const data = await res.json();
         const msgs = (data.messages || []).map(m => {
           const msg = m.role ? m : Object.fromEntries(Object.entries(m));
+          if (msg.role === 'process') {
+            return { role: 'process', steps: msg.steps || [], open: false };
+          }
           return { role: msg.role, content: msg.content, actions: msg.actions, suggestions: msg.suggestions };
-        }).filter(m => m.role && m.content);
+        }).filter(m => m.role && (m.content || m.role === 'process'));
         setMessages(msgs);
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
@@ -254,9 +257,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           addStep({ type: 'tool_result', data, ts });
           // tool 실행 후 contentBuf 리셋 — 다음 응답은 새로 시작
           if (contentBuf) {
-            if (!showProcess) {
-              setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
-            }
+            setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false, _intermediate: true } : m));
             contentBuf = '';
           }
           // ui_navigate 등 _action이 있으면 메인 앱에 전달
@@ -303,6 +304,10 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             let next = prev.filter(m => !m._streaming);
             next = next.filter(m => m.role !== 'thought');
             const reply = data.reply || contentBuf;
+            // 최종 응답과 동일한 중간 응답은 제거 (중복 방지)
+            if (reply) {
+              next = next.filter(m => !(m._intermediate && m.content === reply));
+            }
             return [...next, {
               role: 'assistant',
               content: reply,
@@ -702,7 +707,18 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               )}
               {messages.map((msg, i) => {
                 if (msg.role === 'process') {
-                  if (!showProcess) return null;
+                  if (!showProcess) {
+                    // showProcess OFF: content step만 말풍선으로 렌더링
+                    const contentSteps = (msg.steps || []).filter(s => s.type === 'content');
+                    if (contentSteps.length === 0) return null;
+                    return contentSteps.map((step, j) => (
+                      <div key={`${i}-c${j}`} className="ac-msg ac-msg-assistant">
+                        <div className="ac-msg-content">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.data.text || ''}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ));
+                  }
                   const steps = msg.steps || [];
                   if (steps.length === 0 && !(loading && i === messages.findLastIndex(m => m.role === 'process'))) return null;
                   const isRunning = loading && i === messages.findLastIndex(m => m.role === 'process');
@@ -759,7 +775,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                   );
                 }
                 if (msg.role === 'thought') return null;
-                if (msg.role === 'assistant' && showProcess && messages.some(m => m.role === 'process')) return null;
+                if (msg.role === 'assistant' && showProcess && messages.some(m => m.role === 'process') && !msg._intermediate) return null;
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
                     <div className="ac-msg-content">

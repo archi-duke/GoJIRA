@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1933,6 +1934,45 @@ func DocRepoEditDiscardHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, "discarded")
+}
+
+func DocRepoOpenFolderHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
+		return
+	}
+	wtDir := filepath.Join(config.RepoBaseDir, owner, name+".worktrees", userID)
+	if _, err := os.Stat(wtDir); os.IsNotExist(err) {
+		respondError(w, http.StatusNotFound, "작업공간 폴더가 없습니다. Pull을 먼저 실행하세요.")
+		return
+	}
+	var cmd string
+	switch {
+	case fileExists("/usr/bin/open"):
+		cmd = "open"
+	case fileExists("/usr/bin/explorer.exe") || fileExists("/mnt/c/Windows/explorer.exe"):
+		cmd = "explorer.exe"
+	default:
+		cmd = "xdg-open"
+	}
+	go func() {
+		exec.Command(cmd, wtDir).Run()
+	}()
+	respondJSON(w, http.StatusOK, map[string]string{"path": wtDir, "cmd": cmd})
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func hasRef(refs []string, name string) bool {

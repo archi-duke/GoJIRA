@@ -180,8 +180,11 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 
 ### 5.2 ASR 라벨 부여 (선정된 Driver + 모든 NFR)
 ```bash
-# 현재 labels 조회 → ASR 누락 시 append
-LABELS=$(curl -s "${GOJIRA_API}/Issue/${KEY}" -H "X-User-Id: ${USER}" | jq -c '.labels // []')
+# 현재 labels 조회 (XBody 헤더 방식) → ASR 누락 시 append
+LABELS=$(curl -s "${GOJIRA_API}/Issue" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"key\":\"${KEY}\"}" \
+  -H "X-User-Id: ${USER}" \
+  | jq -c '.[0].labels // []')
 NEW_LABELS=$(echo "$LABELS" | jq -c 'if index("ASR") then . else . + ["ASR"] end')
 curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \

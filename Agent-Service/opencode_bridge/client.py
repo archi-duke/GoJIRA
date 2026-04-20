@@ -82,6 +82,21 @@ async def abort_session(session_id: str) -> bool:
         return r.status_code < 400
 
 
+async def get_session_messages(session_id: str) -> list:
+    """세션의 현재 메시지 목록 조회 (폴링용)."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            r = await c.get(
+                f"{_base_url()}/session/{session_id}/message",
+                headers=_auth_header(),
+            )
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        pass
+    return []
+
+
 async def stream_events(session_id: str) -> AsyncIterator[dict]:
     """OpenCode /event SSE 를 파싱해 이 세션 의 이벤트만 yield."""
     async with httpx.AsyncClient(timeout=None) as c:

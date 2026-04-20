@@ -67,15 +67,18 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
                     return
             elif t == "session.status":
                 st = evt.get("properties", {}).get("status", {}).get("type")
-                # 보조 종료 신호: idle 이고 최근 text 가 있으면 종료
                 if st == "idle" and final_text_by_part:
                     reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
                     if reply:
                         yield _sse("done", {"reply": reply, "actions": actions})
                         return
-            # raw 이벤트가 계속 오고 있으면 keepalive 전송 (10초 간격)
+            elif t == "message.created":
+                role = evt.get("properties", {}).get("info", {}).get("role")
+                if role == "assistant":
+                    yield _sse("thinking", {"turn": turn, "message": "응답 생성 중..."})
+            # raw 이벤트가 계속 오고 있으면 keepalive 전송 (3초 간격)
             now = time.monotonic()
-            if now - last_keepalive > 10.0:
+            if now - last_keepalive > 3.0:
                 last_keepalive = now
                 yield _KEEPALIVE
             continue
@@ -97,7 +100,7 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
         elif ptype == "reasoning":
             txt = part.get("text") or part.get("content") or ""
             if txt:
-                yield _sse("reasoning", {"turn": turn, "step": "thought", "content": txt[-200:]})
+                yield _sse("reasoning", {"turn": turn, "step": "thought", "content": txt})
 
         elif ptype == "tool":
             state = part.get("state", {})
@@ -134,6 +137,7 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
                 })
 
         elif ptype == "step-start":
+            turn += 1
             yield _sse("thinking", {"turn": turn, "message": "추론 중..."})
 
 

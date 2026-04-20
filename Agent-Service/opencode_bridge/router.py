@@ -82,32 +82,98 @@ async def chat_stream(
             await oc.send_message_async(oc_sid, req.message)
 
             final_reply_holder = {"text": ""}
+            process_steps = []
 
-            # Watchdog: 60초 동안 어떤 이벤트도 없으면 권한 대기 등으로 행 된 것으로 간주 → abort
             IDLE_TIMEOUT = 300.0
+            POLL_INTERVAL = 5.0
             translated = translate(events_iter, gojira_sid)
+            poll_state = {"last_reasoning": "", "last_text": "", "idle_since": 0.0}
 
             async def _next_sse():
                 return await translated.__anext__()
 
             while True:
                 try:
-                    sse = await asyncio.wait_for(_next_sse(), timeout=IDLE_TIMEOUT)
+                    sse = await asyncio.wait_for(_next_sse(), timeout=POLL_INTERVAL)
+                    poll_state["idle_since"] = 0.0
                 except StopAsyncIteration:
                     break
                 except asyncio.TimeoutError:
-                    log.warning(f"SSE watchdog timeout — aborting OpenCode session {oc_sid}")
+                    # 이벤트 없음 — 세션 메시지 폴링으로 새 내용 확인
+                    if poll_state["idle_since"] == 0.0:
+                        poll_state["idle_since"] = asyncio.get_event_loop().time()
+                    elapsed = asyncio.get_event_loop().time() - poll_state["idle_since"]
+                    if elapsed > IDLE_TIMEOUT:
+                        log.warning(f"SSE watchdog timeout — aborting OpenCode session {oc_sid}")
+                        try:
+                            await oc.abort_session(oc_sid)
+                        except Exception:
+                            pass
+                        yield _sse("error", {"message": f"{IDLE_TIMEOUT}초 동안 응답이 없어 작업을 중단했습니다 (권한 대기 또는 행 상태 의심). 재시도해주세요."})
+                        yield _sse("done", {"reply": "", "actions": []})
+                        return
+                    # 폴링: 세션 상태 + 메시지에서 새 내용 확인
                     try:
-                        await oc.abort_session(oc_sid)
+                        # 세션 상태 확인 — idle이면 완료
+                        import httpx as _hx
+                        async with _hx.AsyncClient(timeout=3.0) as _pc:
+                            sr = await _pc.get(f"{oc._base_url()}/session/{oc_sid}", headers=oc._auth_header())
+                            if sr.status_code == 200:
+                                sdata = sr.json()
+                                sstatus = (sdata.get("status") or {}).get("type") or sdata.get("status")
+                                if sstatus == "idle" or sstatus == "stopped":
+                                    # 최종 텍스트 수집
+                                    msgs = await oc.get_session_messages(oc_sid)
+                                    reply_text = ""
+                                    if msgs:
+                                        for part in reversed(msgs[-1].get("parts") or []):
+                                            if part.get("type") == "text":
+                                                reply_text = part.get("text", "")
+                                                break
+                                    if reply_text and reply_text != poll_state["last_text"]:
+                                        delta = reply_text[len(poll_state["last_text"]):]
+                                        yield _sse("content", {"text": delta})
+                                        process_steps.append({"type": "content", "data": {"text": delta}})
+                                    final_reply_holder["text"] = reply_text or poll_state["last_text"]
+                                    yield _sse("done", {"reply": final_reply_holder["text"], "actions": []})
+                                    break
+
+                        # 메시지에서 새 reasoning/text 확인
+                        msgs = await oc.get_session_messages(oc_sid)
+                        if msgs:
+                            last_msg = msgs[-1]
+                            for part in (last_msg.get("parts") or []):
+                                pt = part.get("type")
+                                txt = part.get("text") or part.get("content") or ""
+                                if pt == "reasoning" and txt and txt != poll_state["last_reasoning"]:
+                                    delta = txt[len(poll_state["last_reasoning"]):]
+                                    poll_state["last_reasoning"] = txt
+                                    yield _sse("reasoning", {"turn": 0, "step": "thought", "content": delta})
+                                    process_steps.append({"type": "reasoning", "data": {"turn": 0, "step": "thought", "content": delta}})
+                                elif pt == "text" and txt and txt != poll_state["last_text"]:
+                                    delta = txt[len(poll_state["last_text"]):]
+                                    poll_state["last_text"] = txt
+                                    yield _sse("content", {"text": delta})
+                                    process_steps.append({"type": "content", "data": {"text": delta}})
                     except Exception:
                         pass
-                    yield _sse("error", {"message": f"{IDLE_TIMEOUT}초 동안 응답이 없어 작업을 중단했습니다 (권한 대기 또는 행 상태 의심). 재시도해주세요."})
-                    yield _sse("done", {"reply": "", "actions": []})
-                    return
+                    yield ": keepalive\n\n"
+                    continue
                 # keepalive 는 UI 로 전달만 하고 로직 건너뛰기
                 if sse.startswith(":"):
                     yield sse
                     continue
+                # process step 수집 (이력 저장용)
+                import json as _j
+                for evt_type in ("reasoning", "tool_call", "tool_result", "content"):
+                    if sse.startswith(f"event: {evt_type}\n"):
+                        try:
+                            data_line = sse.split("\n", 2)[1]
+                            step_data = _j.loads(data_line[len("data: "):])
+                            process_steps.append({"type": evt_type, "data": step_data})
+                        except Exception:
+                            pass
+                        break
                 # done 이벤트의 reply 를 히스토리에 저장하기 위해 가로채기
                 if sse.startswith("event: done\n"):
                     try:
@@ -127,12 +193,17 @@ async def chat_stream(
                 if sse.startswith("event: done\n"):
                     break
 
-            # assistant 메시지 Mongo 저장
+            # process + assistant 메시지 Mongo 저장
+            msgs_to_push = []
+            if process_steps:
+                msgs_to_push.append({"role": "process", "steps": process_steps, "timestamp": _now()})
             if final_reply_holder["text"]:
+                msgs_to_push.append({"role": "assistant", "content": final_reply_holder["text"], "timestamp": _now()})
+            if msgs_to_push:
                 agent_sessions().update_one(
                     {"_id": gojira_sid},
                     {
-                        "$push": {"messages": {"role": "assistant", "content": final_reply_holder["text"], "timestamp": _now()}},
+                        "$push": {"messages": {"$each": msgs_to_push}},
                         "$set": {"updatedAt": _now()},
                     },
                 )
@@ -182,31 +253,92 @@ async def session_events(session_id: str, x_user_id: str = Header(default="batma
             events_iter = oc.stream_events(oc_sid)
             translated = translate(events_iter, session_id)
             IDLE_TIMEOUT = 300.0
+            POLL_INTERVAL = 5.0
             final_reply_holder = {"text": ""}
+            process_steps = []
+            poll_state = {"last_reasoning": "", "last_text": "", "idle_since": 0.0}
 
             async def _next_sse():
                 return await translated.__anext__()
 
             while True:
                 try:
-                    sse = await asyncio.wait_for(_next_sse(), timeout=IDLE_TIMEOUT)
+                    sse = await asyncio.wait_for(_next_sse(), timeout=POLL_INTERVAL)
+                    poll_state["idle_since"] = 0.0
                 except StopAsyncIteration:
                     break
                 except asyncio.TimeoutError:
-                    log.warning(f"events watchdog timeout — session {session_id}")
+                    if poll_state["idle_since"] == 0.0:
+                        poll_state["idle_since"] = asyncio.get_event_loop().time()
+                    elapsed = asyncio.get_event_loop().time() - poll_state["idle_since"]
+                    if elapsed > IDLE_TIMEOUT:
+                        log.warning(f"events watchdog timeout — session {session_id}")
+                        try:
+                            await oc.abort_session(oc_sid)
+                        except Exception:
+                            pass
+                        yield _sse("error", {"message": "응답 대기 시간 초과"})
+                        yield _sse("done", {"reply": "", "actions": []})
+                        return
                     try:
-                        await oc.abort_session(oc_sid)
+                        import httpx as _hx
+                        async with _hx.AsyncClient(timeout=3.0) as _pc:
+                            sr = await _pc.get(f"{oc._base_url()}/session/{oc_sid}", headers=oc._auth_header())
+                            if sr.status_code == 200:
+                                sdata = sr.json()
+                                sstatus = (sdata.get("status") or {}).get("type") or sdata.get("status")
+                                if sstatus == "idle" or sstatus == "stopped":
+                                    msgs = await oc.get_session_messages(oc_sid)
+                                    reply_text = ""
+                                    if msgs:
+                                        for part in reversed(msgs[-1].get("parts") or []):
+                                            if part.get("type") == "text":
+                                                reply_text = part.get("text", "")
+                                                break
+                                    if reply_text and reply_text != poll_state["last_text"]:
+                                        delta = reply_text[len(poll_state["last_text"]):]
+                                        yield _sse("content", {"text": delta})
+                                        process_steps.append({"type": "content", "data": {"text": delta}})
+                                    final_reply_holder["text"] = reply_text or poll_state["last_text"]
+                                    yield _sse("done", {"reply": final_reply_holder["text"], "actions": []})
+                                    break
+
+                        msgs = await oc.get_session_messages(oc_sid)
+                        if msgs:
+                            last_msg = msgs[-1]
+                            for part in (last_msg.get("parts") or []):
+                                pt = part.get("type")
+                                txt = part.get("text") or part.get("content") or ""
+                                if pt == "reasoning" and txt and txt != poll_state["last_reasoning"]:
+                                    delta = txt[len(poll_state["last_reasoning"]):]
+                                    poll_state["last_reasoning"] = txt
+                                    yield _sse("reasoning", {"turn": 0, "step": "thought", "content": delta})
+                                    process_steps.append({"type": "reasoning", "data": {"turn": 0, "step": "thought", "content": delta}})
+                                elif pt == "text" and txt and txt != poll_state["last_text"]:
+                                    delta = txt[len(poll_state["last_text"]):]
+                                    poll_state["last_text"] = txt
+                                    yield _sse("content", {"text": delta})
+                                    process_steps.append({"type": "content", "data": {"text": delta}})
                     except Exception:
                         pass
-                    yield _sse("error", {"message": "응답 대기 시간 초과"})
-                    yield _sse("done", {"reply": "", "actions": []})
-                    return
+                    yield ": keepalive\n\n"
+                    continue
                 if sse.startswith(":"):
                     yield sse
                     continue
+                # process step 수집
+                import json as _j
+                for evt_type in ("reasoning", "tool_call", "tool_result", "content"):
+                    if sse.startswith(f"event: {evt_type}\n"):
+                        try:
+                            data_line = sse.split("\n", 2)[1]
+                            step_data = _j.loads(data_line[len("data: "):])
+                            process_steps.append({"type": evt_type, "data": step_data})
+                        except Exception:
+                            pass
+                        break
                 if sse.startswith("event: done\n"):
                     try:
-                        import json as _j
                         data_line = sse.split("\n", 2)[1]
                         payload = _j.loads(data_line[len("data: "):])
                         final_reply_holder["text"] = payload.get("reply", "")
@@ -221,11 +353,16 @@ async def session_events(session_id: str, x_user_id: str = Header(default="batma
                 if sse.startswith("event: done\n"):
                     break
 
+            msgs_to_push = []
+            if process_steps:
+                msgs_to_push.append({"role": "process", "steps": process_steps, "timestamp": _now()})
             if final_reply_holder["text"]:
+                msgs_to_push.append({"role": "assistant", "content": final_reply_holder["text"], "timestamp": _now()})
+            if msgs_to_push:
                 agent_sessions().update_one(
                     {"_id": session_id},
                     {
-                        "$push": {"messages": {"role": "assistant", "content": final_reply_holder["text"], "timestamp": _now()}},
+                        "$push": {"messages": {"$each": msgs_to_push}},
                         "$set": {"updatedAt": _now()},
                     },
                 )

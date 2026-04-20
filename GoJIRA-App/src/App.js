@@ -91,7 +91,7 @@ function App() {
 
   let content;
   if (page === 'docs' && selectedProject) {
-    content = <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} />;
+    content = <DocEditor project={selectedProject} user={user} authority={authority} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} />;
   } else if (page === 'issues' && selectedProject) {
     content = <IssueList project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} />;
   } else if (page === 'relationMap' && selectedProject) {
