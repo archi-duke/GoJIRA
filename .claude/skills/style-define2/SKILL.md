@@ -112,6 +112,21 @@ ls "${KN}/styles/"
 
 ## 3. 스타일별 선정 근거
 ### 3.1 {Primary A}
+#### 구조 (정적 관점)
+```mermaid
+graph TB
+    ...
+```
+(스타일의 컴포넌트/레이어 배치를 다이어그램으로 설명 — ADSN adiagram에 해당)
+
+#### 동작 (동적 관점, 생략 가능)
+```mermaid
+sequenceDiagram
+    ...
+```
+(스타일 고유의 런타임 흐름이 있는 경우 — ADSN bdiagram에 해당. 세부 설계에서 구체화되는 스타일은 생략)
+
+#### 선정 근거
 - 적합 신호(fit_signals)
 - 품질속성 영향(positive/negative)
 - 트레이드오프(pros/cons)
@@ -119,7 +134,22 @@ ls "${KN}/styles/"
 - 연결된 Driver: [속성=레벨, ...]
 
 ## 4. 조합 설계
-- Primary 간 조합 / Primary+Supporting / 제외 스타일 이유
+#### 통합 구조 (정적 관점)
+```mermaid
+graph TB
+    ...
+```
+(선정된 스타일들이 시스템 내에서 어떻게 조합·배치되는지 전체 구조 다이어그램)
+
+#### 통합 동작 (동적 관점)
+```mermaid
+sequenceDiagram
+    ...
+```
+(조합된 스타일 간 런타임 상호작용 흐름)
+
+#### 조합 근거
+- Primary 간 조합 관계 / Primary+Supporting 역할 분담 / 제외 스타일 이유
 
 ## 5. 설계 결정에 미치는 영향
 ```

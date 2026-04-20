@@ -58,7 +58,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const loadSession = useCallback(async (sid) => {
     if (!sid) return;
     try {
-      const res = await fetch(`${API}/Agent/session/${sid}`, {
+      const res = await fetch(`${STREAM_API}/Agent/session/${sid}`, {
         headers: { 'X-User-Id': user || '' },
       });
       if (res.ok) {
@@ -73,6 +73,10 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         setMessages(msgs);
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
+        // OpenCode 세션이 아직 진행 중이면 자동으로 EventSource 연결
+        if (data.active) {
+          connectEventSource(sid);
+        }
       } else {
         setSessionId(null);
         sessionStorage.removeItem('agent_sessionId');
@@ -209,72 +213,38 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     return () => window.removeEventListener('message', onContinue);
   }, []);
 
-  async function handleSend() {
-    const text = input.trim();
-    if (!text || loading) return;
-    setInput('');
-    setMessages(prev => [
-      ...prev,
-      { role: 'user', content: text },
-      { role: 'process', steps: [], open: false },
-    ]);
-    setLoading(true);
-
+  function connectEventSource(sid) {
     let contentBuf = '';
     let finalActions = [];
 
     function addStep(step) {
       setMessages(prev => {
         const idx = prev.findLastIndex(m => m.role === 'process');
-        if (idx === -1) return prev;
+        if (idx === -1) {
+          return [...prev, { role: 'process', steps: [step], open: false }];
+        }
         const proc = { ...prev[idx], steps: [...prev[idx].steps, step] };
         return [...prev.slice(0, idx), proc, ...prev.slice(idx + 1)];
       });
     }
 
-    function handleSSE(type, data) {
+    function handleEvt(type, data) {
       const ts = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       switch (type) {
-        case 'session':
-          if (data.sessionId) {
-            setSessionId(data.sessionId);
-            sessionStorage.setItem('agent_sessionId', data.sessionId);
-          }
-          break;
-        case 'thinking':
-          // thinking은 스피너 상태 유지 용도 (step에 추가하지 않음)
-          break;
-        case 'reasoning':
-          addStep({ type: 'reasoning', data, ts });
-          break;
-        case 'tool_call':
-          addStep({ type: 'tool_call', data, ts });
-          break;
-        case 'progress':
-          addStep({ type: 'progress', data, ts });
-          break;
+        case 'session': break;
+        case 'thinking': break;
+        case 'reasoning': addStep({ type: 'reasoning', data, ts }); break;
+        case 'tool_call': addStep({ type: 'tool_call', data, ts }); break;
         case 'tool_result':
           addStep({ type: 'tool_result', data, ts });
-          // tool 실행 후 contentBuf 리셋 — 다음 응답은 새로 시작
           if (contentBuf) {
             setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false, _intermediate: true } : m));
             contentBuf = '';
           }
-          // ui_navigate 등 _action이 있으면 메인 앱에 전달
-          if (data._action === 'navigate' && data._payload) {
-            try { const ch = new BroadcastChannel('gojira-navigate'); ch.postMessage(data._payload); ch.close(); } catch {}
-            if (window.opener) {
-              window.opener.postMessage({ type: 'gojira-navigate', ...data._payload }, '*');
-            }
-          }
           break;
         case 'content':
           contentBuf += data.text;
-          // process step에 content 누적 + streaming assistant도 유지 (토글 전환 대응)
           setMessages(prev => {
-            const lastUser = [...prev].reverse().find(m => m.role === 'user');
-            if (lastUser && contentBuf.trim() === lastUser.content.trim()) return prev;
-            // process step에 content 추가/갱신
             const idx = prev.findLastIndex(m => m.role === 'process');
             let next = [...prev];
             if (idx >= 0) {
@@ -288,7 +258,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               }
               next = [...next.slice(0, idx), { ...proc, steps }, ...next.slice(idx + 1)];
             }
-            // streaming assistant 메시지도 유지 (추론 끈 상태용)
             const last = next[next.length - 1];
             if (last && last._streaming) {
               next = [...next.slice(0, -1), { ...last, content: contentBuf }];
@@ -304,57 +273,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             let next = prev.filter(m => !m._streaming);
             next = next.filter(m => m.role !== 'thought');
             const reply = data.reply || contentBuf;
-            // 최종 응답과 동일한 중간 응답은 제거 (중복 방지)
             if (reply) {
               next = next.filter(m => !(m._intermediate && m.content === reply));
             }
-            return [...next, {
-              role: 'assistant',
-              content: reply,
-              actions: finalActions,
-            }];
+            return [...next, { role: 'assistant', content: reply, actions: finalActions }];
           });
-          // applyToEditor / documentSaved: 자동 위임/연쇄 호출 결과까지 재귀 탐색하여
-          // 생성된 모든 문서를 편집기로 통지
-          if (finalActions.length > 0) {
-            const sent = new Set();
-            // 같은 origin 통신 채널 (같은 창에 임베드된 경우, 또는 popup 모두 커버)
-            let bc = null;
-            try { bc = new BroadcastChannel('gojira-doc'); } catch {}
-            const dispatch = (payload) => {
-              if (window.opener) {
-                try { window.opener.postMessage(payload, '*'); } catch {}
-              }
-              if (bc) {
-                try { bc.postMessage(payload); } catch {}
-              }
-              // 같은 창 내 다른 컴포넌트(임베디드 시) — window.postMessage 자체에도 전달
-              try { window.postMessage(payload, '*'); } catch {}
-            };
-            const visit = (node) => {
-              if (!node || typeof node !== 'object') return;
-              if (node.applyToEditor && node.filePath && node.content && !sent.has(node.filePath)) {
-                dispatch({
-                  type: 'gojira-doc-apply',
-                  filePath: node.filePath,
-                  content: node.content,
-                });
-                sent.add(node.filePath);
-              } else if (node.documentSaved && !sent.has(node.documentSaved)) {
-                dispatch({
-                  type: 'gojira-doc-reload',
-                  filePath: node.documentSaved,
-                });
-                sent.add(node.documentSaved);
-              }
-              for (const v of Object.values(node)) {
-                if (Array.isArray(v)) v.forEach(visit);
-                else if (v && typeof v === 'object') visit(v);
-              }
-            };
-            finalActions.forEach(a => visit(a.result));
-            if (bc) setTimeout(() => bc.close(), 200);
-          }
           break;
         case 'error':
           addStep({ type: 'error', data, ts });
@@ -362,6 +285,35 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         default: break;
       }
     }
+
+    setLoading(true);
+    return new Promise((resolve) => {
+      const evtUrl = `${STREAM_API}/Agent/session/${sid}/events`;
+      const es = new EventSource(evtUrl);
+      abortRef.current = { abort: () => { es.close(); setLoading(false); resolve(); } };
+
+      function onEvent(e) {
+        try { handleEvt(e.type, JSON.parse(e.data)); } catch {}
+        if (e.type === 'done') { es.close(); setLoading(false); resolve(); }
+      }
+      ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'].forEach(
+        t => es.addEventListener(t, onEvent)
+      );
+      es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED) { setLoading(false); resolve(); }
+      };
+    });
+  }
+
+  async function handleSend() {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput('');
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: text },
+      { role: 'process', steps: [], open: false },
+    ]);
 
     // 인터뷰 모드: 첫 전송 시 인터뷰 질문 + 답변을 묶어서 전송
     let sendText = text;
@@ -389,26 +341,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       const activeSid = sendData.sessionId;
       if (activeSid) { setSessionId(activeSid); sessionStorage.setItem('agent_sessionId', activeSid); }
 
-      // 2) EventSource 로 이벤트 수신 (별도 연결, 자동 재접속)
-      await new Promise((resolve, reject) => {
-        const evtUrl = `${STREAM_API}/Agent/session/${activeSid}/events`;
-        const es = new EventSource(evtUrl);
-        abortRef.current = { abort: () => { es.close(); resolve(); } };
-
-        function onEvent(e) {
-          try { handleSSE(e.type, JSON.parse(e.data)); } catch {}
-          if (e.type === 'done') { es.close(); resolve(); }
-        }
-        ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'].forEach(
-          t => es.addEventListener(t, onEvent)
-        );
-        es.onerror = () => {
-          // EventSource 자동 재접속 시도 — CLOSED 상태면 종료
-          if (es.readyState === EventSource.CLOSED) {
-            resolve();
-          }
-        };
-      });
+      // 2) EventSource 로 이벤트 수신 (재사용 가능한 connectEventSource)
+      await connectEventSource(activeSid);
     } catch (err) {
       setMessages(prev => {
         const filtered = prev.filter(m => m.role !== 'process' || m.steps.length > 0);
@@ -428,7 +362,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   async function loadSessions(query) {
     const q = query ? `?q=${encodeURIComponent(query)}` : '';
     try {
-      const res = await fetch(`${API}/Agent/sessions${q}`, { headers: { 'X-User-Id': user || '' } });
+      const res = await fetch(`${STREAM_API}/Agent/sessions${q}`, { headers: { 'X-User-Id': user || '' } });
       if (res.ok) setSessions(await res.json());
     } catch {}
   }
@@ -775,7 +709,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                   );
                 }
                 if (msg.role === 'thought') return null;
-                if (msg.role === 'assistant' && showProcess && messages.some(m => m.role === 'process') && !msg._intermediate) return null;
+                if (msg.role === 'assistant' && msg._intermediate) return null;
+                if (msg.role === 'assistant' && showProcess && messages.some(m => m.role === 'process')) return null;
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
                     <div className="ac-msg-content">

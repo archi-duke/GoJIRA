@@ -1,8 +1,18 @@
-"""세션별 SSE 이벤트 버퍼 — 재연결 시 놓친 이벤트 재전송 지원."""
+"""세션별 SSE 이벤트 버퍼 + 백그라운드 구독자.
 
-import threading
+OpenCode /event SSE를 상시 구독하여 세션별로 이벤트를 버퍼링.
+브라우저 연결/끊김과 무관하게 동작.
+"""
+
+import asyncio
+import json
+import logging
 import time
+import threading
 from collections import defaultdict
+from typing import Optional
+
+log = logging.getLogger("agent.event_buffer")
 
 _MAX_EVENTS = 500
 _TTL = 600  # 10분 후 세션 버퍼 자동 삭제
@@ -11,42 +21,60 @@ _lock = threading.Lock()
 _buffers: dict[str, list[dict]] = defaultdict(list)
 _counters: dict[str, int] = defaultdict(int)
 _last_access: dict[str, float] = {}
+# 세션별 asyncio.Event — 새 이벤트 도착 시 대기 중인 reader를 깨움
+_notifiers: dict[str, asyncio.Event] = {}
 
 
-def push(session_id: str, event_type: str, sse_str: str) -> int:
-    """이벤트 추가, 할당된 event_id 반환."""
+def push(session_id: str, event_type: str, data_json: str) -> int:
+    """이벤트 추가, 할당된 event_id 반환. 대기 중인 reader에 알림."""
     with _lock:
         _counters[session_id] += 1
         eid = _counters[session_id]
         _buffers[session_id].append({
             "id": eid,
             "type": event_type,
-            "sse": sse_str,
+            "data": data_json,
         })
         if len(_buffers[session_id]) > _MAX_EVENTS:
             _buffers[session_id] = _buffers[session_id][-_MAX_EVENTS:]
         _last_access[session_id] = time.time()
-        return eid
+    # notifier는 lock 밖에서 set (asyncio thread-safe)
+    notifier = _notifiers.get(session_id)
+    if notifier:
+        notifier.set()
+    return eid
 
 
-def replay(session_id: str, last_event_id: int) -> list[dict]:
-    """last_event_id 이후 이벤트 목록 반환."""
+def get_latest_id(session_id: str) -> int:
+    """현재 세션의 마지막 이벤트 ID."""
+    with _lock:
+        return _counters.get(session_id, 0)
+
+
+def read_since(session_id: str, after_id: int) -> list[dict]:
+    """after_id 이후 이벤트 목록 반환."""
     with _lock:
         _last_access[session_id] = time.time()
         buf = _buffers.get(session_id, [])
-        return [e for e in buf if e["id"] > last_event_id]
+        return [e for e in buf if e["id"] > after_id]
+
+
+def get_notifier(session_id: str) -> asyncio.Event:
+    """세션의 notifier를 가져오거나 생성."""
+    if session_id not in _notifiers:
+        _notifiers[session_id] = asyncio.Event()
+    return _notifiers[session_id]
 
 
 def clear(session_id: str):
-    """세션 버퍼 삭제."""
     with _lock:
         _buffers.pop(session_id, None)
         _counters.pop(session_id, None)
         _last_access.pop(session_id, None)
+    _notifiers.pop(session_id, None)
 
 
 def cleanup_expired():
-    """만료된 세션 버퍼 정리."""
     now = time.time()
     with _lock:
         expired = [sid for sid, t in _last_access.items() if now - t > _TTL]
@@ -54,8 +82,91 @@ def cleanup_expired():
             _buffers.pop(sid, None)
             _counters.pop(sid, None)
             _last_access.pop(sid, None)
+    for sid in expired:
+        _notifiers.pop(sid, None)
 
 
-def sse_with_id(event_id: int, event_type: str, data_json: str) -> str:
-    """이벤트 ID가 포함된 SSE 문자열 생성."""
-    return f"id: {event_id}\nevent: {event_type}\ndata: {data_json}\n\n"
+# ── 백그라운드 구독자 ──
+
+_subscriber_tasks: dict[str, asyncio.Task] = {}
+
+
+async def ensure_subscriber(oc_session_id: str, gojira_session_id: str):
+    """해당 세션의 백그라운드 구독자가 없으면 시작."""
+    key = gojira_session_id
+    task = _subscriber_tasks.get(key)
+    if task and not task.done():
+        return
+    task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
+    _subscriber_tasks[key] = task
+    log.info(f"백그라운드 구독 시작: {gojira_session_id} → {oc_session_id[:16]}")
+
+
+async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
+    """OpenCode /event SSE를 구독하고 event_buffer에 누적."""
+    from . import client as oc
+    from .translator import translate
+
+    try:
+        events_iter = oc.stream_events(oc_session_id)
+        async for sse_str in translate(events_iter, gojira_session_id):
+            if sse_str.startswith(":"):
+                continue
+            # SSE 문자열에서 event type과 data 추출
+            evt_type = None
+            evt_data = "{}"
+            for line in sse_str.split("\n"):
+                if line.startswith("event: "):
+                    evt_type = line[7:]
+                elif line.startswith("data: "):
+                    evt_data = line[6:]
+            if evt_type:
+                push(gojira_session_id, evt_type, evt_data)
+            if evt_type == "done":
+                log.info(f"백그라운드 구독 완료 (done): {gojira_session_id}")
+                # Mongo에 process + assistant 저장
+                await _save_to_mongo(gojira_session_id, evt_data)
+                break
+    except asyncio.CancelledError:
+        log.info(f"백그라운드 구독 취소: {gojira_session_id}")
+    except Exception as e:
+        log.warning(f"백그라운드 구독 오류: {gojira_session_id} — {e}")
+    finally:
+        _subscriber_tasks.pop(gojira_session_id, None)
+
+
+async def _save_to_mongo(gojira_session_id: str, done_data_json: str):
+    """done 시점에 process steps + assistant reply를 Mongo에 저장."""
+    from core.database import agent_sessions
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+
+    # 버퍼에서 process steps 수집
+    events = read_since(gojira_session_id, 0)
+    process_steps = []
+    for e in events:
+        if e["type"] in ("reasoning", "tool_call", "tool_result", "content"):
+            try:
+                process_steps.append({"type": e["type"], "data": json.loads(e["data"])})
+            except Exception:
+                pass
+
+    # done에서 reply 추출
+    reply = ""
+    try:
+        done_payload = json.loads(done_data_json)
+        reply = done_payload.get("reply", "")
+    except Exception:
+        pass
+
+    msgs_to_push = []
+    if process_steps:
+        msgs_to_push.append({"role": "process", "steps": process_steps, "timestamp": now})
+    if reply:
+        msgs_to_push.append({"role": "assistant", "content": reply, "timestamp": now})
+    if msgs_to_push:
+        agent_sessions().update_one(
+            {"_id": gojira_session_id},
+            {"$push": {"messages": {"$each": msgs_to_push}}, "$set": {"updatedAt": now}},
+        )
