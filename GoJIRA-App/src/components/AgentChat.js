@@ -624,7 +624,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 </div>
               )}
               {messages.map((msg, i) => {
-                if (msg.role === 'thought' || msg.role === 'process') return null;
                 if (msg.role === 'user') {
                   return (
                     <div key={i} className="ac-msg ac-msg-user">
