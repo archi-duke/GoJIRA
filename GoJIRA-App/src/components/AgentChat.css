@@ -135,3 +135,37 @@
 /* tool_call / tool_result 좌측 보더 */
 .ac-ps-tool_call { border-left: 2px solid #3b82f6; padding-left: 6px; margin-left: 2px; }
 .ac-ps-tool_result { border-left: 2px solid #10b981; padding-left: 6px; margin-left: 2px; }
+
+/* ── Segment 기반 assistant 렌더 ── */
+.ac-msg-assistant { display: flex; flex-direction: column; gap: 4px; }
+.ac-seg-thinking {
+  background: #faf7ff; color: #5b21b6; border-left: 3px solid #a78bfa;
+  border-radius: 4px; padding: 6px 10px; font-size: 12px; line-height: 1.55;
+  font-style: italic; white-space: pre-wrap; word-break: break-word;
+}
+.ac-seg-response { /* .ac-msg-content 스타일 상속 */ }
+
+.ac-seg-action {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+  font-size: 11.5px; font-family: 'SF Mono', Menlo, Consolas, monospace;
+  overflow: hidden;
+}
+.ac-seg-action-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; cursor: pointer; user-select: none;
+}
+.ac-seg-action-header:hover { background: #eef2f7; }
+.ac-seg-arrow { color: #94a3b8; font-size: 9px; width: 10px; flex-shrink: 0; }
+.ac-seg-tool { color: #1e293b; background: none; font-size: 11.5px; padding: 0; flex: 1; word-break: break-all; }
+.ac-seg-status { font-weight: 700; font-size: 10px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; }
+.ac-seg-status-ok { background: #d1fae5; color: #065f46; }
+.ac-seg-status-err { background: #fee2e2; color: #991b1b; }
+.ac-seg-status-run { background: #e0e7ff; color: #3730a3; }
+.ac-seg-action-body { border-top: 1px solid #e2e8f0; padding: 6px 10px; background: #fff; }
+.ac-seg-summary { color: #334155; font-size: 11.5px; margin-bottom: 4px; white-space: pre-wrap; word-break: break-word; }
+.ac-seg-detail {
+  background: #f1f5f9; color: #475569; border-radius: 4px;
+  padding: 6px 8px; font-size: 10.5px; line-height: 1.4;
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 180px; overflow-y: auto; margin: 0;
+}

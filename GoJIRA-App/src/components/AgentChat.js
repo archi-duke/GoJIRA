@@ -7,6 +7,101 @@ import './AgentChat.css';
 const API = config.GOJIRA_API || config.API_BASE;
 const STREAM_API = config.AGENT_API || API;
 
+// ── <thinking> 태그 파서: 스트리밍 중 안전하게 thinking / response 분리 ──
+const OPEN_TAGS = ['<thinking>', '<think>'];
+const CLOSE_TAGS = ['</thinking>', '</think>'];
+
+function partialTagLen(s, tags) {
+  let max = 0;
+  for (const tag of tags) {
+    const maxLen = Math.min(tag.length - 1, s.length);
+    for (let len = maxLen; len > max; len--) {
+      if (s.slice(-len) === tag.slice(0, len)) { max = len; break; }
+    }
+  }
+  return max;
+}
+
+function splitContent(buf, startInThinking) {
+  const segs = [];
+  let cursor = 0;
+  let inThinking = startInThinking;
+  while (cursor < buf.length) {
+    const tags = inThinking ? CLOSE_TAGS : OPEN_TAGS;
+    let nextIdx = -1, matched = null;
+    for (const tag of tags) {
+      const idx = buf.indexOf(tag, cursor);
+      if (idx !== -1 && (nextIdx === -1 || idx < nextIdx)) { nextIdx = idx; matched = tag; }
+    }
+    if (nextIdx === -1) {
+      const rest = buf.slice(cursor);
+      const partial = partialTagLen(rest, tags);
+      const emit = rest.length - partial;
+      if (emit > 0) segs.push({ type: inThinking ? 'thinking' : 'response', text: rest.slice(0, emit) });
+      return { segments: segs, remainder: rest.slice(emit), inThinking };
+    }
+    if (nextIdx > cursor) segs.push({ type: inThinking ? 'thinking' : 'response', text: buf.slice(cursor, nextIdx) });
+    cursor = nextIdx + matched.length;
+    inThinking = !inThinking;
+  }
+  return { segments: segs, remainder: '', inThinking };
+}
+
+function formatParams(params) {
+  return Object.entries(params || {}).map(([k, v]) => {
+    const str = typeof v === 'string' ? v : JSON.stringify(v);
+    const short = str.length > 40 ? str.slice(0, 40) + '…' : str;
+    return `${k}=${short}`;
+  }).join(', ');
+}
+
+function mergeSegments(existing, incoming) {
+  const out = [...existing];
+  for (const s of incoming) {
+    const last = out[out.length - 1];
+    if (last && last.type === s.type && (s.type === 'thinking' || s.type === 'response')) {
+      out[out.length - 1] = { ...last, text: (last.text || '') + (s.text || '') };
+    } else {
+      out.push({ ...s });
+    }
+  }
+  return out;
+}
+
+function stepsToSegments(steps) {
+  let segs = [];
+  for (const s of steps || []) {
+    if (s.type === 'reasoning') {
+      const txt = s.data?.content || '';
+      if (txt) segs = mergeSegments(segs, [{ type: 'thinking', text: txt.endsWith('\n') ? txt : txt + '\n' }]);
+    } else if (s.type === 'tool_call') {
+      segs.push({ type: 'action', tool: s.data?.tool || '?', params: s.data?.params || {}, status: 'running' });
+    } else if (s.type === 'tool_result') {
+      let i = segs.length - 1;
+      while (i >= 0 && !(segs[i].type === 'action' && segs[i].status === 'running')) i--;
+      const patch = {
+        status: s.data?.status === 'success' ? 'ok' : 'err',
+        summary: s.data?.summary || '',
+        detail: s.data?.detail || '',
+      };
+      if (i >= 0) segs[i] = { ...segs[i], ...patch };
+      else segs.push({ type: 'action', tool: s.data?.tool || '?', params: {}, ...patch });
+    } else if (s.type === 'content') {
+      const { segments } = splitContent(s.data?.text || '', false);
+      segs = mergeSegments(segs, segments);
+    } else if (s.type === 'error') {
+      segs = mergeSegments(segs, [{ type: 'response', text: `\n[ERROR] ${s.data?.message || ''}\n` }]);
+    }
+  }
+  return segs;
+}
+
+function contentToSegments(content) {
+  if (!content) return [];
+  const { segments } = splitContent(content, false);
+  return mergeSegments([], segments);
+}
+
 export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession, interviewPrompt, continueTo }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -22,7 +117,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
-  const [showProcess, setShowProcess] = useState(true);
+  const [showThinking, setShowThinking] = useState(true);
 
   async function handleCancel() {
     if (abortRef.current) {
@@ -63,13 +158,19 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       });
       if (res.ok) {
         const data = await res.json();
-        const msgs = (data.messages || []).map(m => {
+        const msgs = (data.messages || []).flatMap(m => {
           const msg = m.role ? m : Object.fromEntries(Object.entries(m));
           if (msg.role === 'process') {
-            return { role: 'process', steps: msg.steps || [], open: false };
+            const segs = stepsToSegments(msg.steps || []);
+            return segs.length ? [{ role: 'assistant', segments: segs }] : [];
           }
-          return { role: msg.role, content: msg.content, actions: msg.actions, suggestions: msg.suggestions };
-        }).filter(m => m.role && (m.content || m.role === 'process'));
+          if (msg.role === 'assistant') {
+            if (!msg.content) return [];
+            return [{ role: 'assistant', segments: contentToSegments(msg.content), actions: msg.actions, suggestions: msg.suggestions }];
+          }
+          if (!msg.content) return [];
+          return [{ role: msg.role, content: msg.content }];
+        });
         setMessages(msgs);
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
@@ -210,78 +311,84 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   }, []);
 
   function connectEventSource(sid) {
-    let contentBuf = '';
-    let segmentBuf = '';
-    let finalActions = [];
+    // 스트리밍 파서 상태 (assistant 메시지 단위)
+    let inThinking = false;
+    let pendingContent = '';
 
-    function addStep(step) {
+    function updateStreaming(fn) {
       setMessages(prev => {
-        const idx = prev.findLastIndex(m => m.role === 'process');
-        if (idx === -1) {
-          return [...prev, { role: 'process', steps: [step], open: false }];
+        let idx = prev.length - 1;
+        while (idx >= 0 && !(prev[idx].role === 'assistant' && prev[idx]._streaming)) idx--;
+        if (idx < 0) {
+          const msg = { role: 'assistant', _streaming: true, segments: fn([]) };
+          return [...prev, msg];
         }
-        const proc = { ...prev[idx], steps: [...prev[idx].steps, step] };
-        return [...prev.slice(0, idx), proc, ...prev.slice(idx + 1)];
+        const msg = prev[idx];
+        return [...prev.slice(0, idx), { ...msg, segments: fn(msg.segments || []) }, ...prev.slice(idx + 1)];
       });
     }
 
-    function handleEvt(type, data) {
-      const ts = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      switch (type) {
-        case 'session': break;
-        case 'thinking': break;
-        case 'reasoning': addStep({ type: 'reasoning', data, ts }); break;
-        case 'tool_call': addStep({ type: 'tool_call', data, ts }); break;
-        case 'tool_result':
-          addStep({ type: 'tool_result', data, ts });
-          if (contentBuf) {
-            setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false, _intermediate: true } : m));
-            contentBuf = '';
-            segmentBuf = '';
+    function appendSegments(list) {
+      if (!list.length) return;
+      updateStreaming(segs => mergeSegments(segs, list));
+    }
+
+    function pushAction(action) {
+      updateStreaming(segs => [...segs, action]);
+    }
+
+    function patchLastRunningAction(patch) {
+      updateStreaming(segs => {
+        for (let i = segs.length - 1; i >= 0; i--) {
+          if (segs[i].type === 'action' && segs[i].status === 'running') {
+            return [...segs.slice(0, i), { ...segs[i], ...patch }, ...segs.slice(i + 1)];
           }
+        }
+        return [...segs, { type: 'action', tool: '?', params: {}, ...patch }];
+      });
+    }
+
+    function handleContent(delta) {
+      const combined = pendingContent + (delta || '');
+      const { segments, remainder, inThinking: nextState } = splitContent(combined, inThinking);
+      pendingContent = remainder;
+      inThinking = nextState;
+      appendSegments(segments);
+    }
+
+    function handleEvt(type, data) {
+      switch (type) {
+        case 'session':
+        case 'thinking':
+          break;
+        case 'reasoning':
+          if (data.content) appendSegments([{ type: 'thinking', text: data.content }]);
+          break;
+        case 'tool_call':
+          pushAction({ type: 'action', tool: data.tool, params: data.params || {}, status: 'running' });
+          break;
+        case 'tool_result':
+          patchLastRunningAction({
+            status: data.status === 'success' ? 'ok' : 'err',
+            summary: data.summary || '',
+            detail: data.detail || '',
+          });
           break;
         case 'content':
-          contentBuf += data.text;
-          segmentBuf += data.text;
-          setMessages(prev => {
-            const idx = prev.findLastIndex(m => m.role === 'process');
-            let next = [...prev];
-            if (idx >= 0) {
-              const proc = next[idx];
-              const steps = [...proc.steps];
-              const lastStep = steps[steps.length - 1];
-              if (lastStep && lastStep.type === 'content') {
-                steps[steps.length - 1] = { ...lastStep, data: { text: segmentBuf } };
-              } else {
-                steps.push({ type: 'content', data: { text: segmentBuf }, ts });
-              }
-              next = [...next.slice(0, idx), { ...proc, steps }, ...next.slice(idx + 1)];
-            }
-            const last = next[next.length - 1];
-            if (last && last._streaming) {
-              next = [...next.slice(0, -1), { ...last, content: contentBuf }];
-            } else {
-              next = [...next, { role: 'assistant', content: contentBuf, _streaming: true }];
-            }
-            return next;
-          });
+          handleContent(data.text);
           break;
         case 'done':
-          finalActions = data.actions || [];
-          setMessages(prev => {
-            let next = prev.filter(m => !m._streaming);
-            next = next.filter(m => m.role !== 'thought');
-            const reply = data.reply || contentBuf;
-            if (reply) {
-              next = next.filter(m => !(m._intermediate && m.content === reply));
-            }
-            return [...next, { role: 'assistant', content: reply, actions: finalActions }];
-          });
+          if (pendingContent) {
+            appendSegments([{ type: inThinking ? 'thinking' : 'response', text: pendingContent }]);
+            pendingContent = '';
+          }
+          setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
           break;
         case 'error':
-          addStep({ type: 'error', data, ts });
+          appendSegments([{ type: 'response', text: `\n[ERROR] ${data.message || ''}\n` }]);
           break;
-        default: break;
+        default:
+          break;
       }
     }
 
@@ -311,7 +418,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     setMessages(prev => [
       ...prev,
       { role: 'user', content: text },
-      { role: 'process', steps: [], open: false },
     ]);
 
     // 인터뷰 모드: 첫 전송 시 인터뷰 질문 + 답변을 묶어서 전송
@@ -343,10 +449,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       // 2) EventSource 로 이벤트 수신 (재사용 가능한 connectEventSource)
       await connectEventSource(activeSid);
     } catch (err) {
-      setMessages(prev => {
-        const filtered = prev.filter(m => m.role !== 'process' || m.steps.length > 0);
-        return [...filtered, { role: 'assistant', content: `연결 오류: ${err.message}` }];
-      });
+      setMessages(prev => [...prev, { role: 'assistant', content: `연결 오류: ${err.message}` }]);
     }
     setLoading(false);
   }
@@ -372,129 +475,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   function handleKeyDown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }
   function handleSuggestion(text) { setInput(text); setTimeout(() => inputRef.current?.focus(), 0); }
 
-  function toggleProcess(idx) {
-    setMessages(prev => prev.map((m, i) => i === idx ? { ...m, open: !m.open } : m));
-  }
-
-  // ─── 디버그 상세(detail) 접기 ───
-  function toggleDetail(msgIdx, stepIdx) {
+  function toggleAction(msgIdx, segIdx) {
     setMessages(prev => prev.map((m, i) => {
-      if (i !== msgIdx || m.role !== 'process') return m;
-      const steps = m.steps.map((s, j) => j === stepIdx ? { ...s, detailOpen: !s.detailOpen } : s);
-      return { ...m, steps };
+      if (i !== msgIdx || !m.segments) return m;
+      return { ...m, segments: m.segments.map((s, j) => j === segIdx ? { ...s, open: !s.open } : s) };
     }));
-  }
-
-  function renderProcess(msg, idx) {
-    const steps = msg.steps || [];
-    const toolCount = steps.filter(s => s.type === 'tool_result').length;
-    const isRunning = loading && !messages.some(m => m._streaming) && idx === messages.findLastIndex(m => m.role === 'process');
-
-    // 일반 사용자: 스피너 + 진행 메시지(progress 단계만) 표시
-    if (!isMaster) {
-      const progressSteps = steps.filter(s => s.type === 'progress');
-      if (!isRunning && progressSteps.length === 0) return null;
-      return (
-        <div className="ac-process">
-          <div className="ac-proc-header">
-            {isRunning && <span className="ac-proc-spinner" />}
-            <span className="ac-proc-label">{isRunning ? '작업 중...' : '완료'}</span>
-          </div>
-          {progressSteps.length > 0 && (
-            <div className="ac-proc-body">
-              {progressSteps.map((s, i) => (
-                <div key={i} className="ac-ps-line">
-                  <span className="ac-ps-text">• {s.data.message}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // Master: 전체 디버그 뷰
-    return (
-      <div className="ac-process">
-        <div className="ac-proc-header" onClick={() => toggleProcess(idx)}>
-          {isRunning
-            ? <span className="ac-proc-spinner" />
-            : <span className="ac-proc-arrow">{msg.open ? '\u25BC' : '\u25B6'}</span>
-          }
-          <span className="ac-proc-label">{isRunning ? '작업 중...' : '작업 과정'}</span>
-          {toolCount > 0 && <span className="ac-proc-badge">{toolCount} tools</span>}
-        </div>
-        {msg.open && (
-          <div className="ac-proc-body">
-            {steps.map((step, i) => (
-              <div key={i} className={`ac-proc-step ac-ps-${step.type}`}>
-                {step.type === 'reasoning' && (
-                  <div className={`ac-ps-line ac-ps-reasoning ac-ps-${step.data.step || 'thought'}`}>
-                    <span className={`ac-ps-tag ${
-                      step.data.step === 'action' ? 'ac-tag-action' :
-                      step.data.step === 'observation' ? 'ac-tag-obs' :
-                      step.data.step === 'answer' ? 'ac-tag-answer' :
-                      'ac-tag-reason'
-                    }`}>
-                      {{ thought: 'Thought', action: 'Action', observation: 'Observation', answer: 'Answer' }[step.data.step] || 'Thought'}
-                    </span>
-                    <span className="ac-ps-text">{step.data.content}</span>
-                  </div>
-                )}
-                {step.type === 'progress' && (
-                  <div className="ac-ps-line">
-                    <span className="ac-ps-tag ac-tag-action">PROG</span>
-                    <span className="ac-ps-text">
-                      <strong>{step.data.stage}</strong> — {step.data.message}
-                    </span>
-                    <span className="ac-ps-ts">{step.ts}</span>
-                  </div>
-                )}
-                {step.type === 'tool_call' && (
-                  <div className="ac-ps-line">
-                    <span className="ac-ps-tag ac-tag-call">CALL</span>
-                    <span className="ac-ps-text">
-                      <strong>{step.data.tool}</strong>
-                      {Object.keys(step.data.params || {}).length > 0 && (
-                        <span className="ac-ps-params">
-                          ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})
-                        </span>
-                      )}
-                    </span>
-                    <span className="ac-ps-ts">{step.ts}</span>
-                  </div>
-                )}
-                {step.type === 'tool_result' && (
-                  <div className="ac-ps-result-wrap">
-                    <div className="ac-ps-line" onClick={() => toggleDetail(idx, i)} style={{cursor:'pointer'}}>
-                      <span className={`ac-ps-tag ${step.data.status === 'success' ? 'ac-tag-ok' : 'ac-tag-err'}`}>
-                        {step.data.status === 'success' ? 'OK' : 'ERR'}
-                      </span>
-                      <span className="ac-ps-text">
-                        {step.data.tool} &rarr; {step.data.summary}
-                      </span>
-                      <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
-                      {step.data.detail && (
-                        <span className="ac-ps-expand">{step.detailOpen ? '\u25BC' : '...'}</span>
-                      )}
-                    </div>
-                    {step.detailOpen && step.data.detail && (
-                      <pre className="ac-ps-detail">{step.data.detail}</pre>
-                    )}
-                  </div>
-                )}
-                {step.type === 'error' && (
-                  <div className="ac-ps-line">
-                    <span className="ac-ps-tag ac-tag-err">ERR</span>
-                    <span className="ac-ps-text">{step.data.message}</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
   }
 
   return (
@@ -639,78 +624,52 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 </div>
               )}
               {messages.map((msg, i) => {
-                if (msg.role === 'process') {
-                  if (!showProcess) {
-                    // showProcess OFF: process 블록 숨김 (assistant 메시지가 대신 표시됨)
-                    return null;
-                  }
-                  const steps = msg.steps || [];
-                  if (steps.length === 0 && !(loading && i === messages.findLastIndex(m => m.role === 'process'))) return null;
-                  const isRunning = loading && i === messages.findLastIndex(m => m.role === 'process');
+                if (msg.role === 'thought' || msg.role === 'process') return null;
+                if (msg.role === 'user') {
                   return (
-                    <div key={i} className="ac-msg ac-msg-process">
-                      <div className="ac-proc-body">
-                        {steps.map((step, j) => (
-                          <div key={j} className={`ac-proc-step ac-ps-${step.type}`}>
-                            {step.type === 'reasoning' && (
-                              <div className={`ac-ps-line ac-ps-reasoning ac-ps-${step.data.step || 'thought'}`}>
-                                <span className="ac-ps-tag ac-tag-reason">Thought</span>
-                                <span className="ac-ps-text">{step.data.content}</span>
-                              </div>
-                            )}
-                            {step.type === 'tool_call' && (
-                              <div className="ac-ps-line">
-                                <span className="ac-ps-tag ac-tag-call">CALL</span>
-                                <span className="ac-ps-text"><strong>{step.data.tool}</strong>
-                                  {Object.keys(step.data.params || {}).length > 0 && (
-                                    <span className="ac-ps-params"> ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})</span>
-                                  )}
-                                </span>
-                                <span className="ac-ps-ts">{step.ts}</span>
-                              </div>
-                            )}
-                            {step.type === 'tool_result' && (
-                              <div className="ac-ps-result-wrap">
-                                <div className="ac-ps-line" onClick={() => toggleDetail(i, j)} style={{cursor:'pointer'}}>
-                                  <span className={`ac-ps-tag ${step.data.status === 'success' ? 'ac-tag-ok' : 'ac-tag-err'}`}>
-                                    {step.data.status === 'success' ? 'OK' : 'ERR'}
-                                  </span>
-                                  <span className="ac-ps-text">{step.data.tool} &rarr; {step.data.summary}</span>
-                                  <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
-                                  {step.data.detail && <span className="ac-ps-expand">{step.detailOpen ? '\u25BC' : '...'}</span>}
-                                </div>
-                                {step.detailOpen && step.data.detail && <pre className="ac-ps-detail">{step.data.detail}</pre>}
-                              </div>
-                            )}
-                            {step.type === 'error' && (
-                              <div className="ac-ps-line"><span className="ac-ps-tag ac-tag-err">ERR</span><span className="ac-ps-text">{step.data.message}</span></div>
-                            )}
-                            {step.type === 'content' && (
-                              <div className="ac-msg ac-msg-assistant" style={{margin: '8px 0'}}>
-                                <div className="ac-msg-content">
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.data.text || ''}</ReactMarkdown>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                        {isRunning && <div className="ac-ps-line"><span className="ac-proc-spinner" /> <span className="ac-ps-text">작업 중...</span></div>}
-                      </div>
+                    <div key={i} className="ac-msg ac-msg-user">
+                      <div className="ac-msg-content"><span>{msg.content}</span></div>
                     </div>
                   );
                 }
-                if (msg.role === 'thought') return null;
-                if (msg.role === 'assistant' && msg._intermediate) return null;
-                if (msg.role === 'assistant' && showProcess && messages.some(m => m.role === 'process')) return null;
+                // assistant
+                const segments = msg.segments || (msg.content ? [{ type: 'response', text: msg.content }] : []);
                 return (
-                  <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
-                    <div className="ac-msg-content">
-                      {msg.role === 'assistant' ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
-                      ) : (
-                        <span>{msg.content}</span>
-                      )}
-                    </div>
+                  <div key={i} className="ac-msg ac-msg-assistant">
+                    {segments.map((seg, j) => {
+                      if (seg.type === 'thinking') {
+                        if (!showThinking) return null;
+                        return (
+                          <div key={j} className="ac-seg-thinking">{seg.text}</div>
+                        );
+                      }
+                      if (seg.type === 'action') {
+                        if (!showThinking) return null;
+                        const statusLabel = seg.status === 'ok' ? 'OK' : seg.status === 'err' ? 'ERR' : '…';
+                        const statusCls = seg.status === 'ok' ? 'ac-seg-status-ok' : seg.status === 'err' ? 'ac-seg-status-err' : 'ac-seg-status-run';
+                        return (
+                          <div key={j} className="ac-seg-action">
+                            <div className="ac-seg-action-header" onClick={() => toggleAction(i, j)}>
+                              <span className="ac-seg-arrow">{seg.open ? '▼' : '▶'}</span>
+                              <code className="ac-seg-tool">{seg.tool}({formatParams(seg.params)})</code>
+                              <span className={`ac-seg-status ${statusCls}`}>{statusLabel}</span>
+                            </div>
+                            {seg.open && (seg.summary || seg.detail) && (
+                              <div className="ac-seg-action-body">
+                                {seg.summary && <div className="ac-seg-summary">{seg.summary}</div>}
+                                {seg.detail && <pre className="ac-seg-detail">{seg.detail}</pre>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      // response
+                      return (
+                        <div key={j} className="ac-msg-content ac-seg-response">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{seg.text || ''}</ReactMarkdown>
+                        </div>
+                      );
+                    })}
                     {msg.actions && msg.actions.length > 0 && (
                       <div className="ac-actions">
                         {msg.actions.map((a, j) => (
@@ -731,7 +690,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                   </div>
                 );
               })}
-              {loading && !messages.some(m => m._streaming) && !messages.some(m => m.role === 'process') && (
+              {loading && !messages.some(m => m._streaming) && (
                 <div className="ac-msg ac-msg-assistant">
                   <div className="ac-msg-content ac-typing">생각하는 중...</div>
                 </div>
@@ -754,14 +713,14 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             />
             <div className="ac-input-area">
               <button
-                onClick={() => setShowProcess(p => !p)}
+                onClick={() => setShowThinking(p => !p)}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
-                  fontSize: '11px', color: showProcess ? '#e67e22' : '#999',
+                  fontSize: '11px', color: showThinking ? '#6d28d9' : '#999',
                   padding: '2px 6px', marginRight: '4px', flexShrink: 0
                 }}
-                title={showProcess ? '추론 과정 감추기' : '추론 과정 보기'}
-              >{showProcess ? '◉' : '○'}</button>
+                title={showThinking ? '추론/Action 감추기' : '추론/Action 보기'}
+              >{showThinking ? '◉' : '○'}</button>
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => {
                   setInput(e.target.value);

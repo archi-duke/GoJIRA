@@ -28,6 +28,7 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
     assistant message 완료(step-finish) 감지 시 done 을 yield 하고 종료.
     """
     final_text_by_part: dict[str, str] = {}
+    final_reasoning_by_part: dict[str, str] = {}
     text_part_order: list[str] = []
     actions: list[dict] = []
     # session 이벤트 먼저
@@ -117,8 +118,12 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
 
         elif ptype == "reasoning":
             txt = part.get("text") or part.get("content") or ""
-            if txt:
-                yield _sse("reasoning", {"turn": turn, "step": "thought", "content": txt})
+            pid = part.get("id") or part.get("callID") or "reasoning"
+            prev = final_reasoning_by_part.get(pid, "")
+            if len(txt) > len(prev):
+                delta = txt[len(prev):]
+                yield _sse("reasoning", {"turn": turn, "step": "thought", "content": delta})
+            final_reasoning_by_part[pid] = txt
 
         elif ptype == "tool":
             state = part.get("state", {})
