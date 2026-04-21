@@ -222,7 +222,7 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
 
   let content;
   if (page === 'docs' && selectedProject) {
-    content = <DocEditor project={selectedProject} user={user} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} projectAlert={projectAlert} onDocStateChange={refreshAlert} />;
+    content = <DocEditor project={selectedProject} user={user} authority={authority} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} projectAlert={projectAlert} onDocStateChange={refreshAlert} />;
   } else if (page === 'issues' && selectedProject) {
     content = <IssueList project={selectedProject} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} user={user} projectAlert={projectAlert} />;
   } else if (page === 'relationMap' && selectedProject) {

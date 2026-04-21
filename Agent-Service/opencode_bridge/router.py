@@ -76,6 +76,9 @@ async def chat_send(
         },
     )
 
+    # 이전 턴 이벤트 버퍼 초기화 (중복 방지)
+    eb.clear(gojira_sid)
+
     # 백그라운드 구독자 시작 (이벤트 버퍼에 누적)
     await eb.ensure_subscriber(oc_sid, gojira_sid)
 
@@ -108,36 +111,36 @@ async def session_events(
 
     async def sse_stream():
         cursor = last_event_id
-        notifier = eb.get_notifier(session_id)
         IDLE_TIMEOUT = 300.0
         idle_start = asyncio.get_event_loop().time()
+        last_keepalive = asyncio.get_event_loop().time()
 
         while True:
             # 버퍼에서 새 이벤트 읽기
             events = eb.read_since(session_id, cursor)
             if events:
                 idle_start = asyncio.get_event_loop().time()
+                last_keepalive = idle_start
                 for evt in events:
                     cursor = evt["id"]
                     yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['data']}\n\n"
                     if evt["type"] == "done":
                         return
             else:
+                now = asyncio.get_event_loop().time()
                 # 타임아웃 체크
-                elapsed = asyncio.get_event_loop().time() - idle_start
-                if elapsed > IDLE_TIMEOUT:
+                if now - idle_start > IDLE_TIMEOUT:
                     log.warning(f"events idle timeout — session {session_id}")
                     yield _sse("error", {"message": "응답 대기 시간 초과"})
                     yield _sse("done", {"reply": "", "actions": []})
                     return
-                yield ": keepalive\n\n"
+                # keepalive (3초마다)
+                if now - last_keepalive > 3.0:
+                    last_keepalive = now
+                    yield ": keepalive\n\n"
 
-            # 새 이벤트 대기 (최대 3초)
-            notifier.clear()
-            try:
-                await asyncio.wait_for(notifier.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                pass
+            # 짧은 polling (0.1초) — notifier 대신 안정적
+            await asyncio.sleep(0.1)
 
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
@@ -167,32 +170,31 @@ async def chat_stream(
 
     async def sse_stream():
         cursor = 0
-        notifier = eb.get_notifier(gojira_sid)
         IDLE_TIMEOUT = 300.0
         idle_start = asyncio.get_event_loop().time()
+        last_keepalive = idle_start
 
         while True:
             events = eb.read_since(gojira_sid, cursor)
             if events:
                 idle_start = asyncio.get_event_loop().time()
+                last_keepalive = idle_start
                 for evt in events:
                     cursor = evt["id"]
                     yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['data']}\n\n"
                     if evt["type"] == "done":
                         return
             else:
-                elapsed = asyncio.get_event_loop().time() - idle_start
-                if elapsed > IDLE_TIMEOUT:
+                now = asyncio.get_event_loop().time()
+                if now - idle_start > IDLE_TIMEOUT:
                     yield _sse("error", {"message": f"{IDLE_TIMEOUT}초 동안 응답이 없어 작업을 중단했습니다."})
                     yield _sse("done", {"reply": "", "actions": []})
                     return
-                yield ": keepalive\n\n"
+                if now - last_keepalive > 3.0:
+                    last_keepalive = now
+                    yield ": keepalive\n\n"
 
-            notifier.clear()
-            try:
-                await asyncio.wait_for(notifier.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                pass
+            await asyncio.sleep(0.1)
 
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
 

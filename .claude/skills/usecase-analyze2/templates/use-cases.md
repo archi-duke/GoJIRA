@@ -27,17 +27,34 @@
 
 ### 2.1 User Story 목록
 
-| ID | Actor | 분류 | Story | 매핑 UC |
-|----|-------|------|-------|---------|
-| US-1 | Actor1 | Happy | ~로서 ~할 수 있다 | UC_001 |
-| US-2 | Actor1 | Alternative | ~할 때 ~할 수 있다 | UC_001 |
-| ... | ... | ... | ... | ... |
+| ID | Actor | 분류 | Story | 원본 VOS | 매핑 UC |
+|----|-------|------|-------|----------|---------|
+| US-1 | Actor1 | Happy | ~로서 ~할 수 있다 | {VOS-KEY} | UC_001 |
+| US-2 | Actor1 | Alternative | ~할 때 ~할 수 있다 | {VOS-KEY} | UC_001 |
+| ... | ... | ... | ... | ... | ... |
+
+⚠️ **모든 VOS 는 최소 1개 User Story 로 파생되어야 함** — VOS 누락 시 critical.
 
 ---
 
-## 3. 다이어그램 (전체)
+## 3. Use Case 목록
 
-### 3.1 Context Diagram
+### 3.1 Use Case 요약
+
+| UC ID | Use Case 명 | 관련 User Story | Feature 선정 | 비고 |
+|-------|------------|----------------|:------------:|------|
+| UC_001 | {UC 제목} | US-1, US-2 | ✅ | |
+| UC_002 | {UC 제목} | US-3 | ✅ | |
+| UC_003 | {UC 제목} | US-4, US-5 | — | include (UC_002에 포함) |
+| ... | ... | ... | ... | ... |
+
+⚠️ Feature 로 선정되지 않은 Use Case 도 **삭제하지 않음** — 목록과 다이어그램에 그대로 유지.
+
+---
+
+## 4. 다이어그램 (전체)
+
+### 4.1 Context Diagram
 
 ```mermaid
 graph LR
@@ -46,27 +63,32 @@ graph LR
     classDef actor fill:#fef3c7,stroke:#f59e0b
 ```
 
-### 3.2 Use Case Diagram
+### 4.2 Use Case Diagram
+
+⚠️ **모든 Use Case 포함** — Feature 선정 여부와 무관. Feature 는 `:::feature` 스타일로 구분.
 
 ```mermaid
 graph TB
     Actor1[Actor1]:::actor
     Actor2[Actor2]:::actor
-    UC001((UC 제목1))
-    UC002((UC 제목2))
+    UC001((UC 제목1)):::feature
+    UC002((UC 제목2)):::feature
+    UC003((UC 제목3))
     Actor1 --> UC001
     Actor1 --> UC002
+    UC002 -.->|include| UC003
     Actor2 --> UC002
     classDef actor fill:#fef3c7,stroke:#f59e0b
+    classDef feature fill:#dbeafe,stroke:#3b82f6
 ```
 
 ---
 
-## 4. Feature 상세
+## 5. Feature 상세
 
 ⚠️ **모든 Feature 에 시나리오 + Sequence Diagram 필수** — 누락 시 critical.
 
-### 4.1 UC_001: {Feature 제목} (Feature 이슈: {key})
+### 5.1 UC_001: {Feature 제목} (Feature 이슈: {key})
 
 **Actor**: ...
 **Precondition**: ...
@@ -100,7 +122,7 @@ sequenceDiagram
 
 ---
 
-### 4.N UC_00N: {Feature 제목} (Feature 이슈: {key})
+### 5.N UC_00N: {Feature 제목} (Feature 이슈: {key})
 
 **Actor**: ...
 **Precondition**: ...
@@ -127,13 +149,15 @@ sequenceDiagram
 
 ---
 
-## 5. VOS 커버리지 매트릭스
+## 6. VOS 커버리지 매트릭스
 
-| VOS 키 | 매핑된 Feature | 비고 |
-|--------|---------------|------|
-| {key}-1 | UC_001, UC_003 | |
-| {key}-2 | UC_002 | |
-| {key}-3 | (NFR) | 후속 Requirement 단계 위임 |
+| VOS 키 | 파생 User Story | 매핑된 Feature | 비고 |
+|--------|----------------|---------------|------|
+| {key}-1 | US-1, US-2 | UC_001, UC_003 | |
+| {key}-2 | US-3 | UC_002 | |
+| {key}-3 | US-7 | (NFR) | 후속 Requirement 단계 위임 |
+
+⚠️ **VOS → User Story → Use Case → Feature** 경로가 모든 VOS 에 대해 추적 가능해야 함.
 
 ---
 
@@ -142,6 +166,7 @@ sequenceDiagram
 
 ### Mermaid 작성 규칙
 - Use Case Diagram: `graph TB` 사용 (**classDiagram 금지**)
+- Feature UC 에 `:::feature` 스타일 적용, 비Feature UC 는 기본 스타일
 - Sequence Diagram 다중 수신자: `A-->>B, C: msg` 금지 → 개별 2줄로 분리
 - participant 에 반드시 `as` 키워드: `participant U2 as 후공 사용자` (O) / `participant U2 후공 사용자` (X)
 - 노드 ID 에 공백/한글 직접 사용 금지: `User1[게임 이용자]` (O) / `게임 이용자` (X)

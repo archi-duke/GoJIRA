@@ -107,6 +107,9 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
     from . import client as oc
     from .translator import translate
 
+    # 이 턴의 시작 event ID 기록 (이전 턴 이벤트 제외용)
+    turn_start_id = get_latest_id(gojira_session_id)
+
     try:
         events_iter = oc.stream_events(oc_session_id)
         async for sse_str in translate(events_iter, gojira_session_id):
@@ -124,8 +127,8 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
                 push(gojira_session_id, evt_type, evt_data)
             if evt_type == "done":
                 log.info(f"백그라운드 구독 완료 (done): {gojira_session_id}")
-                # Mongo에 process + assistant 저장
-                await _save_to_mongo(gojira_session_id, evt_data)
+                # Mongo에 이번 턴의 process + assistant만 저장
+                await _save_to_mongo(gojira_session_id, evt_data, turn_start_id)
                 break
     except asyncio.CancelledError:
         log.info(f"백그라운드 구독 취소: {gojira_session_id}")
@@ -135,20 +138,26 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
         _subscriber_tasks.pop(gojira_session_id, None)
 
 
-async def _save_to_mongo(gojira_session_id: str, done_data_json: str):
-    """done 시점에 process steps + assistant reply를 Mongo에 저장."""
+async def _save_to_mongo(gojira_session_id: str, done_data_json: str, after_id: int = 0):
+    """done 시점에 이번 턴의 process steps + assistant reply를 Mongo에 저장."""
     from core.database import agent_sessions
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
 
-    # 버퍼에서 process steps 수집
-    events = read_since(gojira_session_id, 0)
+    # 버퍼에서 이번 턴의 이벤트만 수집 (연속 content는 병합)
+    events = read_since(gojira_session_id, after_id)
     process_steps = []
     for e in events:
         if e["type"] in ("reasoning", "tool_call", "tool_result", "content"):
             try:
-                process_steps.append({"type": e["type"], "data": json.loads(e["data"])})
+                step = {"type": e["type"], "data": json.loads(e["data"])}
+                if e["type"] == "content" and process_steps and process_steps[-1]["type"] == "content":
+                    prev_text = process_steps[-1]["data"].get("text", "")
+                    step["data"]["text"] = prev_text + step["data"].get("text", "")
+                    process_steps[-1] = step
+                else:
+                    process_steps.append(step)
             except Exception:
                 pass
 

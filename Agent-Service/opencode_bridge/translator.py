@@ -35,6 +35,8 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
 
     turn = 0
     seen_tool_ids: set[str] = set()
+    assistant_msg_id: str | None = None  # assistant message ID 추적
+    finished_msg_ids: set[str] = set()  # 이미 완료된 assistant message ID (재전송 차단)
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
     permission_asked_at: float = 0.0  # 권한 요청 시각 (0이면 미발생)
@@ -61,10 +63,16 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
             if t == "message.updated":
                 info = evt.get("properties", {}).get("info", {})
                 fin = info.get("finish")
+                msg_id = info.get("id")
                 if info.get("role") == "assistant" and fin in TERMINAL_FINISHES:
-                    reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
-                    yield _sse("done", {"reply": reply, "actions": actions})
-                    return
+                    # 현재 턴의 assistant가 완료된 경우만 done 처리
+                    if msg_id and msg_id == assistant_msg_id:
+                        reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
+                        yield _sse("done", {"reply": reply, "actions": actions})
+                        return
+                    # 과거 턴의 완료 이벤트는 무시 목록에 추가
+                    if msg_id:
+                        finished_msg_ids.add(msg_id)
             elif t == "session.status":
                 st = evt.get("properties", {}).get("status", {}).get("type")
                 if st == "idle" and final_text_by_part:
@@ -73,8 +81,10 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
                         yield _sse("done", {"reply": reply, "actions": actions})
                         return
             elif t == "message.created":
-                role = evt.get("properties", {}).get("info", {}).get("role")
+                info = evt.get("properties", {}).get("info", {})
+                role = info.get("role")
                 if role == "assistant":
+                    assistant_msg_id = info.get("id") or evt.get("properties", {}).get("id")
                     yield _sse("thinking", {"turn": turn, "message": "응답 생성 중..."})
             # raw 이벤트가 계속 오고 있으면 keepalive 전송 (3초 간격)
             now = time.monotonic()
@@ -85,6 +95,14 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
 
         part = evt.get("properties", {}).get("part", {})
         ptype = part.get("type")
+        msg_id = evt.get("properties", {}).get("messageID")
+
+        # 과거 완료된 메시지의 part 는 무시 (OpenCode 재전송)
+        if msg_id and msg_id in finished_msg_ids:
+            continue
+        # user message의 part는 무시 (assistant message만 처리)
+        if msg_id and assistant_msg_id and msg_id != assistant_msg_id:
+            continue
 
         if ptype == "text":
             txt = part.get("text", "")

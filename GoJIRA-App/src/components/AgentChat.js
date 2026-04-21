@@ -73,10 +73,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         setMessages(msgs);
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
-        // OpenCode 세션이 아직 진행 중이면 자동으로 EventSource 연결
-        if (data.active) {
-          connectEventSource(sid);
-        }
       } else {
         setSessionId(null);
         sessionStorage.removeItem('agent_sessionId');
@@ -215,6 +211,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
 
   function connectEventSource(sid) {
     let contentBuf = '';
+    let segmentBuf = '';
     let finalActions = [];
 
     function addStep(step) {
@@ -240,10 +237,12 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           if (contentBuf) {
             setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false, _intermediate: true } : m));
             contentBuf = '';
+            segmentBuf = '';
           }
           break;
         case 'content':
           contentBuf += data.text;
+          segmentBuf += data.text;
           setMessages(prev => {
             const idx = prev.findLastIndex(m => m.role === 'process');
             let next = [...prev];
@@ -252,9 +251,9 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               const steps = [...proc.steps];
               const lastStep = steps[steps.length - 1];
               if (lastStep && lastStep.type === 'content') {
-                steps[steps.length - 1] = { ...lastStep, data: { text: contentBuf } };
+                steps[steps.length - 1] = { ...lastStep, data: { text: segmentBuf } };
               } else {
-                steps.push({ type: 'content', data: { text: contentBuf }, ts });
+                steps.push({ type: 'content', data: { text: segmentBuf }, ts });
               }
               next = [...next.slice(0, idx), { ...proc, steps }, ...next.slice(idx + 1)];
             }
@@ -642,16 +641,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               {messages.map((msg, i) => {
                 if (msg.role === 'process') {
                   if (!showProcess) {
-                    // showProcess OFF: content step만 말풍선으로 렌더링
-                    const contentSteps = (msg.steps || []).filter(s => s.type === 'content');
-                    if (contentSteps.length === 0) return null;
-                    return contentSteps.map((step, j) => (
-                      <div key={`${i}-c${j}`} className="ac-msg ac-msg-assistant">
-                        <div className="ac-msg-content">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.data.text || ''}</ReactMarkdown>
-                        </div>
-                      </div>
-                    ));
+                    // showProcess OFF: process 블록 숨김 (assistant 메시지가 대신 표시됨)
+                    return null;
                   }
                   const steps = msg.steps || [];
                   if (steps.length === 0 && !(loading && i === messages.findLastIndex(m => m.role === 'process'))) return null;

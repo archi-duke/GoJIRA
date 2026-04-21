@@ -22,7 +22,18 @@ export USER="batman"
 ```
 
 ## 역할
-소프트웨어 아키텍트. **모든 VOS 가 최소 1 Feature 에 매핑되는 커버리지**를 책임진다.
+소프트웨어 아키텍트. **모든 VOS 가 User Story → Use Case → Feature 로 빠짐없이 파생되는 커버리지**를 책임진다.
+
+### 핵심 파생 규칙
+```
+VOS ──(1:N)──▶ User Story ──(N:M)──▶ Use Case ──(선별)──▶ Feature
+```
+1. **VOS → User Story**: 각 VOS 에서 최소 1개 User Story 파생 (Happy/Alternative/Exception)
+2. **User Story → Use Case**: 유사 목적 Story 를 묶어 Use Case 도출. 모든 Story 는 반드시 하나의 UC 에 매핑
+3. **Use Case Diagram**: Feature 선정 **이전에** 모든 Use Case 로 다이어그램 작성
+4. **Feature 선정**: Actor 와 1차적으로 연결되는 Use Case 만 Feature (include/extend/보조 제외)
+   - 이 단계에서 VOS → User Story → Use Case 경로가 보장되므로 **모든 VOS 는 반드시 1개 이상의 Feature 에 연결됨**
+5. **Feature 미선정 Use Case 유지**: Feature 로 선정되지 않은 Use Case 는 삭제하지 않음. Use Case 다이어그램도 수정하지 않음
 
 ---
 
@@ -64,33 +75,44 @@ VOS 가 0건이면 **중단** 하고 "vos-collect2 를 먼저 실행하세요" �
 - 도메인 규칙/제약
 → document "## 1. Business Domain 분석" 섹션
 
-### 1.2 User Story 탐색 (Use Case 세분화 핵심)
-상위 의도를 구체적 상호작용으로 분해:
+### 1.2 User Story 파생 (VOS 기반)
+각 VOS 에서 User Story 를 파생시킨다. **모든 VOS 는 최소 1개 User Story 를 가져야 한다.**
+
+분류:
 - (A) 정상(Happy Path): 성공 진행
 - (B) 비정상(Alternative): 정상 흐름의 분기
 - (C) 예외(Exception): 오류/실패
 
 **암묵적 Story** 능동 발굴: 계정/인증, 중단/이탈, 다중 사용자 동기화, 데이터 영속성.
 
-→ document "## 2.1 User Story 목록" 표 (ID/Actor/분류/Story/매핑 UC-ID)
+→ document "## 2.1 User Story 목록" 표 (ID/Actor/분류/Story/원본 VOS/매핑 UC-ID)
 
 ### 1.3 Use Case 도출
-- 비슷한 목적 Story 묶기
+- 비슷한 목적 Story 묶기 → Use Case
 - 다른 목적/시점/입출력 은 **별도 Use Case**
 - 예: "게임 시작" vs "추측 입력" vs "게임 종료" 는 별도 UC
+- **모든 User Story 는 반드시 하나의 UC 에 매핑**되어야 함
+- VOS → Story → UC 경로가 보장되므로 모든 VOS 가 최소 1개 UC 에 연결됨
 
-### 1.4 Feature 선정
-Actor 직접 관계 UC 만 Feature. include/extend/보조 제외.
+### 1.4 Use Case Diagram (Feature 선정 전 작성)
+**모든 Use Case** 를 포함한 다이어그램을 이 단계에서 작성한다.
+- Use Case Diagram → `graph TB` (**절대 `classDiagram` 금지**)
+- 이 다이어그램은 Feature 선정 후에도 **수정하지 않음**
+
+### 1.5 Feature 선정
+Actor 와 1차적으로 직접 연결되는 Use Case 만 Feature 로 선정.
+- include/extend/보조 Use Case 는 Feature 에서 **제외**
 - 과도 통합 금지: "게임 플레이" 하나로 [시작/입력/결과/이력] 묶지 말 것
-- 수량: 일반적으로 VOS 건수의 30~80%
+- **Feature 로 선정되지 않은 Use Case 는 삭제하지 않는다** — Use Case 목록과 다이어그램 그대로 유지
+- VOS → Story → UC 파생 구조 상 **모든 VOS 에 대해 1개 이상의 Feature 연결이 보장됨**
 
-### 1.5 시나리오 정의
-각 Feature 에 Basic/Alternative/Exception Flow.
+### 1.6 시나리오 정의
+각 **Feature** 에 Basic/Alternative/Exception Flow.
 Basic 5단계 이상이면 별도 UC 분해 검토.
 
-### 1.6 Mermaid 다이어그램 (시작 라인 정확히)
+### 1.7 Mermaid 다이어그램 (시작 라인 정확히)
 - Context Diagram → `graph LR`
-- Use Case Diagram → `graph TB` (**절대 `classDiagram` 금지**)
+- Use Case Diagram → `graph TB` (Step 1.4 에서 작성 완료, 그대로 사용)
 - Sequence Diagram (Feature별) → `sequenceDiagram`
 
 예시:
@@ -98,17 +120,23 @@ Basic 5단계 이상이면 별도 UC 분해 검토.
 ```mermaid
 graph TB
     User[사용자]:::actor
-    UC1((로그인))
+    UC1((로그인)):::feature
+    UC2((세션 관리))
     User --> UC1
+    UC1 -.->|include| UC2
     classDef actor fill:#fef3c7,stroke:#f59e0b
+    classDef feature fill:#dbeafe,stroke:#3b82f6
 ```
 ````
+
+- Feature 로 선정된 UC 에는 `:::feature` 스타일 적용하여 시각적 구분
+- Feature 미선정 UC 도 다이어그램에 그대로 포함
 
 금지: classDiagram 으로 UC 표현, 외부 이미지(`![...](...png)`) 참조, Mermaid 노드 ID 에 공백/한글 직접 사용.
 **Sequence Diagram 에서 다중 수신자 쉼표 금지**: `Game-->>User1, User2: 메시지` → 개별 2줄로 분리.
 **participant 에 반드시 `as` 키워드 사용**: `participant User2 as 후공 사용자` (O) / `participant User2 후공 사용자` (X)
 
-### 1.7 문서 템플릿 (use-cases.md)
+### 1.8 문서 템플릿 (use-cases.md)
 
 **반드시** 아래 템플릿 파일의 구조를 따른다. 실행 전 먼저 읽어서 구조를 확인하라:
 
@@ -118,10 +146,10 @@ cat "${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
 
 섹션/번호를 빠뜨리지 말 것. 특히 **모든 Feature 에 대해 Sequence Diagram 필수** — 누락 시 critical.
 
-### 1.8 docId 부여
+### 1.9 docId 부여
 각 Feature 에 `docId: "UC-N"` (1부터 순차). document 본문의 모든 Feature 표기에 **동일 docId 사용**. "(Feature 이슈 키)" 칸에 docId 를 그대로 적음 (Step 5 에서 실제 key 로 치환).
 
-### 1.8 relatedVOS + mode
+### 1.10 relatedVOS + mode
 각 Feature 에 `relatedVOS: ["GOJIRA3-N", ...]` (VOS 목록 실존 키만).
 mode: `create` / `reuse` / `modify` / `delete_mark` (existingKey 필요).
 
@@ -137,8 +165,10 @@ VOS 목록의 **모든 키**가 최소 1 Feature 의 `relatedVOS` 에 포함되�
 ### critical 기준
 - 필수 필드(summary, actor, basicflow, docId, relatedVOS) 누락
 - `relatedVOS` 가 VOS 목록에 없는 키 참조 (hallucination)
-- **VOS 1건이라도** 매핑 안 됨 (NFR 표기 시 면제)
+- **VOS 1건이라도** User Story 에서 파생되지 않음 (파생 경로 단절)
+- **VOS 1건이라도** Feature 매핑 안 됨 (NFR 표기 시 면제)
 - Use Case Diagram 을 classDiagram 으로 작성
+- **Use Case Diagram 에 Feature 미선정 UC 가 누락됨** (모든 UC 포함 필수)
 - Context/Use Case/Sequence 중 2개 이상 누락
 - **Sequence Diagram 이 일부 Feature 에만 있고 나머지 누락** (모든 Feature 필수)
 - Mermaid 구문 오류 (쉼표 다중 수신자, `as` 누락 등)
@@ -146,6 +176,7 @@ VOS 목록의 **모든 키**가 최소 1 Feature 의 `relatedVOS` 에 포함되�
 - Feature 1건뿐인데 VOS 3건 이상 (과도 통합)
 - 모든 Feature 의 Actor 동일 (다른 Actor 누락)
 - docId 중복/누락
+- Feature 선정 후 Use Case 목록/다이어그램에서 미선정 UC 를 삭제함
 
 ### 점수
 - `score`: 0.0~1.0
