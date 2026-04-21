@@ -27,6 +27,7 @@ _notifiers: dict[str, asyncio.Event] = {}
 
 def push(session_id: str, event_type: str, data_json: str) -> int:
     """이벤트 추가, 할당된 event_id 반환. 대기 중인 reader에 알림."""
+    push_ts = time.time()
     with _lock:
         _counters[session_id] += 1
         eid = _counters[session_id]
@@ -34,10 +35,17 @@ def push(session_id: str, event_type: str, data_json: str) -> int:
             "id": eid,
             "type": event_type,
             "data": data_json,
+            "_push_ts": push_ts,
         })
         if len(_buffers[session_id]) > _MAX_EVENTS:
             _buffers[session_id] = _buffers[session_id][-_MAX_EVENTS:]
         _last_access[session_id] = time.time()
+    # diag log
+    try:
+        with open("/tmp/event-timing.log", "a") as f:
+            f.write(f"PUSH {push_ts:.3f} {session_id[:8]} {event_type} {len(data_json)}\n")
+    except Exception:
+        pass
     # notifier는 lock 밖에서 set (asyncio thread-safe)
     notifier = _notifiers.get(session_id)
     if notifier:
@@ -89,6 +97,55 @@ def cleanup_expired():
 # ── 백그라운드 구독자 ──
 
 _subscriber_tasks: dict[str, asyncio.Task] = {}
+_watchdog_tasks: dict[str, asyncio.Task] = {}
+
+
+def _start_watchdog(oc_session_id: str, gojira_session_id: str):
+    key = gojira_session_id
+    wt = _watchdog_tasks.get(key)
+    if wt and not wt.done():
+        return
+    wt = asyncio.create_task(_watchdog_loop(oc_session_id, gojira_session_id))
+    _watchdog_tasks[key] = wt
+
+
+async def _watchdog_loop(oc_session_id: str, gojira_session_id: str):
+    """15초마다 OpenCode 세션 상태를 폴링하여, 이벤트가 idle 인데 assistant finish 이면 synthetic done 발행."""
+    from . import client as oc
+    CHECK_INTERVAL = 1.0
+    last_id = get_latest_id(gojira_session_id)
+    try:
+        while True:
+            await asyncio.sleep(CHECK_INTERVAL)
+            sub = _subscriber_tasks.get(gojira_session_id)
+            if not sub or sub.done():
+                return
+            current_id = get_latest_id(gojira_session_id)
+            if current_id != last_id:
+                last_id = current_id
+                continue
+            # idle — OpenCode 세션 상태 확인
+            try:
+                msgs = await oc.get_session_messages(oc_session_id)
+            except Exception as e:
+                log.warning(f"watchdog oc 조회 실패 {gojira_session_id}: {e}")
+                continue
+            finished = False
+            for m in reversed(msgs):
+                info = m.get("info", {}) if isinstance(m, dict) else {}
+                if info.get("role") == "assistant":
+                    fin = info.get("finish")
+                    if fin and str(fin).strip():
+                        finished = True
+                    break
+            if finished:
+                log.info(f"watchdog: OpenCode finish 감지 — synthetic done 발행 {gojira_session_id}")
+                push(gojira_session_id, "done", '{"reply":"","actions":[]}')
+                if sub and not sub.done():
+                    sub.cancel()
+                return
+    except asyncio.CancelledError:
+        return
 
 
 async def ensure_subscriber(oc_session_id: str, gojira_session_id: str):
@@ -96,10 +153,33 @@ async def ensure_subscriber(oc_session_id: str, gojira_session_id: str):
     key = gojira_session_id
     task = _subscriber_tasks.get(key)
     if task and not task.done():
+        _start_watchdog(oc_session_id, gojira_session_id)
         return
     task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
     _subscriber_tasks[key] = task
+    _start_watchdog(oc_session_id, gojira_session_id)
     log.info(f"백그라운드 구독 시작: {gojira_session_id} → {oc_session_id[:16]}")
+
+
+async def reset_subscriber(oc_session_id: str, gojira_session_id: str):
+    """기존 구독자 취소 후 새로 시작. 턴 경계에서 깨끗한 재구독 보장."""
+    key = gojira_session_id
+    task = _subscriber_tasks.get(key)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    wt = _watchdog_tasks.get(key)
+    if wt and not wt.done():
+        wt.cancel()
+    _subscriber_tasks.pop(key, None)
+    _watchdog_tasks.pop(key, None)
+    task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
+    _subscriber_tasks[key] = task
+    _start_watchdog(oc_session_id, gojira_session_id)
+    log.info(f"백그라운드 구독 리셋: {gojira_session_id} → {oc_session_id[:16]}")
 
 
 async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
@@ -110,9 +190,21 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
     # 이 턴의 시작 event ID 기록 (이전 턴 이벤트 제외용)
     turn_start_id = get_latest_id(gojira_session_id)
 
+    # 재접속 대응: 현재 OpenCode 세션에 진행 중(finish=None)인 assistant 메시지가 있으면 그 id 로 초기화
+    initial_msg_id = None
+    try:
+        msgs = await oc.get_session_messages(oc_session_id)
+        for m in reversed(msgs):
+            info = m.get("info", {}) if isinstance(m, dict) else {}
+            if info.get("role") == "assistant" and info.get("finish") in (None, ""):
+                initial_msg_id = info.get("id")
+                break
+    except Exception:
+        pass
+
     try:
         events_iter = oc.stream_events(oc_session_id)
-        async for sse_str in translate(events_iter, gojira_session_id):
+        async for sse_str in translate(events_iter, gojira_session_id, initial_msg_id):
             if sse_str.startswith(":"):
                 continue
             # SSE 문자열에서 event type과 data 추출

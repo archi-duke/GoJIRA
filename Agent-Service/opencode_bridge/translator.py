@@ -9,7 +9,7 @@ OpenCode /event 포맷:
 
 import json
 import time
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 
 def _sse(event: str, data: dict) -> str:
@@ -22,10 +22,11 @@ _KEEPALIVE = ": keepalive\n\n"
 _PERMISSION_TIMEOUT = 60.0
 
 
-async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str):
+async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str, initial_assistant_msg_id: Optional[str] = None):
     """OpenCode 이벤트 스트림 → UI SSE 이벤트 문자열 yield.
 
     assistant message 완료(step-finish) 감지 시 done 을 yield 하고 종료.
+    재접속 시 message.created 를 놓친 경우 initial_assistant_msg_id 로 현재 진행 중 메시지 추적.
     """
     final_text_by_part: dict[str, str] = {}
     final_reasoning_by_part: dict[str, str] = {}
@@ -36,7 +37,7 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
 
     turn = 0
     seen_tool_ids: set[str] = set()
-    assistant_msg_id: str | None = None  # assistant message ID 추적
+    assistant_msg_id: Optional[str] = initial_assistant_msg_id  # assistant message ID 추적
     finished_msg_ids: set[str] = set()  # 이미 완료된 assistant message ID (재전송 차단)
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
@@ -74,13 +75,6 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
                     # 과거 턴의 완료 이벤트는 무시 목록에 추가
                     if msg_id:
                         finished_msg_ids.add(msg_id)
-            elif t == "session.status":
-                st = evt.get("properties", {}).get("status", {}).get("type")
-                if st == "idle" and final_text_by_part:
-                    reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
-                    if reply:
-                        yield _sse("done", {"reply": reply, "actions": actions})
-                        return
             elif t == "message.created":
                 info = evt.get("properties", {}).get("info", {})
                 role = info.get("role")

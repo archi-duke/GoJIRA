@@ -10,6 +10,7 @@ UI 계약 유지:
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -79,8 +80,8 @@ async def chat_send(
     # 이전 턴 이벤트 버퍼 초기화 (중복 방지)
     eb.clear(gojira_sid)
 
-    # 백그라운드 구독자 시작 (이벤트 버퍼에 누적)
-    await eb.ensure_subscriber(oc_sid, gojira_sid)
+    # 턴 경계에서 구독자 리셋 (이전 턴 구독자가 stale 인 경우 대비)
+    await eb.reset_subscriber(oc_sid, gojira_sid)
 
     # 메시지 전송
     await oc.send_message_async(oc_sid, req.message)
@@ -111,7 +112,7 @@ async def session_events(
 
     async def sse_stream():
         cursor = last_event_id
-        IDLE_TIMEOUT = 300.0
+        IDLE_TIMEOUT = 180.0
         idle_start = asyncio.get_event_loop().time()
         last_keepalive = asyncio.get_event_loop().time()
 
@@ -123,6 +124,13 @@ async def session_events(
                 last_keepalive = idle_start
                 for evt in events:
                     cursor = evt["id"]
+                    flush_ts = time.time()
+                    push_ts = evt.get("_push_ts", 0)
+                    try:
+                        with open("/tmp/event-timing.log", "a") as f:
+                            f.write(f"FLUSH {flush_ts:.3f} {session_id[:8]} {evt['type']} lat={(flush_ts - push_ts)*1000:.0f}ms\n")
+                    except Exception:
+                        pass
                     yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['data']}\n\n"
                     if evt["type"] == "done":
                         return
@@ -170,7 +178,7 @@ async def chat_stream(
 
     async def sse_stream():
         cursor = 0
-        IDLE_TIMEOUT = 300.0
+        IDLE_TIMEOUT = 180.0
         idle_start = asyncio.get_event_loop().time()
         last_keepalive = idle_start
 

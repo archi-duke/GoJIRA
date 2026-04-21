@@ -70,6 +70,8 @@ function mergeSegments(existing, incoming) {
 
 function stepsToSegments(steps) {
   let segs = [];
+  let inThinking = false;
+  let pendingContent = '';
   for (const s of steps || []) {
     if (s.type === 'reasoning') {
       const txt = s.data?.content || '';
@@ -87,11 +89,17 @@ function stepsToSegments(steps) {
       if (i >= 0) segs[i] = { ...segs[i], ...patch };
       else segs.push({ type: 'action', tool: s.data?.tool || '?', params: {}, ...patch });
     } else if (s.type === 'content') {
-      const { segments } = splitContent(s.data?.text || '', false);
+      const combined = pendingContent + (s.data?.text || '');
+      const { segments, remainder, inThinking: next } = splitContent(combined, inThinking);
+      pendingContent = remainder;
+      inThinking = next;
       segs = mergeSegments(segs, segments);
     } else if (s.type === 'error') {
       segs = mergeSegments(segs, [{ type: 'response', text: `\n[ERROR] ${s.data?.message || ''}\n` }]);
     }
+  }
+  if (pendingContent) {
+    segs = mergeSegments(segs, [{ type: inThinking ? 'thinking' : 'response', text: pendingContent }]);
   }
   return segs;
 }
@@ -123,6 +131,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     if (abortRef.current) {
       try { abortRef.current.abort(); } catch(_){}
     }
+    // stale _streaming 플래그 클리어 — 다음 턴이 이 메시지에 흘러들지 않게
+    setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
     if (sessionId) {
       try {
         await fetch(`${STREAM_API}/Agent/session/${sessionId}/cancel`, {
@@ -158,19 +168,28 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       });
       if (res.ok) {
         const data = await res.json();
-        const msgs = (data.messages || []).flatMap(m => {
-          const msg = m.role ? m : Object.fromEntries(Object.entries(m));
-          if (msg.role === 'process') {
-            const segs = stepsToSegments(msg.steps || []);
-            return segs.length ? [{ role: 'assistant', segments: segs }] : [];
+        const raw = data.messages || [];
+        const msgs = [];
+        for (let i = 0; i < raw.length; i++) {
+          const m = raw[i].role ? raw[i] : Object.fromEntries(Object.entries(raw[i]));
+          if (m.role === 'process') {
+            const segs = stepsToSegments(m.steps || []);
+            const next = raw[i + 1];
+            // process 다음의 assistant.content 는 process 의 content 스텝과 중복 — 건너뛰되
+            // actions/suggestions 만 승계
+            if (next && next.role === 'assistant') {
+              i++;
+              if (segs.length) msgs.push({ role: 'assistant', segments: segs, actions: next.actions, suggestions: next.suggestions });
+            } else if (segs.length) {
+              msgs.push({ role: 'assistant', segments: segs });
+            }
+          } else if (m.role === 'assistant') {
+            if (!m.content) continue;
+            msgs.push({ role: 'assistant', segments: contentToSegments(m.content), actions: m.actions, suggestions: m.suggestions });
+          } else if (m.content) {
+            msgs.push({ role: m.role, content: m.content });
           }
-          if (msg.role === 'assistant') {
-            if (!msg.content) return [];
-            return [{ role: 'assistant', segments: contentToSegments(msg.content), actions: msg.actions, suggestions: msg.suggestions }];
-          }
-          if (!msg.content) return [];
-          return [{ role: msg.role, content: msg.content }];
-        });
+        }
         setMessages(msgs);
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
@@ -413,10 +432,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
 
   async function handleSend() {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text) return;
+    // 대화 중이면 기존 스트림 정리 (subscriber 는 chat/send 의 reset_subscriber 가 처리)
+    if (loading && abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
     setInput('');
+    // 이전 턴 stale _streaming 플래그 클리어 후 user 메시지 append
     setMessages(prev => [
-      ...prev,
+      ...prev.map(m => m._streaming ? { ...m, _streaming: false } : m),
       { role: 'user', content: text },
     ]);
 
@@ -728,11 +752,10 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder="메시지를 입력하세요..." rows={1} />
-              {loading ? (
-                <button className="ac-send" onClick={handleCancel} style={{ background: '#c33', color: '#fff' }}>중지</button>
-              ) : (
-                <button className="ac-send" onClick={handleSend} disabled={!input.trim()}>전송</button>
+              {loading && (
+                <button className="ac-send" onClick={handleCancel} style={{ background: '#c33', color: '#fff' }} title="현재 응답 중지">중지</button>
               )}
+              <button className="ac-send" onClick={handleSend} disabled={!input.trim()} title={loading ? '현재 응답 중단 후 새 메시지 전송' : '전송'}>전송</button>
             </div>
           </>
         )}

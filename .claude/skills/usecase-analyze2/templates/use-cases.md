@@ -155,9 +155,10 @@ sequenceDiagram
 |--------|----------------|---------------|------|
 | {key}-1 | US-1, US-2 | UC_001, UC_003 | |
 | {key}-2 | US-3 | UC_002 | |
-| {key}-3 | US-7 | (NFR) | 후속 Requirement 단계 위임 |
+| {key}-3 | US-7 | UC_005 | NFR 성격 — 구현 기능 Feature 확보 후 Requirement 단계에서 NFR 속성화 |
 
-⚠️ **VOS → User Story → Use Case → Feature** 경로가 모든 VOS 에 대해 추적 가능해야 함.
+⚠️ **VOS → User Story → Use Case → Feature** 경로가 **모든** VOS 에 대해 추적 가능해야 함.
+⚠️ NFR/품질속성/정책 성격의 VOS 도 (NFR) 로 빼지 말고 구현 기능 Feature 를 반드시 도출 — "이 요구를 만족시키려면 시스템이 무슨 동작을 해야 하는가?" 로 환원.
 
 ---
 

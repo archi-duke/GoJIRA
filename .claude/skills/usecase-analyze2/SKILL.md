@@ -35,6 +35,17 @@ VOS ──(1:N)──▶ User Story ──(N:M)──▶ Use Case ──(선별)
    - 이 단계에서 VOS → User Story → Use Case 경로가 보장되므로 **모든 VOS 는 반드시 1개 이상의 Feature 에 연결됨**
 5. **Feature 미선정 Use Case 유지**: Feature 로 선정되지 않은 Use Case 는 삭제하지 않음. Use Case 다이어그램도 수정하지 않음
 
+### NFR 성격 VOS 도 Feature 확보 (면제 없음)
+품질속성/정책/제약 성격이 강한 VOS 라도 **반드시 그 요구를 "구현하는" 기능 Feature 를 도출**한다. 면제(NFR 표기만) 금지.
+- 원칙: "이 요구를 만족시키려면 시스템이 **무슨 동작**을 해야 하는가?" 로 환원 → 그 동작이 Feature
+- Feature 가 확보되면 후속 Requirement 단계에서 그 Feature 에 NFR/CNST 속성 Requirement 를 연결하여 품질속성을 표현
+
+파생 예시:
+- "개인정보는 사용자 동의 없이 수집되지 않아야 함" → Feature **"사용자 동의 수집 및 데이터 수집 정책 표시"** (동의 플로우, 프라이버시 설정 UC)
+- "네트워크 불안정 시 게임 상태가 유지되어야 함" → Feature **"세션 자동 복구/재접속"** (재접속 UC, 상태 스냅샷 UC)
+- "접근성 준수" → Feature **"접근성 설정/키보드 네비게이션"**
+- "응답시간 XX 이하" → Feature **"성능 모니터링/로드 상태 표시"** 또는 기능 Feature 자체에 NFR 로 연결
+
 ---
 
 ## Step 0 — 데이터 수집
@@ -159,14 +170,16 @@ mode: `create` / `reuse` / `modify` / `delete_mark` (existingKey 필요).
 
 ### VOS 커버리지 매트릭스 (필수)
 VOS 목록의 **모든 키**가 최소 1 Feature 의 `relatedVOS` 에 포함되는지 점검.
-- 미커버 VOS 가 있으면 **Feature 추가** (Step 1.4~1.8 반복) 또는 NFR 성격이면 `coverageMatrix[key] = ["(NFR)"]` 로 표기하고 후속 Requirement 단계 위임
+- 미커버 VOS 가 있으면 **Feature 추가** (Step 1.4~1.8 반복) — **NFR 면제 금지**
+- NFR 성격 VOS 도 "이 요구를 구현하는 동작" Feature 를 반드시 도출해서 매핑 (역할 섹션 파생 예시 참조)
 - 억지 매핑 금지 — 의미 연관 불충분하면 새 Feature 추가
 
 ### critical 기준
 - 필수 필드(summary, actor, basicflow, docId, relatedVOS) 누락
 - `relatedVOS` 가 VOS 목록에 없는 키 참조 (hallucination)
 - **VOS 1건이라도** User Story 에서 파생되지 않음 (파생 경로 단절)
-- **VOS 1건이라도** Feature 매핑 안 됨 (NFR 표기 시 면제)
+- **VOS 1건이라도** Feature 매핑 안 됨 — **NFR 면제 없음**. 품질속성/정책/제약 VOS 라도 구현 기능 Feature 를 반드시 도출해 매핑
+- `coverageMatrix` 에 `(NFR)` 플레이스홀더 사용 금지
 - Use Case Diagram 을 classDiagram 으로 작성
 - **Use Case Diagram 에 Feature 미선정 UC 가 누락됨** (모든 UC 포함 필수)
 - Context/Use Case/Sequence 중 2개 이상 누락
@@ -264,11 +277,11 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - 문서 저장: business/use-cases.md
 - Mermaid 다이어그램: Context / Use Case / Sequence
 
-### VOS 커버리지 매트릭스
+### VOS 커버리지 매트릭스 (전 VOS 가 1개 이상 Feature 연결)
 | VOS 키 | 매핑된 Feature | 비고 |
 |---|---|---|
 | GOJIRA3-N | UC-1, UC-3 | |
-| GOJIRA3-M | (NFR) | Requirement 단계 위임 |
+| GOJIRA3-M | UC-5 | NFR 성격 — 구현 기능 Feature 확보 후 Requirement 단계에서 NFR 로 속성화
 
 ### Self-loop
 - iter N회 / selected=iter X (score_eff Y) / stop=pass|max_iter|...
