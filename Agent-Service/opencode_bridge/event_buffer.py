@@ -27,7 +27,6 @@ _notifiers: dict[str, asyncio.Event] = {}
 
 def push(session_id: str, event_type: str, data_json: str) -> int:
     """이벤트 추가, 할당된 event_id 반환. 대기 중인 reader에 알림."""
-    push_ts = time.time()
     with _lock:
         _counters[session_id] += 1
         eid = _counters[session_id]
@@ -35,17 +34,10 @@ def push(session_id: str, event_type: str, data_json: str) -> int:
             "id": eid,
             "type": event_type,
             "data": data_json,
-            "_push_ts": push_ts,
         })
         if len(_buffers[session_id]) > _MAX_EVENTS:
             _buffers[session_id] = _buffers[session_id][-_MAX_EVENTS:]
         _last_access[session_id] = time.time()
-    # diag log
-    try:
-        with open("/tmp/event-timing.log", "a") as f:
-            f.write(f"PUSH {push_ts:.3f} {session_id[:8]} {event_type} {len(data_json)}\n")
-    except Exception:
-        pass
     # notifier는 lock 밖에서 set (asyncio thread-safe)
     notifier = _notifiers.get(session_id)
     if notifier:
@@ -110,10 +102,15 @@ def _start_watchdog(oc_session_id: str, gojira_session_id: str):
 
 
 async def _watchdog_loop(oc_session_id: str, gojira_session_id: str):
-    """15초마다 OpenCode 세션 상태를 폴링하여, 이벤트가 idle 인데 assistant finish 이면 synthetic done 발행."""
+    """주기적으로 OpenCode 세션 상태를 확인하여
+    - finish 이 설정됐으면 synthetic done 발행 후 구독자 종료
+    - finish=None 인데 이벤트가 IDLE_REFRESH_SEC 이상 stale 이면 /event 스트림 hung 으로 간주, 구독자 강제 리셋
+    """
     from . import client as oc
     CHECK_INTERVAL = 1.0
+    IDLE_REFRESH_SEC = 10.0  # 이벤트 없이 이 시간 지나면 subscriber 리셋
     last_id = get_latest_id(gojira_session_id)
+    idle_since = time.time()
     try:
         while True:
             await asyncio.sleep(CHECK_INTERVAL)
@@ -123,7 +120,9 @@ async def _watchdog_loop(oc_session_id: str, gojira_session_id: str):
             current_id = get_latest_id(gojira_session_id)
             if current_id != last_id:
                 last_id = current_id
+                idle_since = time.time()
                 continue
+            idle_elapsed = time.time() - idle_since
             # idle — OpenCode 세션 상태 확인
             try:
                 msgs = await oc.get_session_messages(oc_session_id)
@@ -143,6 +142,21 @@ async def _watchdog_loop(oc_session_id: str, gojira_session_id: str):
                 push(gojira_session_id, "done", '{"reply":"","actions":[]}')
                 if sub and not sub.done():
                     sub.cancel()
+                return
+            # finish=None 인데 이벤트 IDLE_REFRESH_SEC 이상 멎어있으면 /event 스트림이 hung 이라고 보고 subscriber 강제 리셋
+            if idle_elapsed >= IDLE_REFRESH_SEC:
+                log.warning(f"watchdog: subscriber idle {idle_elapsed:.1f}s (finish=None) — 강제 리셋 {gojira_session_id}")
+                # 현재 태스크가 구독자 task 라서 cancel 만 걸고 탈출. reset 은 다음 /events 재접속 시 ensure_subscriber 가 처리
+                # 대신 여기서 직접 새 구독자 task 생성
+                try:
+                    sub.cancel()
+                except Exception:
+                    pass
+                _subscriber_tasks.pop(gojira_session_id, None)
+                new_task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
+                _subscriber_tasks[gojira_session_id] = new_task
+                # 새 구독자에 watchdog 도 다시 붙여야 하므로 — 이 watchdog 은 여기서 종료하고 새로 시작
+                _start_watchdog(oc_session_id, gojira_session_id)
                 return
     except asyncio.CancelledError:
         return

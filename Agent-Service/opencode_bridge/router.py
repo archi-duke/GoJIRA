@@ -124,13 +124,6 @@ async def session_events(
                 last_keepalive = idle_start
                 for evt in events:
                     cursor = evt["id"]
-                    flush_ts = time.time()
-                    push_ts = evt.get("_push_ts", 0)
-                    try:
-                        with open("/tmp/event-timing.log", "a") as f:
-                            f.write(f"FLUSH {flush_ts:.3f} {session_id[:8]} {evt['type']} lat={(flush_ts - push_ts)*1000:.0f}ms\n")
-                    except Exception:
-                        pass
                     yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['data']}\n\n"
                     if evt["type"] == "done":
                         return

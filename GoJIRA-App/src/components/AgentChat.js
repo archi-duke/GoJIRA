@@ -485,6 +485,52 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
+  async function handleReconnect() {
+    if (!sessionId) return;
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
+    setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+
+    // Mongo 에서 저장 상태 다시 로드 (완료된 턴들 정확히)
+    let inProgress = false;
+    try {
+      const res = await fetch(`${STREAM_API}/Agent/session/${sessionId}`, { headers: { 'X-User-Id': user || '' } });
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data.messages || [];
+        const msgs = [];
+        for (let i = 0; i < raw.length; i++) {
+          const m = raw[i].role ? raw[i] : Object.fromEntries(Object.entries(raw[i]));
+          if (m.role === 'process') {
+            const segs = stepsToSegments(m.steps || []);
+            const next = raw[i + 1];
+            if (next && next.role === 'assistant') {
+              i++;
+              if (segs.length) msgs.push({ role: 'assistant', segments: segs, actions: next.actions, suggestions: next.suggestions });
+            } else if (segs.length) {
+              msgs.push({ role: 'assistant', segments: segs });
+            }
+          } else if (m.role === 'assistant') {
+            if (!m.content) continue;
+            msgs.push({ role: 'assistant', segments: contentToSegments(m.content), actions: m.actions, suggestions: m.suggestions });
+          } else if (m.content) {
+            msgs.push({ role: m.role, content: m.content });
+          }
+        }
+        setMessages(msgs);
+        // 턴 진행 중 판정: Mongo 의 마지막 원본 메시지가 user 면 아직 assistant 가 저장 안 됨 = 진행 중
+        const lastRaw = raw[raw.length - 1];
+        inProgress = !!(lastRaw && lastRaw.role === 'user');
+      }
+    } catch(_) {}
+
+    // 진행 중인 턴만 EventSource 재연결 (완료 턴 재생으로 인한 중복 방지)
+    if (inProgress) {
+      await connectEventSource(sessionId);
+    }
+  }
+
   async function loadSessions(query) {
     const q = query ? `?q=${encodeURIComponent(query)}` : '';
     try {
@@ -571,6 +617,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             </div>
           )}
           <div className="ac-header-btns">
+            <button className="ac-header-btn" onClick={handleReconnect}
+              title="세션 재연결 (SSE 끊고 다시 연결)" style={{opacity: sessionId ? 1 : 0.3}}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 4v6h-6"/>
+                <path d="M1 20v-6h6"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+                <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+              </svg>
+            </button>
             {isMaster && (
               <button className="ac-header-btn" onClick={async () => {
                 if (!sessionId) return;
@@ -693,6 +748,12 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                         </div>
                       );
                     })}
+                    {msg._streaming && (
+                      <div className="ac-seg-pending">
+                        <span className="ac-dot" /><span className="ac-dot" /><span className="ac-dot" />
+                        <span className="ac-seg-pending-label">추론 중...</span>
+                      </div>
+                    )}
                     {msg.actions && msg.actions.length > 0 && (
                       <div className="ac-actions">
                         {msg.actions.map((a, j) => (

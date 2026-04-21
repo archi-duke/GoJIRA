@@ -39,6 +39,7 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
     seen_tool_ids: set[str] = set()
     assistant_msg_id: Optional[str] = initial_assistant_msg_id  # assistant message ID 추적
     finished_msg_ids: set[str] = set()  # 이미 완료된 assistant message ID (재전송 차단)
+    part_types: dict[str, str] = {}  # partID → part.type (reasoning/text 등) — delta 이벤트 분류용
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
     permission_asked_at: float = 0.0  # 권한 요청 시각 (0이면 미발생)
@@ -60,6 +61,33 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
             reply = "".join(final_text_by_part.get(pid, "") for pid in text_part_order).strip()
             yield _sse("done", {"reply": reply, "actions": actions, "_abort": True})
             return
+
+        if t == "message.part.delta":
+            # OpenCode 가 part 내용을 char/토큰 단위로 흘려보내는 이벤트.
+            # delta.field 는 어느 필드의 변경인지만 나타내므로, part 의 실제 타입은 part_types 에서 조회.
+            props = evt.get("properties", {})
+            msg_id = props.get("messageID")
+            part_id = props.get("partID")
+            delta = props.get("delta", "")
+            if msg_id and msg_id in finished_msg_ids:
+                continue
+            if msg_id and assistant_msg_id and msg_id != assistant_msg_id:
+                continue
+            if not delta or not part_id:
+                continue
+            # part 타입 판단: 기억한 매핑 우선, 없으면 delta.field 로 추정
+            ptype = part_types.get(part_id) or props.get("field", "text")
+            if ptype == "reasoning":
+                prev = final_reasoning_by_part.get(part_id, "")
+                final_reasoning_by_part[part_id] = prev + delta
+                yield _sse("reasoning", {"turn": turn, "step": "thought", "content": delta})
+            elif ptype == "text":
+                prev = final_text_by_part.get(part_id, "")
+                final_text_by_part[part_id] = prev + delta
+                if part_id not in text_part_order:
+                    text_part_order.append(part_id)
+                yield _sse("content", {"text": delta})
+            continue
 
         if t != "message.part.updated":
             if t == "message.updated":
@@ -98,6 +126,11 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
         # user message의 part는 무시 (assistant message만 처리)
         if msg_id and assistant_msg_id and msg_id != assistant_msg_id:
             continue
+
+        # partID → type 매핑 기록 (delta 이벤트 분류에 사용)
+        _pid_for_type = part.get("id")
+        if _pid_for_type and ptype:
+            part_types[_pid_for_type] = ptype
 
         if ptype == "text":
             txt = part.get("text", "")
