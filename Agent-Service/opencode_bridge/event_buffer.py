@@ -204,21 +204,29 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
     # 이 턴의 시작 event ID 기록 (이전 턴 이벤트 제외용)
     turn_start_id = get_latest_id(gojira_session_id)
 
-    # 재접속 대응: 현재 OpenCode 세션에 진행 중(finish=None)인 assistant 메시지가 있으면 그 id 로 초기화
+    # 재접속 대응: 현재 OpenCode 세션에 진행 중(finish=None)인 assistant 메시지가 있으면 그 id 로 초기화.
+    # 동시에 해당 메시지의 기존 parts 에서 partID→type 매핑을 수집해 translator 에 전달
+    # (재시작 subscriber 가 message.part.updated 를 놓쳐 delta 를 text 로 오분류하는 문제 방지).
     initial_msg_id = None
+    initial_part_types: dict = {}
     try:
         msgs = await oc.get_session_messages(oc_session_id)
         for m in reversed(msgs):
             info = m.get("info", {}) if isinstance(m, dict) else {}
             if info.get("role") == "assistant" and info.get("finish") in (None, ""):
                 initial_msg_id = info.get("id")
+                for p in (m.get("parts") or []):
+                    pid = p.get("id")
+                    ptype = p.get("type")
+                    if pid and ptype:
+                        initial_part_types[pid] = ptype
                 break
     except Exception:
         pass
 
     try:
         events_iter = oc.stream_events(oc_session_id)
-        async for sse_str in translate(events_iter, gojira_session_id, initial_msg_id):
+        async for sse_str in translate(events_iter, gojira_session_id, initial_msg_id, initial_part_types):
             if sse_str.startswith(":"):
                 continue
             # SSE 문자열에서 event type과 data 추출

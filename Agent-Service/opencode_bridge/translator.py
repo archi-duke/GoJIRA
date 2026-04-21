@@ -22,11 +22,19 @@ _KEEPALIVE = ": keepalive\n\n"
 _PERMISSION_TIMEOUT = 60.0
 
 
-async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str, initial_assistant_msg_id: Optional[str] = None):
+async def translate(
+    opencode_events: AsyncIterator[dict],
+    gojira_session_id: str,
+    initial_assistant_msg_id: Optional[str] = None,
+    initial_part_types: Optional[dict] = None,
+):
     """OpenCode 이벤트 스트림 → UI SSE 이벤트 문자열 yield.
 
     assistant message 완료(step-finish) 감지 시 done 을 yield 하고 종료.
     재접속 시 message.created 를 놓친 경우 initial_assistant_msg_id 로 현재 진행 중 메시지 추적.
+    initial_part_types 는 subscriber 재시작 시 누락된 message.part.updated 를 보완하기 위해
+    기존 part 의 partID→type 매핑을 선공급한다. 없으면 delta 가 reasoning 인지 text 인지
+    구분할 수 없어 모두 response 로 출력되는 버그가 난다.
     """
     final_text_by_part: dict[str, str] = {}
     final_reasoning_by_part: dict[str, str] = {}
@@ -39,7 +47,7 @@ async def translate(opencode_events: AsyncIterator[dict], gojira_session_id: str
     seen_tool_ids: set[str] = set()
     assistant_msg_id: Optional[str] = initial_assistant_msg_id  # assistant message ID 추적
     finished_msg_ids: set[str] = set()  # 이미 완료된 assistant message ID (재전송 차단)
-    part_types: dict[str, str] = {}  # partID → part.type (reasoning/text 등) — delta 이벤트 분류용
+    part_types: dict[str, str] = dict(initial_part_types or {})  # partID → part.type (reasoning/text 등) — delta 이벤트 분류용
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
     permission_asked_at: float = 0.0  # 권한 요청 시각 (0이면 미발생)

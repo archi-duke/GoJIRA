@@ -525,9 +525,12 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       }
     } catch(_) {}
 
-    // 진행 중인 턴만 EventSource 재연결 (완료 턴 재생으로 인한 중복 방지)
+    // 진행 중인 턴만 EventSource 재연결 (완료 턴 재생으로 인한 중복 방지).
+    // 완료 턴이면 loading 을 내려서 '추론중' / 중지 버튼 stuck 상태 해소.
     if (inProgress) {
       await connectEventSource(sessionId);
+    } else {
+      setLoading(false);
     }
   }
 
