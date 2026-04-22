@@ -26,7 +26,7 @@ curl -s "${GOJIRA_API}/Issue" \
   -H "X-User-Id: ${USER}" \
   > /tmp/gojira_issues.json
 
-jq '[.[] | {key, subkey, issueType, reqType, summary, status, links}]' /tmp/gojira_issues.json
+jq '[.[] | {key, subkey, issueType, reqType, summary, status, issueLinks}]' /tmp/gojira_issues.json
 ```
 
 ## 분석 항목 (에이전트가 직접 수행)

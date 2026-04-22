@@ -1,8 +1,17 @@
 ---
 name: usecase-analyze2
-description: VOS 를 Use Case/Feature 로 분석하여 이슈로 등록하고 business/use-cases.md 를 작성합니다. VOS 커버리지 자가검증(모든 VOS 최소 1 Feature 매핑) + self-loop(최대 3회) + VOS-Feature Contains 링크 생성. Claude Code 네이티브(curl/jq).
+description: VOS 를 User Story / Use Case / Feature 로 분석·도출하고 VOS↔Feature Contains 링크 + business/use-cases.md 를 작성/재정립합니다. 사용자가 "Feature 도출/Use Case 분석" 을 요청하면 MODE=full, "Feature-VOS 연결 재정리·재링크·링크만 다시" 류 요청이면 MODE=relink 로 호출 (기존 Feature/UC 이슈 보존, 링크·문서만 재작성, 차집합만 POST). VOS 커버리지 자가검증(모든 VOS 최소 1 Feature) + self-loop(최대 3회). Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
+
+## 이 스킬을 언제 호출하나
+
+사용자 요청이 아래 의도에 해당하면 이 스킬을 호출하고 `MODE` 를 확정한다.
+
+- **MODE=relink** — "Feature-VOS 연결 재정리", "링크 재정리", "재링크", "relink", "링크만 다시" 등 **기존 Feature/UseCase 를 유지하면서 VOS 와의 연결/문서만 재정립** 하려는 요청
+- **MODE=full** — "Use Case 분석", "Feature 도출", "VOS 에서 Use Case 뽑아" 등 **VOS 에서 신규 Use Case/Feature 를 도출** 해 달라는 요청
+
+단순 현황 조회(고아 Feature, 커버리지 점검 등)만 원하는 거면 먼저 `issue-analyze` 로 분석하고, 구조 변경(이슈·링크 수정) 의도가 확인된 뒤에만 이 스킬을 호출한다. 분석 결과만 요구한 턴에서 이 스킬을 "미리 돌려놓지" 말 것.
 
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
@@ -14,11 +23,13 @@ allowed-tools: Bash, Read
 
 - `CODE` — projectCode (예: GOJIRA3)
 - `USER` — user (예: batman)
+- `MODE` — `full`(기본) | `relink`. `relink` 는 **기존 Feature 이슈를 보존**하고 VOS ↔ Feature 링크 / use-cases.md 만 재생성. 사용자가 "연결 재정리", "링크만", "재링크" 류의 표현을 쓰면 `relink` 로 해석
 
 예:
 ```bash
 export CODE="GOJIRA3"
 export USER="batman"
+export MODE="full"   # 또는 relink
 ```
 
 ## 역할
@@ -34,6 +45,11 @@ VOS ──(1:N)──▶ User Story ──(N:M)──▶ Use Case ──(선별)
 4. **Feature 선정**: Actor 와 1차적으로 연결되는 Use Case 만 Feature (include/extend/보조 제외)
    - 이 단계에서 VOS → User Story → Use Case 경로가 보장되므로 **모든 VOS 는 반드시 1개 이상의 Feature 에 연결됨**
 5. **Feature 미선정 Use Case 유지**: Feature 로 선정되지 않은 Use Case 는 삭제하지 않음. Use Case 다이어그램도 수정하지 않음
+
+### VOS ↔ Feature 연결 양방향 필수
+- 모든 **VOS** 는 최소 1 개 Feature 와 연결 (기존 원칙)
+- 모든 **Feature** 는 최소 1 개 VOS 와 연결 — Feature 는 VOS → UC → Feature 로 도출된 것이므로 연결할 VOS 가 없다는 건 Feature 자체의 도출 근거가 없다는 신호
+- `relatedVOS` 는 최소 1 개 VOS 키 필수. 빈 배열 금지
 
 ### NFR 성격 VOS 도 Feature 확보 (면제 없음)
 품질속성/정책/제약 성격이 강한 VOS 라도 **반드시 그 요구를 "구현하는" 기능 Feature 를 도출**한다. 면제(NFR 표기만) 금지.
@@ -59,24 +75,38 @@ DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${U
 echo "=== project-description.md ==="
 echo "$DESC"
 
-# VOS 목록
+# VOS 목록 (issueLinks 포함 — relink 차집합 계산 / Feature 미연결 VOS 검출용)
 echo
 echo "=== VOS 목록 ==="
 curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client}]'
+  | jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client,issueLinks}]'
 
-# 기존 Feature
+# 기존 Feature (issueLinks + 전체 본문 — relink 에서 원문 그대로 보존)
 echo
 echo "=== 기존 Feature ==="
 curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,actor}]'
+  | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]'
 ```
 
-VOS 가 0건이면 **중단** 하고 "vos-collect2 를 먼저 실행하세요" 보고.
+- VOS 가 0건 → **중단** 하고 "vos-collect2 를 먼저 실행하세요" 보고
+- `MODE=relink` 인데 기존 Feature 0 건 → **중단** 하고 `MODE=full` 로 전환 권고 (재링크 대상 없음)
 
 ---
 
 ## Step 1 — 초안 생성 (iter 1)
+
+### MODE=relink 축약 규칙
+
+이슈 생성/수정/삭제 금지. 기존 Feature 원문(summary/actor/flows) 보존. 다음만 수행:
+
+- 모든 항목 `mode=reuse` 고정, `existingKey` = Step 0 의 기존 Feature key, `docId` = 기존 subkey (예: UC_001) 그대로
+- 신규 Feature/UC 추가 금지 (커버리지 부족은 critical 보고만, 신규 create 는 MODE=full 로 재호출 권고)
+- `relatedVOS` 만 각 Feature 원문과 VOS 목록을 대조해 재산정 — **빈 배열 금지, 최소 1개 VOS 필수**
+- 모든 Step 1.1~1.9 (도메인 분석, User Story 파생, Use Case 도출, Diagram 작성, 시나리오 정의) 는 기존 문서에서 원문 그대로 취해 재작성 — 추가 도출 금지
+
+그 외는 MODE=full 과 동일하게 Step 2 self-loop 수행.
+
+### MODE=full (기본)
 
 ### 1.1 Business Domain 분석
 - 도메인 경계와 범위 (시스템 책임 영역)
@@ -162,6 +192,7 @@ cat "${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
 
 ### 1.10 relatedVOS + mode
 각 Feature 에 `relatedVOS: ["GOJIRA3-N", ...]` (VOS 목록 실존 키만).
+**최소 1개 VOS 키 필수 — 빈 배열 금지**. Feature 는 VOS → UC → Feature 로 도출된 것이므로 연결할 VOS 가 없는 Feature 는 정의상 부적절 (critical).
 mode: `create` / `reuse` / `modify` / `delete_mark` (existingKey 필요).
 
 ---
@@ -175,10 +206,11 @@ VOS 목록의 **모든 키**가 최소 1 Feature 의 `relatedVOS` 에 포함되�
 - 억지 매핑 금지 — 의미 연관 불충분하면 새 Feature 추가
 
 ### critical 기준
-- 필수 필드(summary, actor, basicflow, docId, relatedVOS) 누락
+- 필수 필드(summary, actor, basicflow, docId, relatedVOS) 누락. **`relatedVOS` 는 최소 1 개 VOS 키 필수 — 빈 배열 critical**
 - `relatedVOS` 가 VOS 목록에 없는 키 참조 (hallucination)
 - **VOS 1건이라도** User Story 에서 파생되지 않음 (파생 경로 단절)
 - **VOS 1건이라도** Feature 매핑 안 됨 — **NFR 면제 없음**. 품질속성/정책/제약 VOS 라도 구현 기능 Feature 를 반드시 도출해 매핑
+- **Feature 1건이라도 VOS 미매핑** — Feature 는 VOS 에서 도출된 것이므로 연결할 VOS 가 없는 Feature 는 정의상 부적절
 - `coverageMatrix` 에 `(NFR)` 플레이스홀더 사용 금지
 - Use Case Diagram 을 classDiagram 으로 작성
 - **Use Case Diagram 에 Feature 미선정 UC 가 누락됨** (모든 UC 포함 필수)
@@ -222,6 +254,8 @@ critical + suggestions 항목만 **국소 수정**. 나머지 원문 유지. 수
 
 ### 5.1 Feature 이슈 일괄 생성
 
+**MODE=relink 이면 이 섹션 전체 스킵** — 이슈 생성/수정/삭제 모두 하지 않는다. 바로 5.2 로.
+
 create 모드 항목을 JSON 배열로 모아 batch 스크립트 **1회** 실행.
 `issue-batch-create.sh` 는 순차 POST + PUT(추가 필드) + 재시도를 자동 처리한다.
 
@@ -243,6 +277,15 @@ cat /tmp/uc_result.json
 
 ### 5.2 VOS → Feature Contains 링크 일괄 생성
 
+각 Feature 의 `relatedVOS` 를 순회해 링크 JSON 배열을 구성. 링크 방향: **VOS 가 inward, Feature 가 outward**.
+
+> **중복 제거 필수** — `POST /Issue/link` 은 idempotent 아님 (매 호출마다 새 linkID 로 `$push`). Step 0 에서 수집한 VOS/Feature 의 `issueLinks[].{inwardIssue.key, outwardIssue.key, type.name}` 로 기존 튜플 집합 `EXISTING` 을 만들고, 새로 만들 집합 `DESIRED` 와 차집합을 계산:
+> - `NEW = DESIRED - EXISTING` → `/tmp/uc_links.json` 에 이것만 씀
+> - `KEPT = DESIRED ∩ EXISTING` → 보고에만 노출, POST 안 함
+> - `REMOVAL_CANDIDATES = EXISTING - DESIRED` (VOS↔Feature 범위만) → **자동 삭제 금지**, 최종 보고에 ⚠ 목록으로만 표시
+
+batch 스크립트 **1회** 실행 (NEW 만 POST):
+
 ```bash
 cat > /tmp/uc_links.json <<'JSON'
 [
@@ -256,8 +299,11 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${
 cat /tmp/uc_link_result.json
 ```
 
+링크 실패는 **silent drop 금지** — 최종 보고에 누락 건수 명시.
+
 ### 5.3 docId → subkey 치환
 - 각 생성된 Feature 의 `subkey` (UC_001, UC_002...) 를 document 본문의 docId 와 매핑
+- MODE=relink 는 docId 가 이미 기존 subkey 형식(UC_001) 이라 자연스럽게 no-op
 
 ### 5.4 use-cases.md 저장
 
@@ -270,14 +316,14 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 ## Step 6 — 최종 보고
 
 ```
-## Use Case 분석 완료 (v2 Claude Code)
+## Use Case 분석 완료 (v2 Claude Code) — MODE={full|relink}
 
-- Feature 생성: N건 (키 리스트)
-- VOS-Feature 링크: L건
+- Feature 생성: N건 (키 리스트)   (relink 은 0)
+- VOS-Feature 링크: 신규 NEW / 기존 유지 KEPT / ⚠ 제거 후보 REM (REM>0 이면 key 쌍 나열 + 수동 처리 안내)
 - 문서 저장: business/use-cases.md
 - Mermaid 다이어그램: Context / Use Case / Sequence
 
-### VOS 커버리지 매트릭스 (전 VOS 가 1개 이상 Feature 연결)
+### VOS 커버리지 매트릭스 (전 VOS ≥1 Feature, 전 Feature ≥1 VOS 연결)
 | VOS 키 | 매핑된 Feature | 비고 |
 |---|---|---|
 | GOJIRA3-N | UC-1, UC-3 | |
@@ -297,3 +343,4 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - use-cases.md 본문은 **UTF-8 plain markdown** (Platform-API 가 서버 측에서 base64 인코딩 처리)
 - Mermaid 코드블록은 반드시 ```mermaid ... ``` 로 감싸기
 - Feature 생성 후 subkey 를 응답에서 받아 docId 치환에 사용
+- MODE 요약: `full` — 신규 Feature create + 링크 + 문서 작성 / `relink` — 이슈 생성·수정 없음, 링크 차집합 POST + 문서 재작성. 두 모드 모두 `/Issue/link` 가 idempotent 아니므로 POST 전 기존 `issueLinks` 와 차집합 필수

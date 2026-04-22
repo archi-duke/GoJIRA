@@ -47,6 +47,7 @@ async def translate(
     seen_tool_ids: set[str] = set()
     assistant_msg_id: Optional[str] = initial_assistant_msg_id  # assistant message ID 추적
     finished_msg_ids: set[str] = set()  # 이미 완료된 assistant message ID (재전송 차단)
+    user_msg_ids: set[str] = set()      # role=user 로 생성된 메시지 ID — part/delta 필터용
     part_types: dict[str, str] = dict(initial_part_types or {})  # partID → part.type (reasoning/text 등) — delta 이벤트 분류용
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
@@ -78,6 +79,8 @@ async def translate(
             part_id = props.get("partID")
             delta = props.get("delta", "")
             if msg_id and msg_id in finished_msg_ids:
+                continue
+            if msg_id and msg_id in user_msg_ids:
                 continue
             if msg_id and assistant_msg_id and msg_id != assistant_msg_id:
                 continue
@@ -114,8 +117,11 @@ async def translate(
             elif t == "message.created":
                 info = evt.get("properties", {}).get("info", {})
                 role = info.get("role")
-                if role == "assistant":
-                    assistant_msg_id = info.get("id") or evt.get("properties", {}).get("id")
+                mid = info.get("id") or evt.get("properties", {}).get("id")
+                if role == "user" and mid:
+                    user_msg_ids.add(mid)
+                elif role == "assistant":
+                    assistant_msg_id = mid
                     yield _sse("thinking", {"turn": turn, "message": "응답 생성 중..."})
             # raw 이벤트가 계속 오고 있으면 keepalive 전송 (3초 간격)
             now = time.monotonic()
@@ -131,7 +137,10 @@ async def translate(
         # 과거 완료된 메시지의 part 는 무시 (OpenCode 재전송)
         if msg_id and msg_id in finished_msg_ids:
             continue
-        # user message의 part는 무시 (assistant message만 처리)
+        # user message의 part 는 무시 (role=user 로 알려진 메시지 — assistant_msg_id 가 아직 None 이어도 걸러짐)
+        if msg_id and msg_id in user_msg_ids:
+            continue
+        # 다른 assistant 메시지의 part 는 무시 (assistant_msg_id 가 세팅되어 있을 때만)
         if msg_id and assistant_msg_id and msg_id != assistant_msg_id:
             continue
 

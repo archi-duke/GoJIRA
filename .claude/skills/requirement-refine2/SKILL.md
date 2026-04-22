@@ -1,8 +1,17 @@
 ---
 name: requirement-refine2
-description: Feature 와 use-cases.md 로부터 FR(User Story)/NFR(QAS)/CNST(제약) Requirement 를 도출하여 이슈를 생성하고 Feature contains Requirement 링크를 연결하며 business/requirements.md 를 작성합니다. Self-loop 자가검증(최대 3회) + Feature 커버리지 매트릭스. Claude Code 네이티브(curl/jq).
+description: Requirement(FR/NFR/CNST) 를 도출·정제하고 Feature↔Requirement Contains 링크 + business/requirements.md 를 작성/재정립합니다. 사용자가 "요구사항 도출/생성" 을 요청하면 MODE=full, "연결 정리·재정립·재링크·relink·링크만 다시" 류 요청이면 MODE=relink 로 호출 (기존 이슈 보존, 링크·문서만 재작성, 차집합만 POST). Self-loop 자가검증(최대 3회) + Feature 커버리지 매트릭스. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
+
+## 이 스킬을 언제 호출하나
+
+사용자 요청이 아래 의도에 해당하면 이 스킬을 호출하고 `MODE` 를 확정한다.
+
+- **MODE=relink** — "연결 정리", "링크 재정리", "관계 다시 맞춰", "재링크", "relink", "링크만 다시" 등 **기존 Requirement 를 유지하면서 Feature 와의 연결/문서만 재정립** 하려는 요청
+- **MODE=full** — "Requirement 도출", "요구사항 생성", "FR/NFR/CNST 뽑아" 등 **Feature + use-cases 에서 신규 Requirement 를 만들어** 달라는 요청
+
+단순 현황 조회(링크 몇 개, 고아 이슈 등)만 원하는 거면 먼저 `issue-analyze` 로 분석하고, 구조 변경(이슈·링크 수정) 의도가 확인된 뒤에만 이 스킬을 호출한다. 분석 결과만 요구한 턴에서 이 스킬을 "미리 돌려놓지" 말 것.
 
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
@@ -14,15 +23,17 @@ allowed-tools: Bash, Read
 
 - `CODE` — projectCode (예: GOJIRA3)
 - `USER` — user (예: batman)
+- `MODE` — `full`(기본) | `relink`. `relink` 는 **기존 Requirement 이슈를 보존**하고 Feature ↔ Requirement 링크 / requirements.md 만 재생성. 사용자가 "연결 재정리", "링크만", "재링크" 류의 표현을 쓰면 `relink` 로 해석
 
 예:
 ```bash
 export CODE="GOJIRA3"
 export USER="batman"
+export MODE="full"   # 또는 relink
 ```
 
 ## 역할
-소프트웨어 아키텍트. Feature 와 Use Case 시나리오에서 **User Story(FR) / QAS(NFR) / 제약(CNST)** 을 도출. 모든 Feature 가 최소 1 개 FR 로 커버되도록 책임진다. User Story 형식과 QAS 6 요소 엄수.
+소프트웨어 아키텍트. Feature 와 Use Case 시나리오에서 **User Story(FR) / QAS(NFR) / 제약(CNST)** 을 도출. 모든 Feature 가 최소 1 개 Requirement(FR/NFR/CNST 구분 없이) 로 커버되도록 책임진다. User Story 형식과 QAS 6 요소 엄수.
 
 ---
 
@@ -41,28 +52,37 @@ UC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USE
 echo "=== project-description.md ==="; echo "$DESC"
 echo; echo "=== use-cases.md ==="; echo "$UC"
 
-# Feature
+# Feature (issueLinks 포함 — relink 차집합 계산에 필요)
 echo; echo "=== Feature ==="
 curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition}]'
+  | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]'
 
 # VOS (참조용)
 echo; echo "=== VOS ==="
 curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
   | jq '[.[] | select(.issueType=="VOS") | {key,summary}]'
 
-# 기존 Requirement
+# 기존 Requirement (description/QAS 전체 + issueLinks — relink 모드에서 원문 그대로 보존)
 echo; echo "=== 기존 Requirement ==="
 curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,reqtype,qa,measure}]'
+  | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,description,reqtype,qa,source,stimulus,environment,artifact,response,measure,responseScenario,measureAuto,issueLinks}]'
 ```
 
 - project-description.md 가 템플릿 수준(실질 < 30자) → **중단** 하고 `projdesc_interview` 먼저 권고
 - Feature 0 건 → **중단** 하고 `usecase-analyze2` 먼저 권고
+- `MODE=relink` 인데 기존 Requirement 0 건 → **중단** 하고 `MODE=full` 로 전환 권고 (재링크 대상이 없음)
 
 ---
 
 ## Step 1 — 초안 생성 (iter 1)
+
+### MODE=relink 축약 규칙
+
+- 모든 항목 `mode=reuse` 고정, `existingKey` = Step 0 의 기존 key, `docId` = 기존 subkey 그대로
+- 신규 FR/NFR/CNST 추가 금지 (커버리지 부족은 critical 보고만)
+- `relatedFeatures` 만 Feature 스코프 대조해 재산정
+
+### MODE=full (기본)
 
 각 Feature / Use Case 에서 FR / NFR / CNST 를 **다양한 관점에서 충분히** 도출.
 
@@ -71,6 +91,7 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 - FR 관점: 기본 동작, 입력 검증, 조회/검색, CRUD, 권한/접근제어, 알림/피드백, 오류 처리
 - NFR 은 품질 속성(QA)별로 다양: Performance / Security / Availability / Usability / Maintainability / Scalability
 - CNST 는 과제 설명 / use-case 에서 **명확히 드러난 제약만** (기술 스택, 규정, 플랫폼, 표준). 추측성 금지
+- **Feature 연결 방침 (FR/NFR/CNST 공통)**: 모든 Requirement 는 **최소 1 개 Feature** 와 Contains 링크 필수. Requirement 는 Feature 로부터 도출된 것이므로 `relatedFeatures` 가 빈 배열(`[]`) 이 되는 경우는 없음. 영향 범위가 전체 Feature 라면 6개 중 적용되는 전부를 열거한다 (cross-cutting). 하나도 못 찾으면 Requirement 자체의 도출 근거가 약한 것 — critical
 
 ### FR 규칙
 - User Story 형식 필수: `"{역할}은(는) {목적}을 위해 {기능}을 할 수 있다"`
@@ -82,6 +103,7 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 
 ### CNST 규칙
 - 반드시 지켜야 하는 사양/규제/표준만
+- 특정 Feature 만 구속하는 제약은 해당 키만 지정. cross-cutting 제약(예: "전 시스템 PCI-DSS 준수") 은 적용되는 Feature **전부** 를 열거 (빈 배열 금지)
 
 ### 수량 가이드
 FR 10~30, NFR 3~10, CNST 0~5 수준.
@@ -95,6 +117,10 @@ FR 10~30, NFR 3~10, CNST 0~5 수준.
 - `relatedFeatures` 에는 **실제 Feature 이슈 키**(`{code}-N`) 사용 (docId 아님)
 
 ### 항목 구조
+
+`relatedFeatures` 는 FR / NFR / CNST 모두 **최소 1 개 이상의 Feature 키** 를 담은 배열. **빈 배열 금지** — Requirement 는 Feature 로부터 도출된 것이므로 연결할 Feature 가 없다는 건 Requirement 자체가 부적절하다는 신호.
+
+FR:
 ```
 {
   "docId": "FR-1",
@@ -107,25 +133,56 @@ FR 10~30, NFR 3~10, CNST 0~5 수준.
 }
 ```
 
-NFR 은 위에 + `qa/source/stimulus/environment/artifact/response/measure/responseScenario/measureAuto`.
+NFR (위 필드 + QAS 6 요소):
+```
+{
+  "docId": "NFR-1",
+  "reqType": "NFR",
+  "summary": "로그인 응답 < 500ms",
+  "description": "...",
+  "relatedFeatures": ["GOJIRA3-5"],
+  "mode": "create",
+  "qa": "Performance",
+  "source": "...", "stimulus": "...", "environment": "...",
+  "artifact": "...", "response": "...",
+  "measure": "500ms",
+  "responseScenario": "...",
+  "measureAuto": false
+}
+```
+
+CNST:
+```
+{
+  "docId": "CNST-1",
+  "reqType": "CNST",
+  "summary": "PCI-DSS 준수",
+  "description": "...",
+  "relatedFeatures": ["GOJIRA3-7"],
+  "mode": "create"
+}
+```
+
+cross-cutting NFR/CNST 예 (여러 Feature 열거): `"relatedFeatures": ["GOJIRA3-14","GOJIRA3-15","GOJIRA3-16","GOJIRA3-17","GOJIRA3-18","GOJIRA3-19"]`.
 
 ---
 
 ## Step 2 — 자가검증 (커버리지 + 형식)
 
 ### Feature 커버리지 매트릭스 (필수)
-Feature 목록의 **모든 키**가 최소 1 개 FR 의 `relatedFeatures` 에 포함되는지 점검.
-- 미커버 Feature 가 있으면 **FR 추가** (Step 1 반복) 또는 `coverageMatrix[feat_key] = ["(CNST/NFR 전역)"]` 으로 전역 품질/제약에 의한 간접 커버 표시
-- 억지 매핑 금지
+Feature 목록의 **모든 키**가 최소 1 개 Requirement(FR/NFR/CNST 동일 취급) 의 `relatedFeatures` 에 포함되는지 점검.
+- 미커버 Feature 가 있으면 **Requirement 추가** (Step 1 반복). "전역" 핑계로 비워두지 않는다 — cross-cutting 이면 해당 Feature 에도 Requirement 를 직접 연결
+- 억지 매핑은 금지하지만, Feature 로부터 도출된 Requirement 가 "어느 Feature 와도 관계없다" 는 건 정의상 불가능 — 다시 점검
+- 매트릭스에는 해당 Feature 를 지목한 **모든 Requirement 키**(FR/NFR/CNST) 를 한 칸에 나열. 예: `| GOJIRA3-5 | FR_001, FR_002, QA_001, CNST_001 |`
 
 ### critical 기준
-- 필수 필드 누락: FR(summary, description, docId, relatedFeatures, mode), NFR(+ QAS 6 요소), CNST(summary, description, docId, mode)
+- 필수 필드 누락: FR(summary, description, docId, relatedFeatures, mode), NFR(summary, description, docId, relatedFeatures, mode + QAS 6 요소), CNST(summary, description, docId, relatedFeatures, mode). **`relatedFeatures` 는 최소 1 개 Feature 키 필수 — 빈 배열 critical**
 - FR description 이 User Story 형식 아님
 - NFR 에 QAS 필드 누락
 - `relatedFeatures` 가 Feature 목록에 없는 키 참조 (hallucination)
 - `mode=reuse/modify/delete_mark` 인데 `existingKey` 가 기존 Requirement 에 없음
-- Feature 1 건이라도 FR 미매핑 (전역 표기 시 면제)
-- Feature 당 평균 FR < 1.5 (세분화 부족)
+- Feature 1 건이라도 Requirement(FR/NFR/CNST) 미매핑 — 전역 면제 규칙 없음
+- FR 로 커버된 Feature 당 평균 FR < 1.5 (FR 세분화 부족 — NFR/CNST 만으로 커버된 Feature 는 제외)
 - QA 품질 속성 다양성 부족 (Performance/Security/Availability 중 2 개 이상 누락인데 NFR 은 존재)
 - CNST 에 추측성 제약 (원문 근거 없음)
 - docId 중복/누락 또는 reqType 접두 불일치
@@ -158,15 +215,20 @@ critical + suggestions 만 **국소 수정**. 나머지 원문 유지. 수정 �
 
 ### 5.1 Requirement 이슈 일괄 생성 (create)
 
+**MODE=relink 이면 이 섹션 전체 스킵** — 이슈 생성/수정/삭제 모두 하지 않는다. 바로 5.2 로.
+
 FR / NFR / CNST 모든 create 모드 항목을 JSON 배열로 모아 batch 스크립트 **1회** 실행.
 `issue-batch-create.sh` 가 순차 POST + PUT(추가 필드) + 재시도를 자동 처리한다.
+
+`relatedFeatures` 는 Step 5.2 링크 생성에만 쓰이며 Issue 본문에는 저장되지 않음 — batch JSON 에 포함시켜도 무해하나, 순수 생성용 페이로드만 전달해도 됨.
 
 ```bash
 # reqType / qa / source 등 추가 필드를 포함시키면 PUT 으로 자동 업데이트됨
 cat > /tmp/req_items.json <<'JSON'
 [
   {"issueType":"Requirement","summary":"...","desc":"...","reqType":"FR"},
-  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"NFR","qa":"...","source":"...","stimulus":"...","environment":"...","artifact":"...","response":"...","measure":"...","responseScenario":"...","measureAuto":false}
+  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"NFR","qa":"Performance","source":"...","stimulus":"...","environment":"...","artifact":"...","response":"...","measure":"...","responseScenario":"...","measureAuto":false},
+  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"CNST"}
 ]
 JSON
 
@@ -192,7 +254,14 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 
 ### 5.2 Feature → Requirement Contains 링크 일괄 생성
 
-각 Requirement 의 `relatedFeatures` 에서 링크 JSON 배열을 구성해 batch 스크립트 **1회** 실행:
+FR / NFR / CNST 모든 Requirement 의 `relatedFeatures` 를 순회해 링크 JSON 배열을 구성 (빈 배열은 Step 2 에서 이미 critical 로 걸러짐 — 여기까지 오면 전부 1개 이상).
+
+> **중복 제거 필수** — `POST /Issue/link` 은 idempotent 아님 (매 호출마다 새 linkID 로 `$push`). Step 0 에서 수집한 Feature/Requirement 의 `issueLinks[].{inwardIssue.key, outwardIssue.key, type.name}` 로 기존 튜플 집합 `EXISTING` 을 만들고, 새로 만들 집합 `DESIRED` 와 차집합을 계산:
+> - `NEW = DESIRED - EXISTING` → `/tmp/req_links.json` 에 이것만 씀
+> - `KEPT = DESIRED ∩ EXISTING` → 보고에만 노출, POST 안 함
+> - `REMOVAL_CANDIDATES = EXISTING - DESIRED` (Requirement↔Feature 범위만) → **자동 삭제 금지**, 최종 보고에 ⚠ 목록으로만 표시 (유저가 검토 후 수동 처리)
+
+batch 스크립트 **1회** 실행 (NEW 만 POST):
 ```bash
 cat > /tmp/req_links.json <<'JSON'
 [
@@ -210,7 +279,7 @@ cat /tmp/req_link_result.json
 
 ### 5.3 docId → subkey 치환
 
-생성 응답의 `subkey` 로 document 치환:
+생성 응답의 `subkey` 로 document 치환 (relink 모드는 docId 가 이미 subkey 형식이라 자연스럽게 no-op):
 - FR-N → FR_NNN
 - NFR-N → QA_NNN
 - CNST-N → CNST_NNN
@@ -229,19 +298,21 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 ## Step 6 — 최종 보고
 
 ```
-## Requirement 정제 완료 (v2 Claude Code)
+## Requirement 정제 완료 (v2 Claude Code) — MODE={full|relink}
 
-- FR 생성 N / NFR 생성 M / CNST 생성 K
+- FR 생성 N / NFR 생성 M / CNST 생성 K   (relink 은 모두 0)
 - 수정 X / 재사용 Y / 삭제 마킹 Z (⚠ 검토 필요)
-- Feature-Requirement 링크: L건
+- Feature-Requirement 링크: 신규 NEW / 기존 유지 KEPT / ⚠ 제거 후보 REM (REM>0 이면 key 쌍 나열 + 수동 처리 안내)
+  · FR L1 / NFR L2 / CNST L3 (모든 Requirement 는 ≥1 Feature 연결 보장)
 - 문서 저장: business/requirements.md
 - ⚠ 자동 결정 NFR Measure: W건 (검토/조정 필요)
 
 ### Feature 커버리지 매트릭스
-| Feature 키 | 매핑 Requirement | 비고 |
-|---|---|---|
-| GOJIRA3-5 | FR_001, FR_002 | |
-| GOJIRA3-6 | (CNST 전역) | 전역 제약으로 간접 커버 |
+| Feature 키 | 매핑 Requirement (FR/NFR/CNST) |
+|---|---|
+| GOJIRA3-5 | FR_001, FR_002, QA_001, CNST_001 |
+| GOJIRA3-6 | QA_002, CNST_002 |
+| GOJIRA3-7 | QA_002, CNST_002 |
 
 ### Self-loop
 - iter N회 / selected=iter X (score_eff Y) / stop=pass|max_iter|repeat_critical|regression
@@ -258,3 +329,4 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - docId 규칙 엄수 — "(이슈 키)" 칸 빈칸 금지. docId 그대로 적고 Step 5.3 에서 치환
 - User Story 어투: `~은(는) ~을 위해 ~할 수 있다` 준수
 - Step 0 과 Step 5 만 실제 Bash 호출, Step 1~4 는 에이전트 내부 추론 (단일 Claude Code 세션)
+- MODE 요약: `full` — 이슈 create + 링크 + 문서 재작성 / `relink` — 이슈 생성·수정 없음, 링크 차집합 POST + 문서 재작성. 두 모드 모두 `/Issue/link` 가 idempotent 아니므로 POST 전 기존 `issueLinks` 와 차집합 필수
