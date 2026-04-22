@@ -40,18 +40,38 @@ export USER="batman"
 ## Step 0 — 선행 데이터 수집
 
 ### 0.1 normalizedAttributes 확보
-프로젝트의 `archSettings.normalizedAttributes` 조회. 없으면 **중단** → "driver_select 를 먼저 실행하세요".
+
+우선 프로젝트의 `archSettings.normalizedAttributes` 를 조회하고, 비어있으면 **fallback 경로** 로 진행:
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
-curl -s "${GOJIRA_API}/Project" \
+NORM=$(curl -s "${GOJIRA_API}/Project" \
   -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
-  | jq '.[0].archSettings.normalizedAttributes // {}'
+  | jq '.[0].archSettings.normalizedAttributes // {}')
+
+# 기본 파일 경로에서 먼저 확인 (driver-select2 가 flush 해둔 경우)
+if [[ "$NORM" == "{}" ]] && [[ -f "/tmp/${CODE}-drivers-normalized.json" ]]; then
+  NORM=$(cat "/tmp/${CODE}-drivers-normalized.json")
+fi
+
+echo "$NORM"
 ```
 
-결과가 빈 객체면 중단.
+**`NORM` 이 `{}` 이면 다음 순서로 대응**:
+
+1. **같은 세션 fallback** — 직전 turn 에서 `driver-select2` 를 이 세션에서 실행했으면, 해당 generation 의 assistant text 또는 tool output 에 `normalizedAttributes = {...}` 블록이 있을 것. 거기에서 JSON 을 그대로 추출해 다음 파일에 저장:
+   ```bash
+   cat > /tmp/${CODE}-styledef-norm.json <<'JSON'
+   { ...driver-select2 가 출력한 normalizedAttributes JSON... }
+   JSON
+   NORM=$(cat /tmp/${CODE}-styledef-norm.json)
+   ```
+2. **사용자 메시지 fallback** — 사용자가 호출 프롬프트에 `normalizedAttributes={...}` 형태로 JSON 을 첨부했으면 그걸 사용
+3. 위 둘 다 없으면 **중단** → "먼저 driver-select2 를 실행하거나 normalizedAttributes JSON 을 제공하세요"
+
+이 fallback 은 GoJIRA-API 에 `archSettings` PATCH 엔드포인트가 추가될 때까지의 임시 회피책. 엔드포인트가 들어오면 이 블록은 제거 가능.
 
 ### 0.2 카탈로그 읽기
 카탈로그는 `knowledge/arch-styles/` 하위에 `index.yaml` + `styles/*.yaml` 구조.
@@ -79,9 +99,17 @@ ls "${KN}/styles/"
 `style-score.py` 가 모든 점수/매치/조합/분류를 결정적으로 계산한다. 에이전트는 암산 금지 — 반드시 호출만.
 
 ```bash
+# Step 0.1 에서 확보한 NORM 을 그대로 사용.
+# (archSettings 저장 API 가 생기기 전까지는 아래 fallback 체인 필수)
 REQ_JSON=$(curl -s "${GOJIRA_API}/Project" \
   -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
   | jq '.[0].archSettings.normalizedAttributes // {}')
+if [[ "$REQ_JSON" == "{}" ]] && [[ -f "/tmp/${CODE}-styledef-norm.json" ]]; then
+  REQ_JSON=$(cat "/tmp/${CODE}-styledef-norm.json")
+fi
+if [[ "$REQ_JSON" == "{}" ]] && [[ -f "/tmp/${CODE}-drivers-normalized.json" ]]; then
+  REQ_JSON=$(cat "/tmp/${CODE}-drivers-normalized.json")
+fi
 
 jq -n --argjson r "$REQ_JSON" '{req:$r}' \
   | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-score.py" \

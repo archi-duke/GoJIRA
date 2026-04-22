@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "zai-coding-plan/glm-4.7",
+  "model": "zai-coding-plan/glm-5",
   "small_model": "zai-coding-plan/glm-4.7-flashx",
   "permission": {
     "bash": "allow",
