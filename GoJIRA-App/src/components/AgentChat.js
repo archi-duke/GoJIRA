@@ -469,18 +469,79 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     return new Promise((resolve) => {
       const evtUrl = `${STREAM_API}/Agent/session/${sid}/events`;
       const es = new EventSource(evtUrl);
-      abortRef.current = { abort: () => { es.close(); setLoading(false); resolve(); } };
+
+      // 이벤트-침묵 + 상태 폴링으로 대화 종료 감지 (서버 타임아웃 없음)
+      const SILENCE_MS = 10_000;          // 마지막 이벤트 이후 10s 무음이면 폴링 시작
+      const POLL_INTERVAL_MS = 1_000;     // 1s 간격 폴링
+      const STUCK_THRESHOLD_MS = 30_000;  // 30s 이상 정체 → 수동 완료 안내 (현재는 로그만)
+      let silenceTimer = null;
+      let pollTimer = null;
+      let lastEventAt = Date.now();
+      let finished = false;
+
+      function finish(local) {
+        if (finished) return;
+        finished = true;
+        if (silenceTimer) clearTimeout(silenceTimer);
+        if (pollTimer) clearInterval(pollTimer);
+        es.close();
+        setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+        setLoading(false);
+        resolve();
+      }
+
+      async function pollOnce() {
+        try {
+          const r = await fetch(`${STREAM_API}/Agent/session/${sid}/state`, {
+            headers: { 'X-User-Id': user || '' },
+          });
+          if (!r.ok) return;
+          const s = await r.json();
+          if (!s.active) { finish('inactive'); return; }
+          if (s.finish && ['stop','end_turn','length','content-filter'].includes(s.finish)) {
+            finish('poll-stop'); return;
+          }
+          if (s.hasPermissionPending) {
+            // TODO: 승인 UI (현재는 로그)
+            return;
+          }
+          // in-progress — lastActivityAt 으로 정체 판단
+          const stuckFor = s.lastActivityAt ? (Date.now() - s.lastActivityAt) : 0;
+          if (stuckFor > STUCK_THRESHOLD_MS) {
+            // TODO: "응답 대기중" 힌트 + 수동 완료 버튼
+          }
+        } catch {}
+      }
+
+      function startPolling() {
+        if (pollTimer || finished) return;
+        pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+        pollOnce();  // 즉시 1회
+      }
+
+      function armSilenceTimer() {
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(startPolling, SILENCE_MS);
+      }
+
+      abortRef.current = { abort: () => finish('abort') };
 
       function onEvent(e) {
+        lastEventAt = Date.now();
+        // 이벤트 도착 → 침묵 타이머 재설정, 폴링 중이면 정리
+        armSilenceTimer();
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         try { handleEvt(e.type, JSON.parse(e.data)); } catch {}
-        if (e.type === 'done') { es.close(); setLoading(false); resolve(); }
+        if (e.type === 'done') finish('done-event');
       }
       ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'].forEach(
         t => es.addEventListener(t, onEvent)
       );
       es.onerror = () => {
-        if (es.readyState === EventSource.CLOSED) { setLoading(false); resolve(); }
+        if (es.readyState === EventSource.CLOSED) finish('es-closed');
       };
+
+      armSilenceTimer();  // 첫 이벤트 도착 전에도 카운트다운 시작
     });
   }
 

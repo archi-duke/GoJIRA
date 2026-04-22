@@ -111,17 +111,16 @@ async def session_events(
     await eb.ensure_subscriber(oc_sid, session_id)
 
     async def sse_stream():
+        # 서버 측 IDLE 타임아웃 없음 — 에이전트가 얼마나 오래 걸려도 대기.
+        # 종료 판정은 클라이언트가 /session/{id}/state 폴링으로 수행.
+        # 클라이언트가 브라우저 탭 닫으면 EventSource 가 자연 종료되어 이 루프도 cancel 된다.
         cursor = last_event_id
-        IDLE_TIMEOUT = 180.0
-        idle_start = asyncio.get_event_loop().time()
         last_keepalive = asyncio.get_event_loop().time()
 
         while True:
-            # 버퍼에서 새 이벤트 읽기
             events = eb.read_since(session_id, cursor)
             if events:
-                idle_start = asyncio.get_event_loop().time()
-                last_keepalive = idle_start
+                last_keepalive = asyncio.get_event_loop().time()
                 for evt in events:
                     cursor = evt["id"]
                     yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['data']}\n\n"
@@ -129,18 +128,10 @@ async def session_events(
                         return
             else:
                 now = asyncio.get_event_loop().time()
-                # 타임아웃 체크
-                if now - idle_start > IDLE_TIMEOUT:
-                    log.warning(f"events idle timeout — session {session_id}")
-                    yield _sse("error", {"message": "응답 대기 시간 초과"})
-                    yield _sse("done", {"reply": "", "actions": []})
-                    return
-                # keepalive (3초마다)
                 if now - last_keepalive > 3.0:
                     last_keepalive = now
                     yield ": keepalive\n\n"
 
-            # 짧은 polling (0.1초) — notifier 대신 안정적
             await asyncio.sleep(0.1)
 
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
@@ -171,15 +162,12 @@ async def chat_stream(
 
     async def sse_stream():
         cursor = 0
-        IDLE_TIMEOUT = 180.0
-        idle_start = asyncio.get_event_loop().time()
-        last_keepalive = idle_start
+        last_keepalive = asyncio.get_event_loop().time()
 
         while True:
             events = eb.read_since(gojira_sid, cursor)
             if events:
-                idle_start = asyncio.get_event_loop().time()
-                last_keepalive = idle_start
+                last_keepalive = asyncio.get_event_loop().time()
                 for evt in events:
                     cursor = evt["id"]
                     yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['data']}\n\n"
@@ -187,10 +175,6 @@ async def chat_stream(
                         return
             else:
                 now = asyncio.get_event_loop().time()
-                if now - idle_start > IDLE_TIMEOUT:
-                    yield _sse("error", {"message": f"{IDLE_TIMEOUT}초 동안 응답이 없어 작업을 중단했습니다."})
-                    yield _sse("done", {"reply": "", "actions": []})
-                    return
                 if now - last_keepalive > 3.0:
                     last_keepalive = now
                     yield ": keepalive\n\n"
@@ -288,6 +272,73 @@ async def get_session(session_id: str):
         "sessionId": doc["_id"],
         "messages": doc.get("messages", []),
         "active": active,
+    }
+
+
+@router.get("/session/{session_id}/state")
+async def get_session_state(session_id: str):
+    """경량 상태 조회 — 클라이언트가 이벤트 침묵 후 폴링할 때 사용.
+
+    returns:
+      - finish: 마지막 assistant 메시지의 finish 값 (stop/end_turn/... / None=진행중)
+      - hasPermissionPending: permission.asked 가 아직 resolve 안 된 상태 여부
+      - lastActivityAt: 마지막 assistant part 생성 시간 (unix ms) — 정체 판단용
+      - assistantMsgId: 현재(혹은 마지막) assistant message id
+    """
+    doc = agent_sessions().find_one({"_id": session_id}, {"openCodeSessionId": 1}) or {}
+    oc_sid = doc.get("openCodeSessionId")
+    if not oc_sid:
+        return {"finish": None, "hasPermissionPending": False, "lastActivityAt": None, "assistantMsgId": None, "active": False}
+
+    try:
+        msgs = await oc.get_session_messages(oc_sid)
+    except Exception:
+        return {"finish": None, "hasPermissionPending": False, "lastActivityAt": None, "assistantMsgId": None, "active": False}
+
+    # 마지막 assistant 메시지
+    last_assistant = None
+    for m in reversed(msgs or []):
+        info = m.get("info") if isinstance(m, dict) else None
+        if info and info.get("role") == "assistant":
+            last_assistant = m
+            break
+
+    if not last_assistant:
+        return {"finish": None, "hasPermissionPending": False, "lastActivityAt": None, "assistantMsgId": None, "active": True}
+
+    info = last_assistant.get("info") or {}
+    parts = last_assistant.get("parts") or []
+
+    # 가장 최근 part 의 time.end (또는 start)
+    last_activity = 0
+    for p in parts:
+        t = p.get("time") or {}
+        for k in ("end", "start"):
+            v = t.get(k)
+            if isinstance(v, (int, float)) and v > last_activity:
+                last_activity = v
+        state = p.get("state") or {}
+        st = state.get("time") or {}
+        for k in ("end", "start"):
+            v = st.get(k)
+            if isinstance(v, (int, float)) and v > last_activity:
+                last_activity = v
+
+    # permission 대기: 가장 최근 tool part 중 status=pending/running 이며 permission 을 요구하는 케이스
+    has_permission = False
+    for p in parts:
+        if p.get("type") == "tool":
+            state = p.get("state") or {}
+            if state.get("status") == "pending" or state.get("permission") == "asked":
+                has_permission = True
+                break
+
+    return {
+        "finish": info.get("finish"),
+        "hasPermissionPending": has_permission,
+        "lastActivityAt": last_activity or None,
+        "assistantMsgId": info.get("id"),
+        "active": True,
     }
 
 
