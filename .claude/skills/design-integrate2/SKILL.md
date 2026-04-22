@@ -99,29 +99,15 @@ graph TB
 
 ### 1.6 문서 구조 (architecture-integrated.md)
 
+**반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 1~7 과 Mermaid 블록 위치 준수:
+
+```bash
+cat "${PROJECT_ROOT}/.claude/skills/design-integrate2/templates/architecture-integrated.md"
 ```
-# 통합 설계 뷰 (Integrated Design Views)
 
-## 1. 개요
-- 시스템 스타일 요약
-- 주요 설계 결정 요약 (ADSN_NNN — 한 줄)
-
-## 2. Logical View
-### 2.1 주요 컴포넌트와 책임
-### 2.2 의존 관계 (Mermaid graph TB)
-### 2.3 반영된 ADSN/DDSN
-
-## 3. Process View
-### 3.1 런타임 상호작용 (sequenceDiagram)
-### 3.2 비동기/이벤트 흐름
-### 3.3 반영된 ADSN/DDSN
-
-## 4. (선택) Deployment View / Development View
-
-## 5. 관점 간 일관성 점검
-
-## 6. 후속 단계 포인트 (SATAM 집중 점검 후보)
-```
+- 섹션 1 개요 / 2 Logical View / 3 Process View / 4~5 (선택) Deployment·Development / 6 관점 간 일관성 / 7 SATAM 후속 포인트
+- 모든 ADSN/DDSN 이 최소 1 개 관점에 반영되어야 함 (섹션 6 체크표에서 확인)
+- 각 View 의 Mermaid 블록은 인라인 필수 (외부 이미지 참조 금지)
 
 ---
 

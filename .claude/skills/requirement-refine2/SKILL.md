@@ -175,6 +175,17 @@ CNST:
 
 cross-cutting NFR/CNST 예 (여러 Feature 열거): `"relatedFeatures": ["GOJIRA3-14","GOJIRA3-15","GOJIRA3-16","GOJIRA3-17","GOJIRA3-18","GOJIRA3-19"]`.
 
+### 문서 템플릿 (requirements.md)
+
+**반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 번호/이름을 그대로 유지:
+
+```bash
+cat "${PROJECT_ROOT}/.claude/skills/requirement-refine2/templates/requirements.md"
+```
+
+- 섹션 1 개요 / 2 FR / 3 NFR / 4 CNST / 5 상세 / 6 Feature 커버리지 매트릭스 전부 포함
+- User Story 형식 (`~은(는) ~을 위해 ~할 수 있다`) 엄수 — validator 가 잡음
+
 ### Step 1 종료 — draft flush (필수)
 
 draft 를 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 2 시작.

@@ -114,6 +114,17 @@ cat /tmp/${CODE}-styledef-engine.json | jq '{primary, secondary, supporting, top
 
 ## Step 2 — 초안 문서 작성 (iter 1)
 
+### 문서 템플릿 (architecture-style.md)
+
+**반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 1~5 와 Mermaid 블록 위치를 준수:
+
+```bash
+cat "${PROJECT_ROOT}/.claude/skills/style-define2/templates/architecture-style.md"
+```
+
+- 섹션 1 추천 요약 / 2 정규화된 속성 / 3 스타일별 선정 근거 (Mermaid 포함) / 4 조합 설계 (Mermaid 포함) / 5 설계 결정 영향 전부 필수
+- validator (`validate-style-doc.py`) 가 섹션 누락 / Mermaid 0개 / 선정 스타일 미등장 등을 잡음
+
 `architecture/architecture-style.md` 본문 작성:
 
 ```

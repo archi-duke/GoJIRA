@@ -94,29 +94,14 @@ Driver / 스타일 / 품질속성에서 설계 결정이 필요한 관심사 도
 
 ### 1.8 architecture/design-decisions.md 작성
 
+**반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 1~4 와 ADR 필수 필드를 준수:
+
+```bash
+cat "${PROJECT_ROOT}/.claude/skills/design-decide2/templates/design-decisions.md"
 ```
-# 설계 결정 (Architectural & Detailed Design)
 
-## 1. Design Point 요약
-| Design Point | 결정 | 대안 | 관련 Driver | 이슈 ID |
-|---|---|---|---|---|
-
-## 2. 설계 결정 상세
-### ADSN-1: {Design Point 이름}
-- 관련 Driver / Requirement: {ID 목록}
-- 검토된 대안:
-  - (A) ... — pros / cons
-  - (B) ... — pros / cons
-- 선정: (A)
-- 결정 근거: Driver X(scalability=high) 에 부합 ...
-- 트레이드오프: (B) 는 ... 유리하나 ... 이유로 기각
-- 리스크 / 민감도: ...
-
-## 3. Driver 추적성 매트릭스
-| Driver | 담당 설계 이슈 |
-
-## 4. 설계 결정의 리스크 요약
-```
+- 섹션 1 Design Point 요약 / 2 설계 결정 상세 (ADR 형식) / 3 Driver 추적성 매트릭스 / 4 리스크 요약 전부 필수
+- ADR 필수 필드: 대안 2개 이상, pros/cons, 선정 + 근거, 트레이드오프, 리스크 + 민감도
 
 ---
 
