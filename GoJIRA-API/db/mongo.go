@@ -234,6 +234,16 @@ func UpdateProjectFields(ctx context.Context, jiraCode string, fields bson.M) (b
 	return res.MatchedCount > 0, nil
 }
 
+// UnsetProjectField removes a single top-level field from the project document.
+// Used by reset flows that need a true absence (not a null value).
+func UnsetProjectField(ctx context.Context, jiraCode, field string) error {
+	_, err := Projects().UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+		bson.M{"$unset": bson.M{field: ""}},
+	)
+	return err
+}
+
 // AddIssueToProject adds an issue key to the project's issues array
 func AddIssueToProject(ctx context.Context, jiraCode string, issueKey string) error {
 	_, err := Projects().UpdateOne(ctx,

@@ -189,6 +189,132 @@ func ProjectArchSettingsPatchHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /api/v{version}/Project/{jiraCode}/reset
+//
+// Body: { confirm: bool, resetIssues?: bool, resetArchSettings?: bool }
+//   - confirm=false (기본): dry-run — 영향 범위만 반환
+//   - confirm=true: 실제 실행
+//   - resetIssues 기본 true, resetArchSettings 기본 true
+//
+// 처리:
+//   - resetIssues: projectCode 로 시작하는 모든 이슈를 deleteIssueInternal 로 삭제
+//     (Gitea YAML + Mongo issues 컬렉션 + 모든 프로젝트의 issues 배열에서 제거)
+//     + project.issues 배열 자체를 [] 로 초기화 (안전망)
+//   - resetArchSettings: project.archSettings 필드 $unset
+//
+// 응답: { jiraCode, mode, deleted, failed, archSettingsCleared, issueCount, ... }
+//
+// 문서(business/*, architecture/*) 초기화는 이 엔드포인트가 담당하지 않음 — Platform-API
+// /DocRepo/{code}/file 을 호출자(reset-project 스킬)가 반복 호출.
+func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
+	jiraCode := chi.URLParam(r, "jiraCode")
+	if jiraCode == "" {
+		respondError(w, http.StatusBadRequest, "jiraCode path param required")
+		return
+	}
+
+	var body struct {
+		Confirm           bool  `json:"confirm"`
+		ResetIssues       *bool `json:"resetIssues"`
+		ResetArchSettings *bool `json:"resetArchSettings"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	user, ok := resolveUser(r, "")
+	if !ok {
+		respondError(w, http.StatusForbidden, "user required (X-User-Id)")
+		return
+	}
+
+	resetIssues := true
+	if body.ResetIssues != nil {
+		resetIssues = *body.ResetIssues
+	}
+	resetArch := true
+	if body.ResetArchSettings != nil {
+		resetArch = *body.ResetArchSettings
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	prj := db.FindProjectByCode(ctx, jiraCode)
+	if prj == nil {
+		respondError(w, http.StatusNotFound, fmt.Sprintf("project %q not found", jiraCode))
+		return
+	}
+
+	// 영향 범위 조회: key prefix 로 시작하는 이슈들
+	issueKeys := []string{}
+	if resetIssues {
+		issues, err := db.FindAllIssues(ctx, bson.M{"key": bson.M{"$regex": "^" + jiraCode + "-"}})
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, iss := range issues {
+			if k, _ := iss["key"].(string); k != "" {
+				issueKeys = append(issueKeys, k)
+			}
+		}
+	}
+
+	// dry-run
+	if !body.Confirm {
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"jiraCode": jiraCode,
+			"mode":     "dry-run",
+			"wouldDelete": map[string]interface{}{
+				"issueCount":           len(issueKeys),
+				"issueKeys":            issueKeys,
+				"resetArchSettings":    resetArch,
+				"archSettingsPresent":  bsonGetDoc(prj, "archSettings") != nil,
+			},
+			"message": fmt.Sprintf("DRY-RUN: %d이슈 삭제 예정. 실제 실행은 confirm=true 로 재호출.", len(issueKeys)),
+		})
+		return
+	}
+
+	// 실행
+	deleted := make([]string, 0, len(issueKeys))
+	failed := make([]map[string]interface{}, 0)
+	for _, k := range issueKeys {
+		if err := deleteIssueInternal(ctx, jiraCode, k, user); err != nil {
+			failed = append(failed, map[string]interface{}{"key": k, "error": err.Error()})
+			continue
+		}
+		deleted = append(deleted, k)
+	}
+	// projects.issues 배열 자체도 비움 (안전망 — 개별 $pull 이 누락됐을 가능성)
+	if resetIssues {
+		if err := db.UpdateProjectField(ctx, jiraCode, "issues", []string{}); err != nil {
+			log.Printf("reset issues array warn: %v", err)
+		}
+	}
+
+	archCleared := false
+	if resetArch {
+		if err := db.UnsetProjectField(ctx, jiraCode, "archSettings"); err != nil {
+			log.Printf("archSettings unset failed: %v", err)
+		} else {
+			archCleared = true
+		}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"jiraCode":            jiraCode,
+		"mode":                "executed",
+		"deleted":             deleted,
+		"deletedCount":        len(deleted),
+		"failed":              failed,
+		"failedCount":         len(failed),
+		"archSettingsCleared": archCleared,
+	})
+}
+
 func buildProjectDoc(req models.ProjectRequest) bson.M {
 	code := req.MainJiraCode()
 	doc := bson.M{
