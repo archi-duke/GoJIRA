@@ -217,6 +217,7 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 		Confirm           bool  `json:"confirm"`
 		ResetIssues       *bool `json:"resetIssues"`
 		ResetArchSettings *bool `json:"resetArchSettings"`
+		DeleteProject     bool  `json:"deleteProject"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid json body")
@@ -268,10 +269,11 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 			"jiraCode": jiraCode,
 			"mode":     "dry-run",
 			"wouldDelete": map[string]interface{}{
-				"issueCount":           len(issueKeys),
-				"issueKeys":            issueKeys,
-				"resetArchSettings":    resetArch,
-				"archSettingsPresent":  bsonGetDoc(prj, "archSettings") != nil,
+				"issueCount":          len(issueKeys),
+				"issueKeys":           issueKeys,
+				"resetArchSettings":   resetArch,
+				"archSettingsPresent": bsonGetDoc(prj, "archSettings") != nil,
+				"deleteProject":       body.DeleteProject,
 			},
 			"message": fmt.Sprintf("DRY-RUN: %d이슈 삭제 예정. 실제 실행은 confirm=true 로 재호출.", len(issueKeys)),
 		})
@@ -304,6 +306,15 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	projectDeleted := false
+	if body.DeleteProject {
+		if ok, err := db.DeleteProjectByCode(ctx, jiraCode); err != nil {
+			log.Printf("project delete failed: %v", err)
+		} else {
+			projectDeleted = ok
+		}
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"jiraCode":            jiraCode,
 		"mode":                "executed",
@@ -312,6 +323,46 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 		"failed":              failed,
 		"failedCount":         len(failed),
 		"archSettingsCleared": archCleared,
+		"projectDeleted":      projectDeleted,
+	})
+}
+
+// GET /api/v{version}/Project/{jiraCode}/dump
+//
+// archive-project 스킬의 백업용 read-only 엔드포인트.
+// 응답: { project: {...}, issues: [...] }
+//   - project: projects 컬렉션 해당 문서 전체
+//   - issues: issues 컬렉션에서 key prefix 매칭된 이슈들
+//
+// 프로젝트가 없으면 404.
+func ProjectDumpHandler(w http.ResponseWriter, r *http.Request) {
+	jiraCode := chi.URLParam(r, "jiraCode")
+	if jiraCode == "" {
+		respondError(w, http.StatusBadRequest, "jiraCode path param required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	prj := db.FindProjectByCode(ctx, jiraCode)
+	if prj == nil {
+		respondError(w, http.StatusNotFound, fmt.Sprintf("project %q not found", jiraCode))
+		return
+	}
+
+	issuesArr, err := db.FindAllIssues(ctx, bson.M{"key": bson.M{"$regex": "^" + jiraCode + "-"}})
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if issuesArr == nil {
+		issuesArr = []bson.M{}
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"project": prj,
+		"issues":  issuesArr,
 	})
 }
 

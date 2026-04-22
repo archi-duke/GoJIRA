@@ -244,6 +244,19 @@ func UnsetProjectField(ctx context.Context, jiraCode, field string) error {
 	return err
 }
 
+// DeleteProjectByCode removes the project document entirely from the projects
+// collection. Used by archive flows (deleteProject=true in reset). Returns
+// (matched bool, error). matched=false when no such project exists.
+func DeleteProjectByCode(ctx context.Context, jiraCode string) (bool, error) {
+	res, err := Projects().DeleteOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+	)
+	if err != nil {
+		return false, err
+	}
+	return res.DeletedCount > 0, nil
+}
+
 // AddIssueToProject adds an issue key to the project's issues array
 func AddIssueToProject(ctx context.Context, jiraCode string, issueKey string) error {
 	_, err := Projects().UpdateOne(ctx,
