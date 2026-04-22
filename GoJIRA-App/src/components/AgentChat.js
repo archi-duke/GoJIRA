@@ -472,29 +472,53 @@ export default function AgentChat({ user, authority, context, onClose, standalon
 
     setLoading(true);
     return new Promise((resolve) => {
-      const evtUrl = `${STREAM_API}/Agent/session/${sid}/events`;
-      const es = new EventSource(evtUrl);
-
-      // 이벤트-침묵 + 상태 폴링으로 대화 종료 감지 (서버 타임아웃 없음)
-      const SILENCE_MS = 10_000;          // 마지막 이벤트 이후 10s 무음이면 폴링 시작
-      const POLL_INTERVAL_MS = 1_000;     // 1s 간격 폴링
-      const STUCK_THRESHOLD_MS = 30_000;  // 30s 이상 정체 → 수동 완료 안내 (현재는 로그만)
+      // 이벤트-침묵 + 상태 폴링 (서버 타임아웃 없음) + SSE 끊김 자동 재연결 + done 시 세션 재로드
+      const SILENCE_MS = 10_000;
+      const POLL_INTERVAL_MS = 1_000;
+      const STUCK_THRESHOLD_MS = 30_000;
       let silenceTimer = null;
       let pollTimer = null;
       let lastEventAt = Date.now();
+      let lastEventId = 0;         // id: 헤더로 받은 마지막 이벤트 ID — 재연결용
       let finished = false;
+      let es = null;
 
-      function finish(local) {
+      const evtTypes = ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'];
+
+      function openEventSource() {
+        const evtUrl = `${STREAM_API}/Agent/session/${sid}/events` + (lastEventId ? `?lastEventId=${lastEventId}` : '');
+        const source = new EventSource(evtUrl);
+        evtTypes.forEach(t => source.addEventListener(t, onEvent));
+        source.onerror = () => {
+          // CLOSED 상태는 재연결 실패. 폴링이 in-progress 판정하면 수동 재연결로 이어진다.
+          // 여기서 곧바로 finish 하지 않음 (서버가 아직 진행 중일 수 있음).
+        };
+        return source;
+      }
+
+      async function finish(local) {
         if (finished) return;
         finished = true;
         if (silenceTimer) clearTimeout(silenceTimer);
         if (pollTimer) clearInterval(pollTimer);
-        es.close();
+        if (es) { try { es.close(); } catch(_){} }
         setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
-        setLoading(false);
         setPermissionPending(false);
         setStuckSince(0);
+        // done 확정 시 Mongo 최신 상태로 대화창 재구성 — SSE 누락 이벤트 복구
+        if (local === 'poll-stop' || local === 'done-event' || local === 'es-closed') {
+          try { await loadSession(sid); } catch(_){}
+        }
+        setLoading(false);
         resolve();
+      }
+
+      function maybeReconnect() {
+        if (finished) return;
+        if (!es || es.readyState === 2 /* CLOSED */) {
+          try { if (es) es.close(); } catch(_){}
+          es = openEventSource();
+        }
       }
 
       async function pollOnce() {
@@ -508,14 +532,14 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           if (s.finish && ['stop','end_turn','length','content-filter'].includes(s.finish)) {
             finish('poll-stop'); return;
           }
-          // permission 대기 상태 반영
           setPermissionPending(!!s.hasPermissionPending);
           if (s.hasPermissionPending) {
-            // permission 대기 중이면 정체 판단은 보류
             setStuckSince(0);
+            maybeReconnect();
             return;
           }
-          // in-progress — lastActivityAt 으로 정체 판단
+          // in-progress: SSE 끊겼으면 재연결, 장기 정체면 힌트
+          maybeReconnect();
           const stuckFor = s.lastActivityAt ? (Date.now() - s.lastActivityAt) : 0;
           if (stuckFor > STUCK_THRESHOLD_MS) {
             setStuckSince(prev => prev || Date.now());
@@ -528,7 +552,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       function startPolling() {
         if (pollTimer || finished) return;
         pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
-        pollOnce();  // 즉시 1회
+        pollOnce();
       }
 
       function armSilenceTimer() {
@@ -540,7 +564,10 @@ export default function AgentChat({ user, authority, context, onClose, standalon
 
       function onEvent(e) {
         lastEventAt = Date.now();
-        // 이벤트 도착 → 침묵 타이머 재설정, 폴링 중이면 정리, 대기 힌트 해제
+        if (e.lastEventId) {
+          const n = parseInt(e.lastEventId, 10);
+          if (!isNaN(n)) lastEventId = n;
+        }
         armSilenceTimer();
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         setPermissionPending(false);
@@ -548,14 +575,9 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         try { handleEvt(e.type, JSON.parse(e.data)); } catch {}
         if (e.type === 'done') finish('done-event');
       }
-      ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'].forEach(
-        t => es.addEventListener(t, onEvent)
-      );
-      es.onerror = () => {
-        if (es.readyState === EventSource.CLOSED) finish('es-closed');
-      };
 
-      armSilenceTimer();  // 첫 이벤트 도착 전에도 카운트다운 시작
+      es = openEventSource();
+      armSilenceTimer();
     });
   }
 

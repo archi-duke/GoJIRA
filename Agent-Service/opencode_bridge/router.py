@@ -105,7 +105,13 @@ async def session_events(
             yield _sse("error", {"message": "세션에 연결된 OpenCode 세션이 없습니다."})
         return StreamingResponse(_err(), media_type="text/event-stream")
 
-    last_event_id = int(request.headers.get("Last-Event-ID", "0") or "0")
+    # EventSource API 가 custom header 설정을 지원 안 해서 클라이언트가 수동 재연결할 때
+    # 쿼리 파라미터로도 last-event-id 를 받는다 (header 우선).
+    _hdr = request.headers.get("Last-Event-ID", "") or request.query_params.get("lastEventId", "") or "0"
+    try:
+        last_event_id = int(_hdr)
+    except ValueError:
+        last_event_id = 0
 
     # 재연결 시 백그라운드 구독자가 없으면 시작
     await eb.ensure_subscriber(oc_sid, session_id)
