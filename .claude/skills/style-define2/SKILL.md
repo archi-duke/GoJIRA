@@ -1,12 +1,22 @@
 ---
 name: style-define2
-description: Architecture Driver 로부터 정규화된 시스템 속성을 기반으로 적합한 시스템 스타일(Primary/Secondary/Supporting) 을 추천하고 architecture/architecture-style.md 를 작성합니다. 카탈로그 점수 규칙을 에이전트가 직접 적용 + self-loop 자가검증(최대 3회). Claude Code 네이티브(curl/jq).
+description: Architecture Driver 로부터 정규화된 시스템 속성을 기반으로 적합한 시스템 스타일(Primary/Secondary/Supporting) 을 추천하고 architecture/architecture-style.md 를 작성합니다. 점수 계산은 style-score.py (Agent-Service 엔진 wrapper) + 자가검증은 validate-style-doc.py + self-loop(최대 3회). Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
+
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- **한 번의 LLM generation 에서 Step 두 개 이상 몰아 처리 금지**. 각 Step 종료는 **반드시 tool call (Bash) 로 마무리** 해서 generation 경계를 만든다
+- reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요. 점수 계산/규칙 적용은 **전부 스크립트 담당** (`style-score.py`)
+- Step 1 점수 계산은 **반드시 `style-score.py` 호출**로 수행 — 에이전트가 암산으로 점수 매기지 말 것 (엔진이 결정적)
+- Step 2 문서 초안 작성 후 **반드시 `draft-io.sh save`** 로 flush 후 generation 종료
+- Step 3 자가검증은 **반드시 `validate-style-doc.py` 호출** — 에이전트가 직접 Driver 커버리지 등 계산하지 말 것
+- assistant 출력에는 긴 문서/JSON 그대로 뱉지 말 것. "저장 완료 / 다음 tool 호출" 식 한두 줄만. 전체 draft 는 파일로만 유지
 
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- 임시 파일: `/tmp/${CODE}-styledef-{engine|draft|validation}.json`
 
 ## 인자 추출
 
@@ -64,36 +74,41 @@ ls "${KN}/styles/"
 
 ---
 
-## Step 1 — 점수 계산 (에이전트가 규칙 적용)
+## Step 1 — 점수 계산 (스크립트 엔진 호출, 필수)
 
-`index.yaml` 의 `weights` 값을 그대로 적용해 스타일별 점수를 계산한다.
-(Python 엔진 `engine.py` 와 동일 규칙 — 에이전트가 추론으로 수행.)
+`style-score.py` 가 모든 점수/매치/조합/분류를 결정적으로 계산한다. 에이전트는 암산 금지 — 반드시 호출만.
 
-### 매치 함수 (암산 기준)
-- `actual == expected` → exact
-- `expected == "medium_or_higher"` 이고 actual rank ≥ medium → partial
-- `expected == "medium_or_lower"` 이고 actual rank ≤ medium → partial
-- `expected == "required"` 이고 actual ∈ {high, required} → exact/partial
-- 레벨 서열: `{low:1, medium:2, high:3, required:4}`, `{small:1, medium:2, large:3}`, `{eventual:1, strong:3, required:4}`
+```bash
+REQ_JSON=$(curl -s "${GOJIRA_API}/Project" \
+  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
+  | jq '.[0].archSettings.normalizedAttributes // {}')
 
-### 스타일 1건 점수 계산 절차
-1. `fit_signals` 순회: 각 attr 매치 → exact 이면 `+weights.fit_signal_match` (기본 +10), partial 이면 `+weights.fit_signal_partial` (기본 +5)
-2. `avoid_signals` 매치 시 `+weights.avoid_signal_match` (기본 -20)
-3. `quality_attributes` 각 항목에 대해 요구치 actual ∈ req 일 때:
-   - factor = {low:0.33, medium:0.5, high:1.0, required:1.0}[actual]
-   - positive → `+qa_positive_strength[strength] × factor`, negative → `+qa_negative_strength[strength] × factor`
-4. `decision_rules`: `if` 모든 조건 매치되면 `+then.score` 가산 (reason 기록)
-5. `prerequisites.organizational` 미충족 시 `-15` (기본)
+jq -n --argjson r "$REQ_JSON" '{req:$r}' \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-score.py" \
+  > /tmp/${CODE}-styledef-engine.json
 
-### 조합 가감산 (top_n 이후)
-상위 top_n (index.yaml `engine.top_n`, 기본 5) 후보끼리:
-- 서로 `combines_well_with` 에 있으면 `+weights.combines_bonus` (기본 +5)
-- 서로 `conflicts_with` 에 있으면 `+weights.conflict_penalty` (기본 -25)
+cat /tmp/${CODE}-styledef-engine.json | jq '{primary, secondary, supporting, top5:[.scored[:5][]|{id,score}]}'
+```
 
-### Primary / Secondary / Supporting 분류
-- 최고 점수 기준 tie 범위(`engine.tie_threshold`, 기본 3) 내 후보 중 **scope 당 1개씩** → Primary
-- Primary 외 top_n 에서 양의 점수 → Secondary
-- Primary/Secondary 아닌 top_n 중 scope ∈ {module_boundary, infrastructure} 이고 양수 → Supporting
+출력 (`/tmp/${CODE}-styledef-engine.json`) 스키마:
+```json
+{
+  "scored": [{"id","score","breakdown","unmet_prerequisites"}, ...],
+  "primary": ["<id>", ...],
+  "secondary": ["<id>", ...],
+  "supporting": ["<id>", ...],
+  "combinations_applied": [{"from","to","delta","type","reason"}, ...],
+  "catalog_summary": { "styles":[...], "scopes":{...}, "names":{...},
+                       "fit_signals":{...}, "avoid_signals":{...},
+                       "quality_attributes":{...}, "tradeoffs":{...},
+                       "prerequisites":{...}, "combines_well_with":{...},
+                       "conflicts_with":{...} }
+}
+```
+
+- Primary/Secondary/Supporting 은 엔진이 이미 결정적으로 분류함 — 뒤집지 말 것
+- `breakdown` 의 note 가 그대로 문서의 "선정 근거" 소재 — LLM 은 이걸 자연어로 풀어쓰기만 하면 됨
+- tie / scope / top_n / 가중치 는 전부 `index.yaml` 기준으로 엔진이 처리
 
 ---
 
@@ -157,26 +172,79 @@ sequenceDiagram
 
 ---
 
-## Step 3 — 자가검증
+### Step 2 종료 — draft flush (필수)
 
-### critical 기준
-- 선정 스타일이 **카탈로그에 없음** (styles/ 디렉토리 id 외)
-- 각 선정 스타일에 rationale 누락 (fit_signals/품질속성/트레이드오프 중 최소 1개 없음)
-- **Driver coverage gap**: normalizedAttributes 중 어느 하나도 선정 근거에 등장하지 않음
-- 엔진 규칙으로 확연한 Primary 후보를 정당한 사유 없이 무시
-- 필수 섹션 1~5 누락
-- 동일 scope 에 Primary 2개 이상
+문서 초안과 chosen 구조를 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 3 검증.
 
-### 점수
-- `score`: 0.0~1.0
-- `score_effective = score - 0.5 × |critical|`
-- `pass`: `score_effective >= 0.8`
+```bash
+# 엔진 결과에서 chosen 기본값 복사 (수동으로 조정 가능)
+CHOSEN=$(jq '{primary, secondary, supporting}' /tmp/${CODE}-styledef-engine.json)
+
+cat > /tmp/${CODE}-styledef-draft-input.json <<EOF
+{
+  "normalizedAttributes": $(cat /tmp/${CODE}-styledef-engine.json | jq '.scored[0].breakdown[0]' 2>/dev/null && curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" | jq '.[0].archSettings.normalizedAttributes'),
+  "engine_output": $(cat /tmp/${CODE}-styledef-engine.json),
+  "chosen": $CHOSEN,
+  "document": $(jq -Rs . <<< "$DOCUMENT")
+}
+EOF
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "styledef" "draft" \
+  < /tmp/${CODE}-styledef-draft-input.json
+```
 
 ---
 
-## Step 4 — 수정/종료
+## Step 3 — 자가검증 (스크립트 기반)
 
-critical + suggestions 만 **국소 수정**. 점수 계산 결과(순위) 는 변경 금지. 수정 후 Step 3.
+**반드시 `validate-style-doc.py` 호출**. 에이전트가 직접 검증 금지.
+
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "styledef" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-style-doc.py" \
+  > /tmp/${CODE}-styledef-validation.json
+cat /tmp/${CODE}-styledef-validation.json
+```
+
+출력 스키마:
+```json
+{
+  "pass": bool,
+  "score": 0.0~1.0,
+  "score_effective": number,
+  "critical": [{"type":"...","detail":"..."}],
+  "suggestions": [...],
+  "stats": {"attributes","attributesInDoc","chosenStyles","stylesInDoc","mermaidBlocks"}
+}
+```
+
+스크립트가 잡는 critical:
+- 카탈로그에 없는 스타일 선택 (`style_not_in_catalog`)
+- 동일 scope 에 Primary 2개 이상 (`primary_scope_conflict`)
+- 엔진 Primary 를 모두 무시 (`primary_ignores_engine`)
+- Primary 0개 (`no_primary`)
+- Driver 커버리지 갭 — 속성의 1/3 초과가 문서에 미등장 (`driver_coverage_gap`)
+- 선택 스타일이 문서에 미등장 (`chosen_style_not_in_doc`)
+- 필수 섹션 1~5 누락 (`missing_section`)
+- Mermaid 블록 0개 (`no_mermaid`)
+- 점수 1위 스타일이 chosen 어디에도 없음 (`top_score_ignored`)
+
+### 통과 기준
+- `pass == true` → Step 5 진입
+- `pass == false` → Step 4 수정
+
+---
+
+## Step 4 — 수정 (pass=false)
+
+validation output 의 critical 만 **국소 수정**. 점수 계산 결과(엔진 순위) 는 변경 금지. 수정 후 draft 재저장:
+
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "styledef" "draft" \
+  < /tmp/${CODE}-styledef-draft-input.json
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
 
 종료 조건:
 1. pass=true
@@ -184,7 +252,7 @@ critical + suggestions 만 **국소 수정**. 점수 계산 결과(순위) 는 �
 3. 같은 critical 2회 연속 재발
 4. 새 수정이 이전 best 보다 낮은 score_effective → 포기
 
-**best-so-far**: `(chosen, document, score_effective)` 기록 → 종료 시 최댓값 iter 채택.
+**best-so-far**: validation.json 의 `score_effective` 기록 → 종료 시 최댓값 iter 채택.
 
 ---
 
@@ -279,7 +347,7 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 ## 주의
 - 모든 curl 에 `X-User-Id: ${USER}` 헤더 필수
 - Platform-API 응답 content 는 base64 → `base64 -d`
-- 카탈로그 외 id 는 **절대 출력 금지** — styles/ 디렉토리 파일명(.yaml 확장자 제외) 만 valid
-- Primary 는 scope 당 1개 원칙 (동일 scope 중복 금지)
-- 점수 엔진의 순위는 LLM 이 뒤집지 말 것 — 근거 서술과 조합 해석만 조정
-- 엔진 규칙(Step 1) 을 정확히 따를 수 없는 복잡도면 Agent-Service 의 `style_define` 스킬 호출을 권장 (Python 엔진이 결정적 계산 수행)
+- 카탈로그 외 id 는 **절대 출력 금지** — `catalog_summary.styles` 에 있는 id 만 valid
+- Primary 는 scope 당 1개 원칙 (동일 scope 중복 금지 — validate-style-doc.py 가 잡음)
+- 엔진 순위는 LLM 이 뒤집지 말 것 — 근거 서술과 조합 해석만 조정
+- Step 0(데이터/엔진) / 2(draft flush) / 3(검증) / 4(재-flush) / 5(이슈·문서) 모두 **Bash tool call 로 종료**. 한 generation 에 몰아서 처리하지 말 것

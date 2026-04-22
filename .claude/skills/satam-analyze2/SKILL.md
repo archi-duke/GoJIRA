@@ -4,9 +4,19 @@ description: ADSN(Architectural Design) 이슈의 risk/sensitivity/tradeoffs 원
 allowed-tools: Bash, Read
 ---
 
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
+- reasoning 은 각 Step 당 3~5 줄 이내. 원문 해석은 Step 1 1회에만 집중
+- Step 1 매핑 초안 종료는 **반드시 `draft-io.sh save`** — 전체 매핑 JSON 을 파일에 flush 후 그 generation 종료
+- Step 2 자가검증은 **반드시 `validate-satam.py` 호출** — 에이전트가 직접 qa hallucination / id 중복 / counterRisk 형식 계산 금지
+- critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-satam.py` 로 재검증. 한 generation 당 1 iter
+- assistant 출력에는 전체 매핑 JSON 뱉지 말 것. "/tmp/... 저장" / "critical N건" 한두 줄만
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- 임시 파일: `/tmp/${CODE}-satam-{context|draft|validation}.json`
 
 ## 인자 추출
 
@@ -61,6 +71,28 @@ ADSN 이 0건이면 **중단** 하고 "design_decide 를 먼저 실행하세요"
 
 각 ADSN 에 대해 `issueLinks` 중 타입명이 "Contains" 를 포함하는 링크에서 `inwardIssue.key` / `outwardIssue.key` 를 추출 → `linkedQAs` 로 사용.
 
+### Step 0 종료 — 수집 데이터 flush (필수)
+
+수집한 ADSN 목록과 QA 참조 키를 context 파일로 저장. Step 1 이후 모든 generation 이 이 파일을 load 해서 참조.
+
+```bash
+ADSN_JSON=$(curl -s "${GOJIRA_API}/Issue" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | select(.issueType=="Architectural Design")
+         | {key, summary, risk, sensitivity, tradeoffs, mitigation,
+            linkedQAs: [(.issueLinks // [])[]
+                        | select(.type.name | test("Contains"))
+                        | (.inwardIssue.key // .outwardIssue.key)] | unique}]
+        | reduce .[] as $i ({}; . + {($i.key): {risk:$i.risk, sensitivity:$i.sensitivity, tradeoffs:$i.tradeoffs, mitigation:$i.mitigation, linkedQAs:$i.linkedQAs}})')
+
+QA_KEYS=$(curl -s "${GOJIRA_API}/Issue" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | select(.issueType=="Requirement" and .reqtype=="NFR") | .key]')
+
+jq -n --argjson a "$ADSN_JSON" --argjson q "$QA_KEYS" '{adsns:$a, qaKeys:$q}' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "satam" "context"
+```
+
 ---
 
 ## Step 1 — 초안 생성 (iter 1)
@@ -80,29 +112,72 @@ ADSN 이 0건이면 **중단** 하고 "design_decide 를 먼저 실행하세요"
 **키 규칙**: 모든 키(ADSN key, qa[] 원소)는 **이슈 key** (예: `GOJIRA3-23`). subkey 금지.
 **빈 원문**: 해당 리스트는 `[]`.
 
+### Step 1 종료 — draft flush (필수)
+
+context 파일(`/tmp/${CODE}-satam-context.json`) 에 mapping 을 추가해 draft 로 저장:
+
+```bash
+CTX=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "satam" "context")
+
+# MAPPING 은 위에서 생성한 mapping 전체 JSON (에이전트가 이 generation 에서 만든 유일한 산출물)
+echo "$CTX" | jq --argjson m "$MAPPING" '. + {mapping:$m}' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "satam" "draft"
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 validate.
+
 ---
 
-## Step 2 — 자가검증
+## Step 2 — 자가검증 (스크립트 기반)
 
-### critical 기준 (품질 속성 연결이 핵심)
-- ADSN 키 누락 또는 Step 0 목록에 없는 키 생성
-- `qa` 가 `linkedQAs` / QA 참조 목록에 없는 키 참조 (hallucination)
-- **품질 속성 참조 전면 누락** — 모든 항목의 `qa` 가 빈 배열인데 QA 참조가 존재
-- 원문이 있음에도 Risk/Sensitivity/Trade-off 중 한 카테고리가 0 (카테고리 누락)
-- Trade-off 에 `counterRisk` 누락 또는 외부 ADSN 의 Risk ID 참조 (근거 없는 trade-off)
-- subkey 혼용
-- id 중복/누락 / 순번 불연속
+**반드시 `validate-satam.py` 호출**. 에이전트가 직접 검증 금지.
 
-### 점수
-- `score`: 0.0~1.0
-- `score_effective = score - 0.5 × |critical|`
-- `pass = score_effective >= 0.8`
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "satam" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-satam.py" \
+  > /tmp/${CODE}-satam-validation.json
+cat /tmp/${CODE}-satam-validation.json
+```
+
+출력 스키마:
+```json
+{
+  "pass": bool,
+  "score": 0.0~1.0,
+  "score_effective": number,
+  "critical": [{"type":"...","adsn":"...","id":"...","detail":"..."}],
+  "suggestions": [...],
+  "stats": {"adsns":N,"risks":R,"sensitivities":S,"tradeoffs":T,"qaCoveredADSNs":Q}
+}
+```
+
+스크립트가 잡는 critical:
+- `unknown_adsn` — Step 0 목록에 없는 키
+- `category_empty` — 원문 있는데 리스트 비어있음
+- `bad_id_format` — R1/S1/M1 형식 위반
+- `duplicate_id` — ADSN 내부 id 중복
+- `bad_qa_type` / `qa_hallucination` — qa 배열 오류 또는 미존재 키
+- `missing_description` / `missing_counter_risk` / `bad_counter_risk_format`
+- `counter_risk_external_adsn` — 외부 ADSN 의 Risk 참조
+- `no_qa_referenced` — 전 항목 qa=[]
+
+### 통과 기준
+- `pass == true` → Step 5 진입
+- `pass == false` → Step 3 수정
 
 ---
 
 ## Step 3 — 수정 (pass=false)
 
-critical + suggestions 항목만 **국소 수정**. 나머지 원문 유지. 수정 후 Step 2 로.
+critical 항목만 **국소 수정** 후 draft 재저장:
+
+```bash
+CTX=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "satam" "context")
+echo "$CTX" | jq --argjson m "$MAPPING_FIXED" '. + {mapping:$m}' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "satam" "draft"
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
 
 ---
 
@@ -186,4 +261,4 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 - `qa` 배열 및 ADSN 매핑 키는 반드시 **이슈 key** (subkey 금지)
 - Trade-off 의 `counterRisk` 는 **같은 ADSN 내** Risk ID 만 참조 (`R<id>:<QA_KEY>` 형식)
 - 문서 파일 생성 절대 금지 — 이슈 필드 3종 반영만
-- Step 0 / Step 5 만 실제 Bash 호출. Step 1~4 는 에이전트 내부 추론.
+- Step 0 flush / Step 1 draft save / Step 2 validate / Step 3 재-save / Step 5 PUT 루프 **모두 Bash tool call** 로 종료. 한 generation 에 몰아서 처리 금지
