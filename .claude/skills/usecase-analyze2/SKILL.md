@@ -13,9 +13,19 @@ allowed-tools: Bash, Read
 
 단순 현황 조회(고아 Feature, 커버리지 점검 등)만 원하는 거면 먼저 `issue-analyze` 로 분석하고, 구조 변경(이슈·링크 수정) 의도가 확인된 뒤에만 이 스킬을 호출한다. 분석 결과만 요구한 턴에서 이 스킬을 "미리 돌려놓지" 말 것.
 
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
+- reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요
+- Step 1 도출 완료 시 **반드시 `draft-io.sh save`** — User Story / Use Case / Feature / document 전체 JSON 을 파일에 flush 후 generation 종료
+- Step 2 자가검증은 **반드시 `validate-usecases.py` 호출** — 에이전트가 직접 VOS 커버리지 / Mermaid 구문 / Actor 다양성 계산 금지
+- critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-usecases.py` 로 재검증. 한 generation 당 1 iter
+- assistant 출력에는 긴 document JSON 뱉지 말 것. "저장 완료 / critical N건" 한두 줄만
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- 임시 파일: `/tmp/${CODE}-uc-{draft|validation}.json`
 
 ## 인자 추출
 
@@ -195,44 +205,88 @@ cat "${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
 **최소 1개 VOS 키 필수 — 빈 배열 금지**. Feature 는 VOS → UC → Feature 로 도출된 것이므로 연결할 VOS 가 없는 Feature 는 정의상 부적절 (critical).
 mode: `create` / `reuse` / `modify` / `delete_mark` (existingKey 필요).
 
+### Step 1 종료 — draft flush (필수)
+
+User Story / Use Case / Feature / document 전체를 draft 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 2 검증.
+
+```bash
+cat > /tmp/${CODE}-uc-draft-input.json <<'JSON'
+{
+  "vosKeys": [ ...Step 0 VOS 키 목록... ],
+  "existingFeatureKeys": [ ...기존 Feature 키 (MODE=full 이면 빈 배열)... ],
+  "userStories": [ ...Step 1.2 파생 목록... ],
+  "useCases": [ ...Step 1.3 도출 목록... ],
+  "features": [ ...Step 1.5/1.9/1.10 산출 Feature 목록 — docId/relatedVOS/mode 포함... ],
+  "document": "...마크다운 전체 문자열..."
+}
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "draft" \
+  < /tmp/${CODE}-uc-draft-input.json
+```
+
+출력 한 줄만 assistant 메시지에. 전체 JSON 재출력 금지.
+
 ---
 
-## Step 2 — 자가검증 (커버리지가 핵심)
+## Step 2 — 자가검증 (스크립트 기반)
 
-### VOS 커버리지 매트릭스 (필수)
-VOS 목록의 **모든 키**가 최소 1 Feature 의 `relatedVOS` 에 포함되는지 점검.
-- 미커버 VOS 가 있으면 **Feature 추가** (Step 1.4~1.8 반복) — **NFR 면제 금지**
-- NFR 성격 VOS 도 "이 요구를 구현하는 동작" Feature 를 반드시 도출해서 매핑 (역할 섹션 파생 예시 참조)
-- 억지 매핑 금지 — 의미 연관 불충분하면 새 Feature 추가
+**반드시 `validate-usecases.py` 호출**. 에이전트가 직접 커버리지 / Mermaid 구문 / Actor 다양성 계산 금지.
 
-### critical 기준
-- 필수 필드(summary, actor, basicflow, docId, relatedVOS) 누락. **`relatedVOS` 는 최소 1 개 VOS 키 필수 — 빈 배열 critical**
-- `relatedVOS` 가 VOS 목록에 없는 키 참조 (hallucination)
-- **VOS 1건이라도** User Story 에서 파생되지 않음 (파생 경로 단절)
-- **VOS 1건이라도** Feature 매핑 안 됨 — **NFR 면제 없음**. 품질속성/정책/제약 VOS 라도 구현 기능 Feature 를 반드시 도출해 매핑
-- **Feature 1건이라도 VOS 미매핑** — Feature 는 VOS 에서 도출된 것이므로 연결할 VOS 가 없는 Feature 는 정의상 부적절
-- `coverageMatrix` 에 `(NFR)` 플레이스홀더 사용 금지
-- Use Case Diagram 을 classDiagram 으로 작성
-- **Use Case Diagram 에 Feature 미선정 UC 가 누락됨** (모든 UC 포함 필수)
-- Context/Use Case/Sequence 중 2개 이상 누락
-- **Sequence Diagram 이 일부 Feature 에만 있고 나머지 누락** (모든 Feature 필수)
-- Mermaid 구문 오류 (쉼표 다중 수신자, `as` 누락 등)
-- 외부 이미지 참조
-- Feature 1건뿐인데 VOS 3건 이상 (과도 통합)
-- 모든 Feature 의 Actor 동일 (다른 Actor 누락)
-- docId 중복/누락
-- Feature 선정 후 Use Case 목록/다이어그램에서 미선정 UC 를 삭제함
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-usecases.py" \
+  > /tmp/${CODE}-uc-validation.json
+cat /tmp/${CODE}-uc-validation.json
+```
 
-### 점수
-- `score`: 0.0~1.0
-- `score_effective = score - 0.5 × |critical|`
-- `pass`: `score_effective >= 0.8`
+출력 스키마:
+```json
+{
+  "pass": bool,
+  "score": 0.0~1.0,
+  "score_effective": number,
+  "critical": [{"type":"...","docId":"...","detail":"..."}],
+  "suggestions": [...],
+  "stats": {"vosKeys":N,"storyVosCovered":V1,"featureVosCovered":V2,
+            "features":F,"sequenceDiagramCount":SD,
+            "useCaseDiagramFound":bool,"contextDiagramFound":bool,"mermaidBlocks":M}
+}
+```
+
+스크립트가 잡는 critical:
+- `vos_no_story` — VOS 가 User Story 에 미파생
+- `vos_no_feature` — VOS 가 Feature relatedVOS 에 미포함 (NFR 면제 없음)
+- `missing_field` / `empty_field` — Feature 필수 필드 누락 (summary/actor/basicflow/docId/relatedVOS)
+- `relatedVOS_empty` / `relatedVOS_hallucination` / `bad_relatedVOS_type`
+- `duplicate_docId`
+- `over_integration` — Feature 1건에 VOS 3건 이상 묶음
+- `single_actor_all` — Feature ≥3 이 모두 동일 Actor
+- `class_diagram_for_uc` — classDiagram 으로 UC 표현
+- `missing_usecase_diagram` / `missing_sequence_diagram`
+- `mermaid_multi_recipient` — 쉼표로 다중 수신자
+- `external_image` — 외부 이미지 참조
+- `nfr_placeholder` — (NFR) 플레이스홀더
+
+### 통과 기준
+- `pass == true` → Step 5 진입
+- `pass == false` → Step 3 수정
 
 ---
 
 ## Step 3 — 수정 (pass=false)
 
-critical + suggestions 항목만 **국소 수정**. 나머지 원문 유지. 수정 후 Step 2 로.
+validation output 의 critical 만 **국소 수정** 후 draft 재저장:
+
+```bash
+cat > /tmp/${CODE}-uc-draft-input.json <<'JSON'
+{ ...수정된 vosKeys / userStories / useCases / features / document... }
+JSON
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "draft" \
+  < /tmp/${CODE}-uc-draft-input.json
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
 
 ---
 

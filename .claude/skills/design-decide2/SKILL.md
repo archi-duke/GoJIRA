@@ -4,9 +4,19 @@ description: Architecture Driver + 선정 시스템 스타일을 기반으로 De
 allowed-tools: Bash, Read
 ---
 
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
+- reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요. 대안 비교는 표 형식으로 간결하게
+- Step 1 완료 시 **반드시 `draft-io.sh save`** — designs / document 전체 JSON 을 파일에 flush 후 generation 종료
+- Step 2 자가검증은 **반드시 `validate-design-decisions.py` 호출** — 에이전트가 Driver 커버리지 / approach 개수 / hallucination 직접 계산 금지
+- critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-design-decisions.py` 로 재검증. 한 generation 당 1 iter
+- assistant 출력에는 긴 document JSON 뱉지 말 것. "저장 완료 / critical N건" 한두 줄만
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- 임시 파일: `/tmp/${CODE}-dd-{draft|validation}.json`
 
 ## 인자 추출
 
@@ -105,32 +115,61 @@ cat "${PROJECT_ROOT}/.claude/skills/design-decide2/templates/design-decisions.md
 
 ---
 
-## Step 2 — 자가검증 (ADR 품질 + Driver 커버리지)
+### Step 1 종료 — draft flush (필수)
 
-### Driver 커버리지 매트릭스 (필수)
-Driver 목록의 **모든 키**가 최소 1 설계의 `relatedRequirements` 에 포함되는지 점검. 미커버 시 Design Point 추가 (Step 1.1~1.7 반복).
+```bash
+cat > /tmp/${CODE}-dd-draft-input.json <<'JSON'
+{
+  "driverKeys": [ ...Driver 키 (driverSelected=true Requirement)... ],
+  "requirementKeys": [ ...Step 0 Requirement 전체 키 목록... ],
+  "designs": [ ...Step 1.1~1.7 산출 설계 목록 (approaches 배열 + relatedRequirements 등 포함)... ],
+  "document": "...Step 1.8 작성 마크다운 전체..."
+}
+JSON
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "dd" "draft" \
+  < /tmp/${CODE}-dd-draft-input.json
+```
 
-### critical 기준
-- 설계 필수 필드 (summary, designPoint, approaches, decision, decisionRationale, designLevel, docId, relatedRequirements) 누락
-- **approaches 가 2개 미만** (alternatives 미고려 — ADR 아님)
-- **decisionRationale 비어있음** 또는 Driver 추적 불가
-- **어느 Driver 에도 연결되지 않는 설계 결정** (rationale 추적성 결여)
-- **Driver 1건이라도 미커버**
-- `relatedRequirements` 가 Requirement 전체 목록에 없는 키 참조 (hallucination)
-- `designLevel` 이 `Architectural`/`Detailed` 이외 값
-- docId 중복/누락 또는 형식 위반 (`ADSN-N`/`DDSN-N` 아님)
-- 선정 스타일과 근거 없이 모순되는 결정
+---
 
-### 점수
-- `score`: 0.0~1.0
-- `score_effective = score - 0.5 × |critical|`
-- `pass`: `score_effective >= 0.8`
+## Step 2 — 자가검증 (스크립트 기반)
+
+**반드시 `validate-design-decisions.py` 호출**. 에이전트가 직접 검증 금지.
+
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "dd" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-design-decisions.py" \
+  > /tmp/${CODE}-dd-validation.json
+cat /tmp/${CODE}-dd-validation.json
+```
+
+스크립트가 잡는 critical:
+- `missing_field` — 필수 필드 누락 (summary/designPoint/approaches/decision/decisionRationale/designLevel/docId/relatedRequirements)
+- `insufficient_approaches` — approaches < 2 (ADR 아님)
+- `empty_rationale` — decisionRationale 비어있음
+- `no_requirement_link` / `relatedRequirements_hallucination`
+- `driver_uncovered` — Driver 1건이라도 미매핑
+- `bad_designLevel` — Architectural/Detailed 이외
+- `docId_level_mismatch` — ADSN-N 은 Architectural, DDSN-N 은 Detailed
+- `bad_docId_format` / `duplicate_docId`
+- `missing_section` — 섹션 1~4 누락
+
+### 통과 기준
+- `pass == true` → Step 5 진입
+- `pass == false` → Step 3 수정
 
 ---
 
 ## Step 3 — 수정 (pass=false)
 
-critical + suggestions 항목만 **국소 수정**. 나머지 원문 유지. 수정 후 Step 2.
+critical 만 **국소 수정** 후 draft 재저장:
+
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "dd" "draft" \
+  < /tmp/${CODE}-dd-draft-input.json
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
 
 ---
 
