@@ -177,6 +177,9 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const inputRef = useRef(null);
   const abortRef = useRef(null);
   const [showThinking, setShowThinking] = useState(true);
+  // 폴링 기반 대기 상태 (서버 타임아웃 제거 후 UI 가 관리)
+  const [permissionPending, setPermissionPending] = useState(false);
+  const [stuckSince, setStuckSince] = useState(0);  // 정체 시작 시각(ms) — 0 이면 정체 아님
 
   async function handleCancel() {
     if (abortRef.current) {
@@ -184,6 +187,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     }
     // stale _streaming 플래그 클리어 — 다음 턴이 이 메시지에 흘러들지 않게
     setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+    setPermissionPending(false);
+    setStuckSince(0);
     if (sessionId) {
       try {
         await fetch(`${STREAM_API}/Agent/session/${sessionId}/cancel`, {
@@ -487,6 +492,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         es.close();
         setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
         setLoading(false);
+        setPermissionPending(false);
+        setStuckSince(0);
         resolve();
       }
 
@@ -501,14 +508,19 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           if (s.finish && ['stop','end_turn','length','content-filter'].includes(s.finish)) {
             finish('poll-stop'); return;
           }
+          // permission 대기 상태 반영
+          setPermissionPending(!!s.hasPermissionPending);
           if (s.hasPermissionPending) {
-            // TODO: 승인 UI (현재는 로그)
+            // permission 대기 중이면 정체 판단은 보류
+            setStuckSince(0);
             return;
           }
           // in-progress — lastActivityAt 으로 정체 판단
           const stuckFor = s.lastActivityAt ? (Date.now() - s.lastActivityAt) : 0;
           if (stuckFor > STUCK_THRESHOLD_MS) {
-            // TODO: "응답 대기중" 힌트 + 수동 완료 버튼
+            setStuckSince(prev => prev || Date.now());
+          } else {
+            setStuckSince(0);
           }
         } catch {}
       }
@@ -528,9 +540,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
 
       function onEvent(e) {
         lastEventAt = Date.now();
-        // 이벤트 도착 → 침묵 타이머 재설정, 폴링 중이면 정리
+        // 이벤트 도착 → 침묵 타이머 재설정, 폴링 중이면 정리, 대기 힌트 해제
         armSilenceTimer();
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        setPermissionPending(false);
+        setStuckSince(0);
         try { handleEvt(e.type, JSON.parse(e.data)); } catch {}
         if (e.type === 'done') finish('done-event');
       }
@@ -902,6 +916,22 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               )}
               <div ref={messagesEndRef} />
             </div>
+            {(permissionPending || stuckSince > 0) && (
+              <div style={{
+                padding: '8px 12px', fontSize: 13, background: permissionPending ? '#fff7d6' : '#f3f4f6',
+                borderTop: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 12,
+              }}>
+                <span style={{ flex: 1, color: '#374151' }}>
+                  {permissionPending
+                    ? '⏸ OpenCode 가 권한 요청을 대기 중입니다. 터미널에서 `opencode attach` 로 승인하거나 아래 버튼으로 중단하세요.'
+                    : `⏳ ${Math.floor((Date.now() - stuckSince) / 1000)}초째 응답이 없습니다. 계속 기다리거나 완료 처리 가능합니다.`}
+                </span>
+                <button
+                  onClick={handleCancel}
+                  style={{ padding: '4px 10px', border: '1px solid #d1d5db', background: 'lightgray', color: '#000', cursor: 'pointer', fontSize: 12 }}
+                >완료 처리</button>
+              </div>
+            )}
             <div className="ac-input-resize"
               onMouseDown={e => {
                 e.preventDefault();

@@ -18,9 +18,6 @@ def _sse(event: str, data: dict) -> str:
 # SSE keepalive 주석 — UI 에게 무시되지만 watchdog 타이머를 리셋시킨다.
 _KEEPALIVE = ": keepalive\n\n"
 
-# 권한 대기 감지 시 abort 대신 에러 이벤트를 yield 한다.
-_PERMISSION_TIMEOUT = 60.0
-
 
 async def translate(
     opencode_events: AsyncIterator[dict],
@@ -51,25 +48,13 @@ async def translate(
     part_types: dict[str, str] = dict(initial_part_types or {})  # partID → part.type (reasoning/text 등) — delta 이벤트 분류용
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
-    permission_asked_at: float = 0.0  # 권한 요청 시각 (0이면 미발생)
     last_keepalive: float = 0.0
+
+    # 권한 대기 자동 abort 는 제거됨. UI 가 /session/{id}/state 폴링으로 hasPermissionPending 을 확인하고
+    # 사용자에게 표시 + 수동 취소 옵션을 제공한다.
 
     async for evt in opencode_events:
         t = evt.get("type")
-
-        # 권한 대기 감지
-        if t == "permission.asked":
-            if permission_asked_at == 0.0:
-                permission_asked_at = time.monotonic()
-        elif t in ("permission.resolved", "permission.granted"):
-            permission_asked_at = 0.0
-
-        # 권한 대기가 _PERMISSION_TIMEOUT 초과 시 → abort 요청 (router 에서 처리)
-        if permission_asked_at > 0 and (time.monotonic() - permission_asked_at) > _PERMISSION_TIMEOUT:
-            yield _sse("error", {"message": f"OpenCode 권한 요청 대기 {_PERMISSION_TIMEOUT}초 초과 — 작업을 중단합니다."})
-            reply = "".join(final_text_by_part.get(pid, "") for pid in text_part_order).strip()
-            yield _sse("done", {"reply": reply, "actions": actions, "_abort": True})
-            return
 
         if t == "message.part.delta":
             # OpenCode 가 part 내용을 char/토큰 단위로 흘려보내는 이벤트.
