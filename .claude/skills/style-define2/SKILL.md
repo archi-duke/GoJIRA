@@ -36,8 +36,9 @@ export USER="batman"
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
-curl -s "${GOJIRA_API}/Project/${CODE}" -H "X-User-Id: ${USER}" \
-  | jq '.archSettings.normalizedAttributes // {}'
+curl -s "${GOJIRA_API}/Project" \
+  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
+  | jq '.[0].archSettings.normalizedAttributes // {}'
 ```
 
 결과가 빈 객체면 중단.
@@ -46,7 +47,7 @@ curl -s "${GOJIRA_API}/Project/${CODE}" -H "X-User-Id: ${USER}" \
 카탈로그는 `knowledge/arch-styles/` 하위에 `index.yaml` + `styles/*.yaml` 구조.
 
 ```bash
-KN="$(git rev-parse --show-toplevel)/knowledge/arch-styles"
+KN="$(git rev-parse --show-toplevel)/Agent-Service/knowledge/arch-styles"
 # index 파악
 cat "${KN}/index.yaml"
 # 스타일 id 목록
@@ -196,9 +197,10 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 
 ### 5.2 projects.archSettings.chosenStyles 업데이트
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Project/${CODE}" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --argjson ch "$CHOSEN_JSON" '{archSettings:{chosenStyles:$ch}}')"
+# 현재 직접 HTTP 저장 API 없음 — GoJIRA-API 의 PUT /Project 는 archSettings 를 인식 안 하고
+# 다른 필드를 덮어쓸 위험이 있어 호출하지 않는다. 결과는 화면에만 출력.
+# 영속화는 Agent-Service executor 의 MongoDB 직접 업데이트 경로를 통해 수행 (향후 Platform-API 엔드포인트 추가 예정).
+echo "chosenStyles = $(echo $CHOSEN_JSON | jq .)"
 ```
 (`$CHOSEN_JSON` = `{"primary":[...],"secondary":[...],"supporting":[...]}`)
 
