@@ -13,9 +13,19 @@ allowed-tools: Bash, Read
 
 단순 현황 조회(링크 몇 개, 고아 이슈 등)만 원하는 거면 먼저 `issue-analyze` 로 분석하고, 구조 변경(이슈·링크 수정) 의도가 확인된 뒤에만 이 스킬을 호출한다. 분석 결과만 요구한 턴에서 이 스킬을 "미리 돌려놓지" 말 것.
 
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- **한 번의 LLM generation 에서 Step 두 개 이상을 몰아 처리 금지**. 각 Step 종료는 **반드시 tool call (Bash) 로 마무리** 해서 generation 경계를 만든다
+- reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요. 상세 분석은 스크립트 output 으로
+- Step 1 종료는 **반드시** `draft-io.sh save` 호출 — draft JSON 을 파일에 flush 후 그 generation 종료. 다음 generation 에서 Step 2 시작
+- Step 2 자가검증은 **반드시** `validate-requirements.py` 호출로 수행 — 에이전트가 직접 필드/형식/커버리지 계산하지 말 것 (결정적 규칙은 전부 스크립트화됨)
+- critical 수정 후에는 다시 `draft-io.sh save` → 이어 `validate-requirements.py` 로 재검증. 한 generation 당 1 iter
+- assistant 출력에는 긴 JSON/문서를 그대로 뱉지 말 것. "/tmp/... 저장 완료" 식의 한두 줄 요약 + 핵심 지표만. 전체 draft 는 파일로만 유지
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- 임시 파일 위치: `/tmp/${CODE}-reqref-{draft|validated}.json`
 
 ## 인자 추출
 
@@ -165,38 +175,88 @@ CNST:
 
 cross-cutting NFR/CNST 예 (여러 Feature 열거): `"relatedFeatures": ["GOJIRA3-14","GOJIRA3-15","GOJIRA3-16","GOJIRA3-17","GOJIRA3-18","GOJIRA3-19"]`.
 
+### Step 1 종료 — draft flush (필수)
+
+draft 를 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 2 시작.
+
+```bash
+cat > /tmp/${CODE}-reqref-draft-input.json <<'JSON'
+{
+  "requirements": [ ...위에서 생성한 FR/NFR/CNST 항목들... ],
+  "featureKeys": [ ...Step 0 Feature 목록의 key 들... ],
+  "existingRequirementKeys": [ ...Step 0 기존 Requirement key 들 (없으면 빈 배열)... ]
+}
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "reqref" "draft" \
+  < /tmp/${CODE}-reqref-draft-input.json
+```
+
+출력 한 줄(`{"path":"...","bytes":N}`)만 assistant 메시지에 포함. 전체 JSON 재출력 금지.
+
 ---
 
-## Step 2 — 자가검증 (커버리지 + 형식)
+## Step 2 — 자가검증 (스크립트 기반)
 
-### Feature 커버리지 매트릭스 (필수)
-Feature 목록의 **모든 키**가 최소 1 개 Requirement(FR/NFR/CNST 동일 취급) 의 `relatedFeatures` 에 포함되는지 점검.
-- 미커버 Feature 가 있으면 **Requirement 추가** (Step 1 반복). "전역" 핑계로 비워두지 않는다 — cross-cutting 이면 해당 Feature 에도 Requirement 를 직접 연결
-- 억지 매핑은 금지하지만, Feature 로부터 도출된 Requirement 가 "어느 Feature 와도 관계없다" 는 건 정의상 불가능 — 다시 점검
-- 매트릭스에는 해당 Feature 를 지목한 **모든 Requirement 키**(FR/NFR/CNST) 를 한 칸에 나열. 예: `| GOJIRA3-5 | FR_001, FR_002, QA_001, CNST_001 |`
+**반드시 `validate-requirements.py` 호출로 수행**. 에이전트가 직접 필드/형식/커버리지 계산하지 말 것.
 
-### critical 기준
-- 필수 필드 누락: FR(summary, description, docId, relatedFeatures, mode), NFR(summary, description, docId, relatedFeatures, mode + QAS 6 요소), CNST(summary, description, docId, relatedFeatures, mode). **`relatedFeatures` 는 최소 1 개 Feature 키 필수 — 빈 배열 critical**
-- FR description 이 User Story 형식 아님
-- NFR 에 QAS 필드 누락
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "reqref" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-requirements.py" \
+  > /tmp/${CODE}-reqref-validation.json
+cat /tmp/${CODE}-reqref-validation.json
+```
+
+출력 스키마:
+```json
+{
+  "pass": bool,
+  "score": 0.0~1.0,
+  "score_effective": number,
+  "critical": [{"type":"...","docId":"...","detail":"..."}],
+  "suggestions": [...],
+  "stats": {"FR":N,"NFR":M,"CNST":K,"features":F,"coveredFeatures":C}
+}
+```
+
+스크립트가 검사하는 critical 항목 (에이전트가 다시 계산할 필요 없음):
+- 필수 필드 누락 (reqType 별 각각)
+- docId 중복 / reqType 접두 불일치
 - `relatedFeatures` 가 Feature 목록에 없는 키 참조 (hallucination)
-- `mode=reuse/modify/delete_mark` 인데 `existingKey` 가 기존 Requirement 에 없음
-- Feature 1 건이라도 Requirement(FR/NFR/CNST) 미매핑 — 전역 면제 규칙 없음
-- FR 로 커버된 Feature 당 평균 FR < 1.5 (FR 세분화 부족 — NFR/CNST 만으로 커버된 Feature 는 제외)
-- QA 품질 속성 다양성 부족 (Performance/Security/Availability 중 2 개 이상 누락인데 NFR 은 존재)
-- CNST 에 추측성 제약 (원문 근거 없음)
-- docId 중복/누락 또는 reqType 접두 불일치
+- FR description User Story 형식 미준수 (정규식 검사)
+- `mode=reuse/modify/delete_mark` 인데 `existingKey` 누락 또는 기존 Requirement 에 없음
+- **Feature 1 건이라도 Requirement 미매핑** (cross-cutting 도 실제 Feature 키 열거 필요)
+- `relatedFeatures` 가 배열 아님 / 빈 배열은 critical 아닌 suggestion (정책상 빈 배열 허용하지 않으면 수작업으로 critical 로 격상)
 
-### 점수
-- `score`: 0.0~1.0
-- `score_effective = score - 0.5 × |critical|`
-- `pass`: `score_effective >= 0.8`
+suggestions (검토 필요, critical 아님):
+- FR-커버된 Feature 당 평균 FR < 1.5 (세분화 부족)
+- QA 다양성 부족 (Performance/Security/Availability 중 2 개 이상 누락)
+- 드문 QA 속성명
+
+### 통과 기준
+- `pass == true` (critical 없음 + score ≥ 0.8) → Step 4/5 진입
+- `pass == false` → Step 3 수정
+
+### 추가 — CNST "추측성" 판단
+이것 하나만 **Type C (LLM 판단)**. critical 리스트에 자동 포함되지 않으므로 에이전트가 validation output 을 본 뒤 별도 검토 (원문 근거 없이 새로 지어낸 CNST 가 있는지 한 줄 확인).
 
 ---
 
 ## Step 3 — 수정 (pass=false)
 
-critical + suggestions 만 **국소 수정**. 나머지 원문 유지. 수정 후 Step 2 재진입.
+validation output 의 critical 항목 **하나씩만** 국소 수정. 나머지 원문 유지.
+
+수정 후 다시 **draft 파일을 갱신**하고 Step 2 재진입:
+
+```bash
+cat > /tmp/${CODE}-reqref-draft-input.json <<'JSON'
+{ ...수정된 requirements / featureKeys / existingRequirementKeys... }
+JSON
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "reqref" "draft" \
+  < /tmp/${CODE}-reqref-draft-input.json
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
 
 ---
 
@@ -328,5 +388,5 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - NFR Measure 가 자동 결정된 항목은 document 본문에 `[자동결정]` 표기 + 최종 보고에 별도 목록
 - docId 규칙 엄수 — "(이슈 키)" 칸 빈칸 금지. docId 그대로 적고 Step 5.3 에서 치환
 - User Story 어투: `~은(는) ~을 위해 ~할 수 있다` 준수
-- Step 0 과 Step 5 만 실제 Bash 호출, Step 1~4 는 에이전트 내부 추론 (단일 Claude Code 세션)
+- Step 0, 1 종료 flush, 2 validate, 3 재-flush, 5 이슈/링크/문서 저장이 **모두 Bash tool call**. 에이전트가 "한 generation 에 몰아서" 처리하지 말 것 — 이게 GLM 스톨 방지의 핵심
 - MODE 요약: `full` — 이슈 create + 링크 + 문서 재작성 / `relink` — 이슈 생성·수정 없음, 링크 차집합 POST + 문서 재작성. 두 모드 모두 `/Issue/link` 가 idempotent 아니므로 POST 전 기존 `issueLinks` 와 차집합 필수

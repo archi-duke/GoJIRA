@@ -14,6 +14,20 @@
 
 ---
 
+## 개념 정리 — turn / generation / reasoning
+
+리팩터링 전략을 이해하려면 세 단위를 구분해야 함:
+
+- **Turn (대화 턴)**: 사용자 메시지 → 에이전트 응답 → 종료 한 주기. 세션 message history 는 턴을 넘어 누적됨
+- **Generation (LLM 호출)**: 모델이 토큰을 생성하는 한 번의 호출. 한 턴에 tool call 이 끼면 여러 generation 이 발생 (Gen 1 → tool 실행 → Gen 2 → …)
+- **Reasoning (추론 토큰)**: 각 generation 내부에서 모델이 생성하는 사고 토큰. **Generation 경계에서 리셋** 되며 다음 generation 에 전달되지 않음 (최종 출력 text/tool_use 만 전달)
+
+**GLM 스톨의 실제 원인**: 한 generation 안에서 reasoning 이 내부 한계 (~10k+ 자) 를 넘으면 빈 text part 로 종료. 세션이 길어서도, 턴이 많아서도 아님.
+
+따라서 리팩터링의 핵심은 **"한 generation 당 reasoning 분량 축소"**. Turn 을 나눌 필요는 없고 **tool call 로 generation 경계만 만들면** 충분. 사용자는 1 턴 입력 그대로, 내부적으로 여러 generation 이 이어지는 식으로 자동 진입 가능.
+
+---
+
 ## 스킬별 GLM 스톨 위험 프로필
 
 | 스킬 | 줄수 | Step | "에이전트가 직접" 언급 | tool 호출 | self-loop | 리스크 |
@@ -109,23 +123,28 @@ critical 10 개 중 **7~8 개 완전 스크립트**.
   - `coverage-diff.py` — 모든 스킬 공통 set diff 계산
 - SKILL.md 에서 "에이전트가 직접 ~" → "스크립트 실행 → 결과 해석"
 
-### R2. Self-loop 를 한 턴 3회 → 3 턴 1회씩
-- PHASE 모드 도입: `PHASE=draft | validate | save`
-  - `draft`: Step 0~1 만, 결과 JSON flush 후 종료
-  - `validate`: Step 2 자가검증, critical 있으면 재draft 권고
-  - `save`: Step 5 이슈 생성 + 문서 저장
-- 한 턴 reasoning 부담 **1/3 로 감소**
+### R2. Self-loop 를 generation 단위로 분할
+- **핵심 단위는 "턴" 이 아니라 "generation" (LLM 한 번 호출)**. 한 턴에도 tool call 이 끼면 여러 generation 발생. 각 generation 의 reasoning 은 독립, 이전 generation 의 reasoning 은 다음에 안 보임 (출력만 prompt 로 전달)
+- PHASE 모드 도입: `PHASE=draft | validate | save` — 각 PHASE 종료를 **tool call (파일 저장)** 로 끝내면 자동으로 generation 경계 발생
+  - `draft`: Step 0~1 → `write_file` 로 종료 → 다음 generation 은 fresh reasoning
+  - `validate`: `validate-*.py` tool 호출 → 결과 받아 critical 수정 → `write_file`
+  - `save`: 이슈 batch 스크립트 → narrative 작성 → `doc-save.sh`
+- **효과**: 한 generation 당 reasoning 분량이 기존 15k~17k → 2~3k 자. GLM 스톨은 "한 generation 안에서 reasoning 내부 한계 초과" 가 원인이므로 이 분할이 직접 효과적
+- **사용자 turn 분할 불필요** — tool call 체인만으로 자동 진입 달성 가능. 사용자는 "요구사항 정제해" 한 번만 입력, 내부적으로 6~7 generation 이 이어짐
+- **단독 사용 금지** — R4 와 세트 필수. tool call 사이에 긴 assistant text 를 뱉으면 다음 generation 의 prompt 가 불어나 reasoning 한계에 더 빨리 도달
+- 추가 이점: 스톨 시 해당 PHASE 만 재실행, 중간 산출물로 복구 가능
 
 ### R3. Reasoning 예산 명시
 - SKILL.md 상단 한 줄:
   > **GLM 계열 사용 주의**: reasoning 은 각 Step 당 3~5 줄 이내. 상세 분석은 tool output 으로. 장기 추론 불필요.
 - 실측상 이 한 줄만으로도 GLM 의 reasoning 폭주가 감소
 
-### R4. 중간 산출물 즉시 flush
+### R4. 중간 산출물 즉시 flush + assistant 출력 축약
 - reasoning 많은 Step 사이마다 임시 파일:
   ```bash
   echo "$DRAFT_JSON" > /tmp/${CODE}-${SKILL}-draft.json
   ```
+- **R2 와 필수 세트**: 턴 종료 시 assistant 메시지에 긴 JSON 을 출력하지 말고 "저장 경로 + 다음 PHASE 지시" 한두 줄만. 턴 2 는 `cat /tmp/...` 로 tool output 으로 다시 로드 → session history 누적 최소화
 - 스톨 시 재시작 가능. 현재는 스톨 = 처음부터 다시
 
 ---
@@ -133,34 +152,58 @@ critical 10 개 중 **7~8 개 완전 스크립트**.
 ## 재구성된 스킬 흐름 (표준 템플릿)
 
 ```
-Step 1. LLM 초안 생성 (Type C 도출)
-   ↓ JSON 파일 flush
-Step 2. 스크립트 검증 (Type A 계산) — critical 리스트 + score
-   ↓
-Step 3. LLM critical 보고 수정 (재-C)
-   ↓ pass 될 때까지 반복 (단, 한 턴에 1 iter)
-Step 4. 스크립트가 이슈 create/link (Type A)
-Step 5. LLM 이 문서 narrative 작성 (Type C)
-   ↓ 스크립트가 파일 저장 (A)
+[Gen 1] Step 0 데이터 수집 (curl tool)
+   ↓ tool 응답
+[Gen 2] Step 1 초안 생성 (Type C)  → draft-io.sh save 로 종료
+   ↓ generation 경계 — reasoning 리셋
+[Gen 3] validate-*.py 호출 (Type A, tool)
+   ↓ critical 리스트
+[Gen 4] Step 3 critical 수정 (Type C, 국소 수정) → draft-io.sh save
+   ↓ 경계
+[Gen 5] 재검증 (Type A, tool) — pass 될 때까지 Gen 4~5 반복 (한 gen 에 1 iter)
+   ↓ pass
+[Gen 6] Step 5 이슈 batch create/link (Type A, tool)
+[Gen 7] Step 5 narrative 작성 (Type C) → doc-save.sh
 ```
 
+**generation 경계 = tool call 종료**. 에이전트가 tool call 없이 한 generation 에 여러 Step 을 몰아서 수행하지 않도록 SKILL.md 에 명시적 제약 필요.
+
 기대 효과:
-- LLM reasoning 토큰 **~70% 감소**
-- 스톨 지점이 Step 1/3/5 의 C 영역만으로 한정 → 예측/복구 용이
-- 동일 초안이면 항상 같은 critical → 결정적 재현성 ↑
+- Generation 당 reasoning ~15k → 2~3k 자 (기존 대비 ~85% 감소)
+- 스톨 지점이 Gen 2/4/7 의 C 영역만으로 한정 → 예측/복구 용이
+- Gen 3/5/6 의 Type A 스크립트는 항상 같은 입력이면 같은 결과 → 결정적 재현성 ↑
 
 ---
 
 ## 우선순위 로드맵
 
+### Phase 0 (pilot) — `requirement-refine2` 로 R1/R2/R4 통합 실증 (반나절)
+
+가장 리스크 낮은 스킬 하나에 R1+R2+R4 를 함께 적용해 실측 지표 확보. 통과하면 동일 패턴을 Phase 1/2 로 확장.
+
+**Deliverables**:
+1. `.claude/skills/_scripts/draft-io.sh` — stdin JSON → `/tmp/${CODE}-${SKILL}-${PHASE}.json` 저장 / `cat` 중 하나 (R4 helper)
+2. `.claude/skills/_scripts/validate-requirements.py` — FR/NFR/CNST 필수 필드·형식·User Story 정규식·docId 중복·relatedFeatures hallucination·mode/existingKey 일관성 검증. 출력 `{pass, score, score_effective, critical[], suggestions[]}` (R1)
+3. `requirement-refine2/SKILL.md` 개정:
+   - 최상단에 **"한 generation 당 제약"** 블록 추가 — 한 번의 generation 에서 Step 두 개 이상 처리 금지, reasoning 3~5줄 이내, Step 종료는 반드시 tool call 로 마무리
+   - Step 1 종료를 `draft-io.sh save` 호출로 강제
+   - Step 2 시작을 `validate-requirements.py` 호출로 강제 (에이전트가 직접 검증 금지)
+   - critical 수정 루프는 `save → validate → save → validate` 형태로 generation 경계 명시 (최대 3 iter)
+   - MODE=full/relink 기존 분기 유지, PHASE 인자는 미도입 (tool 경계만으로 달성)
+
+**검증 지표**:
+- OpenCode 세션 JSONL 에서 `message.part.updated` 이벤트로 generation 경계 카운트 → **이전 대비 generation 수 증가, 개별 reasoning 길이 감소** 확인
+- GOJIRA3 실제 실행에서 스톨 없이 완주
+- 최종 이슈/링크/requirements.md 품질이 기존과 동등 이상
+
 ### Phase 1 — 가장 위험한 2 스킬 (1~2일)
-- **style-define2**: R1 (engine.py wrapper) + R3
+- **style-define2**: R1 (engine.py wrapper `style-score.sh`) + R3
   - 검증 지표: reasoning 17k → 2~3k 자 감소, GLM-5 완주율 확인
 - **satam-analyze2**: R1 (`validate-qas.py` 신규) + R3
 
 ### Phase 2 — Self-loop 3회 탑재 스킬 (3~5일)
-- R2 (PHASE 분할): `usecase-analyze2`, `requirement-refine2`, `design-decide2`
-- 공통 PHASE 컨벤션 + 임시 파일 위치 표준화
+- R1+R2+R4 통합 패턴 (Phase 0 에서 확정된 템플릿) 을 `usecase-analyze2`, `design-decide2` 에 확장 적용
+- 공통 helper: `draft-io.sh` 재사용, `validate-usecases.py` / `validate-decisions.py` 신규
 
 ### Phase 3 — 나머지 + 공통 인프라 (1~2일)
 - R4 (flush) 전체 적용
@@ -184,11 +227,12 @@ A. 신 버전이 컨텍스트 한계는 완화해도 **구조적 스킬 설계 �
 
 ## 다음 실행 단계
 
-`style-define2` 만 먼저 R1 리팩터링 해보고 전/후 비교:
-1. reasoning 분량 측정 (17k → 2~3k 자 예상)
-2. GLM-5 에서 스톨 없이 완주되는지
-3. 결과 품질 유지 여부
+**Phase 0 pilot 로 `requirement-refine2` 부터 착수** (style-define2 보다 리스크 낮고 tool call 이 이미 많아 템플릿 확정 비용이 낮음):
+1. `_scripts/draft-io.sh` + `_scripts/validate-requirements.py` 작성
+2. `requirement-refine2/SKILL.md` 에 한 generation 당 제약 + tool 경계 명시
+3. GOJIRA3 에서 GLM-5 로 실행 → 세션 JSONL 분석으로 generation 경계/reasoning 길이 측정
+4. 품질 동등 이상 확인되면 동일 템플릿을 `style-define2` (R1 core), `satam-analyze2` (R1 core) 로 확장 — Phase 1 진입
 
-이 결과 보고 Phase 2 이후 전개. 참고 커밋:
+참고 커밋:
 - `2e321d9`: style-define2 API 경로 교정
-- 관련 스킬 (리팩터링 이전 상태 스냅샷): `.claude/skills/style-define2/SKILL.md` 등
+- 관련 스킬 (리팩터링 이전 상태 스냅샷): `.claude/skills/*/SKILL.md`
