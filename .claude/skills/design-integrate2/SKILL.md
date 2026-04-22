@@ -219,6 +219,8 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "integ
 
 ## Step 5 — 문서 저장
 
+### 5.1 architecture-integrated.md 저장
+
 selected iter 의 draft 에서 document 필드를 꺼내 저장:
 
 ```bash
@@ -227,7 +229,19 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "integ
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-integrated.md"
 ```
 
-이슈는 **생성/수정하지 않는다**. `archSettings.designIntegrated=true` 플래그 설정은 서버 측에서 별도 처리 (native 스킬은 문서 저장까지만).
+### 5.2 완료 플래그 영속화 — `archSettings.designIntegrated` + `viewsIncluded`
+
+5.1 저장이 성공하면 프로젝트 플래그를 세움. draft 의 `viewsIncluded` 를 그대로 전달.
+
+```bash
+VIEWS_JSON=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "integrate" "draft" | jq -c '.viewsIncluded')
+curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -d "$(jq -n --argjson v "$VIEWS_JSON" '{designIntegrated:true, viewsIncluded:$v}')" \
+  | jq '{updated, archSettings}'
+```
+
+이슈는 **생성/수정하지 않는다** — 문서 저장 + 프로젝트 플래그 영속화까지가 이 스킬의 전체 스코프.
 
 ---
 

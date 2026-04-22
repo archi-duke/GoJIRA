@@ -103,6 +103,7 @@ func main() {
 		r.Post("/Project", handlers.ProjectCreateHandler)
 		r.Get("/Project", handlers.ProjectGetHandler)
 		r.Put("/Project", handlers.ProjectUpdateHandler)
+		r.Patch("/Project/{jiraCode}/archSettings", handlers.ProjectArchSettingsPatchHandler)
 		r.Get("/Project/alerts", handlers.ProjectAlertsHandler)
 
 		// Agent — 프록시 모드 또는 기존 Go 핸들러

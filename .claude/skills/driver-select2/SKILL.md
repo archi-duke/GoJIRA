@@ -201,13 +201,21 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 
 선정되지 않았더라도 **모든 NFR Requirement** 에 ASR 라벨 부여.
 
-### 5.3 normalizedAttributes 영속화
+### 5.3 archSettings 영속화 (normalizedAttributes + priorityWeight)
+
+`PATCH /Project/{CODE}/archSettings` 한 번 호출로 두 필드 동시 merge. 다른 archSettings 필드(chosenStyles/satamDone 등)는 건드리지 않음.
+
 ```bash
-# projects.archSettings.normalizedAttributes 에 저장 — Platform-API 엔드포인트
-# (현재 직접 HTTP 저장 API 없음 → Agent-Service 경유 또는 수동 확인)
-echo "normalizedAttributes = $(echo $NORM_JSON | jq .)"
+# NORM_JSON: Step 1.7 에서 만든 normalizedAttributes JSON 객체
+# 가중치는 Step 0 에서 결정된 W_QAD / W_QAI 사용
+curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -d "$(jq -n --argjson n "$NORM_JSON" --argjson wq "$W_QAD" --argjson wi "$W_QAI" \
+    '{normalizedAttributes:$n, priorityWeight:{qad:$wq, qai:$wi}}')" \
+  | jq '{updated, archSettings}'
 ```
-(이 Claude Code 네이티브 경로는 참고용 — Agent-Service executor 는 MongoDB 직접 업데이트.)
+
+실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define2) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
 
 ### 5.4 architecture/drivers.md 저장
 ```bash

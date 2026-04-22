@@ -226,9 +226,18 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
     '{prjID:$p, key:$k, user:$u, data:{risk:$r, sensitivity:$s, mitigation:$m}}')"
 ```
 
-### 5.3 완료 플래그
+### 5.3 완료 플래그 영속화 — `archSettings.satamDone=true`
 
-프로젝트 `archSettings.satamDone=true` 는 Platform-API 경로로 업데이트하거나 Agent-Service 와 합의된 경로 사용. (로컬 네이티브 실행 시 생략 가능 — 사용자에게 수동 플래그 필요 보고)
+ADSN 전체 업데이트가 성공하면 (5.2 모든 PUT 이 2xx) 프로젝트 플래그를 세움. 프런트엔드 SATAM 화면이 이 값을 기준으로 완료 여부 렌더.
+
+```bash
+curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -d '{"satamDone": true}' \
+  | jq '{updated, archSettings}'
+```
+
+5.2 에서 한 건이라도 PUT 실패했으면 이 호출은 **스킵** 하고 보고에 ⚠ 로 표시 (부분 성공 상태를 완료로 표기하지 않음).
 
 ### 5.4 문서 생성 금지
 본 스킬은 business/*.md 파일을 **생성하지 않는다**. 프론트엔드 SATAM 컴포넌트가 세 필드를 직접 파싱해 렌더링한다.

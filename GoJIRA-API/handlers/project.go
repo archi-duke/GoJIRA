@@ -7,11 +7,23 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"gojira-api/db"
 	"gojira-api/models"
 )
+
+// archSettingsAllowedKeys — PATCH /Project/{jiraCode}/archSettings 가 허용하는 서브필드.
+// 이 집합에 들어있는 키만 bson 의 `archSettings.<key>` 경로로 $set 된다.
+var archSettingsAllowedKeys = map[string]struct{}{
+	"normalizedAttributes": {},
+	"priorityWeight":       {},
+	"chosenStyles":         {},
+	"satamDone":            {},
+	"designIntegrated":     {},
+	"viewsIncluded":        {},
+}
 
 // POST /api/v{version}/Project
 func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +117,76 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
+}
+
+// PATCH /api/v{version}/Project/{jiraCode}/archSettings
+//
+// Body: { normalizedAttributes?, priorityWeight?, chosenStyles?, satamDone?,
+//         designIntegrated?, viewsIncluded? }   (모두 optional, 포함된 것만 merge)
+//
+// whitelist 밖의 키가 있으면 400. 하나도 없으면 400. 프로젝트가 없으면 404.
+// 성공 시 { jiraCode, archSettings, updated:[keys] } 반환.
+func ProjectArchSettingsPatchHandler(w http.ResponseWriter, r *http.Request) {
+	jiraCode := chi.URLParam(r, "jiraCode")
+	if jiraCode == "" {
+		respondError(w, http.StatusBadRequest, "jiraCode path param required")
+		return
+	}
+
+	var body map[string]interface{}
+	if err := decodeJSON(r, &body); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	fields := bson.M{}
+	updatedKeys := make([]string, 0, len(body))
+	var rejected []string
+	for k, v := range body {
+		if _, ok := archSettingsAllowedKeys[k]; !ok {
+			rejected = append(rejected, k)
+			continue
+		}
+		fields["archSettings."+k] = v
+		updatedKeys = append(updatedKeys, k)
+	}
+	if len(rejected) > 0 {
+		allowed := make([]string, 0, len(archSettingsAllowedKeys))
+		for k := range archSettingsAllowedKeys {
+			allowed = append(allowed, k)
+		}
+		respondError(w, http.StatusBadRequest,
+			fmt.Sprintf("unknown keys: %v (allowed: %v)", rejected, allowed))
+		return
+	}
+	if len(fields) == 0 {
+		respondError(w, http.StatusBadRequest, "empty body — at least one whitelisted key required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	matched, err := db.UpdateProjectFields(ctx, jiraCode, fields)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !matched {
+		respondError(w, http.StatusNotFound, fmt.Sprintf("project %q not found", jiraCode))
+		return
+	}
+
+	prj := db.FindProjectByCode(ctx, jiraCode)
+	var arch interface{}
+	if prj != nil {
+		arch = bsonGetDoc(prj, "archSettings")
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"jiraCode":     jiraCode,
+		"archSettings": arch,
+		"updated":      updatedKeys,
+	})
 }
 
 func buildProjectDoc(req models.ProjectRequest) bson.M {

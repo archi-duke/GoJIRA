@@ -303,13 +303,18 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 ```
 
 ### 5.2 projects.archSettings.chosenStyles 업데이트
+
+`PATCH /Project/{CODE}/archSettings` 로 merge. 다른 archSettings 필드는 건드리지 않음.
+
 ```bash
-# 현재 직접 HTTP 저장 API 없음 — GoJIRA-API 의 PUT /Project 는 archSettings 를 인식 안 하고
-# 다른 필드를 덮어쓸 위험이 있어 호출하지 않는다. 결과는 화면에만 출력.
-# 영속화는 Agent-Service executor 의 MongoDB 직접 업데이트 경로를 통해 수행 (향후 Platform-API 엔드포인트 추가 예정).
-echo "chosenStyles = $(echo $CHOSEN_JSON | jq .)"
+# $CHOSEN_JSON = {"primary":[...],"secondary":[...],"supporting":[...]}
+curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -d "$(jq -n --argjson c "$CHOSEN_JSON" '{chosenStyles:$c}')" \
+  | jq '{updated, archSettings}'
 ```
-(`$CHOSEN_JSON` = `{"primary":[...],"secondary":[...],"supporting":[...]}`)
+
+실패 시 최종 보고에 ⚠. fallback 체인(`/tmp/${CODE}-styledef-norm.json` 등) 은 Step 0/1 입력용으로 유지되며, 여기서 저장 실패해도 다음 스킬은 archSettings API 를 통해 정상 조회 가능.
 
 ### 5.3 검토된 모든 스타일을 ADSN 이슈로 생성
 
