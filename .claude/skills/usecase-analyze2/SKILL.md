@@ -22,6 +22,21 @@ allowed-tools: Bash, Read
 - critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-usecases.py` 로 재검증. 한 generation 당 1 iter
 - assistant 출력에는 긴 document JSON 뱉지 말 것. "저장 완료 / critical N건" 한두 줄만
 
+## 진행 상태 가시화 — `todowrite` (선택, OpenCode)
+
+OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 단계를 알려주면 UX 가 좋다. 강제 아님, Claude Code 에서는 무시. 자세한 규칙은 `.claude/skills/_shared/todowrite-guide.md`.
+
+이 스킬 Step 체크리스트:
+```
+# Todos
+[ ] Step 0 — 데이터 수집 (VOS + 기존 Feature/UC)
+[ ] Step 1 — 초안 생성 (iter 1)
+[ ] Step 2 — 자가검증 (validate-usecases.py)
+[ ] Step 3 — critical 수정 (반복, 최대 iter 3)
+[ ] Step 5 — Feature/UC 이슈 + 링크 + use-cases.md 영속화
+[ ] Step 6 — 최종 보고
+```
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`

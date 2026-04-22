@@ -13,6 +13,21 @@ allowed-tools: Bash, Read
 - critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-satam.py` 로 재검증. 한 generation 당 1 iter
 - assistant 출력에는 전체 매핑 JSON 뱉지 말 것. "/tmp/... 저장" / "critical N건" 한두 줄만
 
+## 진행 상태 가시화 — `todowrite` (선택, OpenCode)
+
+OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 단계를 알려주면 UX 가 좋다. 강제 아님, Claude Code 에서는 무시. 자세한 규칙은 `.claude/skills/_shared/todowrite-guide.md`.
+
+이 스킬 Step 체크리스트:
+```
+# Todos
+[ ] Step 0 — ADSN + NFR(QA) 데이터 수집
+[ ] Step 1 — risk/sensitivity/mitigation 매핑 초안
+[ ] Step 2 — 자가검증 (validate-satam.py)
+[ ] Step 3 — critical 수정 (반복)
+[ ] Step 5 — ADSN PUT + satamDone 플래그 영속화
+[ ] Step 6 — 최종 보고
+```
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`

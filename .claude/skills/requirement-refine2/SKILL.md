@@ -22,6 +22,21 @@ allowed-tools: Bash, Read
 - critical 수정 후에는 다시 `draft-io.sh save` → 이어 `validate-requirements.py` 로 재검증. 한 generation 당 1 iter
 - assistant 출력에는 긴 JSON/문서를 그대로 뱉지 말 것. "/tmp/... 저장 완료" 식의 한두 줄 요약 + 핵심 지표만. 전체 draft 는 파일로만 유지
 
+## 진행 상태 가시화 — `todowrite` (선택, OpenCode)
+
+OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 단계를 알려주면 UX 가 좋다. 강제 아님, Claude Code 에서는 무시. 자세한 규칙은 `.claude/skills/_shared/todowrite-guide.md`.
+
+이 스킬 Step 체크리스트:
+```
+# Todos
+[ ] Step 0 — 데이터 수집
+[ ] Step 1 — 초안 생성 (iter 1)
+[ ] Step 2 — 자가검증 (validate-requirements.py)
+[ ] Step 3 — critical 수정 (반복, 최대 iter 3)
+[ ] Step 5 — 이슈/링크/문서 영속화
+[ ] Step 6 — 최종 보고
+```
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`

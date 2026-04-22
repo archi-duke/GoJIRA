@@ -13,6 +13,21 @@ allowed-tools: Bash, Read
 - Step 3 자가검증은 **반드시 `validate-style-doc.py` 호출** — 에이전트가 직접 Driver 커버리지 등 계산하지 말 것
 - assistant 출력에는 긴 문서/JSON 그대로 뱉지 말 것. "저장 완료 / 다음 tool 호출" 식 한두 줄만. 전체 draft 는 파일로만 유지
 
+## 진행 상태 가시화 — `todowrite` (선택, OpenCode)
+
+OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 단계를 알려주면 UX 가 좋다. 강제 아님, Claude Code 에서는 무시. 자세한 규칙은 `.claude/skills/_shared/todowrite-guide.md`.
+
+이 스킬 Step 체크리스트:
+```
+# Todos
+[ ] Step 0 — 데이터 수집 (normalizedAttributes + 카탈로그)
+[ ] Step 1 — 점수 계산 (style-score.py)
+[ ] Step 2 — 문서 초안 + draft flush
+[ ] Step 3 — 자가검증 (validate-style-doc.py)
+[ ] Step 4 — critical 수정 (반복)
+[ ] Step 5 — 문서 저장 + ADSN 생성
+```
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
@@ -51,15 +66,40 @@ NORM=$(curl -s "${GOJIRA_API}/Project" \
   -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
   | jq '.[0].archSettings.normalizedAttributes // {}')
 
-# 기본 파일 경로에서 먼저 확인 (driver-select2 가 flush 해둔 경우)
+# Fallback 1: driver-select2 가 같은 세션에서 flush 해둔 /tmp 파일
 if [[ "$NORM" == "{}" ]] && [[ -f "/tmp/${CODE}-drivers-normalized.json" ]]; then
   NORM=$(cat "/tmp/${CODE}-drivers-normalized.json")
+fi
+
+# Fallback 2: docs/{user}/architecture/drivers.md 의 "3. 정규화된 시스템 속성" 표에서 파싱
+#   (세션 경계를 넘어도 복구 가능 — archSettings 저장이 실패했을 때 최후 안전망)
+if [[ "$NORM" == "{}" ]]; then
+  DMD=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "architecture/drivers.md" 2>/dev/null || true)
+  if [[ -n "$DMD" ]]; then
+    NORM=$(echo "$DMD" | python3 -c '
+import sys, re, json
+text = sys.stdin.read()
+m = re.search(r"^##?#?\s*3\.[^\n]*\n(.*?)(?=^##? |\Z)", text, re.MULTILINE | re.DOTALL)
+if not m:
+    print("{}"); sys.exit(0)
+attrs = {}
+for line in m.group(1).splitlines():
+    parts = [c.strip() for c in line.split("|")]
+    if len(parts) < 3: continue
+    key = parts[1] if len(parts) > 1 else ""
+    val = parts[2] if len(parts) > 2 else ""
+    if not key or key in ("속성",) or set(key) <= {"-"}: continue
+    if not val or val in ("값",) or set(val) <= {"-"}: continue
+    attrs[key] = val
+print(json.dumps(attrs, ensure_ascii=False))
+')
+  fi
 fi
 
 echo "$NORM"
 ```
 
-**`NORM` 이 `{}` 이면 다음 순서로 대응**:
+**`NORM` 이 여전히 `{}` 이면 다음 순서로 대응**:
 
 1. **같은 세션 fallback** — 직전 turn 에서 `driver-select2` 를 이 세션에서 실행했으면, 해당 generation 의 assistant text 또는 tool output 에 `normalizedAttributes = {...}` 블록이 있을 것. 거기에서 JSON 을 그대로 추출해 다음 파일에 저장:
    ```bash
@@ -71,7 +111,11 @@ echo "$NORM"
 2. **사용자 메시지 fallback** — 사용자가 호출 프롬프트에 `normalizedAttributes={...}` 형태로 JSON 을 첨부했으면 그걸 사용
 3. 위 둘 다 없으면 **중단** → "먼저 driver-select2 를 실행하거나 normalizedAttributes JSON 을 제공하세요"
 
-이 fallback 은 GoJIRA-API 에 `archSettings` PATCH 엔드포인트가 추가될 때까지의 임시 회피책. 엔드포인트가 들어오면 이 블록은 제거 가능.
+**확보된 `NORM` 은 반드시 아래 파일에 기록**해 Step 1 에서 사용한다:
+
+```bash
+echo "$NORM" > /tmp/${CODE}-styledef-norm.json
+```
 
 ### 0.2 카탈로그 읽기
 카탈로그는 `knowledge/arch-styles/` 하위에 `index.yaml` + `styles/*.yaml` 구조.
@@ -99,17 +143,8 @@ ls "${KN}/styles/"
 `style-score.py` 가 모든 점수/매치/조합/분류를 결정적으로 계산한다. 에이전트는 암산 금지 — 반드시 호출만.
 
 ```bash
-# Step 0.1 에서 확보한 NORM 을 그대로 사용.
-# (archSettings 저장 API 가 생기기 전까지는 아래 fallback 체인 필수)
-REQ_JSON=$(curl -s "${GOJIRA_API}/Project" \
-  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
-  | jq '.[0].archSettings.normalizedAttributes // {}')
-if [[ "$REQ_JSON" == "{}" ]] && [[ -f "/tmp/${CODE}-styledef-norm.json" ]]; then
-  REQ_JSON=$(cat "/tmp/${CODE}-styledef-norm.json")
-fi
-if [[ "$REQ_JSON" == "{}" ]] && [[ -f "/tmp/${CODE}-drivers-normalized.json" ]]; then
-  REQ_JSON=$(cat "/tmp/${CODE}-drivers-normalized.json")
-fi
+# Step 0.1 에서 확보해 파일로 기록한 NORM 을 그대로 사용.
+REQ_JSON=$(cat "/tmp/${CODE}-styledef-norm.json")
 
 jq -n --argjson r "$REQ_JSON" '{req:$r}' \
   | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-score.py" \
