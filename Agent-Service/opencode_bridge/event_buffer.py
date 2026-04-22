@@ -224,6 +224,7 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
     except Exception:
         pass
 
+    saved = False
     try:
         events_iter = oc.stream_events(oc_session_id)
         async for sse_str in translate(events_iter, gojira_session_id, initial_msg_id, initial_part_types):
@@ -243,51 +244,80 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
                 log.info(f"백그라운드 구독 완료 (done): {gojira_session_id}")
                 # Mongo에 이번 턴의 process + assistant만 저장
                 await _save_to_mongo(gojira_session_id, evt_data, turn_start_id)
+                saved = True
                 break
     except asyncio.CancelledError:
         log.info(f"백그라운드 구독 취소: {gojira_session_id}")
     except Exception as e:
         log.warning(f"백그라운드 구독 오류: {gojira_session_id} — {e}")
     finally:
+        # done 미수신으로 종료된 경우에도 버퍼에 쌓인 process 이벤트를 Mongo 에 반영.
+        # 그렇지 않으면 세션 이력에 user 질문만 남아 세션 제목이 '질문 내용' 만 표시되는 문제 발생.
+        if not saved:
+            try:
+                await _save_to_mongo(gojira_session_id, "{}", turn_start_id)
+            except Exception as se:
+                log.warning(f"구독 종료 시점 부분 저장 실패: {gojira_session_id} — {se}")
         _subscriber_tasks.pop(gojira_session_id, None)
 
 
-async def _save_to_mongo(gojira_session_id: str, done_data_json: str, after_id: int = 0):
-    """done 시점에 이번 턴의 process steps + assistant reply를 Mongo에 저장."""
+async def _save_to_mongo(gojira_session_id: str, done_data_json: str = "{}", after_id: int = 0):
+    """OpenCode 가 관리하는 메시지(info + parts) 를 그대로 Mongo 에 저장.
+
+    과거 방식(translator 가 조립한 process.steps)은 저장 시점 translator 버그가 영구 동결되는 문제가 있었다.
+    이제 OpenCode 원본 parts 를 저장하고, 렌더/복구는 클라이언트 partsToSegments 에서 수행.
+    이미 저장된 assistant 메시지 (ocMessageId) 는 중복 push 하지 않는다.
+    """
     from core.database import agent_sessions
     from datetime import datetime, timezone
+    from . import client as oc_client
 
-    now = datetime.now(timezone.utc)
+    doc = agent_sessions().find_one({"_id": gojira_session_id}, {"messages": 1, "openCodeSessionId": 1}) or {}
+    oc_sid = doc.get("openCodeSessionId")
+    if not oc_sid:
+        return
 
-    # 버퍼에서 이번 턴의 이벤트만 수집 (연속 content는 병합)
-    events = read_since(gojira_session_id, after_id)
-    process_steps = []
-    for e in events:
-        if e["type"] in ("reasoning", "tool_call", "tool_result", "content"):
+    saved_ids = set()
+    for m in doc.get("messages") or []:
+        mid = m.get("ocMessageId")
+        if mid:
+            saved_ids.add(mid)
+
+    try:
+        oc_messages = await oc_client.get_session_messages(oc_sid)
+    except Exception as e:
+        log.warning(f"save: OC 메시지 조회 실패 {gojira_session_id}: {e}")
+        return
+
+    def _ts(info):
+        t = (info or {}).get("time") or {}
+        created = t.get("created")
+        if created:
             try:
-                step = {"type": e["type"], "data": json.loads(e["data"])}
-                if e["type"] == "content" and process_steps and process_steps[-1]["type"] == "content":
-                    prev_text = process_steps[-1]["data"].get("text", "")
-                    step["data"]["text"] = prev_text + step["data"].get("text", "")
-                    process_steps[-1] = step
-                else:
-                    process_steps.append(step)
+                return datetime.fromtimestamp(created / 1000, tz=timezone.utc)
             except Exception:
                 pass
+        return datetime.now(timezone.utc)
 
-    # done에서 reply 추출
-    reply = ""
-    try:
-        done_payload = json.loads(done_data_json)
-        reply = done_payload.get("reply", "")
-    except Exception:
-        pass
-
+    now = datetime.now(timezone.utc)
     msgs_to_push = []
-    if process_steps:
-        msgs_to_push.append({"role": "process", "steps": process_steps, "timestamp": now})
-    if reply:
-        msgs_to_push.append({"role": "assistant", "content": reply, "timestamp": now})
+    for m in oc_messages:
+        if not isinstance(m, dict):
+            continue
+        info = m.get("info") or {}
+        if info.get("role") != "assistant":
+            continue
+        mid = info.get("id")
+        if not mid or mid in saved_ids:
+            continue
+        msgs_to_push.append({
+            "role": "assistant",
+            "ocMessageId": mid,
+            "info": info,
+            "parts": m.get("parts") or [],
+            "timestamp": _ts(info),
+        })
+
     if msgs_to_push:
         agent_sessions().update_one(
             {"_id": gojira_session_id},

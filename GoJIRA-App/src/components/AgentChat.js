@@ -110,6 +110,57 @@ function contentToSegments(content) {
   return mergeSegments([], segments);
 }
 
+// OpenCode 원본 parts → segments 변환. 저장 포맷이 OpenCode native 로 바뀌면서 추가.
+function partsToSegments(parts) {
+  let segs = [];
+  let inThinking = false;
+  let pendingText = '';
+  for (const p of parts || []) {
+    const t = p.type;
+    if (t === 'reasoning') {
+      // text 구간이 남아있으면 먼저 flush
+      if (pendingText) {
+        const r = splitContent(pendingText, inThinking);
+        pendingText = r.remainder;
+        inThinking = r.inThinking;
+        segs = mergeSegments(segs, r.segments);
+      }
+      const txt = p.text || '';
+      if (txt) segs = mergeSegments(segs, [{ type: 'thinking', text: txt.endsWith('\n') ? txt : txt + '\n' }]);
+    } else if (t === 'text') {
+      pendingText += (p.text || '');
+    } else if (t === 'tool') {
+      if (pendingText) {
+        const r = splitContent(pendingText, inThinking);
+        pendingText = r.remainder;
+        inThinking = r.inThinking;
+        segs = mergeSegments(segs, r.segments);
+      }
+      const state = p.state || {};
+      const status = state.status;
+      const tool = p.tool || '?';
+      const params = state.input || {};
+      if (status === 'completed') {
+        const out = state.output;
+        const outStr = typeof out === 'string' ? out : (out ? JSON.stringify(out) : '');
+        const summary = outStr.length > 200 ? outStr.slice(0, 200) + '...' : outStr;
+        const detail = outStr.length > 500 ? outStr.slice(0, 500) : outStr;
+        segs.push({ type: 'action', tool, params, status: 'ok', summary, detail });
+      } else if (status === 'error') {
+        const err = String(state.error || 'unknown');
+        segs.push({ type: 'action', tool, params, status: 'err', summary: err.slice(0, 200), detail: err });
+      } else {
+        segs.push({ type: 'action', tool, params, status: 'running' });
+      }
+    }
+    // step-start, step-finish 는 무시
+  }
+  if (pendingText) {
+    segs = mergeSegments(segs, [{ type: inThinking ? 'thinking' : 'response', text: pendingText }]);
+  }
+  return segs;
+}
+
 export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession, interviewPrompt, continueTo }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -172,11 +223,14 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         const msgs = [];
         for (let i = 0; i < raw.length; i++) {
           const m = raw[i].role ? raw[i] : Object.fromEntries(Object.entries(raw[i]));
-          if (m.role === 'process') {
+          if (m.role === 'assistant' && Array.isArray(m.parts)) {
+            // 새 포맷: OpenCode 원본 parts 를 직접 렌더
+            const segs = partsToSegments(m.parts);
+            if (segs.length) msgs.push({ role: 'assistant', segments: segs });
+          } else if (m.role === 'process') {
+            // 레거시 포맷 호환
             const segs = stepsToSegments(m.steps || []);
             const next = raw[i + 1];
-            // process 다음의 assistant.content 는 process 의 content 스텝과 중복 — 건너뛰되
-            // actions/suggestions 만 승계
             if (next && next.role === 'assistant') {
               i++;
               if (segs.length) msgs.push({ role: 'assistant', segments: segs, actions: next.actions, suggestions: next.suggestions });
@@ -502,7 +556,10 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         const msgs = [];
         for (let i = 0; i < raw.length; i++) {
           const m = raw[i].role ? raw[i] : Object.fromEntries(Object.entries(raw[i]));
-          if (m.role === 'process') {
+          if (m.role === 'assistant' && Array.isArray(m.parts)) {
+            const segs = partsToSegments(m.parts);
+            if (segs.length) msgs.push({ role: 'assistant', segments: segs });
+          } else if (m.role === 'process') {
             const segs = stepsToSegments(m.steps || []);
             const next = raw[i + 1];
             if (next && next.role === 'assistant') {
@@ -803,11 +860,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 onClick={() => setShowThinking(p => !p)}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
-                  fontSize: '11px', color: showThinking ? '#6d28d9' : '#999',
-                  padding: '2px 6px', marginRight: '4px', flexShrink: 0
+                  padding: '2px 6px', marginRight: '4px', flexShrink: 0,
+                  display: 'inline-flex', alignItems: 'center',
                 }}
                 title={showThinking ? '추론/Action 감추기' : '추론/Action 보기'}
-              >{showThinking ? '◉' : '○'}</button>
+              >
+                <img src="/icons/thinking-toggle.png" alt="toggle"
+                  style={{ width: 18, height: 18, opacity: showThinking ? 1 : 0.35, transition: 'opacity 0.15s' }}
+                />
+              </button>
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => {
                   setInput(e.target.value);

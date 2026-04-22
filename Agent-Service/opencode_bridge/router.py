@@ -250,11 +250,24 @@ async def cancel_session(session_id: str):
 
 @router.get("/sessions")
 async def list_sessions(x_user_id: str = Header(default="batman", alias="X-User-Id")):
-    docs = list(agent_sessions().find({"userId": x_user_id}, {"messages": 0}).sort("updatedAt", -1).limit(50))
+    # 첫 user 메시지 content 만 title 용도로 꺼내온다 (전체 messages 를 로드하면 페이로드 비대).
+    docs = list(agent_sessions().find(
+        {"userId": x_user_id},
+        {"title": 1, "createdAt": 1, "updatedAt": 1, "messages": {"$slice": 5}},
+    ).sort("updatedAt", -1).limit(50))
+
+    def _pick_title(d):
+        if d.get("title"):
+            return d["title"]
+        for m in d.get("messages") or []:
+            if m.get("role") == "user" and m.get("content"):
+                return m["content"][:40]
+        return "New session"
+
     return [
         {
             "sessionId": d["_id"],
-            "title": d.get("title") or (d.get("messages", [{}])[0].get("content", "")[:40] if d.get("messages") else "New session"),
+            "title": _pick_title(d),
             "createdAt": d.get("createdAt"),
             "updatedAt": d.get("updatedAt"),
         }
