@@ -4,6 +4,13 @@ description: Requirement(FR/NFR/CNST) 중 아키텍처 결정에 영향이 큰 �
 allowed-tools: Bash, Read
 ---
 
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- reasoning 은 각 Step 당 **3~5 줄 이내**. 장기 추론 불필요 — QAD/QAI 산정·정규화 속성 선택의 상세 분석은 문서에 짧게 근거만 적고 넘어갈 것
+- **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
+- Step 5 는 Requirement PUT / ASR 라벨 / normalizedAttributes 저장 / drivers.md 저장을 **개별 Bash 호출로 분할** — 한 generation 에 몰지 말 것 (5.4 에서 155s 대기 관찰 이력 있음)
+- assistant 출력에는 document / JSON 전체를 뱉지 말 것. "iter N 완료 / critical K건" 식 한두 줄 요약만
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
@@ -241,4 +248,4 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - document 의 "이슈 키" 칸은 **subkey** (FR_001/QA_001/CNST_001)
 - Platform-API `/file` 응답 content 는 base64 → `base64 -d`, 저장 시 plain UTF-8 전달
 - normalizedAttributes 는 허용 어휘 외 사용 금지
-- 한 세션에서 Steps 1~4 는 추론, Step 0 과 Step 5 는 실제 Bash 호출
+- 한 세션에서 Steps 1~4 는 추론, Step 0 과 Step 5 는 실제 Bash 호출. 단 **Step 5 내부는 5.1~5.4 각각을 별도 Bash tool call 로 분할** — 한 generation 에 몰지 말 것

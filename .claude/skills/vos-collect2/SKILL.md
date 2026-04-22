@@ -13,6 +13,12 @@ allowed-tools: Bash, Read
 5. Step 5 실행 없이 "점수 0.X 성공" 서술만 출력하면 **거짓 응답** — 절대 금지.
 6. 생성 후 GET /Issue 로 실제 count 를 재조회해 보고에 포함하라.
 
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- reasoning 은 각 Step 당 **3~5 줄 이내**. 장기 추론 불필요 — 이해관계자 관점 분해는 표 형식으로 간결하게
+- **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성 (Step 1 완료 → Step 0 에서 수집한 기존 VOS 재조회 같은 가벼운 curl 을 붙여 경계 만들어도 무방)
+- assistant 출력에는 items JSON / document 를 그대로 뱉지 말 것. "초안 N건 / critical K건" 식 한두 줄 요약만. 상세는 Step 5 batch JSON 파일로만 유지
+
 ## 환경
 
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
