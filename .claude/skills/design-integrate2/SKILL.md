@@ -4,9 +4,19 @@ description: ADSN/DDSN 설계 결정과 선정 시스템 스타일을 Logical/Pr
 allowed-tools: Bash, Read
 ---
 
+## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
+
+- **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
+- reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요. 뷰 통합은 템플릿 섹션별로 짧게
+- Step 1 완료 시 **반드시 `draft-io.sh save`** — document + adsnSubkeys + ddsnSubkeys + chosenStyles + viewsIncluded 를 JSON 으로 파일에 flush 후 generation 종료
+- Step 2 자가검증은 **반드시 `validate-integrate-doc.py` 호출** — 에이전트가 subkey 참조/Mermaid/섹션 누락 직접 계산 금지
+- critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-integrate-doc.py` 재검증. 한 generation 당 1 iter
+- assistant 출력에는 document 원문을 그대로 뱉지 말 것. "저장 완료 / critical N건" 한두 줄만. 전체 본문은 파일로만 유지
+
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- 임시 파일: `/tmp/${CODE}-integrate-{draft|validation}.json`
 
 ## 인자 추출
 
@@ -109,32 +119,91 @@ cat "${PROJECT_ROOT}/.claude/skills/design-integrate2/templates/architecture-int
 - 모든 ADSN/DDSN 이 최소 1 개 관점에 반영되어야 함 (섹션 6 체크표에서 확인)
 - 각 View 의 Mermaid 블록은 인라인 필수 (외부 이미지 참조 금지)
 
+### Step 1 종료 — draft flush (필수)
+
+draft 를 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 2 시작.
+
+```bash
+cat > /tmp/${CODE}-integrate-draft-input.json <<'JSON'
+{
+  "adsnSubkeys":  [ ...Step 0 ADSN subkey 전체 (ADSN_NNN)... ],
+  "ddsnSubkeys":  [ ...Step 0 DDSN subkey 전체 (DDSN_NNN)... ],
+  "chosenStyles": {
+    "primary":   [{"id":"...","name":"..."}],
+    "secondary": [{"id":"...","name":"..."}],
+    "supporting":[{"id":"...","name":"..."}]
+  },
+  "viewsIncluded": ["logical","process","deployment"],
+  "document": "...Step 1.6 작성 마크다운 전체..."
+}
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "integrate" "draft" \
+  < /tmp/${CODE}-integrate-draft-input.json
+```
+
+출력 한 줄(`{"path":"...","bytes":N}`)만 assistant 메시지에 포함. document 원문 재출력 금지.
+
 ---
 
-## Step 2 — 자가검증
+## Step 2 — 자가검증 (스크립트 기반)
 
-### critical 기준
-- ADSN/DDSN 중 **단 1건이라도** 본문에서 subkey 로 참조되지 않음 (upstream 미반영)
-- 선정 스타일 중 본문 언급 0 인 항목
-- 정규화 속성과 본문 설계 방향 모순
-- 관점이 1개 이하
-- Mermaid 다이어그램 전 관점 합쳐 1개 이하
-- Mermaid 구문 오류 / 시작 라인 비표준
-- 컴포넌트/배포 뷰에 `classDiagram` 사용
-- 외부 이미지 참조
-- §5 관점 간 일관성 섹션 부재
-- `viewsIncluded` 가 본문 실제 뷰와 불일치
+**반드시 `validate-integrate-doc.py` 호출**. 에이전트가 직접 참조/섹션/Mermaid 계산 금지.
 
-### 점수
-- `score`: 0.0~1.0
-- `score_effective = score - 0.5 × |critical|`
-- `pass = score_effective >= 0.8`
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "integrate" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-integrate-doc.py" \
+  > /tmp/${CODE}-integrate-validation.json
+cat /tmp/${CODE}-integrate-validation.json
+```
+
+출력 스키마:
+```json
+{
+  "pass": bool,
+  "score": 0.0~1.0,
+  "score_effective": number,
+  "critical": [{"type":"...","detail":"..."}],
+  "suggestions": [...],
+  "stats": {"views":N,"mermaidBlocks":M,"adsnReferenced":A,"ddsnReferenced":D,"stylesReferenced":S,"sectionsFound":K,"viewsInDoc":[...]}
+}
+```
+
+스크립트가 잡는 critical:
+- `upstream_not_referenced` — ADSN/DDSN subkey 가 본문에 등장 안 함 (upstream 미반영)
+- `style_not_referenced` — 선정 스타일의 id/name 이 본문 어디에도 없음
+- `insufficient_views` — viewsIncluded < 2
+- `views_mismatch` — viewsIncluded 에 주장된 뷰가 본문 헤딩에 없음
+- `insufficient_mermaid` — Mermaid 블록 < 2
+- `mermaid_bad_header` — 시작 라인이 표준 헤더 아님 (graph/flowchart/sequenceDiagram/...)
+- `class_diagram_for_component` — 컴포넌트/배포/프로세스 뷰 표현에 `classDiagram` 사용
+- `external_image` — `![...](...png|jpg|svg)` 외부 이미지 참조
+- `missing_section` — 섹션 1/2/3/6/7 헤딩 누락
+
+### 통과 기준
+- `pass == true` (critical 없음 + score ≥ 0.8) → Step 4/5 진입
+- `pass == false` → Step 3 수정
+
+### 추가 — 관점 간 모순 판단
+이것 하나만 **Type C (LLM 판단)**. validator 가 자동으로 못 잡으므로 validation output 을 본 뒤 별도 검토 (예: Logical 뷰가 "동기 호출" 인데 Process 뷰가 "비동기 큐" 로 모순 기술 — 한 줄 확인).
 
 ---
 
 ## Step 3 — 수정 (pass=false)
 
-critical + suggestions 만 **국소 수정**. 나머지 원문 유지. 수정 후 Step 2 로.
+validation output 의 critical 항목 **하나씩만** 국소 수정. 나머지 원문 유지.
+
+수정 후 다시 **draft 파일을 갱신**하고 Step 2 재진입:
+
+```bash
+cat > /tmp/${CODE}-integrate-draft-input.json <<'JSON'
+{ ...수정된 adsnSubkeys / ddsnSubkeys / chosenStyles / viewsIncluded / document... }
+JSON
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "integrate" "draft" \
+  < /tmp/${CODE}-integrate-draft-input.json
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
 
 ---
 
@@ -150,8 +219,12 @@ critical + suggestions 만 **국소 수정**. 나머지 원문 유지. 수정 �
 
 ## Step 5 — 문서 저장
 
+selected iter 의 draft 에서 document 필드를 꺼내 저장:
+
 ```bash
-echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-integrated.md"
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "integrate" "draft" \
+  | jq -r '.document' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-integrated.md"
 ```
 
 이슈는 **생성/수정하지 않는다**. `archSettings.designIntegrated=true` 플래그 설정은 서버 측에서 별도 처리 (native 스킬은 문서 저장까지만).
@@ -164,15 +237,15 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 ## 디자인 통합 완료 (v2 Claude Code)
 
 - 관점: logical, process, deployment (N개)
-- 반영 ADSN/DDSN: M건 (subkey 리스트)
+- 반영 ADSN: A건 / DDSN: D건 (subkey 본문 참조 기준)
+- Mermaid 블록: M건 (Logical graph TB / Process sequenceDiagram / Deployment graph LR ...)
 - 문서 저장: architecture/architecture-integrated.md
-- Mermaid: Logical(graph TB) / Process(sequenceDiagram) / Deployment(graph LR)
 
 ### 관점 간 일관성 요약
 - ...
 
 ### Self-loop
-- iter N회 / selected=iter X (score_eff Y) / stop=pass|max_iter|...
+- iter N회 / selected=iter X (score_eff Y) / stop=pass|max_iter|repeat_critical|regression
 - unresolvedCritical: [...]
 ```
 
@@ -184,3 +257,4 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - Mermaid 블록은 반드시 ```` ```mermaid ... ``` ```` 로 감싸기
 - ADSN/DDSN 참조는 반드시 subkey (key 나 docId 금지)
 - 이슈 생성/변경 금지 — 문서만 산출
+- Step 0, 1 종료 flush, 2 validate, 3 재-flush, 5 문서 저장이 **모두 Bash tool call**. 에이전트가 "한 generation 에 몰아서" 처리하지 말 것 — 이게 GLM 스톨 방지의 핵심
