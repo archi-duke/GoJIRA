@@ -1,62 +1,57 @@
 ---
 name: style-define2
-description: Architecture Driver 로부터 정규화된 시스템 속성을 기반으로 적합한 시스템 스타일(Primary/Secondary/Supporting) 을 추천하고 architecture/architecture-style.md 를 작성합니다. 점수 계산은 style-score.py (Agent-Service 엔진 wrapper) + 자가검증은 validate-style-doc.py + self-loop(최대 3회). Claude Code 네이티브(curl/jq).
+description: Architecture Driver 로부터 정규화된 시스템 속성을 입력 받아, 카탈로그 스타일 엔진 점수를 참조해 **통합 스타일 조합 후보 2~3개** 를 구성하고 QA 가중 점수로 비교해 최종 선정합니다. 각 조합 후보를 ADSN 이슈로 생성(선정 조합만 decision 필드 기록, 혼합 허용), architecture/architecture-style.md (상위 index) + architecture/architecture-style/ST-NN-*.md (후보별 상세) 를 저장합니다. 개별 스타일은 ADSN 으로 만들지 않음. Self-loop 최대 3회. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
 
 ## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
 
-- **한 번의 LLM generation 에서 Step 두 개 이상 몰아 처리 금지**. 각 Step 종료는 **반드시 tool call (Bash) 로 마무리** 해서 generation 경계를 만든다
-- reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요. 점수 계산/규칙 적용은 **전부 스크립트 담당** (`style-score.py`)
-- Step 1 점수 계산은 **반드시 `style-score.py` 호출**로 수행 — 에이전트가 암산으로 점수 매기지 말 것 (엔진이 결정적)
-- Step 2 문서 초안 작성 후 **반드시 `draft-io.sh save`** 로 flush 후 generation 종료
-- Step 3 자가검증은 **반드시 `validate-style-doc.py` 호출** — 에이전트가 직접 Driver 커버리지 등 계산하지 말 것
-- assistant 출력에는 긴 문서/JSON 그대로 뱉지 말 것. "저장 완료 / 다음 tool 호출" 식 한두 줄만. 전체 draft 는 파일로만 유지
+- **한 generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 Bash tool call 로 마무리해 generation 경계 형성
+- **Mermaid 격리 (Option C)**: Step 1 에서는 mermaid **생성 금지**. Step 1.5 에서만 후보별 `structuralDiagram` / `dynamicDiagram` 을 생성해 draft merge
+- reasoning 은 각 Step 당 3~5 줄 이내. 엔진 점수/규칙 적용은 `style-score.py` 담당
+- Step 1 / 1.5 / 3 종료마다 **반드시 `draft-io.sh save`** — draft JSON 전체 flush 후 generation 종료
+- Step 2 자가검증은 **반드시 `validate-style-doc.py` 호출** — 에이전트가 직접 필드/섹션 계산 금지
+- assistant 출력에는 draft JSON / 문서 본문 재노출 금지. "저장 완료 / critical N건" 한두 줄
 
-## 진행 상태 가시화 — `todowrite` (선택, OpenCode)
-
-OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 단계를 알려주면 UX 가 좋다. 강제 아님, Claude Code 에서는 무시. 자세한 규칙은 `.claude/skills/_shared/todowrite-guide.md`.
+## 진행 상태 가시화 — `todowrite` (OpenCode 한정, 선택)
 
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — 데이터 수집 (normalizedAttributes + 카탈로그)
-[ ] Step 1 — 점수 계산 (style-score.py)
-[ ] Step 2 — 문서 초안 + draft flush
-[ ] Step 3 — 자가검증 (validate-style-doc.py)
-[ ] Step 4 — critical 수정 (반복)
-[ ] Step 5 — 문서 저장 + ADSN 생성
+[ ] Step 0 — 데이터 수집 + 엔진 점수 (참고용)
+[ ] Step 1 — 통합 스타일 조합 후보 2~3개 + QA 가중 평가 (mermaid 없음)
+[ ] Step 1.5 — 후보별 Structural/Dynamic Mermaid 추가
+[ ] Step 2 — 자가검증 (validate-style-doc.py)
+[ ] Step 3 — critical 수정 (반복, 최대 iter 3)
+[ ] Step 5 — 후보 ADSN 생성 + index/후보파일 저장 + archSettings.chosenStyles 업데이트
+[ ] Step 6 — 최종 보고
 ```
 
 ## 환경
+
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
-- 임시 파일: `/tmp/${CODE}-styledef-{engine|draft|validation}.json`
+- 임시 파일: `/tmp/${CODE}-styledef-{norm|engine|draft|validation}.json`
 
 ## 인자 추출
 
-사용자 메시지에서 다음 값들을 추출해 **먼저** 환경변수로 export 한 뒤 아래 bash 블록들을 실행하라. 누락 시 사용자에게 되물어 확정하라.
+- `CODE` — projectCode
+- `USER` — user
 
-- `CODE` — projectCode (예: GOJIRA3)
-- `USER` — user (예: batman)
-
-예:
 ```bash
 export CODE="GOJIRA3"
 export USER="batman"
 ```
 
 ## 역할
-아키텍트. Architecture Driver(정규화 속성)를 근거로 시스템 스타일 카탈로그에서 적합 스타일을 선정한다.
-**모든 선정은 Driver 로 역추적 가능해야 함 (driver coverage)**.
+
+아키텍트. Architecture Driver 와 엔진 점수를 근거로 **시너지 있는 스타일 조합 2~3개** 를 설계하고, QA(NFR) 가중 평가로 최종안을 선정한다. 개별 스타일 랭킹이 아니라 **조합 단위** 가 의사결정 대상.
 
 ---
 
-## Step 0 — 선행 데이터 수집
+## Step 0 — 선행 데이터 수집 + 엔진 점수
 
 ### 0.1 normalizedAttributes 확보
-
-우선 프로젝트의 `archSettings.normalizedAttributes` 를 조회하고, 비어있으면 **fallback 경로** 로 진행:
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -71,8 +66,7 @@ if [[ "$NORM" == "{}" ]] && [[ -f "/tmp/${CODE}-drivers-normalized.json" ]]; the
   NORM=$(cat "/tmp/${CODE}-drivers-normalized.json")
 fi
 
-# Fallback 2: docs/{user}/architecture/drivers.md 의 "3. 정규화된 시스템 속성" 표에서 파싱
-#   (세션 경계를 넘어도 복구 가능 — archSettings 저장이 실패했을 때 최후 안전망)
+# Fallback 2: docs/{user}/architecture/drivers.md 의 "3. 정규화된 시스템 속성" 표 파싱
 if [[ "$NORM" == "{}" ]]; then
   DMD=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "architecture/drivers.md" 2>/dev/null || true)
   if [[ -n "$DMD" ]]; then
@@ -96,182 +90,248 @@ print(json.dumps(attrs, ensure_ascii=False))
   fi
 fi
 
+echo "$NORM" > "/tmp/${CODE}-styledef-norm.json"
 echo "$NORM"
 ```
 
-**`NORM` 이 여전히 `{}` 이면 다음 순서로 대응**:
-
-1. **같은 세션 fallback** — 직전 turn 에서 `driver-select2` 를 이 세션에서 실행했으면, 해당 generation 의 assistant text 또는 tool output 에 `normalizedAttributes = {...}` 블록이 있을 것. 거기에서 JSON 을 그대로 추출해 다음 파일에 저장:
-   ```bash
-   cat > /tmp/${CODE}-styledef-norm.json <<'JSON'
-   { ...driver-select2 가 출력한 normalizedAttributes JSON... }
-   JSON
-   NORM=$(cat /tmp/${CODE}-styledef-norm.json)
-   ```
-2. **사용자 메시지 fallback** — 사용자가 호출 프롬프트에 `normalizedAttributes={...}` 형태로 JSON 을 첨부했으면 그걸 사용
-3. 위 둘 다 없으면 **중단** → "먼저 driver-select2 를 실행하거나 normalizedAttributes JSON 을 제공하세요"
-
-**확보된 `NORM` 은 반드시 아래 파일에 기록**해 Step 1 에서 사용한다:
-
-```bash
-echo "$NORM" > /tmp/${CODE}-styledef-norm.json
-```
+`NORM` 이 `{}` 이면 **중단** → "먼저 driver-select2 를 실행하거나 normalizedAttributes JSON 을 제공하세요" 보고.
 
 ### 0.2 카탈로그 읽기
-카탈로그는 `knowledge/arch-styles/` 하위에 `index.yaml` + `styles/*.yaml` 구조.
 
 ```bash
 KN="$(git rev-parse --show-toplevel)/Agent-Service/knowledge/arch-styles"
-# index 파악
 cat "${KN}/index.yaml"
-# 스타일 id 목록
 ls "${KN}/styles/"
-# 개별 스타일 파일은 필요 시 Read 로 확인
 ```
 
-각 스타일 파일은 다음 필드를 가진다:
-- `id`, `name`, `scope` (system_structure / data / integration / module_boundary / infrastructure)
-- `summary`, `fit_signals` (dict of attr→expected_level)
-- `avoid_signals`, `quality_attributes` (list of {attribute, effect, strength})
-- `prerequisites.{technical|design|organizational}`, `decision_rules` (if/then)
-- `combines_well_with`, `conflicts_with`, `tradeoffs.pros/cons`
+각 스타일 파일은 `id / name / scope / summary / fit_signals / avoid_signals / quality_attributes / prerequisites / combines_well_with / conflicts_with / tradeoffs` 를 담는다.
 
----
+### 0.3 엔진 점수 계산 (참고용)
 
-## Step 1 — 점수 계산 (스크립트 엔진 호출, 필수)
-
-`style-score.py` 가 모든 점수/매치/조합/분류를 결정적으로 계산한다. 에이전트는 암산 금지 — 반드시 호출만.
+**엔진은 개별 스타일 랭킹 도구로만 활용**. 최종 Primary/Secondary/Supporting 선정은 이번 스킬에서는 LLM 의 조합 설계가 담당 — 엔진 분류 그대로 쓰지 않는다.
 
 ```bash
-# Step 0.1 에서 확보해 파일로 기록한 NORM 을 그대로 사용.
 REQ_JSON=$(cat "/tmp/${CODE}-styledef-norm.json")
 
 jq -n --argjson r "$REQ_JSON" '{req:$r}' \
   | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-score.py" \
-  > /tmp/${CODE}-styledef-engine.json
+  > "/tmp/${CODE}-styledef-engine.json"
 
-cat /tmp/${CODE}-styledef-engine.json | jq '{primary, secondary, supporting, top5:[.scored[:5][]|{id,score}]}'
+cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}], primary, secondary, supporting}'
 ```
 
-출력 (`/tmp/${CODE}-styledef-engine.json`) 스키마:
+산출:
+- `scored` — 모든 스타일의 점수 랭킹 (조합 후보 구성의 **참조자료**)
+- `primary/secondary/supporting` — 엔진 자동 분류 (참조만, 뒤집어도 무방)
+- `catalog_summary` — 이후 validator 에 `styleCatalogIds` 로 전달하거나 조합 시 스타일 id 확인에 사용
+
+### 0.4 기존 ADSN 스캔 (선택)
+
+동일 프로젝트에 기존 스타일 ADSN 이 있으면 참고용으로 파악. 현재 `create` 중심 모드만 지원 — 기존 ADSN 재사용·수정 로직은 design-decide2 와 같은 패턴으로 후속 확장 가능.
+
+```bash
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | select(.issueType=="Architectural Design" and (.designPoint // "") == "시스템 스타일 결정") | {key,subkey,summary,decision}]'
+```
+
+기존 조합 ADSN 이 있으면 사용자에게 "재작성 / 덮어쓰기 / 기존 유지" 확인 권고.
+
+---
+
+## Step 1 — 조합 후보 초안 (iter 1, Mermaid 없음)
+
+### 1.1 조합 후보 설계
+
+엔진 랭킹의 상위권과 카탈로그의 `combines_well_with` / `conflicts_with` 를 참고해 **정말로 검토할 가치 있는** 조합 **2~3개** 를 구성. 각 조합은 Primary/Secondary/Supporting 역할을 가진 스타일 세트:
+
+- **Primary** (scope 당 1개) — 전체 결정 계층을 지배하는 스타일 (예: Modular Monolith, Microservices, Layered)
+- **Secondary** — Primary 를 보완하거나 직교 관심사를 다루는 스타일
+- **Supporting** (0~N개) — 선택적으로 결합되는 보조 스타일
+
+후보 수량 가이드: **2개가 기본. 3개는 "정말 검토 가치 있다"** 고 판단될 때만.
+- 후보가 서로 비슷하면 불필요한 노이즈 → 통합하거나 줄임
+- `conflicts_with` 관계인 스타일을 한 조합에 섞지 말 것
+
+### 1.2 QA 가중치 정의
+
+이 결정 전반에 적용될 가중치. 합 = 1.00 (±0.02). 각 QA 마다 근거 기록 필수.
+
 ```json
-{
-  "scored": [{"id","score","breakdown","unmet_prerequisites"}, ...],
-  "primary": ["<id>", ...],
-  "secondary": ["<id>", ...],
-  "supporting": ["<id>", ...],
-  "combinations_applied": [{"from","to","delta","type","reason"}, ...],
-  "catalog_summary": { "styles":[...], "scopes":{...}, "names":{...},
-                       "fit_signals":{...}, "avoid_signals":{...},
-                       "quality_attributes":{...}, "tradeoffs":{...},
-                       "prerequisites":{...}, "combines_well_with":{...},
-                       "conflicts_with":{...} }
+"qaWeights": {
+  "Performance":     {"weight": 0.40, "rationale": "응답 지연이 사용자 이탈에 직결"},
+  "Maintainability": {"weight": 0.35, "rationale": "장기 운영, 소규모 팀"},
+  "Security":        {"weight": 0.25, "rationale": "사내망 SSO 기반이라 상대적 비중 낮음"}
 }
 ```
 
-- Primary/Secondary/Supporting 은 엔진이 이미 결정적으로 분류함 — 뒤집지 말 것
-- `breakdown` 의 note 가 그대로 문서의 "선정 근거" 소재 — LLM 은 이걸 자연어로 풀어쓰기만 하면 됨
-- tie / scope / top_n / 가중치 는 전부 `index.yaml` 기준으로 엔진이 처리
+### 1.3 후보별 QA 평가 (1-5) + 가중합
 
----
+각 조합 후보에 대해:
+- `qaScores`: qaWeights 의 각 QA 에 1~5 정수 할당
+- `weightedScore` = Σ(score × weight), 소수 둘째자리
+- `eval`: QA별 점수 근거 짧은 문단
 
-## Step 2 — 초안 문서 작성 (iter 1)
+### 1.4 선정
 
-### 문서 템플릿 (architecture-style.md)
+- 총점 최고 1개 단독 채택 → 해당 후보만 `chosen=true`
+- 최고점 근소(0.3 이하) / 상호 보완적 → **혼합 채택**: 관련 후보 모두 `chosen=true`, `decisionNote` 에 혼합 방식 기록
+- 엔진 점수와 가중합이 반대 방향이면 `eval` 에 그 불일치를 명시적으로 짚기
 
-**반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 1~5 와 Mermaid 블록 위치를 준수:
+### 1.5 조합(approach) 구조
 
-```bash
-cat "${PROJECT_ROOT}/.claude/skills/style-define2/templates/architecture-style.md"
-```
+각 후보는 다음 필드를 갖는다:
+- `candidateId` — A/B/C... (유일)
+- `docId` — `ST-1` / `ST-2` ... (유일)
+- `name` — 조합 이름 (예: "Modular Monolith + Layered + Event-Driven")
+- `composition.primary/secondary/supporting` — `{id, name, role}` 배열
+  - `id` 는 카탈로그의 **실존 스타일 id** (validator 가 체크)
+  - `role` 은 이 조합에서의 책임 설명 (예: "전체 모듈 경계 제공")
+- `objectives` — 이 조합이 해결하려는 핵심 아키텍처 목표 2~3 줄
+- `pros` / `cons`
+- `qaScores` / `weightedScore` / `eval`
+- `chosen` (bool) / `decisionNote` (chosen=true 일 때 필수)
+- **주의**: `structuralDiagram` / `dynamicDiagram` 은 **Step 1.5 에서 채움. 여기서는 쓰지 말 것**
 
-- 섹션 1 추천 요약 / 2 정규화된 속성 / 3 스타일별 선정 근거 (Mermaid 포함) / 4 조합 설계 (Mermaid 포함) / 5 설계 결정 영향 전부 필수
-- validator (`validate-style-doc.py`) 가 섹션 누락 / Mermaid 0개 / 선정 스타일 미등장 등을 잡음
+### 1.6 문서 뼈대
 
-`architecture/architecture-style.md` 본문 작성:
+Step 1 에서 index + 각 후보 파일 **뼈대** 작성. mermaid 자리는 placeholder:
 
-```
-# 시스템 아키텍처 스타일
-
-## 1. 추천 요약
-| 구분 | 스타일 | Scope | 점수 | 핵심 근거(Driver) |
-| Primary | ... | system_structure | ... | scalability=high, ... |
-
-## 2. 정규화된 시스템 속성
-| 속성 | 값 | 비고(Driver 근거) |
-
-## 3. 스타일별 선정 근거
-### 3.1 {Primary A}
-#### 구조 (정적 관점)
+```md
+**Structural View**
 ```mermaid
 graph TB
-    ...
+    TBD
 ```
-(스타일의 컴포넌트/레이어 배치를 다이어그램으로 설명 — ADSN adiagram에 해당)
-
-#### 동작 (동적 관점, 생략 가능)
-```mermaid
-sequenceDiagram
-    ...
-```
-(스타일 고유의 런타임 흐름이 있는 경우 — ADSN bdiagram에 해당. 세부 설계에서 구체화되는 스타일은 생략)
-
-#### 선정 근거
-- 적합 신호(fit_signals)
-- 품질속성 영향(positive/negative)
-- 트레이드오프(pros/cons)
-- 전제조건(technical/design/organizational)
-- 연결된 Driver: [속성=레벨, ...]
-
-## 4. 조합 설계
-#### 통합 구조 (정적 관점)
-```mermaid
-graph TB
-    ...
-```
-(선정된 스타일들이 시스템 내에서 어떻게 조합·배치되는지 전체 구조 다이어그램)
-
-#### 통합 동작 (동적 관점)
-```mermaid
-sequenceDiagram
-    ...
-```
-(조합된 스타일 간 런타임 상호작용 흐름)
-
-#### 조합 근거
-- Primary 간 조합 관계 / Primary+Supporting 역할 분담 / 제외 스타일 이유
-
-## 5. 설계 결정에 미치는 영향
 ```
 
----
+템플릿 참조:
+```bash
+cat "${PROJECT_ROOT}/.claude/skills/style-define2/templates/architecture-style.md"  # index
+cat "${PROJECT_ROOT}/.claude/skills/style-define2/templates/style-candidate.md"      # 후보 파일
+```
 
-### Step 2 종료 — draft flush (필수)
+index (`architecture-style.md`) 필수 섹션: 1 후보 조합 스타일 / 2 QA 가중치 / 3 최종 선정 / (4 Driver 추적성 / 5 트레이드오프)
+후보 파일 필수 섹션: 1 조합 구성 / 2 Design Objective / 3 Structural View / 4 Dynamic View / 5 Pros/Cons / 6 QA 평가 / 7 트레이드오프 / 8 선정 여부
 
-문서 초안과 chosen 구조를 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 3 검증.
+### Step 1 종료 — draft flush (필수)
+
+**JSON 필드명은 스키마 그대로 사용**. validator 는 아래 키만 인식 — `point` / `alternatives` / `composition` 아닌 다른 이름 금지. `composition` 은 반드시 `primary/secondary/supporting` 3키 dict.
 
 ```bash
-# 엔진 결과에서 chosen 기본값 복사 (수동으로 조정 가능)
-CHOSEN=$(jq '{primary, secondary, supporting}' /tmp/${CODE}-styledef-engine.json)
-
-cat > /tmp/${CODE}-styledef-draft-input.json <<EOF
+cat > /tmp/${CODE}-styledef-draft-input.json <<'JSON'
 {
-  "normalizedAttributes": $(cat /tmp/${CODE}-styledef-engine.json | jq '.scored[0].breakdown[0]' 2>/dev/null && curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" | jq '.[0].archSettings.normalizedAttributes'),
-  "engine_output": $(cat /tmp/${CODE}-styledef-engine.json),
-  "chosen": $CHOSEN,
-  "document": $(jq -Rs . <<< "$DOCUMENT")
+  "driverKeys": ["GOJIRA3-11","GOJIRA3-13"],
+  "styleCatalogIds": ["modular-monolith","layered","event-driven","microservices","space-based","..."],
+  "qaWeights": {
+    "Performance":     {"weight": 0.40, "rationale": "..."},
+    "Maintainability": {"weight": 0.35, "rationale": "..."},
+    "Security":        {"weight": 0.25, "rationale": "..."}
+  },
+  "candidates": [
+    {
+      "candidateId":"A",
+      "docId":"ST-1",
+      "name":"Modular Monolith + Layered + Event-Driven",
+      "composition": {
+        "primary":    [{"id":"modular-monolith","name":"Modular Monolith","role":"전체 모듈 경계"}],
+        "secondary":  [{"id":"layered","name":"Layered","role":"계층 분리"}],
+        "supporting": [{"id":"event-driven","name":"Event-Driven","role":"비동기 이벤트"}]
+      },
+      "objectives":"단일 배포의 운영 단순성을 유지하면서 모듈 간 결합도 최소화",
+      "pros":"운영 단순, 학습 곡선 낮음, 모듈 분리 명확",
+      "cons":"확장성 한계, 단일 장애점 가능",
+      "qaScores":{"Performance":4,"Maintainability":5,"Security":4},
+      "weightedScore":4.35,
+      "eval":"Performance: 단일 프로세스 내 호출로 4점. Maintainability: 모듈 경계 + 단순 배포 5점. Security: 표준 프레임워크 4점.",
+      "chosen":true,
+      "decisionNote":"단독 채택 — 총점 4.35 로 최고, 소규모 팀 운영 복잡도 최소화"
+    },
+    {
+      "candidateId":"B",
+      "docId":"ST-2",
+      "name":"Microservices + Event-Driven + CQRS",
+      "composition": {
+        "primary":    [{"id":"microservices","name":"Microservices","role":"독립 배포 단위"}],
+        "secondary":  [{"id":"event-driven","name":"Event-Driven","role":"서비스 간 비동기"}],
+        "supporting": [{"id":"cqrs","name":"CQRS","role":"읽기/쓰기 분리"}]
+      },
+      "objectives":"대규모 트래픽·독립 배포에 최적화",
+      "pros":"스케일링 독립성, 장애 격리",
+      "cons":"운영 복잡도, 분산 트랜잭션 난이도",
+      "qaScores":{"Performance":5,"Maintainability":3,"Security":4},
+      "weightedScore":4.05,
+      "eval":"Performance: 독립 스케일링으로 5점. Maintainability: 운영 오버헤드로 3점. Security: 경계 명확 4점.",
+      "chosen":false,
+      "decisionNote":""
+    }
+  ],
+  "decisionSummary":"Candidate A (Modular Monolith + Layered + Event-Driven) 단독 채택",
+  "decisionRationale":"Driver GOJIRA3-11 (응답 < 500ms) 과 GOJIRA3-13 (소규모 팀 운영 가능) 을 동시 충족. 총점 4.35 로 최고이며 Maintainability 가중치 0.35 에서 우위가 결정적",
+  "tradeoffs":"B 는 Performance 최고점이나 운영 복잡도 페널티로 기각. 트래픽이 현 규모의 10배 초과 시 B 재검토",
+  "relatedDrivers":["GOJIRA3-11","GOJIRA3-13"],
+  "document":{
+    "index":"...architecture-style.md 마크다운 전체 (mermaid placeholder)",
+    "candidateFiles":{
+      "ST-1":"...ST-1-modular-monolith.md 마크다운 전체 (mermaid placeholder)",
+      "ST-2":"...ST-2-microservices.md 마크다운 전체 (mermaid placeholder)"
+    }
+  }
 }
-EOF
+JSON
 
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "styledef" "draft" \
   < /tmp/${CODE}-styledef-draft-input.json
 ```
 
+출력 한 줄(`{"path":"...","bytes":N}`)만. JSON 재출력 금지.
+
 ---
 
-## Step 3 — 자가검증 (스크립트 기반)
+## Step 1.5 — Mermaid 격리 단계 (신규, 필수)
 
-**반드시 `validate-style-doc.py` 호출**. 에이전트가 직접 검증 금지.
+Step 1 draft 를 로드하고 **각 후보에 structuralDiagram / dynamicDiagram 을 채워** 재저장. 이 단계는 generation 분리를 위해 존재 (GLM mermaid 스톨 방지).
+
+작성 규칙:
+- **Structural View**: `graph TB` 또는 `graph LR` — 조합이 구성하는 시스템의 컴포넌트/레이어/데이터 흐름
+- **Dynamic View**: `sequenceDiagram` — 주요 시나리오의 시간 순 상호작용 (participant 에 `as` 키워드 필수, 쉼표 다중 수신자 금지)
+- 각 다이어그램은 ` ```mermaid ` / ` ``` ` 블록으로 감싼다
+- 같은 주제를 다르게 푸는 조합들이니 **공통 입력/출력을 동일하게 표현** 해 비교 가시성 확보
+- document.candidateFiles[ST-N] 의 mermaid placeholder 도 실제 내용으로 교체
+
+작업 예:
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "styledef" "draft" > /tmp/${CODE}-styledef-draft.json
+
+python3 <<'PY'
+import json, os
+p = "/tmp/%s-styledef-draft.json" % os.environ["CODE"]
+d = json.load(open(p))
+
+for c in d["candidates"]:
+    # 각 후보별로 에이전트가 이 generation 에서 생성한 mermaid 를 채움
+    c["structuralDiagram"] = c.get("structuralDiagram") or "```mermaid\ngraph TB\n    Client --> API\n    API --> DB\n```"
+    c["dynamicDiagram"]   = c.get("dynamicDiagram")   or "```mermaid\nsequenceDiagram\n    participant U as User\n    participant A as API\n    U->>A: request\n    A-->>U: response\n```"
+
+    # document.candidateFiles[ST-N] 본문의 placeholder 를 실제 블록으로 교체
+    did = c["docId"]
+    body = d["document"]["candidateFiles"].get(did, "")
+    # 에이전트가 placeholder → 실제 mermaid 치환 로직 작성 (단순 replace 가능)
+    d["document"]["candidateFiles"][did] = body
+
+open(p, "w").write(json.dumps(d, ensure_ascii=False, indent=2))
+PY
+
+cat /tmp/${CODE}-styledef-draft.json \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "styledef" "draft"
+```
+
+출력 한 줄만. mermaid 원문 재출력 금지.
+
+---
+
+## Step 2 — 자가검증 (스크립트 기반)
+
+**반드시 `validate-style-doc.py` 호출**. 에이전트가 직접 계산 금지.
 
 ```bash
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "styledef" "draft" \
@@ -286,135 +346,261 @@ cat /tmp/${CODE}-styledef-validation.json
   "pass": bool,
   "score": 0.0~1.0,
   "score_effective": number,
-  "critical": [{"type":"...","detail":"..."}],
+  "critical": [{"type":"...","docId":"ST-N","detail":"..."}],
   "suggestions": [...],
-  "stats": {"attributes","attributesInDoc","chosenStyles","stylesInDoc","mermaidBlocks"}
+  "stats": {"candidates":N,"chosen":C,"selectedDocIds":[...],
+            "qaWeightsTotal":T,"candidateFilesProvided":P,"indexProvided":bool}
 }
 ```
 
-스크립트가 잡는 critical:
-- 카탈로그에 없는 스타일 선택 (`style_not_in_catalog`)
-- 동일 scope 에 Primary 2개 이상 (`primary_scope_conflict`)
-- 엔진 Primary 를 모두 무시 (`primary_ignores_engine`)
-- Primary 0개 (`no_primary`)
-- Driver 커버리지 갭 — 속성의 1/3 초과가 문서에 미등장 (`driver_coverage_gap`)
-- 선택 스타일이 문서에 미등장 (`chosen_style_not_in_doc`)
-- 필수 섹션 1~5 누락 (`missing_section`)
-- Mermaid 블록 0개 (`no_mermaid`)
-- 점수 1위 스타일이 chosen 어디에도 없음 (`top_score_ignored`)
+스크립트가 잡는 critical (주요):
+- `bad_qaWeights` / `qaWeights_sum_not_one` — 가중치 합 ≠ 1.0 (±0.02)
+- `insufficient_candidates` — 후보 < 2
+- `candidate_missing_field` / `candidate_empty_field`
+- `composition_missing_role` / `composition_no_primary` / `composition_bad_role_type`
+- `composition_missing_id` / `composition_missing_name`
+- `bad_qaScores` / `qaScore_out_of_range` / `qaScore_missing_qa`
+- `bad_weightedScore_type` / `bad_chosen_type`
+- `no_chosen_candidate` — chosen=true 후보 0건
+- `chosen_without_note` — chosen=true 인데 decisionNote 비어있음
+- `duplicate_docId` / `duplicate_candidateId` / `bad_docId_format` (ST-N 형식)
+- `missing_diagram` — Step 1.5 미수행 (structuralDiagram / dynamicDiagram 블록 없음)
+- `index_missing` / `index_missing_section` / `candidate_file_missing` / `candidate_file_missing_section`
+- `empty_decisionSummary` / `empty_rationale`
 
 ### 통과 기준
 - `pass == true` → Step 5 진입
-- `pass == false` → Step 4 수정
+- `pass == false` → Step 3 수정
 
 ---
 
-## Step 4 — 수정 (pass=false)
+## Step 3 — 수정 (pass=false)
 
-validation output 의 critical 만 **국소 수정**. 점수 계산 결과(엔진 순위) 는 변경 금지. 수정 후 draft 재저장:
+critical 만 **국소 수정** 후 draft 재저장 (JSON 재구성 금지 — 이슈된 필드만 건드림):
 
 ```bash
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "styledef" "draft" \
-  < /tmp/${CODE}-styledef-draft-input.json
+python3 <<'PY'
+import json, os
+p = "/tmp/%s-styledef-draft.json" % os.environ["CODE"]
+d = json.load(open(p))
+# critical 유형별 수정 로직
+open(p, "w").write(json.dumps(d, ensure_ascii=False, indent=2))
+PY
+
+cat /tmp/${CODE}-styledef-draft.json \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "styledef" "draft"
 ```
 
 이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
 
-종료 조건:
+---
+
+## Step 4 — 종료 조건
+
 1. pass=true
 2. iter 3 완료
 3. 같은 critical 2회 연속 재발
 4. 새 수정이 이전 best 보다 낮은 score_effective → 포기
 
-**best-so-far**: validation.json 의 `score_effective` 기록 → 종료 시 최댓값 iter 채택.
+**best-so-far**: `(candidates, document, score_effective)` 기록. 종료 시 최댓값 iter 를 selected.
 
 ---
 
-## Step 5 — 문서 저장 + chosenStyles 영속화 + ADSN 생성
+## Step 5 — 이슈 생성 + 문서 + archSettings 영속화
 
-### 5.1 architecture/architecture-style.md 저장
-```bash
-echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-style.md"
-```
+### 5.1 후보 ADSN 이슈 일괄 생성 (조합 단위만)
 
-### 5.2 projects.archSettings.chosenStyles 업데이트
+**각 조합 후보를 개별 ADSN 이슈로 생성** (2~3건). 개별 스타일은 ADSN 생성하지 않음 — 이 스킬의 핵심 변경점.
 
-`PATCH /Project/{CODE}/archSettings` 로 merge. 다른 archSettings 필드는 건드리지 않음.
+`chosen=true` 인 후보(들) 에만 `decision` 필드를 채운다. 나머지는 decision 빈 문자열.
 
 ```bash
-# $CHOSEN_JSON = {"primary":[...],"secondary":[...],"supporting":[...]}
-curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --argjson c "$CHOSEN_JSON" '{chosenStyles:$c}')" \
-  | jq '{updated, archSettings}'
-```
+python3 <<'PY'
+import json, os
 
-실패 시 최종 보고에 ⚠. fallback 체인(`/tmp/${CODE}-styledef-norm.json` 등) 은 Step 0/1 입력용으로 유지되며, 여기서 저장 실패해도 다음 스킬은 archSettings API 를 통해 정상 조회 가능.
+d = json.load(open("/tmp/%s-styledef-draft.json" % os.environ["CODE"]))
 
-### 5.3 검토된 모든 스타일을 ADSN 이슈로 생성
-
-top_n 이내 검토된 **모든** 스타일(Primary/Secondary/Supporting)에 대해 각각 ADSN(Architectural Design) 이슈를 생성한다.
-
-```bash
-cat > /tmp/style_adsn_items.json <<'JSON'
-[
-  {"issueType":"Architectural Design","summary":"시스템 스타일: {style_name}","desc":"..."},
-  ...
+items = []
+# 모든 후보 조합 목록 (approaches 필드에 JSON 문자열로 넣어 맥락 공유)
+all_candidates_ref = [
+    {"candidateId": c["candidateId"], "name": c["name"],
+     "composition": c["composition"], "weightedScore": c["weightedScore"]}
+    for c in d["candidates"]
 ]
-JSON
+approaches_json = json.dumps(all_candidates_ref, ensure_ascii=False)
+
+for c in d["candidates"]:
+    item = {
+        "issueType":         "Architectural Design",
+        "summary":           f"시스템 스타일 조합: {c['name']}",
+        "desc":              f"{c['docId']} — {c.get('eval','')}",
+        "designLevel":       "Architectural",
+        "designPoint":       "시스템 스타일 결정",
+        "objectives":        c["objectives"],
+        "approaches":        approaches_json,
+        "pros":              c["pros"],
+        "cons":              c["cons"],
+        "score":             str(c["weightedScore"]),
+        "eval":              c["eval"],
+        "adiagram":          c.get("structuralDiagram", ""),
+        "bdiagram":          c.get("dynamicDiagram", ""),
+    }
+    if c.get("chosen"):
+        item["decision"]          = c.get("decisionNote", "")
+        item["decisionRationale"] = d["decisionRationale"]
+        item["tradeoffs"]         = d.get("tradeoffs", "")
+    items.append(item)
+
+open("/tmp/style_adsn_items.json","w").write(json.dumps(items, ensure_ascii=False, indent=2))
+print(f"{len(items)}건 준비")
+PY
 
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "${USER}" < /tmp/style_adsn_items.json \
   > /tmp/style_adsn_result.json
 cat /tmp/style_adsn_result.json
 ```
 
-생성된 ADSN 이슈의 도메인 필드를 업데이트:
+`issue-batch-create.sh` 가 POST 후 PUT 으로 ADSN 필드(designLevel/designPoint/objectives/approaches/decision/decisionRationale/pros/cons/score/eval/adiagram/bdiagram/tradeoffs) 를 자동 반영.
+
+### 5.2 Requirement → 조합 ADSN Contains 링크 (선택)
+
+`relatedDrivers` 에 명시된 Driver 들을 **채택된** ADSN 과 연결. 기각 후보는 링크 안 만듦 (불필요한 관계 생성 방지).
+
+> **중복 제거 필수** — `POST /Issue/link` idempotent 아님. Step 0 수집한 issueLinks 와 차집합 POST.
+
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
-    --arg dp "$STYLE_NAME" --argjson ap "$ALTERNATIVES_JSON" \
-    --arg dc "$DECISION" --arg dr "$RATIONALE" --arg tr "$TRADEOFFS" \
-    --arg rk "$RISK" --arg se "$SENS" --arg dl "Architectural" \
-    --arg obj "$OBJECTIVES" --arg pr "$PROS" --arg cn "$CONS" \
-    --arg sc "$SCORE" --arg ev "$EVAL" \
-    --arg ad "$ADIAGRAM" --arg bd "$BDIAGRAM" \
-    '{prjID:$p, key:$k, user:$u, data:{designPoint:$dp, approaches:($ap|tostring), decision:$dc, decisionRationale:$dr, tradeoffs:$tr, risk:$rk, sensitivity:$se, designLevel:$dl, objectives:$obj, pros:$pr, cons:$cn, score:$sc, eval:$ev, adiagram:$ad, bdiagram:$bd}}')"
+python3 <<'PY'
+import json, os
+d = json.load(open("/tmp/%s-styledef-draft.json" % os.environ["CODE"]))
+result = json.load(open("/tmp/style_adsn_result.json"))
+keys = result.get("keys", [])
+
+# candidate 순서대로 key 매핑
+chosen_keys = []
+idx = 0
+for c in d["candidates"]:
+    if c.get("chosen"):
+        chosen_keys.append(keys[idx])
+    idx += 1
+
+links = []
+for driver_key in d.get("relatedDrivers", []):
+    for adsn_key in chosen_keys:
+        links.append({
+            "inwardKey":  driver_key,
+            "outwardKey": adsn_key,
+            "linkType":   "Contains(WBSGantt)"
+        })
+
+open("/tmp/style_links.json","w").write(json.dumps(links, ensure_ascii=False))
+print(f"{len(links)}건 링크 예정")
+PY
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" < /tmp/style_links.json \
+  > /tmp/style_link_result.json
+cat /tmp/style_link_result.json
 ```
 
-**ADSN 필드 매핑**:
-| ADSN 필드 | 값 |
-|---|---|
-| `designPoint` | 스타일명 (예: "Event-Driven Architecture") |
-| `approaches` | 동일 scope 내 검토된 대안 스타일 목록과 비교 |
-| `decision` | 최종 선정 → **"최종선택"** (단독) / **"최종안 통합"** (복수 통합) / 미선정 → **"검토완료(미채택)"** |
-| `decisionRationale` | fit_signals 매치, 품질속성 영향, Driver 근거 요약 |
-| `objectives` | 해당 스타일의 주요 목표/역할 |
-| `pros` | 카탈로그 pros + fit_signals 기반 장점 |
-| `cons` | 카탈로그 cons + avoid_signals 기반 단점 |
-| `score` | 엔진 점수 (Step 1 결과) |
-| `eval` | Primary/Secondary/Supporting 분류 및 평가 요약 |
-| `tradeoffs` | 카탈로그의 tradeoffs 기반 |
-| `risk` | avoid_signals 매치 항목, 전제조건 미충족 위험 |
-| `sensitivity` | 해당 스타일 변경 시 영향받는 Driver/속성 범위 |
-| `adiagram` | Mermaid 구조 다이어그램 — 스타일의 정적 구조(컴포넌트/레이어 배치)를 `graph TB` 또는 `graph LR`로 표현. 필수 |
-| `bdiagram` | Mermaid 동작 다이어그램 — 스타일의 런타임 동작을 `sequenceDiagram` 또는 `graph LR`로 표현. 스타일 수준에서 동적 상호작용이 고유하게 정의되는 경우(예: Event-Driven의 이벤트 흐름, CQRS의 읽기/쓰기 분리 흐름) 작성. 동적 관점이 세부 설계 결정(DDSN)에 의해 구체화되는 스타일(예: Client-Server, Layered)은 생략 가능 |
-| `designLevel` | `"Architectural"` |
+링크 실패는 silent drop 금지 — 보고에 건수 명시.
+
+### 5.3 docId → subkey 치환 + 후보 파일 저장
+
+```bash
+python3 <<'PY'
+import json, os, subprocess, re
+d = json.load(open("/tmp/%s-styledef-draft.json" % os.environ["CODE"]))
+result = json.load(open("/tmp/style_adsn_result.json"))
+keys = result.get("keys", [])
+
+def slugify(name):
+    s = re.sub(r"[^0-9A-Za-z가-힣+\-]+", "-", name).strip("-").lower()
+    return s[:60] if s else "st"
+
+user = os.environ["USER"]
+code = os.environ["CODE"]
+script = os.environ["PROJECT_ROOT"] + "/.claude/skills/_scripts/doc-save.sh"
+
+# 후보 파일 각각 저장
+idx = 0
+for c in d["candidates"]:
+    candidate_key = keys[idx]; idx += 1
+    docid = c["docId"]              # ST-N
+    num = docid.split("-")[1].zfill(2)
+    slug = slugify(c["name"])
+    path = f"architecture/architecture-style/ST-{num}-{slug}.md"
+    body = d["document"]["candidateFiles"].get(docid, "")
+    # placeholder {KEY} 가 있다면 실제 key 로 치환 (뼈대에 사용한 경우)
+    body = body.replace("{" + c["candidateId"] + "_KEY}", candidate_key)
+    p = subprocess.run(["bash", script, code, user, path], input=body, text=True, capture_output=True)
+    print(f"  {path}: {p.stdout.strip()}")
+
+# index 파일
+index_body = d["document"]["index"]
+p = subprocess.run(["bash", script, code, user, "architecture/architecture-style.md"],
+                   input=index_body, text=True, capture_output=True)
+print(f"  architecture/architecture-style.md: {p.stdout.strip()}")
+PY
+```
+
+### 5.4 archSettings.chosenStyles 업데이트 (선정 조합 평탄화)
+
+**호환성 중요** — 다음 스킬(design-integrate2) 이 `chosenStyles.primary / secondary / supporting` 구조로 읽는다. 선정된 조합(들) 의 composition 을 역할별로 평탄화 병합.
+
+```bash
+python3 <<'PY'
+import json, os, subprocess
+d = json.load(open("/tmp/%s-styledef-draft.json" % os.environ["CODE"]))
+
+chosen_styles = {"primary": [], "secondary": [], "supporting": []}
+seen = {"primary": set(), "secondary": set(), "supporting": set()}
+
+for c in d["candidates"]:
+    if not c.get("chosen"):
+        continue
+    comp = c["composition"]
+    for role in ("primary", "secondary", "supporting"):
+        for s in comp.get(role) or []:
+            sid = s.get("id")
+            if sid and sid not in seen[role]:
+                seen[role].add(sid)
+                chosen_styles[role].append({"id": sid, "name": s.get("name", "")})
+
+open("/tmp/style_chosen.json","w").write(json.dumps(chosen_styles, ensure_ascii=False))
+print(json.dumps(chosen_styles, ensure_ascii=False, indent=2))
+PY
+
+CHOSEN_JSON=$(cat /tmp/style_chosen.json)
+curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -d "$(jq -n --argjson c "$CHOSEN_JSON" '{chosenStyles:$c}')" \
+  | jq '{updated, archSettings}'
+```
+
+PATCH 실패 시 최종 보고에 ⚠. 다음 스킬이 영향 받을 수 있음.
 
 ---
 
 ## Step 6 — 최종 보고
 
 ```
-## 시스템 스타일 정의 완료 (v2 Claude Code)
+## 시스템 스타일 결정 완료 (v2 Claude Code)
 
-- Primary:    [..]
-- Secondary:  [..]
-- Supporting: [..]
-- 문서 저장: architecture/architecture-style.md
+- 검토 후보: N개 (ST-01 ~ ST-NN)
+- ADSN 생성: K건 (채택 C건 / 미채택 K-C건)
+- Requirement-Style 링크: L건 (채택안에만)
+- 문서:
+  - architecture/architecture-style.md (상위 index)
+  - architecture/architecture-style/ST-01-*.md ~ ST-NN-*.md
+- archSettings.chosenStyles 업데이트: 성공 / ⚠
 
-### Driver 커버리지
-| Driver | 대응 스타일 |
+### 선정 결과
+- ST-NN {조합 이름}: 총점 X.XX — 채택
+  - Primary: {스타일}
+  - Secondary: {스타일}
+  - Supporting: {스타일(들)}
+
+### Driver 추적성
+| Driver | 담당 스타일 | 역할 |
 
 ### Self-loop
 - iter N회 / selected=iter X (score_eff Y) / stop=pass|max_iter|...
@@ -424,9 +610,15 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 ---
 
 ## 주의
-- 모든 curl 에 `X-User-Id: ${USER}` 헤더 필수
-- Platform-API 응답 content 는 base64 → `base64 -d`
-- 카탈로그 외 id 는 **절대 출력 금지** — `catalog_summary.styles` 에 있는 id 만 valid
-- Primary 는 scope 당 1개 원칙 (동일 scope 중복 금지 — validate-style-doc.py 가 잡음)
-- 엔진 순위는 LLM 이 뒤집지 말 것 — 근거 서술과 조합 해석만 조정
-- Step 0(데이터/엔진) / 2(draft flush) / 3(검증) / 4(재-flush) / 5(이슈·문서) 모두 **Bash tool call 로 종료**. 한 generation 에 몰아서 처리하지 말 것
+
+- 모든 curl 에 `X-User-Id: ${USER}` 필수
+- `issueType` 은 정확히 `Architectural Design` (공백 포함)
+- 링크 linkType 은 정확히 `Contains(WBSGantt)` — Requirement 가 inward, ADSN 이 outward
+- **개별 스타일 ADSN 생성 금지** — 조합만 ADSN 으로. 이전 버전의 Primary/Secondary/Supporting 개별 ADSN 생성은 폐기
+- `chosen=true` 후보는 반드시 `decisionNote` 기록. 혼합 채택은 여러 후보를 `chosen=true` 로 동시에
+- `composition.primary` 는 **scope 당 1개 원칙** (여러 개면 suggestion, 0개면 critical)
+- `composition.{role}[].id` 는 카탈로그 id (`styleCatalogIds` 에 있어야 suggestion 회피)
+- `qaWeights` 합 = 1.0 ±0.02 / `qaScores` 는 1~5 정수 / `weightedScore` 는 Σ(score×weight)
+- **Step 1 에서 mermaid 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 mermaid 생성하면 스톨 리스크
+- Step 0 / 1 / 1.5 / 2 / 3 / 5 만 실제 Bash 호출, Step 4 는 내부 판단
+- `archSettings.chosenStyles` 는 **평탄화된 Primary/Secondary/Supporting 리스트** — design-integrate2 가 이 형식을 기대
