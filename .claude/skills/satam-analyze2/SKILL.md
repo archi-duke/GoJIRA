@@ -127,6 +127,24 @@ jq -n --argjson a "$ADSN_JSON" --argjson q "$QA_KEYS" '{adsns:$a, qaKeys:$q}' \
 **키 규칙**: 모든 키(ADSN key, qa[] 원소)는 **이슈 key** (예: `GOJIRA3-23`). subkey 금지.
 **빈 원문**: 해당 리스트는 `[]`.
 
+**JSON 필드명은 스키마 그대로 사용**. validator 는 **복수형** 키만 인식 — `risk` / `sensitivity` (단수) 금지. 각 항목은 `{id, description, qa}` 필수, Trade-off 는 + `counterRisk`.
+
+```json
+{
+  "GOJIRA3-23": {
+    "risks": [
+      {"id":"R1","description":"...","qa":["GOJIRA3-15"]}
+    ],
+    "sensitivities": [
+      {"id":"S1","description":"...","qa":["GOJIRA3-15"]}
+    ],
+    "tradeoffs": [
+      {"id":"M1","description":"...","qa":["GOJIRA3-15"],"counterRisk":["R1:GOJIRA3-15"]}
+    ]
+  }
+}
+```
+
 ### Step 1 종료 — draft flush (필수)
 
 context 파일(`/tmp/${CODE}-satam-context.json`) 에 mapping 을 추가해 draft 로 저장:

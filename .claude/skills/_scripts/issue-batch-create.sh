@@ -7,7 +7,16 @@
 # 입력(stdin): JSON array
 #   [{"issueType":"VOS","summary":"...","desc":"...","client":"alice"}, ...]
 #   필수: issueType, summary, desc
-#   옵션: client / priority / assignee — 생성 후 PUT 으로 업데이트됨
+#   POST 본문 포함: issueType / summary / desc / reqType / labels
+#   PUT 업데이트 필드 (생성 후 자동 반영):
+#     공통:      client / priority / assignee
+#     Feature:   actor / precondition / basicflow / alternativeflow / exceptionflow / postcondition
+#     NFR:       qa / source / stimulus / environment / artifact / response / measure / responseScenario / measureAuto
+#     Driver:    qad / qai / priority / riskLevel / sensitivity / driverSelected
+#     ADSN/DDSN: designLevel / designPoint / dmodel / objectives / approaches / decision / decisionRationale
+#                pros / cons / score / eval / tradeoffs / risk / sensitivity / mitigation
+#                adiagram / bdiagram
+#   그 외 필드는 무시됨
 #
 # 출력(stdout): JSON
 #   {"total":N,"created":K,"failed":F,"keys":[...],"errors":[...]}
@@ -66,12 +75,49 @@ for i in $(seq 0 $((COUNT - 1))); do
     CREATED=$((CREATED+1))
     KEYS+=("$KEY")
 
-    # 선택 필드 PUT 업데이트
+    # 선택 필드 PUT 업데이트 — 공통 + Feature + NFR + Driver + ADSN/DDSN 필드 화이트리스트
+    # 값이 빈 문자열이 아닌 것만 PUT 에 포함 (false, 0, [] 등은 유지)
     EXTRA=$(jq '{
-      client: (.client // ""),
-      priority: (.priority // ""),
-      assignee: (.assignee // "")
-    } | with_entries(select(.value != ""))' <<< "$ITEM")
+      client:            .client,
+      priority:          .priority,
+      assignee:          .assignee,
+      actor:             .actor,
+      precondition:      .precondition,
+      basicflow:         .basicflow,
+      alternativeflow:   .alternativeflow,
+      exceptionflow:     .exceptionflow,
+      postcondition:     .postcondition,
+      qa:                .qa,
+      source:            .source,
+      stimulus:          .stimulus,
+      environment:       .environment,
+      artifact:          .artifact,
+      response:          .response,
+      measure:           .measure,
+      responseScenario:  .responseScenario,
+      measureAuto:       .measureAuto,
+      qad:               .qad,
+      qai:               .qai,
+      riskLevel:         .riskLevel,
+      driverSelected:    .driverSelected,
+      designLevel:       .designLevel,
+      designPoint:       .designPoint,
+      dmodel:            .dmodel,
+      objectives:        .objectives,
+      approaches:        .approaches,
+      decision:          .decision,
+      decisionRationale: .decisionRationale,
+      pros:              .pros,
+      cons:              .cons,
+      score:             .score,
+      eval:              .eval,
+      tradeoffs:         .tradeoffs,
+      risk:              .risk,
+      sensitivity:       .sensitivity,
+      mitigation:        .mitigation,
+      adiagram:          .adiagram,
+      bdiagram:          .bdiagram
+    } | with_entries(select(.value != null and .value != ""))' <<< "$ITEM")
     if [[ "$(jq 'length' <<< "$EXTRA")" != "0" ]]; then
       curl -s -o /dev/null -X PUT "${GOJIRA_API}/Issue" \
         -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \

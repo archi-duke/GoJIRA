@@ -224,14 +224,22 @@ mode: `create` / `reuse` / `modify` / `delete_mark` (existingKey 필요).
 
 User Story / Use Case / Feature / document 전체를 draft 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 2 검증.
 
+**JSON 필드명은 스키마 그대로 사용**. `vos` / `sourceVOS` 등 유사 필드로 대체 금지 — Step 2 validator 는 아래 키만 인식합니다.
+
 ```bash
 cat > /tmp/${CODE}-uc-draft-input.json <<'JSON'
 {
-  "vosKeys": [ ...Step 0 VOS 키 목록... ],
-  "existingFeatureKeys": [ ...기존 Feature 키 (MODE=full 이면 빈 배열)... ],
-  "userStories": [ ...Step 1.2 파생 목록... ],
-  "useCases": [ ...Step 1.3 도출 목록... ],
-  "features": [ ...Step 1.5/1.9/1.10 산출 Feature 목록 — docId/relatedVOS/mode 포함... ],
+  "vosKeys": ["TEST-1","TEST-2", "..."],
+  "existingFeatureKeys": [],
+  "userStories": [
+    {"id":"US-1","actor":"사용자","category":"A","story":"...은(는) ...할 수 있다","vosKey":"TEST-1","ucId":"UC-1"}
+  ],
+  "useCases": [
+    {"id":"UC-1","summary":"...","stories":["US-1","US-2"]}
+  ],
+  "features": [
+    {"docId":"UC-1","summary":"...","actor":"사용자","basicflow":"1. ...\n2. ...","alternativeflow":"","exceptionflow":"","relatedVOS":["TEST-1"],"mode":"create","existingKey":""}
+  ],
   "document": "...마크다운 전체 문자열..."
 }
 JSON

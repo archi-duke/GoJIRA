@@ -1,85 +1,53 @@
-# 설계 결정 (Architectural & Detailed Design)
+# 설계 결정 Index
 
-## 1. Design Point 요약
+## 개요
 
-| Design Point | 결정 | 대안 | 관련 Driver | 이슈 ID |
-|---|---|---|---|---|
-| {design point 이름} | {선정 approach 이름} | {대안1}, {대안2} | {Driver-KEY1}, {Driver-KEY2} | ADSN-1 |
-| {design point 이름} | {선정 approach 이름} | {대안1}, {대안2} | {Driver-KEY1} | DDSN-1 |
-| ... | ... | ... | ... | ... |
+이 문서는 프로젝트의 Architectural Design Decision 전체 목차이며, 각 Design Point 의 상세는 `design-decisions/DP-NN-*.md` 에 수록됩니다.
 
-- **Design Point**: 설계 관심사 이름 (예: "인증 방식", "이벤트 전송 방식")
-- **대안**: 비교된 모든 approach (2 개 이상 필수)
-- **관련 Driver**: normalizedAttributes 의 속성 또는 Requirement key
-- **이슈 ID**: Step 5 에서 `ADSN_NNN` / `DDSN_NNN` 로 치환 (생성 전에는 docId `ADSN-N` / `DDSN-N`)
+Design Point (DP) 는 아키텍처 수준에서 결정이 필요한 관심사 단위이며, 각 DP 마다 2개 이상의 후보 대안을 QA(NFR) 기준으로 평가하여 최종 선정안을 도출합니다.
 
 ---
 
-## 2. 설계 결정 상세
+## 1. Design Point 목록
 
-### ADSN-1: {Design Point 이름}
+| DP | 주제 | Design Objective | designLevel | 선정안 | 상세 |
+|---|---|---|---|---|---|
+| DP-01 | {주제} | {한 줄 요약} | Architectural | {Candidate / Mix 설명} | [DP-01](./design-decisions/DP-01-{slug}.md) |
+| DP-02 | ... | ... | Architectural | ... | [DP-02](./design-decisions/DP-02-{slug}.md) |
+| DP-03 | ... | ... | Detailed | ... | [DP-03](./design-decisions/DP-03-{slug}.md) |
 
-- **관련 Driver / Requirement**: {ID 목록}
-- **검토된 대안**:
-  - (A) {approach A 이름}
-    - **pros**: ...
-    - **cons**: ...
-  - (B) {approach B 이름}
-    - **pros**: ...
-    - **cons**: ...
-  - (C) {approach C 이름} (해당 시)
-    - **pros**: ...
-    - **cons**: ...
-- **선정**: (A)
-- **결정 근거**: Driver {X}(속성={level}) / NFR {Y}(measure={value}) 에 부합하고 ...
-- **트레이드오프**: (B) 는 ... 유리하나 ... 이유로 기각
-- **리스크**: ...
-- **민감도**: ...
-- **구조 다이어그램 (선택)**:
-
-```mermaid
-graph TB
-    A --> B
-```
-
-(Design Point 수준에서 구조가 설명되는 경우 — 예: 레이어 구성, 컴포넌트 배치)
+- **designLevel**: `Architectural` (시스템 전체 영향) / `Detailed` (컴포넌트·모듈 수준)
+- **선정안**: 해당 DP 의 최종 채택 대안. 혼합 채택 시 "Mix of {A}+{C}" 형식
 
 ---
 
-### DDSN-1: {Design Point 이름}
+## 2. Driver 추적성 매트릭스
 
-- **관련 Driver / Requirement**: {ID 목록}
-- **검토된 대안**: (2개 이상)
-- **선정**: ...
-- **결정 근거**: ...
-- **트레이드오프**: ...
-- **리스크**: ...
-- **민감도**: ...
+각 Architecture Driver 가 어느 Design Point 에서 다뤄지는지의 매트릭스. 모든 Driver 는 최소 1개 DP 에 연결되어야 합니다.
 
-(ADSN / DDSN 구분:
-- **ADSN (Architectural)**: 시스템 전체 영향, 변경 비용 큼 — 아키텍처 스타일 수준
-- **DDSN (Detailed)**: 특정 컴포넌트/모듈 수준 결정, 국소적 영향)
-
----
-
-## 3. Driver 추적성 매트릭스
-
-| Driver | 담당 설계 이슈 |
-|--------|----------------|
-| {Driver-KEY1} | ADSN_001, DDSN_003 |
-| {Driver-KEY2} | ADSN_002 |
-| ... | ... |
-
-⚠️ **모든 Driver 는 최소 1개 설계 결정과 연결되어야 함**. 미커버 Driver 있으면 critical.
-
----
-
-## 4. 설계 결정의 리스크 요약
-
-| 설계 ID | 리스크 요약 | 영향 QA |
-|---------|-------------|---------|
-| ADSN_001 | ... | Performance, Availability |
-| DDSN_001 | ... | Security |
+| Driver | 담당 DP | 선정안에서의 반영 |
+|---|---|---|
+| {Driver-KEY} ({QA/CNST 이름}) | DP-01, DP-03 | {어떻게 해당 Driver 를 만족시키는지 한 줄} |
 | ... | ... | ... |
 
-(다음 SATAM 단계에서 각 ADSN 의 risk/sensitivity/mitigation 원문이 구조화됨)
+⚠️ 미커버 Driver 는 validator critical.
+
+---
+
+## 3. QA 가중치 요약
+
+DP별 QA 가중치는 각 DP 파일 내부에 기록. 여기는 프로젝트 전반 경향만 요약.
+
+- **핵심 QA**: {Performance / Security / Availability / ...} — 전체 DP 중 {N}개에서 최고 가중 속성
+- **가중치 차이 관찰**: DP 별로 강조점이 다름 — 상세는 개별 파일 참조
+
+---
+
+## 4. 리스크 요약
+
+각 DP 의 채택된 후보가 가진 주요 리스크의 프로젝트 수준 요약. SATAM 단계에서 구조화됩니다.
+
+| DP | 주요 리스크 | 영향 QA | 대응 방향 |
+|---|---|---|---|
+| DP-01 | ... | Performance, Availability | ... |
+| ... | ... | ... | ... |

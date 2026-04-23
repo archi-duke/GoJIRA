@@ -205,12 +205,18 @@ cat "${PROJECT_ROOT}/.claude/skills/requirement-refine2/templates/requirements.m
 
 draft 를 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 2 시작.
 
+**JSON 필드명은 스키마 그대로 사용**. validator 는 아래 키만 인식 — `desc` / `reqtype` / `related` 등 변형 금지.
+
 ```bash
 cat > /tmp/${CODE}-reqref-draft-input.json <<'JSON'
 {
-  "requirements": [ ...위에서 생성한 FR/NFR/CNST 항목들... ],
-  "featureKeys": [ ...Step 0 Feature 목록의 key 들... ],
-  "existingRequirementKeys": [ ...Step 0 기존 Requirement key 들 (없으면 빈 배열)... ]
+  "requirements": [
+    {"docId":"FR-1","reqType":"FR","summary":"...","description":"{역할}은(는) ... 할 수 있다","relatedFeatures":["GOJIRA3-5"],"mode":"create","existingKey":"","modifyReason":"","deleteReason":""},
+    {"docId":"NFR-1","reqType":"NFR","summary":"...","description":"...","relatedFeatures":["GOJIRA3-5"],"mode":"create","qa":"Performance","source":"...","stimulus":"...","environment":"...","artifact":"...","response":"...","measure":"500ms","responseScenario":"...","measureAuto":false},
+    {"docId":"CNST-1","reqType":"CNST","summary":"...","description":"...","relatedFeatures":[],"mode":"create"}
+  ],
+  "featureKeys": ["GOJIRA3-5","GOJIRA3-6"],
+  "existingRequirementKeys": []
 }
 JSON
 
