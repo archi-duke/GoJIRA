@@ -43,10 +43,13 @@ function parseRST(yamlText) {
 
     if (!current) continue;
 
-    // QA : [GOJIRA-001, GOJIRA-002]
+    // QA : [GOJIRA-001, GOJIRA-002] — bare 형식 공식, ["..", ".."] quoted 도 허용
     const qaMatch = line.match(/^QA\s*:\s*\[([^\]]*)\]/i);
     if (qaMatch) {
-      current.qa = qaMatch[1].split(',').map((s) => s.trim()).filter(Boolean);
+      current.qa = qaMatch[1]
+        .split(',')
+        .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean);
       continue;
     }
 
@@ -104,8 +107,9 @@ function buildDictionaries(designIssues) {
     const risks = parseRST(d.risk);
     const sensitivities = parseRST(d.sensitivity);
     const mitigations = parseRST(d.mitigation);
+    const concerns = parseRST(d.concerns);
 
-    byDesign[d.key] = { risks, sensitivities, mitigations };
+    byDesign[d.key] = { risks, sensitivities, mitigations, concerns };
 
     risks.forEach((r) => {
       riskDict[`${d.key}:${r.id}`] = { ...r, designKey: d.key };
@@ -525,6 +529,41 @@ function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ---------- Concerns 목록 (기타 우려 사항) ---------- */
+
+function ConcernsList({ designIssues }) {
+  const groups = designIssues
+    .map((d) => ({ design: d, items: parseRST(d.concerns || '') }))
+    .filter((g) => g.items.length > 0);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="satam-concerns-list">
+      <div className="satam-concerns-title">기타 우려 사항 (Concerns)</div>
+      {groups.map((g) => (
+        <div key={g.design.key} className="satam-concerns-group">
+          <div className="satam-concerns-design">
+            <span className="satam-concerns-subkey">{g.design.subkey}</span>
+            <span className="satam-concerns-summary">{g.design.summary}</span>
+          </div>
+          <ul className="satam-concerns-items">
+            {g.items.map((it) => (
+              <li key={it.id}>
+                <span className="satam-concerns-id">{it.id}</span>
+                {it.qa && it.qa.length > 0 && (
+                  <span className="satam-concerns-qa">[{it.qa.join(', ')}]</span>
+                )}
+                <span className="satam-concerns-desc">{it.description}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1072,6 +1111,9 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
 
         {/* Effects 상세 테이블 */}
         <EffectsTable designIssues={designIssues} dicts={dicts} resolvedRiskIds={globalResolvedRiskIds} />
+
+        {/* 기타 우려 사항 목록 */}
+        <ConcernsList designIssues={designIssues} />
       </div>
 
       {/* 상태바 */}

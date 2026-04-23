@@ -115,6 +115,7 @@ for i in $(seq 0 $((COUNT - 1))); do
       risk:              .risk,
       sensitivity:       .sensitivity,
       mitigation:        .mitigation,
+      concerns:          .concerns,
       adiagram:          .adiagram,
       bdiagram:          .bdiagram
     } | with_entries(select(.value != null and .value != ""))' <<< "$ITEM")

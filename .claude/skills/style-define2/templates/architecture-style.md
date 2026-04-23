@@ -1,129 +1,66 @@
-# 시스템 아키텍처 스타일
+# 시스템 스타일 결정 (Integrated Architecture Style)
 
-## 1. 추천 요약
+## 개요
 
-| 구분 | 스타일 | Scope | 점수 | 핵심 근거(Driver) |
-|------|--------|-------|------|-------------------|
-| Primary | {style-id} | {scope} | {score} | {driver=level, ...} |
-| Primary | {style-id} | {scope} | {score} | ... |
-| Secondary | {style-id} | {scope} | {score} | ... |
-| Supporting | {style-id} | {scope} | {score} | ... |
+프로젝트의 시스템 스타일은 **2~3개의 통합 스타일 후보** (Primary + Secondary + Supporting 조합) 를 QA(NFR) 가중 평가로 비교하여 최종 선정합니다. 개별 스타일은 ADSN 이슈로 만들지 않고, **각 조합 후보를 ADSN 이슈로** 만듭니다.
 
-⚠️ Primary 는 scope 당 1개 원칙. 엔진(`style-score.py`) 순위는 뒤집지 말 것.
+각 후보 조합의 상세 비교·다이어그램·점수는 `architecture-style/ST-NN-*.md` 파일에 수록되며, 이 index 는 요약·결정 근거·Driver 추적성을 담당합니다.
 
 ---
 
-## 2. 정규화된 시스템 속성
+## 1. 후보 조합 스타일
 
-| 속성 | 값 | 비고(Driver 근거) |
-|------|-----|-------------------|
-| {attribute} | {level} | {Driver key / 출처 / 의미} |
+| 후보 | Primary | Secondary | Supporting | 총점 | 선정 | 상세 |
+|---|---|---|---|---|---|---|
+| ST-01 | {스타일} | {스타일} | {스타일(들)} | X.XX |  | [ST-01](./architecture-style/ST-01-{slug}.md) |
+| ST-02 | {스타일} | {스타일} | {스타일(들)} | X.XX | ✓ | [ST-02](./architecture-style/ST-02-{slug}.md) |
+| ST-03 | {스타일} | {스타일} | {스타일(들)} | X.XX |  | [ST-03](./architecture-style/ST-03-{slug}.md) |
+
+- **총점**: QA 가중 평균 (0.0 ~ 5.0). 가중치는 2 섹션 참조
+- **선정**: 최종 선정된 후보. 혼합 채택 시 복수 ✓
+
+---
+
+## 2. QA 가중치
+
+이 스타일 결정 전반에서 후보 비교에 사용된 가중치.
+
+| QA | Weight | 가중치 근거 |
+|---|---|---|
+| {QA} | 0.XX | {왜 이 QA 가 이 비중인지} |
+| **합계** | **1.00** | |
+
+---
+
+## 3. 최종 선정
+
+**선정안**: ST-NN — {조합 이름}
+**채택 ADSN 키**: {이슈 키}
+**선정 근거**:
+- 총점 기준 최고 (X.XX)
+- Driver {KEY} ({QA 이름}) 에 대해 {어떻게 만족시키는지}
+- 다른 후보 대비 {결정적 차별 포인트}
+
+**(혼합 채택 시)**:
+- Candidate X 의 {X 측면}
+- Candidate Y 의 {Y 측면}
+- 통합 방식: ...
+
+---
+
+## 4. Driver 추적성 매트릭스
+
+선정된 스타일 조합이 각 Architecture Driver 를 어떻게 충족시키는지.
+
+| Driver | 담당 스타일(조합 내) | 역할 |
+|---|---|---|
+| {Driver-KEY} ({QA/CNST 이름}) | {Primary 의 스타일명} | {어떻게 이 Driver 를 만족시키는지} |
 | ... | ... | ... |
 
-`archSettings.normalizedAttributes` 에서 읽어 그대로 표로 정리. 모든 속성이 적어도 한 번은 3번 섹션에 등장해야 Driver 커버리지 pass.
-
 ---
 
-## 3. 스타일별 선정 근거
+## 5. 미채택 후보의 트레이드오프
 
-### 3.1 {Primary-A-Name} ({style-id})
-
-#### 구조 (정적 관점)
-
-```mermaid
-graph TB
-    Client[클라이언트]
-    API[API 게이트웨이]
-    SvcA[서비스 A]
-    SvcB[서비스 B]
-    DB[(DB)]
-    Client --> API
-    API --> SvcA
-    API --> SvcB
-    SvcA --> DB
-    SvcB --> DB
-```
-
-(스타일의 컴포넌트/레이어 배치를 다이어그램으로 — ADSN adiagram 에 해당)
-
-#### 동작 (동적 관점, 생략 가능)
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant API
-    participant Svc as Service
-    U->>API: 요청
-    API->>Svc: 라우팅
-    Svc-->>API: 응답
-    API-->>U: 응답
-```
-
-(스타일 고유의 런타임 흐름이 있는 경우 — ADSN bdiagram 에 해당. 세부 설계에서 구체화되는 스타일은 생략)
-
-#### 선정 근거
-
-- **적합 신호(fit_signals)**: {attr}={level} → +{delta} / ...
-- **품질속성 영향**: Performance positive / Scalability positive / ...
-- **트레이드오프**:
-  - 장점 (pros): ...
-  - 단점 (cons): ...
-- **전제조건**: technical / design / organizational
-- **연결된 Driver**: [{attr=level, ...}]
-- **엔진 score**: {score}
-
----
-
-### 3.2 {Primary-B or Secondary-Name} ({style-id})
-
-(위와 동일 구조로 반복)
-
----
-
-## 4. 조합 설계
-
-### 4.1 통합 구조 (정적 관점)
-
-```mermaid
-graph TB
-    subgraph "Primary-A"
-        A1[...]
-    end
-    subgraph "Primary-B"
-        B1[...]
-    end
-    A1 --> B1
-```
-
-(선정된 스타일들이 시스템 내에서 어떻게 조합·배치되는지 전체 구조)
-
-### 4.2 통합 동작 (동적 관점)
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as PrimaryA 컴포넌트
-    participant B as PrimaryB 컴포넌트
-    C->>A: 요청
-    A->>B: 이벤트
-    B-->>A: 결과
-    A-->>C: 응답
-```
-
-(조합된 스타일 간 런타임 상호작용 흐름)
-
-### 4.3 조합 근거
-
-- **Primary 간 조합 관계**: {style-A} combines_well_with {style-B} — bonus {+delta}
-- **Primary + Supporting 역할 분담**: {Supporting} 이 infrastructure scope 에서 보조
-- **제외 스타일 이유**: {excluded-style} — avoid_signals 매치 / 전제조건 미충족 등
-- **엔진 combinations_applied**: (combine bonus / conflict penalty 내역)
-
----
-
-## 5. 설계 결정에 미치는 영향
-
-- **ADSN 설계 영향**: ...
-- **DDSN 세부 설계 시 고려사항**: ...
-- **NFR 에 대한 기여**: 각 Primary 가 Performance/Scalability/... 에 끼치는 영향
-- **잠재적 Risk / Sensitivity point**: SATAM 단계에서 재검토 대상
+| 후보 | 기각 이유 | 어떤 조건에서 재검토 가능한지 |
+|---|---|---|
+| ST-NN | ... | ... |

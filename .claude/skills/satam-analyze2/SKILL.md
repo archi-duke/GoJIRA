@@ -108,42 +108,113 @@ jq -n --argjson a "$ADSN_JSON" --argjson q "$QA_KEYS" '{adsns:$a, qaKeys:$q}' \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "satam" "context"
 ```
 
+### 기존 전역 ID 풀 파악 (ID 재사용·중복 방지)
+
+v2 규칙상 R/S/M 은 프로젝트 전역 유일. 기존 ADSN 의 risk/sensitivity/mitigation 필드에서 이미 쓰인 ID 를 파악해 둔다. Step 1 에서 같은 내용이면 재사용, 새 항목이면 최대 번호 + 1:
+
+```bash
+# risk/sensitivity/mitigation 원문에서 "- ID : R{N}" 패턴 추출
+python3 <<'PY'
+import json, re, os, subprocess
+ctx = subprocess.run(
+    ["bash", os.environ["PROJECT_ROOT"] + "/.claude/skills/_scripts/draft-io.sh",
+     "load", os.environ["CODE"], "satam", "context"],
+    capture_output=True, text=True).stdout
+d = json.loads(ctx) if ctx.strip() else {}
+ids = {"R": set(), "S": set(), "M": set()}
+for adsn in d.get("adsns", {}).values():
+    for field, prefix in [("risk","R"), ("sensitivity","S"), ("mitigation","M")]:
+        for m in re.findall(r"^-\s*ID\s*:\s*([RSM]\d+)", adsn.get(field,"") or "", re.M):
+            if m[0] == prefix:
+                ids[prefix].add(m)
+print("기존 Risk IDs:", sorted(ids["R"]))
+print("기존 Sensitivity IDs:", sorted(ids["S"]))
+print("기존 Mitigation IDs:", sorted(ids["M"]))
+def max_num(s): return max([int(x[1:]) for x in s], default=0)
+print(f"신규 할당 시작: R{max_num(ids['R'])+1}, S{max_num(ids['S'])+1}, M{max_num(ids['M'])+1}")
+PY
+```
+
+이 결과는 Step 1 초안 작성 시 참조. 기존 풀에 없는 새 항목에 대해서만 새 번호 발급.
+
 ---
 
 ## Step 1 — 초안 생성 (iter 1)
 
-각 ADSN 별로 아래를 수행해 `mapping[<ADSN_KEY>]` 엔트리 생성:
+### 1.1 3-way 분류 기준 (v2, 현실적 엄격화)
 
-1. `risk` 원문을 의미 단위 분해 → Risk 리스트 (id: R1, R2, ...)
-2. `sensitivity` 원문을 분해 → Sensitivity 리스트 (id: S1, S2, ...)
-3. `tradeoffs`/`mitigation` 원문을 분해 → Trade-off 리스트 (id: M1, M2, ...)
-4. 각 항목에 `qa` 배열 (영향 받는 QA 이슈 key) 부여
-   - `linkedQAs` 우선
-   - 부족 시 QA 참조 목록에서 summary 의미 매칭
-   - 억지 매핑 금지 — 불명확하면 `qa: []`
-5. Trade-off 항목에 `counterRisk: ["R<id>:<QA_KEY>", ...]` 필수 (같은 ADSN 내 Risk ID)
+이전 버전은 "원문에 risk 라는 단어가 있으면 전부 risks 로" 분류해 거의 모든 ADSN 에 risk·sensitivity 가 채워지는 문제가 있었습니다. v2 는 **현실 설계 맥락 기반 엄격 분류** 를 적용합니다.
 
-**ID 규칙**: ADSN 내부에서만 유일 — 다른 ADSN 과 번호 공유 금지.
+| 카테고리 | 기준 | 예시 |
+|---|---|---|
+| **Risk (R)** | 현 수준 설계에서 **명확히 문제가 발생할 수밖에 없는** 사항. 구체적 impact·재현 조건이 이미 드러남. 정량화 가능하면 가치 높음 | "단일 DB 병목으로 초당 100 TPS 이상 처리 불가", "외부 SSO 장애 시 전 서비스 중단" |
+| **Sensitivity (S)** | 현재는 허용 수준이지만 **조건이 바뀌면 Risk 로 악화** 될 사항. "~ 초과 시 / ~ 증가 시 / ~ 변화 시" 표현이 자연스러운 것 | "사용자 10만 명 초과 시 캐시 병목", "지역 확장 시 지연 증가" |
+| **Concerns (C, 기타 우려)** | 관찰·검토 필요. 가능성 수준, 정량화 어렵거나 추상적, 완화 여부 불명확 | "팀의 Saga 패턴 숙련도 부족", "추후 문서화 필요", "도입한 기술의 커뮤니티 성숙도" |
+| **Mitigation (M)** | tradeoffs/mitigation 원문에서 **실제 Risk 에 대한 대응** 으로 제시된 것. Counter Risk 필수 |
+
+**분류 지침**:
+- "일반적으로 ~할 수 있음", "~할 가능성" 같이 확률·추측 수준 → **Risk 아님**. Concerns 나 제외
+- 원문에 풀어써진 "단점" 중 구체적 impact 없는 것은 Concerns 로
+- Risk / Sensitivity 가 **0건이어도 정상** (엄격 기준 충족 못하면 빈 배열)
+- Concerns 는 선택 사항 — 적을 필요 없으면 빈 배열
+
+**완화된 Risk 제외 규칙 (중요)**:
+같은 셀(동일 QA) 에서 Risk 와 해당 Risk 를 대응하는 Mitigation 이 **동시에 존재** 하면, 그 Risk 는 **이미 완화** 된 상태입니다. Risk 도 Mitigation 도 **둘 다 미기재**.
+- 구체 판정: Risk `Ri` 의 `qa` 집합이 `{Qa, Qb, ...}` 일 때, 원문 tradeoffs/mitigation 에 `Ri:Qa`, `Ri:Qb`... 를 **모두** 커버하는 Mitigation 이 있으면 → `Ri` 와 그 Mitigation **둘 다 버림**
+- 부분 커버 (일부 QA 만 대응) → Risk 는 커버되지 않은 QA 에 한해 남김, Mitigation 은 남김
+- 여러 Risk 를 대응하는 Mitigation 은 모든 대응 Risk 가 전부 다른 Mitigation 들로 이미 제거될 때만 함께 제거. 하나라도 남아있으면 Mitigation 도 유지
+- 제거된 쌍은 Concerns 로도 옮기지 않음 — 분석 노이즈 최소화가 목적
+
+### 1.2 매핑 엔트리 생성 절차
+
+각 ADSN 별로 `mapping[<ADSN_KEY>]` 엔트리 생성:
+
+1. `risk` 원문 의미 단위 분해 → 위 기준에 따라 **Risk 아니면 Concerns 로 재분류**. 엄격하게 통과한 것만 Risk 리스트 (id: R1, R2, ...)
+2. `sensitivity` 원문 분해 → Sensitivity 기준 부합만 S 리스트 (id: S1, S2, ...), 애매하면 Concerns 로
+3. `tradeoffs`/`mitigation` 원문 분해 → Mitigation 리스트 (id: M1, M2, ...)
+4. 위에서 분류 탈락한 관찰 사항들 → Concerns 리스트 (id: C1, C2, ...)
+5. 각 항목에 `qa` 배열 (영향 받는 QA 이슈 key) — Concerns 는 빈 배열 허용
+   - `linkedQAs` 우선, 부족 시 QA 참조 목록 summary 매칭. 억지 매핑 금지
+6. Mitigation 항목에 `counterRisk: ["R<id>:<QA_KEY>", ...]` 필수 (같은 ADSN 내 Risk ID)
+
+**ID 규칙 (v2 변경)**:
+- **Risk (`R`) / Sensitivity (`S`) / Mitigation (`M`) — 프로젝트 전체 Design 기준 전역 유일**
+  - 의미상 동일한 항목이 다른 ADSN 에 이미 있으면 → **같은 ID 재사용** (번호 중복 부여 금지)
+  - 새 항목은 프로젝트 전역 기존 최대 번호 + 1 로 할당. 예: 기존 R1~R5 있으면 신규는 R6
+  - Step 0 데이터 수집에서 기존 ADSN 의 원문으로부터 이미 쓰인 ID 풀 확보 필수
+- **Concerns (`C`)** — ADSN 국소 식별자. 같은 ADSN 내부 유일이면 충분. 다른 ADSN 과 번호 공유 무방
+
 **키 규칙**: 모든 키(ADSN key, qa[] 원소)는 **이슈 key** (예: `GOJIRA3-23`). subkey 금지.
 **빈 원문**: 해당 리스트는 `[]`.
 
-**JSON 필드명은 스키마 그대로 사용**. validator 는 **복수형** 키만 인식 — `risk` / `sensitivity` (단수) 금지. 각 항목은 `{id, description, qa}` 필수, Trade-off 는 + `counterRisk`.
+동일 ID 재사용 시 description 은 기존 것과 **의미상 같아야** 함. 문구가 완전히 동일할 필요는 없지만 같은 사실·상황을 가리켜야 함 — 상이하면 별도 신규 ID.
+
+### 1.3 JSON 스키마
+
+**JSON 필드명은 스키마 그대로 사용**. validator 는 **복수형 + concerns** 키만 인식. 각 항목은 `{id, description, qa}` 필수, Mitigation 은 + `counterRisk`.
 
 ```json
 {
   "GOJIRA3-23": {
     "risks": [
-      {"id":"R1","description":"...","qa":["GOJIRA3-15"]}
+      {"id":"R1","description":"현 단일 DB 구성으로 초당 500 TPS 초과 처리 불가","qa":["GOJIRA3-15"]}
     ],
     "sensitivities": [
-      {"id":"S1","description":"...","qa":["GOJIRA3-15"]}
+      {"id":"S1","description":"사용자 10만 돌파 시 캐시 병목 가능","qa":["GOJIRA3-15"]}
     ],
     "tradeoffs": [
-      {"id":"M1","description":"...","qa":["GOJIRA3-15"],"counterRisk":["R1:GOJIRA3-15"]}
+      {"id":"M1","description":"읽기 전용 레플리카 추가로 부하 분산","qa":["GOJIRA3-15"],"counterRisk":["R1:GOJIRA3-15"]}
+    ],
+    "concerns": [
+      {"id":"C1","description":"Saga 패턴 팀 숙련도 — 사전 교육 필요","qa":[]},
+      {"id":"C2","description":"선정 메시지 브로커의 커뮤니티 버전 장기 지원 여부 모니터링","qa":[]}
     ]
   }
 }
 ```
+
+- `concerns` 는 optional. 적을 게 없으면 `"concerns": []` 또는 필드 생략 가능
+- `concerns[].qa` 는 빈 배열 허용 (특정 QA 에 묶이지 않는 관찰)
 
 ### Step 1 종료 — draft flush (필수)
 
@@ -245,6 +316,19 @@ Mitigation (Counter Risk 라인 추가):
   Description : ...
 ```
 
+Concerns (QA 선택, Counter Risk 없음):
+```
+- ID : C1
+  Description : 팀의 Saga 패턴 숙련도 부족 — 사전 교육 필요
+- ID : C2
+  QA : [GOJIRA3-123]
+  Description : 특정 QA 에 묶이는 관찰이면 QA 라인 추가 가능
+```
+
+**⚠ 포맷 주의 (이전 실측 버그):**
+- `QA : [...]` 는 **bare 키 + 콤마 + 공백** 형식. **따옴표로 감싸지 말 것** (`["TEST-61","TEST-55"]` ❌ → `[TEST-61, TEST-55]` ✅)
+- Python 에서 생성 시 `json.dumps(qa_list)` 금지. `"[" + ", ".join(qa_list) + "]"` 로 직접 조립
+- `Counter Risk` 는 **예외적으로 따옴표** 필요 (`["R1:GOJIRA3-123"]`) — 콜론 포함 문자열이라 구분자 혼동 방지
 - 항목 없는 리스트는 해당 필드를 빈 문자열 ""
 - Description 은 한 줄로 (개행 공백 치환)
 
@@ -255,9 +339,12 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
   -d "$(jq -n \
     --arg p "$CODE" --arg k "$ADSN_KEY" --arg u "$USER" \
-    --arg r "$RISK_YAML" --arg s "$SENS_YAML" --arg m "$MITI_YAML" \
-    '{prjID:$p, key:$k, user:$u, data:{risk:$r, sensitivity:$s, mitigation:$m}}')"
+    --arg r "$RISK_YAML" --arg s "$SENS_YAML" \
+    --arg m "$MITI_YAML" --arg c "$CONCERNS_YAML" \
+    '{prjID:$p, key:$k, user:$u, data:{risk:$r, sensitivity:$s, mitigation:$m, concerns:$c}}')"
 ```
+
+`concerns` 는 신규 필드. 값 없으면 빈 문자열 "" 로 PUT. 서버는 Mongo 에 그대로 저장 (schema-free).
 
 ### 5.3 완료 플래그 영속화 — `archSettings.satamDone=true`
 
