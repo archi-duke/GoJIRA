@@ -56,30 +56,43 @@
 
 ### 4.1 Context Diagram
 
-```mermaid
-graph LR
-    Actor1[Actor 이름]:::actor --> System[시스템명]
-    System --> ExtSys[외부 시스템]
-    classDef actor fill:#fef3c7,stroke:#f59e0b
+```plantuml
+@startuml
+skinparam actorStyle stick
+left to right direction
+
+actor "Actor 이름" as Actor1
+rectangle "시스템명" as System
+rectangle "외부 시스템" as ExtSys
+
+Actor1 --> System
+System --> ExtSys
+@enduml
 ```
 
 ### 4.2 Use Case Diagram
 
-⚠️ **모든 Use Case 포함** — Feature 선정 여부와 무관. Feature 는 `:::feature` 스타일로 구분.
+⚠️ **모든 Use Case 포함** — Feature 선정 여부와 무관. Feature 와 비Feature UC 모두 `usecase "..." as UC_NNN` 으로 선언.
 
-```mermaid
-graph TB
-    Actor1[Actor1]:::actor
-    Actor2[Actor2]:::actor
-    UC001((UC 제목1)):::feature
-    UC002((UC 제목2)):::feature
-    UC003((UC 제목3))
-    Actor1 --> UC001
-    Actor1 --> UC002
-    UC002 -.->|include| UC003
-    Actor2 --> UC002
-    classDef actor fill:#fef3c7,stroke:#f59e0b
-    classDef feature fill:#dbeafe,stroke:#3b82f6
+```plantuml
+@startuml
+skinparam actorStyle stick
+left to right direction
+
+actor Actor1
+actor Actor2
+
+rectangle "시스템" {
+  usecase "UC 제목1" as UC001
+  usecase "UC 제목2" as UC002
+  usecase "UC 제목3" as UC003
+}
+
+Actor1 --> UC001
+Actor1 --> UC002
+Actor2 --> UC002
+UC002 ..> UC003 : <<include>>
+@enduml
 ```
 
 ---
@@ -108,16 +121,17 @@ graph TB
 
 #### Sequence Diagram
 
-```mermaid
-sequenceDiagram
-    participant User as Actor 이름
-    participant System as 시스템명
-    participant Ext as 외부 시스템
+```plantuml
+@startuml
+actor "Actor 이름" as User
+participant "시스템명" as System
+participant "외부 시스템" as Ext
 
-    User->>System: 요청 메시지
-    System->>Ext: 처리 위임
-    Ext-->>System: 결과 반환
-    System-->>User: 응답 메시지
+User -> System: 요청 메시지
+System -> Ext: 처리 위임
+Ext --> System: 결과 반환
+System --> User: 응답 메시지
+@enduml
 ```
 
 ---
@@ -136,13 +150,14 @@ sequenceDiagram
 
 #### Sequence Diagram
 
-```mermaid
-sequenceDiagram
-    participant User as Actor 이름
-    participant System as 시스템명
+```plantuml
+@startuml
+actor "Actor 이름" as User
+participant "시스템명" as System
 
-    User->>System: 요청
-    System-->>User: 응답
+User -> System: 요청
+System --> User: 응답
+@enduml
 ```
 
 (... 모든 Feature 에 대해 위 형식 반복 ...)
@@ -163,12 +178,13 @@ sequenceDiagram
 ---
 
 ### 문서 작성 규칙
-- **코드 블록 닫기 후 반드시 빈 줄 1개** — ` ``` ` 바로 뒤에 텍스트 이어붙이기 금지 (Mermaid parse error 원인)
+- **코드 블록 닫기 후 반드시 빈 줄 1개** — ` ``` ` 바로 뒤에 텍스트 이어붙이기 금지 (PlantUML 렌더 실패 원인)
 
-### Mermaid 작성 규칙
-- Use Case Diagram: `graph TB` 사용 (**classDiagram 금지**)
-- Feature UC 에 `:::feature` 스타일 적용, 비Feature UC 는 기본 스타일
-- Sequence Diagram 다중 수신자: `A-->>B, C: msg` 금지 → 개별 2줄로 분리
-- participant 에 반드시 `as` 키워드: `participant U2 as 후공 사용자` (O) / `participant U2 후공 사용자` (X)
-- 노드 ID 에 공백/한글 직접 사용 금지: `User1[게임 이용자]` (O) / `게임 이용자` (X)
-- 외부 이미지 참조 금지
+### PlantUML 작성 규칙
+- 모든 블록은 ` ```plantuml ` ... ` ``` ` 로 감싸고 내부는 `@startuml` ~ `@enduml` 쌍 필수
+- Use Case Diagram: `actor` + `usecase "..." as UC_NNN` + `rectangle "..."` 묶음 (**절대 `class` 다이어그램 금지**)
+- 기본 actor 스타일: `skinparam actorStyle stick` (UML 표준 stick figure)
+- 레이아웃: `left to right direction` (use case / context 권장)
+- include/extend 는 점선 화살표: `UC001 ..> UC002 : <<include>>`
+- Sequence Diagram: `participant "이름" as 별칭` 또는 공백 없는 별칭 사용. 공백 있는 이름은 반드시 따옴표
+- 외부 이미지 참조(`![...](...png)`) 금지 — PlantUML 인라인만 허용

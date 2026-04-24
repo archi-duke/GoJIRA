@@ -30,8 +30,8 @@ stdin JSON:
       "qaScores": {"Performance": 4, "Maintainability": 4, "Security": 3},
       "weightedScore": 3.7,
       "eval": "...",
-      "structuralDiagram": "```mermaid\\ngraph TB\\n...\\n```",
-      "dynamicDiagram": "```mermaid\\nsequenceDiagram\\n...\\n```",
+      "structuralDiagram": "```plantuml\\n@startuml\\n...\\n@enduml\\n```",
+      "dynamicDiagram": "```plantuml\\n@startuml\\n...\\n@enduml\\n```",
       "chosen": false,
       "decisionNote": ""
     }
@@ -68,20 +68,16 @@ CANDIDATE_REQUIRED = {
 }
 APPROACH_DIAGRAM_FIELDS = {"structuralDiagram", "dynamicDiagram"}
 
+import plantuml_util as pu
+
+
 ST_ID_RE = re.compile(r"^ADSN-\d+$")
-MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
 
 ROLE_KEYS = ["primary", "secondary", "supporting"]
 
 
 def _has_text(v) -> bool:
     return isinstance(v, str) and bool(v.strip())
-
-
-def _mermaid_has_block(text: str) -> bool:
-    if not isinstance(text, str):
-        return False
-    return bool(MERMAID_BLOCK_RE.search(text))
 
 
 def _weights_sum(weights_map: dict) -> float:
@@ -185,12 +181,17 @@ def validate(payload: dict) -> dict:
                         critical.append({"type": "chosen_without_note", "docId": doc_id,
                                          "detail": "chosen=true 인데 decisionNote 비어있음"})
 
-        # Step 1.5 이후: mermaid 필수
+        # Step 1.5 이후: plantuml 필수 + @startuml/@enduml 쌍
         for df in APPROACH_DIAGRAM_FIELDS:
             diag = c.get(df, "")
-            if not isinstance(diag, str) or not _mermaid_has_block(diag):
+            if not isinstance(diag, str) or not pu.has_block(diag):
                 critical.append({"type": "missing_diagram", "docId": doc_id,
-                                 "detail": f"{df} 에 ```mermaid 블록 없음 (Step 1.5 미수행?)"})
+                                 "detail": f"{df} 에 ```plantuml 블록 없음 (Step 1.5 미수행?)"})
+                continue
+            blocks = pu.find_blocks(diag)
+            if any(not pu.has_uml_pair(b) for b in blocks):
+                critical.append({"type": "plantuml_missing_pair", "docId": doc_id,
+                                 "detail": f"{df} 의 plantuml 블록에 @startuml/@enduml 쌍 누락"})
 
     if candidates and chosen_count == 0:
         critical.append({"type": "no_chosen_candidate", "docId": "(global)",
@@ -359,10 +360,10 @@ def _validate_candidate_files(candidates, cand_files, critical, suggestions):
                 critical.append({"type": "candidate_file_missing_section", "docId": did,
                                  "detail": f"{did}: '{label}' 섹션 누락"})
 
-        mermaid_in_body = MERMAID_BLOCK_RE.findall(body)
-        if len(mermaid_in_body) < 2:
+        plantuml_in_body = pu.find_blocks(body)
+        if len(plantuml_in_body) < 2:
             suggestions.append({"type": "candidate_file_diagram_count_low", "docId": did,
-                                "detail": f"{did}: mermaid 블록 {len(mermaid_in_body)} / 예상 2 (정적+동적)"})
+                                "detail": f"{did}: plantuml 블록 {len(plantuml_in_body)} / 예상 2 (정적+동적)"})
 
 
 def main() -> int:

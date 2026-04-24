@@ -9,7 +9,7 @@ allowed-tools: Bash, Read
 - **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
 - reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요. 뷰 통합은 템플릿 섹션별로 짧게
 - Step 1 완료 시 **반드시 `draft-io.sh save`** — document + adsnSubkeys + ddsnSubkeys + chosenStyles + viewsIncluded 를 JSON 으로 파일에 flush 후 generation 종료
-- Step 2 자가검증은 **반드시 `validate-integrate-doc.py` 호출** — 에이전트가 subkey 참조/Mermaid/섹션 누락 직접 계산 금지
+- Step 2 자가검증은 **반드시 `validate-integrate-doc.py` 호출** — 에이전트가 subkey 참조/PlantUML 블록/섹션 누락 직접 계산 금지
 - critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-integrate-doc.py` 재검증. 한 generation 당 1 iter
 - assistant 출력에는 document 원문을 그대로 뱉지 말 것. "저장 완료 / critical N건" 한두 줄만. 전체 본문은 파일로만 유지
 
@@ -98,23 +98,57 @@ ADSN/DDSN 이 0건이거나 `chosenStyles` 가 비었으면 **중단** 하고 "d
 - 프로세스 뷰 통신 ↔ ADSN 통신 패턴 정합
 - 충돌 명시 + 해결 방향
 
-### 1.4 Mermaid 다이어그램 (인라인 필수)
-각 관점 1개 이상:
-- Logical → `graph TB`
-- Process → `sequenceDiagram`
-- Deployment → `graph LR`
-- Development → `graph TB` 기반 **패키지 다이어그램** (각 패키지를 `subgraph` 로 그룹핑, 화살표로 의존 방향 표시). ASCII 폴더 트리 금지. 의존 방향이 스타일(Layered/Hexagonal 등) 의 규칙과 맞는지 검토
+### 1.4 PlantUML 다이어그램 (인라인 필수)
+각 관점 1개 이상. 모든 블록은 ` ```plantuml ... ``` ` 코드펜스 + `@startuml` / `@enduml` 쌍 필수.
+- **Logical View** — PlantUML **component 다이어그램** (`component [Name]` + 화살표)
+- **Process View** — PlantUML **sequence 다이어그램** (`participant` / `actor` + 화살표)
+- **Deployment View** — PlantUML **deployment 다이어그램** (`node` / `artifact` / `cloud` / `database` / `frame`)
+- **Development View** — PlantUML **package 다이어그램** (`package "이름" { [Component] }` 중첩 + 화살표로 의존 방향). ASCII 폴더 트리 금지. 의존 방향이 스타일(Layered/Hexagonal 등) 의 규칙과 맞는지 검토
 
-**금지**: `classDiagram` 으로 컴포넌트/배포 표현, 외부 이미지(`![...](...png)`), Mermaid 노드 ID 에 공백/한글 직접 사용.
+**금지**: `class` / `interface` / `abstract` / `enum` 다이어그램으로 컴포넌트/배포/개발 뷰 표현, 외부 이미지(`![...](...png)`), `@startuml` / `@enduml` 쌍 누락.
 
-예시:
+예시 (Logical — component):
 ````
-```mermaid
-graph TB
-    API[API Gateway]
-    SVC[Service]
-    DB[(Database)]
-    API --> SVC --> DB
+```plantuml
+@startuml
+component "API Gateway" as API
+component "Service" as SVC
+database "Database" as DB
+API --> SVC
+SVC --> DB
+@enduml
+```
+````
+
+예시 (Deployment — node/artifact/database):
+````
+```plantuml
+@startuml
+node "App Server" as App {
+  artifact "App.jar"
+}
+database "PostgreSQL" as DB
+App --> DB
+@enduml
+```
+````
+
+예시 (Development — package):
+````
+```plantuml
+@startuml
+package "domain" {
+  [Game]
+  [Matching]
+}
+package "infra" {
+  [Redis]
+  [DB]
+}
+[Game] --> [Redis]
+[Matching] --> [Redis]
+[Game] --> [DB]
+@enduml
 ```
 ````
 
@@ -124,7 +158,7 @@ graph TB
 
 ### 1.6 문서 구조 (architecture-integrated.md)
 
-**반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 1~7 과 Mermaid 블록 위치 준수:
+**반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 1~7 과 PlantUML 블록 위치 준수:
 
 ```bash
 cat "${PROJECT_ROOT}/.claude/skills/design-integrate2/templates/architecture-integrated.md"
@@ -132,7 +166,7 @@ cat "${PROJECT_ROOT}/.claude/skills/design-integrate2/templates/architecture-int
 
 - 섹션 1 개요 / 2 Logical View / 3 Process View / 4~5 (선택) Deployment·Development / 6 관점 간 일관성 / 7 SATAM 후속 포인트
 - 모든 ADSN/DDSN 이 최소 1 개 관점에 반영되어야 함 (섹션 6 체크표에서 확인)
-- 각 View 의 Mermaid 블록은 인라인 필수 (외부 이미지 참조 금지)
+- 각 View 의 PlantUML 블록은 인라인 필수 (외부 이미지 참조 금지)
 
 ### Step 1 종료 — draft flush (필수)
 
@@ -163,7 +197,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "integ
 
 ## Step 2 — 자가검증 (스크립트 기반)
 
-**반드시 `validate-integrate-doc.py` 호출**. 에이전트가 직접 참조/섹션/Mermaid 계산 금지.
+**반드시 `validate-integrate-doc.py` 호출**. 에이전트가 직접 참조/섹션/PlantUML 블록 계산 금지.
 
 ```bash
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "integrate" "draft" \
@@ -180,7 +214,7 @@ cat /tmp/${CODE}-integrate-validation.json
   "score_effective": number,
   "critical": [{"type":"...","detail":"..."}],
   "suggestions": [...],
-  "stats": {"views":N,"mermaidBlocks":M,"adsnReferenced":A,"ddsnReferenced":D,"stylesReferenced":S,"sectionsFound":K,"viewsInDoc":[...]}
+  "stats": {"views":N,"plantumlBlocks":M,"plantumlBadPair":X,"adsnReferenced":A,"ddsnReferenced":D,"stylesReferenced":S,"sectionsFound":K,"viewsInDoc":[...]}
 }
 ```
 
@@ -189,9 +223,9 @@ cat /tmp/${CODE}-integrate-validation.json
 - `style_not_referenced` — 선정 스타일의 id/name 이 본문 어디에도 없음
 - `insufficient_views` — viewsIncluded < 2
 - `views_mismatch` — viewsIncluded 에 주장된 뷰가 본문 헤딩에 없음
-- `insufficient_mermaid` — Mermaid 블록 < 2
-- `mermaid_bad_header` — 시작 라인이 표준 헤더 아님 (graph/flowchart/sequenceDiagram/...)
-- `class_diagram_for_component` — 컴포넌트/배포/프로세스 뷰 표현에 `classDiagram` 사용
+- `insufficient_diagrams` — PlantUML 블록 < 2
+- `plantuml_missing_pair` — 블록에 `@startuml` / `@enduml` 쌍 누락
+- `class_diagram_for_component` — 컴포넌트/배포/프로세스/개발 뷰 표현에 `class` 다이어그램 사용
 - `external_image` — `![...](...png|jpg|svg)` 외부 이미지 참조
 - `missing_section` — 섹션 1/2/3/6/7 헤딩 누락
 
@@ -267,7 +301,7 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 
 - 관점: logical, process, deployment (N개)
 - 반영 ADSN: A건 / DDSN: D건 (subkey 본문 참조 기준)
-- Mermaid 블록: M건 (Logical graph TB / Process sequenceDiagram / Deployment graph LR ...)
+- PlantUML 블록: M건 (Logical component / Process sequence / Deployment node·artifact / Development package ...)
 - 문서 저장: architecture/architecture-integrated.md
 
 ### 관점 간 일관성 요약
@@ -283,7 +317,7 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 ## 주의
 - 모든 curl 에 `X-User-Id: ${USER}` 헤더 필수
 - architecture-integrated.md 는 UTF-8 plain markdown (Platform-API 가 서버측에서 base64 처리)
-- Mermaid 블록은 반드시 ```` ```mermaid ... ``` ```` 로 감싸기
+- PlantUML 블록은 반드시 ```` ```plantuml ... ``` ```` 로 감싸고 내부에 `@startuml` / `@enduml` 쌍 포함
 - ADSN/DDSN 참조는 반드시 subkey (key 나 docId 금지)
 - 이슈 생성/변경 금지 — 문서만 산출
 - Step 0, 1 종료 flush, 2 validate, 3 재-flush, 5 문서 저장이 **모두 Bash tool call**. 에이전트가 "한 generation 에 몰아서" 처리하지 말 것 — 이게 GLM 스톨 방지의 핵심

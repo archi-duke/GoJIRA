@@ -28,8 +28,8 @@ stdin JSON:
           "qaScores": {"Performance": 4, "Security": 3},
           "weightedScore": 3.7,
           "eval": "...",
-          "structuralDiagram": "```mermaid\\ngraph TB\\n...\\n```",
-          "dynamicDiagram": "```mermaid\\nsequenceDiagram\\n...\\n```",
+          "structuralDiagram": "```plantuml\\n@startuml\\n...\\n@enduml\\n```",
+          "dynamicDiagram": "```plantuml\\n@startuml\\n...\\n@enduml\\n```",
           "chosen": false,
           "decisionNote": ""                     // chosen=true 면 선정 근거 문구
         },
@@ -85,18 +85,14 @@ APPROACH_DIAGRAM_FIELDS = {"structuralDiagram", "dynamicDiagram"}
 VALID_MODES = {"create", "reuse", "modify", "delete_mark"}
 VALID_LEVELS = {"Architectural", "Detailed"}
 
+import plantuml_util as pu
+
+
 DP_ID_RE = re.compile(r"^DP-\d+$")
-MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
 
 
 def _has_text(v) -> bool:
     return isinstance(v, str) and bool(v.strip())
-
-
-def _mermaid_has_block(text: str) -> bool:
-    if not isinstance(text, str):
-        return False
-    return bool(MERMAID_BLOCK_RE.search(text))
 
 
 def _weights_sum(weights_map: dict) -> float:
@@ -350,12 +346,17 @@ def _validate_approaches(
                                          "docId": doc_id,
                                          "detail": f"{cid} chosen=true 인데 decisionNote 비어있음"})
 
-        # Diagram (Step 1.5 이후 필수)
+        # Diagram (Step 1.5 이후 필수: plantuml + @startuml/@enduml 쌍)
         for df in APPROACH_DIAGRAM_FIELDS:
             diag = a.get(df, "")
-            if not isinstance(diag, str) or not _mermaid_has_block(diag):
+            if not isinstance(diag, str) or not pu.has_block(diag):
                 critical.append({"type": "missing_diagram", "docId": doc_id,
-                                 "detail": f"approaches[{cid or i}].{df} 에 ```mermaid 블록 없음 (Step 1.5 미수행?)"})
+                                 "detail": f"approaches[{cid or i}].{df} 에 ```plantuml 블록 없음 (Step 1.5 미수행?)"})
+                continue
+            blocks = pu.find_blocks(diag)
+            if any(not pu.has_uml_pair(b) for b in blocks):
+                critical.append({"type": "plantuml_missing_pair", "docId": doc_id,
+                                 "detail": f"approaches[{cid or i}].{df} plantuml 블록에 @startuml/@enduml 쌍 누락"})
 
     # candidateId 중복 체크
     dup_cids = [k for k, v in Counter(ids_seen).items() if v > 1 and k]
@@ -428,14 +429,14 @@ def _validate_dp_files(
                 critical.append({"type": "dp_file_missing_section", "docId": did,
                                  "detail": f"{did}: '{label}' 섹션 누락"})
 
-        # 각 후보의 mermaid 블록이 문서에도 등장해야 함 (draft 와 이중 보장)
+        # 각 후보의 plantuml 블록이 문서에도 등장해야 함 (draft 와 이중 보장)
         approaches = d.get("approaches") or []
-        mermaid_in_body = MERMAID_BLOCK_RE.findall(body)
+        plantuml_in_body = pu.find_blocks(body)
         expected_min = 2 * len(approaches)  # candidate 당 structural+dynamic
-        if len(mermaid_in_body) < expected_min:
+        if len(plantuml_in_body) < expected_min:
             suggestions.append({"type": "dp_file_diagram_count_low",
                                 "docId": did,
-                                "detail": f"{did}: mermaid 블록 {len(mermaid_in_body)} / 예상 {expected_min} (후보당 정적+동적)"})
+                                "detail": f"{did}: plantuml 블록 {len(plantuml_in_body)} / 예상 {expected_min} (후보당 정적+동적)"})
 
 
 def main() -> int:

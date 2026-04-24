@@ -29,12 +29,19 @@
 
 이 조합이 구성하는 전체 시스템의 **정적 구조** — 컴포넌트/모듈/레이어 배치.
 
-```mermaid
-graph TB
-    Client --> API[API Layer]
-    API --> Domain[Domain Layer]
-    Domain --> Repo[Repo]
-    Repo --> DB[(DB)]
+```plantuml
+@startuml
+component Client
+component "API Layer" as API
+component "Domain Layer" as Domain
+component Repo
+database DB
+
+Client --> API
+API --> Domain
+Domain --> Repo
+Repo --> DB
+@enduml
 ```
 
 ---
@@ -43,15 +50,17 @@ graph TB
 
 이 조합이 런타임에 **어떻게 동작** 하는지 — 주요 시나리오의 시간 순 흐름.
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant A as API
-    participant D as Domain
-    U->>A: request
-    A->>D: invoke
-    D-->>A: result
-    A-->>U: response
+```plantuml
+@startuml
+actor User as U
+participant API as A
+participant Domain as D
+
+U -> A: request
+A -> D: invoke
+D --> A: result
+A --> U: response
+@enduml
 ```
 
 ---

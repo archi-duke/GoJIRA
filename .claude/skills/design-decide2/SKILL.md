@@ -7,7 +7,7 @@ allowed-tools: Bash, Read
 ## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
 
 - **한 generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 Bash tool call 로 마무리해 generation 경계 형성
-- **Mermaid 격리 (Option C)**: Step 1 에서는 mermaid **생성 금지**. Step 1.5 에서만 후보별 `structuralDiagram` / `dynamicDiagram` 을 생성해 draft merge
+- **PlantUML 격리 (Option C)**: Step 1 에서는 plantuml **생성 금지**. Step 1.5 에서만 후보별 `structuralDiagram` / `dynamicDiagram` 을 생성해 draft merge
 - reasoning 은 각 Step 당 3~5 줄 이내. 표 기반 간결 기술
 - Step 1, 1.5, 3 종료마다 **반드시 `draft-io.sh save`** 호출해 generation 종료
 - Step 2 자가검증은 **반드시 `validate-design-decisions.py` 호출** — 에이전트 직접 계산 금지
@@ -19,8 +19,8 @@ allowed-tools: Bash, Read
 ```
 # Todos
 [ ] Step 0 — 데이터 수집 (Drivers + archSettings)
-[ ] Step 1 — DP + 후보안 엔티티 + QA 점수 초안 (mermaid 없음)
-[ ] Step 1.5 — 후보별 Structural/Dynamic Mermaid 추가
+[ ] Step 1 — DP + 후보안 엔티티 + QA 점수 초안 (plantuml 없음)
+[ ] Step 1.5 — 후보별 Structural/Dynamic PlantUML 추가
 [ ] Step 2 — 자가검증 (validate-design-decisions.py)
 [ ] Step 3 — critical 수정 (반복, 최대 iter 3)
 [ ] Step 5 — ADSN 이슈 생성 + 링크 + index/DP 문서 영속화
@@ -80,7 +80,7 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 
 ---
 
-## Step 1 — 초안 생성 (iter 1, Mermaid 없음)
+## Step 1 — 초안 생성 (iter 1, PlantUML 없음)
 
 ### 1.1 Design Point 식별
 
@@ -93,7 +93,7 @@ Driver / 선정 스타일 / 품질속성에서 설계 결정이 필요한 관심
 
 ### 1.1a 스케일 가이드 (Step 1 batch 경계)
 
-Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (Mermaid 는 Step 1.5 에서 별도). 실측 기준:
+Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (PlantUML 은 Step 1.5 에서 별도). 실측 기준:
 
 | DP × 후보 총합 | Step 1 단일 generation 예상 | 권장 조치 |
 |---|---|---|
@@ -120,7 +120,7 @@ Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (Mermaid 는 St
 
 ### 1.3 후보(approach) 구조
 
-각 후보는 다음 필드를 갖는다 (mermaid 는 Step 1.5 에서 추가):
+각 후보는 다음 필드를 갖는다 (plantuml 은 Step 1.5 에서 추가):
 - `candidateId` — DP 내에서 A/B/C... (유일)
 - `name` — 대안 이름
 - `pros` / `cons`
@@ -155,15 +155,16 @@ Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (Mermaid 는 St
 
 ### 1.7 문서 작성
 
-Step 1 에서 index + 각 DP 파일 **뼈대**를 작성한다. 후보별 mermaid 블록 자리는 placeholder 로 비워두고 Step 1.5 에서 채운다:
+Step 1 에서 index + 각 DP 파일 **뼈대**를 작성한다. 후보별 plantuml 블록 자리는 placeholder 로 비워두고 Step 1.5 에서 채운다:
 
-```md
+````md
 **Structural View**
-```mermaid
-graph TB
-    TBD
+```plantuml
+@startuml
+' TBD — Step 1.5 에서 채움
+@enduml
 ```
-```
+````
 
 섹션 필수:
 - index (`design-decisions.md`): 1. Design Point 목록 / 2. Driver 추적성 / 3. QA 가중치 요약 / 4. 리스크 요약
@@ -229,9 +230,9 @@ cat > /tmp/${CODE}-dd-draft-input.json <<'JSON'
     }
   ],
   "document":{
-    "index":"...design-decisions.md 마크다운 전체 (후보 mermaid 는 graph TB\\n    TBD 로 placeholder)",
+    "index":"...design-decisions.md 마크다운 전체 (후보 plantuml 은 @startuml\\n' TBD\\n@enduml 로 placeholder)",
     "dpFiles":{
-      "DP-1":"...DP-1-data-consistency.md 마크다운 전체 (mermaid placeholder)"
+      "DP-1":"...DP-1-data-consistency.md 마크다운 전체 (plantuml placeholder)"
     }
   }
 }
@@ -245,20 +246,20 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "dd" "
 
 ---
 
-## Step 1.5 — Mermaid 격리 단계 (신규, 필수)
+## Step 1.5 — PlantUML 격리 단계 (신규, 필수)
 
-Step 1 draft 를 로드하고 **각 후보에 structuralDiagram / dynamicDiagram 을 채워** 재저장. 이 단계는 generation 분리를 위해 따로 존재한다 (GLM mermaid 스톨 방지).
+Step 1 draft 를 로드하고 **각 후보에 structuralDiagram / dynamicDiagram 을 채워** 재저장. 이 단계는 generation 분리를 위해 따로 존재한다 (GLM 다이어그램 스톨 방지).
 
 작성 규칙:
-- **Structural View**: `graph TB` 또는 `graph LR` — 컴포넌트/레이어/데이터흐름 표현
-- **Dynamic View**: `sequenceDiagram` — 주요 시나리오의 시간 흐름 (participant 에 `as` 키워드 필수, 쉼표 다중 수신자 금지)
-- 각 다이어그램은 ` ```mermaid ` / ` ``` ` 블록으로 감싼다
+- **Structural View**: PlantUML **component 다이어그램** — 컴포넌트/레이어/데이터흐름 표현 (`component`, `database`, `[Name]`, `package` 등)
+- **Dynamic View**: PlantUML **sequence 다이어그램** — 주요 시나리오의 시간 흐름 (`participant` + 화살표. 공백 있는 이름은 따옴표 또는 `as` 별칭 필수)
+- 각 다이어그램은 ` ```plantuml ` / ` ``` ` 블록으로 감싸고 **반드시 `@startuml` / `@enduml` 쌍** 포함
 - 같은 DP 안의 후보들은 **같은 문제를 다르게 푸는** 것이므로 공통 입력/출력을 표시해 비교 가시성 확보
-- document.dpFiles[DP-N] 의 mermaid placeholder 도 함께 실제 내용으로 교체
+- document.dpFiles[DP-N] 의 plantuml placeholder 도 함께 실제 내용으로 교체
 
 작업 예:
 ```bash
-# draft 로드 후 python 으로 후보별 mermaid 병합
+# draft 로드 후 python 으로 후보별 plantuml 병합
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "dd" "draft" > /tmp/${CODE}-dd-draft.json
 
 python3 <<'PY'
@@ -266,18 +267,17 @@ import json, os
 p = "/tmp/%s-dd-draft.json" % os.environ["CODE"]
 d = json.load(open(p))
 
-# 각 DP/후보에 structuralDiagram, dynamicDiagram 값을 채우기
-# (에이전트가 이 generation 에서 생성한 mermaid 내용을 여기 반영)
+# 각 DP/후보에 structuralDiagram, dynamicDiagram 값을 채우기# (에이전트가 이 generation 에서 생성한 plantuml 내용을 여기 반영)
 for design in d["designs"]:
     dp_id = design["docId"]
     for a in design["approaches"]:
-        # 아래 두 문자열을 실제 mermaid 로 대체
-        a["structuralDiagram"] = a.get("structuralDiagram") or "```mermaid\ngraph TB\n    Client --> API\n    API --> DB\n```"
-        a["dynamicDiagram"]   = a.get("dynamicDiagram")   or "```mermaid\nsequenceDiagram\n    participant U as User\n    participant A as API\n    U->>A: request\n    A-->>U: response\n```"
+        # 아래 두 문자열을 실제 plantuml 로 대체
+        a["structuralDiagram"] = a.get("structuralDiagram") or "```plantuml\n@startuml\ncomponent Client\ncomponent API\ndatabase DB\nClient --> API\nAPI --> DB\n@enduml\n```"
+        a["dynamicDiagram"]   = a.get("dynamicDiagram")   or "```plantuml\n@startuml\nactor User as U\nparticipant API as A\nU -> A: request\nA --> U: response\n@enduml\n```"
 
-    # DP 파일 본문의 mermaid placeholder 를 실제 블록으로 교체
+    # DP 파일 본문의 plantuml placeholder 를 실제 블록으로 교체
     body = d["document"]["dpFiles"].get(dp_id, "")
-    # 에이전트가 placeholder → 실제 mermaid 치환 로직 작성 (단순 replace 가능)
+    # 에이전트가 placeholder → 실제 plantuml 치환 로직 작성 (단순 replace 가능)
     # ...
 
 open(p, "w").write(json.dumps(d, ensure_ascii=False, indent=2))
@@ -287,7 +287,7 @@ cat /tmp/${CODE}-dd-draft.json \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "dd" "draft"
 ```
 
-출력 한 줄만. mermaid 원문 재출력 금지.
+출력 한 줄만. plantuml 원문 재출력 금지.
 
 ---
 
@@ -325,7 +325,8 @@ cat /tmp/${CODE}-dd-validation.json
 - `no_chosen_candidate` — chosen=true 후보 0건
 - `chosen_without_note` — chosen=true 인데 decisionNote 비어있음
 - `duplicate_candidateId`
-- `missing_diagram` — Step 1.5 미수행 (structuralDiagram / dynamicDiagram 에 mermaid 블록 없음)
+- `missing_diagram` — Step 1.5 미수행 (structuralDiagram / dynamicDiagram 에 plantuml 블록 없음)
+- `plantuml_missing_pair` — plantuml 블록에 `@startuml` / `@enduml` 쌍 누락
 - `driver_uncovered` / `relatedRequirements_hallucination` / `no_requirement_link`
 - `bad_designLevel` / `bad_docId_format` / `duplicate_docId`
 - `index_missing_section` / `dp_file_missing` / `dp_file_missing_section`
@@ -562,6 +563,6 @@ PY
 - 링크 linkType 은 정확히 `Contains(WBSGantt)` — Requirement 가 inward, ADSN 이 outward
 - `qaWeights` 합 = 1.0 ±0.02 / `qaScores` 는 1~5 정수 / `weightedScore` 는 Σ(score×weight)
 - `chosen=true` 후보는 반드시 `decisionNote` 기록. 혼합 채택은 여러 후보를 `chosen=true` 로 동시에
-- **Step 1 에서 mermaid 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 mermaid 생성하면 스톨 리스크
+- **Step 1 에서 plantuml 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 plantuml 생성하면 스톨 리스크
 - `relatedRequirements` hallucination 금지 — Step 0 에서 수집한 실존 key 만
 - Step 0, 1, 1.5, 2, 3, 5 만 실제 Bash 호출, Step 4 는 내부 판단

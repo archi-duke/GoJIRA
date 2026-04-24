@@ -35,20 +35,27 @@
 
 **Structural View (정적 관점)**
 
-```mermaid
-graph TB
-    Client --> API
-    API --> DB
+```plantuml
+@startuml
+component Client
+component API
+database DB
+
+Client --> API
+API --> DB
+@enduml
 ```
 
 **Dynamic View (동적 관점)**
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant A as API
-    U->>A: request
-    A-->>U: response
+```plantuml
+@startuml
+actor User as U
+participant API as A
+
+U -> A: request
+A --> U: response
+@enduml
 ```
 
 **Pros**

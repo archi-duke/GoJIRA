@@ -22,17 +22,19 @@
 | {컴포넌트명} | ... | ADSN_002, DDSN_001 |
 | ... | ... | ... |
 
-### 2.2 의존 관계
+### 2.2 의존 관계 (component 다이어그램)
 
-```mermaid
-graph TB
-    UI[UI 레이어]
-    BL[비즈니스 로직]
-    DAL[데이터 접근]
-    DB[(저장소)]
-    UI --> BL
-    BL --> DAL
-    DAL --> DB
+```plantuml
+@startuml
+component "UI 레이어" as UI
+component "비즈니스 로직" as BL
+component "데이터 접근" as DAL
+database "저장소" as DB
+
+UI --> BL
+BL --> DAL
+DAL --> DB
+@enduml
 ```
 
 ### 2.3 반영된 ADSN/DDSN
@@ -46,29 +48,37 @@ graph TB
 
 **관심**: 런타임 동작 / 프로세스 간 상호작용 / 동시성
 
-### 3.1 런타임 상호작용
+### 3.1 런타임 상호작용 (sequence 다이어그램)
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant API as API Gateway
-    participant Svc as Service
-    participant Q as Queue
-    C->>API: 요청
-    API->>Svc: 라우팅
-    Svc->>Q: 이벤트 발행
-    Q-->>Svc: ACK
-    Svc-->>API: 응답
-    API-->>C: 응답
+```plantuml
+@startuml
+actor Client as C
+participant "API Gateway" as API
+participant Service as Svc
+queue "Queue" as Q
+
+C -> API: 요청
+API -> Svc: 라우팅
+Svc -> Q: 이벤트 발행
+Q --> Svc: ACK
+Svc --> API: 응답
+API --> C: 응답
+@enduml
 ```
 
 ### 3.2 비동기 / 이벤트 흐름
 
-```mermaid
-graph LR
-    P[생산자] -->|event-A| Q[(메시지 큐)]
-    Q -->|consume| C1[소비자 1]
-    Q -->|consume| C2[소비자 2]
+```plantuml
+@startuml
+component "생산자" as P
+queue "메시지 큐" as Q
+component "소비자 1" as C1
+component "소비자 2" as C2
+
+P --> Q : event-A
+Q --> C1 : consume
+Q --> C2 : consume
+@enduml
 ```
 
 ### 3.3 반영된 ADSN/DDSN
@@ -81,26 +91,31 @@ graph LR
 
 **관심**: 물리적 배포 / 네트워크 토폴로지 / 인프라
 
-```mermaid
-graph TB
-    subgraph VPC
-        ALB[ALB]
-        subgraph "AZ-A"
-            WebA[Web]
-            AppA[App]
-        end
-        subgraph "AZ-B"
-            WebB[Web]
-            AppB[App]
-        end
-        DB[(RDS Multi-AZ)]
-    end
-    ALB --> WebA
-    ALB --> WebB
-    WebA --> AppA
-    WebB --> AppB
-    AppA --> DB
-    AppB --> DB
+```plantuml
+@startuml
+node "VPC" {
+  node "ALB" as ALB
+
+  node "AZ-A" {
+    artifact "Web" as WebA
+    artifact "App" as AppA
+  }
+
+  node "AZ-B" {
+    artifact "Web" as WebB
+    artifact "App" as AppB
+  }
+
+  database "RDS Multi-AZ" as DB
+}
+
+ALB --> WebA
+ALB --> WebB
+WebA --> AppA
+WebB --> AppB
+AppA --> DB
+AppB --> DB
+@enduml
 ```
 
 - **반영 ADSN/DDSN**: ...
@@ -111,31 +126,39 @@ graph TB
 
 **관심**: 논리 패키지 구조 / 계층·의존성 / 빌드 모듈 경계
 
-폴더 트리가 아니라 **패키지 다이어그램** 으로 표현 — 각 패키지의 책임과 **패키지 간 의존 방향** 을 설계 관점에서 드러낸다. Layered/Hexagonal/Modular Monolith 등 선정 스타일의 경계가 패키지 구조에 어떻게 반영되는지가 보여야 한다.
+폴더 트리가 아니라 **PlantUML package 다이어그램** 으로 표현 — 각 패키지의 책임과 **패키지 간 의존 방향** 을 설계 관점에서 드러낸다. Layered/Hexagonal/Modular Monolith 등 선정 스타일의 경계가 패키지 구조에 어떻게 반영되는지가 보여야 한다.
 
-```mermaid
-graph TB
-    subgraph Presentation["Presentation Layer"]
-        API[api.rest]
-        WS[api.websocket]
-    end
-    subgraph Application["Application Layer"]
-        UC[application.usecase]
-        DTO[application.dto]
-    end
-    subgraph Domain["Domain Layer (Core)"]
-        MODEL[domain.model]
-        SERVICE[domain.service]
-        PORT[domain.port]
-    end
-    subgraph Infrastructure["Infrastructure Layer"]
-        REPO[infra.persistence]
-        EXT[infra.external]
-    end
-    Presentation --> Application
-    Application --> Domain
-    Infrastructure -.implements.-> PORT
-    Infrastructure --> MODEL
+```plantuml
+@startuml
+package "Presentation Layer" {
+  [api.rest] as API
+  [api.websocket] as WS
+}
+
+package "Application Layer" {
+  [application.usecase] as UC
+  [application.dto] as DTO
+}
+
+package "Domain Layer (Core)" {
+  [domain.model] as MODEL
+  [domain.service] as SERVICE
+  [domain.port] as PORT
+}
+
+package "Infrastructure Layer" {
+  [infra.persistence] as REPO
+  [infra.external] as EXT
+}
+
+API --> UC
+WS --> UC
+UC --> SERVICE
+UC --> MODEL
+REPO ..|> PORT : implements
+EXT ..|> PORT : implements
+REPO --> MODEL
+@enduml
 ```
 
 **패키지 책임 표**
@@ -149,6 +172,7 @@ graph TB
 | `infra.persistence` | `domain.port` 구현 (DB 어댑터) | `domain.port`, `domain.model` | DDSN_NNN |
 
 - 의존 방향 규칙(예: 도메인은 인프라를 참조하지 않는다) 명시
+- DIP 는 `..|>` (점선 + 속 빈 삼각형) 로 `implements` 표기
 - **반영 ADSN/DDSN**: ...
 
 ---

@@ -22,7 +22,7 @@ stdout JSON:
   "critical":   [{"type":"...","detail":"..."}],
   "suggestions":[...],
   "stats": {
-     "views": N, "mermaidBlocks": M,
+     "views": N, "plantumlBlocks": M, "plantumlBadPair": X,
      "adsnReferenced": A, "ddsnReferenced": D,
      "stylesReferenced": S,
      "sectionsFound": K
@@ -48,16 +48,11 @@ OPTIONAL_SECTION_PATTERNS = [
     re.compile(r"#{1,3}\s*5\.\s*Development\s*View", re.IGNORECASE),
 ]
 
-MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n([\s\S]*?)```", re.IGNORECASE)
+import plantuml_util as pu
+
+
 EXTERNAL_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\.(png|jpg|jpeg|gif|svg)\)",
                                re.IGNORECASE)
-# 첫 비공백 라인이 허용 헤더인지 체크
-VALID_MERMAID_HEADERS = (
-    "graph TB", "graph TD", "graph BT", "graph LR", "graph RL",
-    "flowchart TB", "flowchart TD", "flowchart BT", "flowchart LR", "flowchart RL",
-    "sequenceDiagram", "stateDiagram", "stateDiagram-v2",
-    "erDiagram", "gantt", "classDiagram",
-)
 # Logical / Process / Deployment / Development 4개 뷰 매칭 (본문 탐지)
 VIEW_HEADING_RES = {
     "logical":     re.compile(r"#{1,3}\s*2\.\s*Logical\s*View", re.IGNORECASE),
@@ -135,36 +130,31 @@ def validate(payload: dict) -> dict:
                             "detail": f"본문에 {sorted(extra_in_doc)} 뷰가 있는데 "
                                       f"viewsIncluded 에서 누락 — 메타데이터 갱신 권장"})
 
-    # 4. Mermaid 블록 수 / 시작 헤더
-    mermaid_blocks = MERMAID_BLOCK_RE.findall(doc)
-    if len(mermaid_blocks) < 2:
-        critical.append({"type": "insufficient_mermaid",
-                         "detail": f"Mermaid 블록 {len(mermaid_blocks)}개 — 최소 2개 필요"})
-    bad_headers = 0
+    # 4. PlantUML 블록 수 / 구조 / 종류
+    plantuml_blocks = pu.find_blocks(doc)
+    if len(plantuml_blocks) < 2:
+        critical.append({"type": "insufficient_diagrams",
+                         "detail": f"PlantUML 블록 {len(plantuml_blocks)}개 — 최소 2개 필요"})
+    bad_pair = 0
     class_on_non_class_view = 0
-    for i, body in enumerate(mermaid_blocks):
-        first = ""
-        for line in body.splitlines():
-            s = line.strip()
-            if s and not s.startswith("%%"):
-                first = s
-                break
-        if not any(first.startswith(h) for h in VALID_MERMAID_HEADERS):
-            critical.append({"type": "mermaid_bad_header",
-                             "detail": f"Mermaid 블록 #{i+1} 시작 '{first[:40]}' — "
-                                       "표준 헤더 아님 (graph/flowchart/sequenceDiagram/...)"})
-            bad_headers += 1
-        # classDiagram 은 Logical/Deployment/Process/Development 어디서도 컴포넌트/배포 표현 금지
-        if first.startswith("classDiagram"):
+    for i, body in enumerate(plantuml_blocks):
+        if not pu.has_uml_pair(body):
+            critical.append({"type": "plantuml_missing_pair",
+                             "detail": f"PlantUML 블록 #{i+1} 에 @startuml / @enduml 쌍 누락"})
+            bad_pair += 1
+            continue
+        kind = pu.detect_kind(body)
+        # Logical/Process/Deployment/Development 모두 class 다이어그램 금지
+        if kind == "class":
             critical.append({"type": "class_diagram_for_component",
-                             "detail": f"Mermaid 블록 #{i+1} 에 classDiagram 사용 — "
-                                       "컴포넌트/배포/프로세스 뷰 표현에 금지"})
+                             "detail": f"PlantUML 블록 #{i+1} 에 class 다이어그램 사용 — "
+                                       "컴포넌트/배포/프로세스/개발 뷰 표현에 금지"})
             class_on_non_class_view += 1
 
     # 5. 외부 이미지 참조 금지
     for m in EXTERNAL_IMAGE_RE.findall(doc):
         critical.append({"type": "external_image",
-                         "detail": f"외부 이미지 참조 ({m}) — Mermaid 인라인만 허용"})
+                         "detail": f"외부 이미지 참조 ({m}) — PlantUML 인라인만 허용"})
 
     # 6. 필수 섹션 1/2/3/6/7
     sections_found = 0
@@ -195,7 +185,8 @@ def validate(payload: dict) -> dict:
         "suggestions": suggestions,
         "stats": {
             "views": len(views_claimed),
-            "mermaidBlocks": len(mermaid_blocks),
+            "plantumlBlocks": len(plantuml_blocks),
+            "plantumlBadPair": bad_pair,
             "adsnReferenced": len(adsn_ref),
             "ddsnReferenced": len(ddsn_ref),
             "stylesReferenced": styles_ref,

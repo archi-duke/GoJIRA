@@ -7,7 +7,7 @@ allowed-tools: Bash, Read
 ## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
 
 - **한 generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 Bash tool call 로 마무리해 generation 경계 형성
-- **Mermaid 격리 (Option C)**: Step 1 에서는 mermaid **생성 금지**. Step 1.5 에서만 후보별 `structuralDiagram` / `dynamicDiagram` 을 생성해 draft merge
+- **PlantUML 격리 (Option C)**: Step 1 에서는 plantuml **생성 금지**. Step 1.5 에서만 후보별 `structuralDiagram` / `dynamicDiagram` 을 생성해 draft merge
 - reasoning 은 각 Step 당 3~5 줄 이내. 엔진 점수/규칙 적용은 `style-score.py` 담당
 - Step 1 / 1.5 / 3 종료마다 **반드시 `draft-io.sh save`** — draft JSON 전체 flush 후 generation 종료
 - Step 2 자가검증은 **반드시 `validate-style-doc.py` 호출** — 에이전트가 직접 필드/섹션 계산 금지
@@ -19,8 +19,8 @@ allowed-tools: Bash, Read
 ```
 # Todos
 [ ] Step 0 — 데이터 수집 + 엔진 점수 (참고용)
-[ ] Step 1 — 통합 스타일 조합 후보 2~3개 + QA 가중 평가 (mermaid 없음)
-[ ] Step 1.5 — 후보별 Structural/Dynamic Mermaid 추가
+[ ] Step 1 — 통합 스타일 조합 후보 2~3개 + QA 가중 평가 (plantuml 없음)
+[ ] Step 1.5 — 후보별 Structural/Dynamic PlantUML 추가
 [ ] Step 2 — 자가검증 (validate-style-doc.py)
 [ ] Step 3 — critical 수정 (반복, 최대 iter 3)
 [ ] Step 5 — 후보 ADSN 생성 + index/후보파일 저장 + archSettings.chosenStyles 업데이트
@@ -138,7 +138,7 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 
 ---
 
-## Step 1 — 조합 후보 초안 (iter 1, Mermaid 없음)
+## Step 1 — 조합 후보 초안 (iter 1, PlantUML 없음)
 
 ### 1.1 조합 후보 설계
 
@@ -194,15 +194,16 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 
 ### 1.6 문서 뼈대
 
-Step 1 에서 index + 각 후보 파일 **뼈대** 작성. mermaid 자리는 placeholder:
+Step 1 에서 index + 각 후보 파일 **뼈대** 작성. plantuml 자리는 placeholder:
 
-```md
+````md
 **Structural View**
-```mermaid
-graph TB
-    TBD
+```plantuml
+@startuml
+' TBD — Step 1.5 에서 채움
+@enduml
 ```
-```
+````
 
 템플릿 참조:
 ```bash
@@ -270,10 +271,10 @@ cat > /tmp/${CODE}-styledef-draft-input.json <<'JSON'
   "tradeoffs":"B 는 Performance 최고점이나 운영 복잡도 페널티로 기각. 트래픽이 현 규모의 10배 초과 시 B 재검토",
   "relatedDrivers":["GOJIRA3-11","GOJIRA3-13"],
   "document":{
-    "index":"...architecture-style.md 마크다운 전체 (mermaid placeholder)",
+    "index":"...architecture-style.md 마크다운 전체 (plantuml placeholder)",
     "candidateFiles":{
-      "ADSN-1":"...ADSN-1-modular-monolith.md 마크다운 전체 (mermaid placeholder) — 저장 시 실제 subkey ADSN_NNN 으로 파일명 치환",
-      "ADSN-2":"...ADSN-2-microservices.md 마크다운 전체 (mermaid placeholder)"
+      "ADSN-1":"...ADSN-1-modular-monolith.md 마크다운 전체 (plantuml placeholder) — 저장 시 실제 subkey ADSN_NNN 으로 파일명 치환",
+      "ADSN-2":"...ADSN-2-microservices.md 마크다운 전체 (plantuml placeholder)"
     }
   }
 }
@@ -287,16 +288,16 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "style
 
 ---
 
-## Step 1.5 — Mermaid 격리 단계 (신규, 필수)
+## Step 1.5 — PlantUML 격리 단계 (신규, 필수)
 
-Step 1 draft 를 로드하고 **각 후보에 structuralDiagram / dynamicDiagram 을 채워** 재저장. 이 단계는 generation 분리를 위해 존재 (GLM mermaid 스톨 방지).
+Step 1 draft 를 로드하고 **각 후보에 structuralDiagram / dynamicDiagram 을 채워** 재저장. 이 단계는 generation 분리를 위해 존재 (GLM 다이어그램 스톨 방지).
 
 작성 규칙:
-- **Structural View**: `graph TB` 또는 `graph LR` — 조합이 구성하는 시스템의 컴포넌트/레이어/데이터 흐름
-- **Dynamic View**: `sequenceDiagram` — 주요 시나리오의 시간 순 상호작용 (participant 에 `as` 키워드 필수, 쉼표 다중 수신자 금지)
-- 각 다이어그램은 ` ```mermaid ` / ` ``` ` 블록으로 감싼다
+- **Structural View**: PlantUML **component 다이어그램** — 조합이 구성하는 시스템의 컴포넌트/레이어/데이터 흐름 (`component`, `database`, `[Name]`, `package` 등)
+- **Dynamic View**: PlantUML **sequence 다이어그램** — 주요 시나리오의 시간 순 상호작용 (`participant` + 화살표. 공백 있는 이름은 따옴표 또는 `as` 별칭 필수)
+- 각 다이어그램은 ` ```plantuml ` / ` ``` ` 블록으로 감싸고 **반드시 `@startuml` / `@enduml` 쌍** 포함
 - 같은 주제를 다르게 푸는 조합들이니 **공통 입력/출력을 동일하게 표현** 해 비교 가시성 확보
-- document.candidateFiles[ADSN-N] 의 mermaid placeholder 도 실제 내용으로 교체
+- document.candidateFiles[ADSN-N] 의 plantuml placeholder 도 실제 내용으로 교체
 
 작업 예:
 ```bash
@@ -308,14 +309,14 @@ p = "/tmp/%s-styledef-draft.json" % os.environ["CODE"]
 d = json.load(open(p))
 
 for c in d["candidates"]:
-    # 각 후보별로 에이전트가 이 generation 에서 생성한 mermaid 를 채움
-    c["structuralDiagram"] = c.get("structuralDiagram") or "```mermaid\ngraph TB\n    Client --> API\n    API --> DB\n```"
-    c["dynamicDiagram"]   = c.get("dynamicDiagram")   or "```mermaid\nsequenceDiagram\n    participant U as User\n    participant A as API\n    U->>A: request\n    A-->>U: response\n```"
+    # 각 후보별로 에이전트가 이 generation 에서 생성한 plantuml 을 채움
+    c["structuralDiagram"] = c.get("structuralDiagram") or "```plantuml\n@startuml\ncomponent Client\ncomponent API\ndatabase DB\nClient --> API\nAPI --> DB\n@enduml\n```"
+    c["dynamicDiagram"]   = c.get("dynamicDiagram")   or "```plantuml\n@startuml\nactor User as U\nparticipant API as A\nU -> A: request\nA --> U: response\n@enduml\n```"
 
     # document.candidateFiles[ADSN-N] 본문의 placeholder 를 실제 블록으로 교체
     did = c["docId"]
     body = d["document"]["candidateFiles"].get(did, "")
-    # 에이전트가 placeholder → 실제 mermaid 치환 로직 작성 (단순 replace 가능)
+    # 에이전트가 placeholder → 실제 plantuml 치환 로직 작성 (단순 replace 가능)
     d["document"]["candidateFiles"][did] = body
 
 open(p, "w").write(json.dumps(d, ensure_ascii=False, indent=2))
@@ -325,7 +326,7 @@ cat /tmp/${CODE}-styledef-draft.json \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "styledef" "draft"
 ```
 
-출력 한 줄만. mermaid 원문 재출력 금지.
+출력 한 줄만. plantuml 원문 재출력 금지.
 
 ---
 
@@ -665,6 +666,6 @@ PATCH 실패 시 최종 보고에 ⚠. 다음 스킬이 영향 받을 수 있음
 - `composition.primary` 는 **scope 당 1개 원칙** (여러 개면 suggestion, 0개면 critical)
 - `composition.{role}[].id` 는 카탈로그 id (`styleCatalogIds` 에 있어야 suggestion 회피)
 - `qaWeights` 합 = 1.0 ±0.02 / `qaScores` 는 1~5 정수 / `weightedScore` 는 Σ(score×weight)
-- **Step 1 에서 mermaid 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 mermaid 생성하면 스톨 리스크
+- **Step 1 에서 plantuml 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 plantuml 생성하면 스톨 리스크
 - Step 0 / 1 / 1.5 / 2 / 3 / 5 만 실제 Bash 호출, Step 4 는 내부 판단
 - `archSettings.chosenStyles` 는 **평탄화된 Primary/Secondary/Supporting 리스트** — design-integrate2 가 이 형식을 기대

@@ -32,7 +32,7 @@ stdout JSON:
   "suggestions": [...],
   "stats": {"vosKeys":N,"storyVosCovered":V1,"featureVosCovered":V2,
             "features":F,"sequenceDiagramCount":SD,"useCaseDiagramFound":bool,
-            "contextDiagramFound":bool}
+            "contextDiagramFound":bool,"plantumlBlocks":M,"plantumlBadPair":X}
 }
 """
 from __future__ import annotations
@@ -43,18 +43,19 @@ import sys
 from collections import Counter, defaultdict
 
 
+import plantuml_util as pu
+
+
 FEATURE_REQUIRED = {"summary", "actor", "basicflow", "docId", "relatedVOS"}
 
-MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*([\s\S]*?)```", re.IGNORECASE)
-HEAD_USECASE_DIAGRAM_RE = re.compile(r"^\s*graph\s+(TB|LR|TD|BT|RL)", re.IGNORECASE | re.MULTILINE)
-HEAD_SEQUENCE_DIAGRAM_RE = re.compile(r"^\s*sequenceDiagram", re.IGNORECASE | re.MULTILINE)
-HEAD_CLASS_DIAGRAM_RE = re.compile(r"^\s*classDiagram", re.IGNORECASE | re.MULTILINE)
 EXT_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^\)]+\.(png|jpg|jpeg|gif|svg)\)", re.IGNORECASE)
-
-# Mermaid 잘못된 구문: 쉼표로 나열된 수신자 (Sequence Diagram)
-SEQ_MULTI_RECIPIENT_RE = re.compile(r"-->>?\s*[A-Za-z0-9가-힣_]+\s*,\s*[A-Za-z0-9가-힣_]+")
-# participant 에 as 누락: "participant Foo 후공" (이름 뒤 공백 + 한글/영문 alias)
-PARTICIPANT_NO_AS_RE = re.compile(r"^\s*participant\s+\S+\s+[^\s][^a]", re.MULTILINE)
+# PlantUML sequence: participant 선언에 공백 있는 이름을 "..." 또는 as 없이 쓰면 실수
+# 예: `participant My Service` (잘못) / `participant "My Service"` 또는 `participant Svc as "My Service"` (정상)
+PARTICIPANT_BAD_NAME_RE = re.compile(
+    r"^\s*(?:participant|boundary|control|entity|queue|collections)\s+"
+    r"(?![\"'])[^\s\"']+\s+(?!as\b)[^\s\"'<][^\s\"']*",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 def validate(payload: dict) -> dict:
@@ -132,60 +133,64 @@ def validate(payload: dict) -> dict:
                          "docId": "(global)",
                          "detail": f"Feature {len(features)}개가 모두 동일 Actor='{list(actors)[0]}' — 다른 Actor 누락 의심"})
 
-    # ── Mermaid 블록 분류
-    blocks = MERMAID_BLOCK_RE.findall(doc)
+    # ── PlantUML 블록 분류
+    blocks = pu.find_blocks(doc)
     uc_diagram_count = 0
     seq_count = 0
     class_count = 0
+    bad_pair_count = 0
     for b in blocks:
-        if HEAD_CLASS_DIAGRAM_RE.search(b):
-            class_count += 1
-        elif HEAD_SEQUENCE_DIAGRAM_RE.search(b):
-            seq_count += 1
-        elif HEAD_USECASE_DIAGRAM_RE.search(b):
+        if not pu.has_uml_pair(b):
+            bad_pair_count += 1
+            continue
+        kind = pu.detect_kind(b)
+        if kind == "usecase":
             uc_diagram_count += 1
+        elif kind == "sequence":
+            seq_count += 1
+        elif kind == "class":
+            class_count += 1
 
-    context_found = any("context" in b.lower() or "컨텍스트" in b for b in blocks) or uc_diagram_count >= 2
+    if bad_pair_count > 0:
+        critical.append({"type": "plantuml_missing_pair",
+                         "docId": "(global)",
+                         "detail": f"{bad_pair_count}개 블록에 @startuml / @enduml 쌍 누락"})
+
+    context_found = (
+        any(("Context" in b) or ("컨텍스트" in b) for b in blocks)
+        or uc_diagram_count >= 2
+    )
     uc_diagram_found = uc_diagram_count >= 1
 
     if class_count > 0:
         critical.append({"type": "class_diagram_for_uc", "docId": "(global)",
-                         "detail": "Use Case 를 classDiagram 으로 표현 — graph TB/LR 또는 sequenceDiagram 사용"})
-    missing_diagrams = 0
-    if not context_found:
-        missing_diagrams += 1
+                         "detail": "Use Case 를 class 다이어그램으로 표현 — usecase / sequence 다이어그램 사용"})
     if not uc_diagram_found:
         critical.append({"type": "missing_usecase_diagram", "docId": "(global)",
-                         "detail": "Use Case Diagram (graph TB/LR) 누락"})
+                         "detail": "Use Case Diagram (PlantUML usecase) 누락"})
     if seq_count == 0:
         critical.append({"type": "missing_sequence_diagram", "docId": "(global)",
-                         "detail": "Sequence Diagram 누락"})
+                         "detail": "Sequence Diagram (PlantUML participant) 누락"})
 
     # ── 모든 Feature 에 Sequence Diagram 있어야
     if features and seq_count > 0 and seq_count < len(features):
         suggestions.append({"type": "sequence_diagram_count_low",
                             "docId": "(global)",
-                            "detail": f"Feature {len(features)}개인데 sequenceDiagram 블록은 {seq_count}개"})
+                            "detail": f"Feature {len(features)}개인데 sequence 블록은 {seq_count}개"})
 
-    # ── Mermaid 구문 오류
+    # ── PlantUML 구문 의심 패턴
     for b in blocks:
-        if SEQ_MULTI_RECIPIENT_RE.search(b):
-            critical.append({"type": "mermaid_multi_recipient",
-                             "docId": "(global)",
-                             "detail": "Sequence Diagram 에 쉼표로 다중 수신자 지정 — 개별 줄로 분리"})
-            break
-    for b in blocks:
-        if HEAD_SEQUENCE_DIAGRAM_RE.search(b) and PARTICIPANT_NO_AS_RE.search(b):
+        if pu.detect_kind(b) == "sequence" and PARTICIPANT_BAD_NAME_RE.search(b):
             suggestions.append({"type": "participant_no_as",
                                 "docId": "(global)",
-                                "detail": "participant 선언에 'as' 키워드 누락 가능성"})
+                                "detail": "participant 선언에 공백 있는 이름 — 따옴표 감싸기 또는 `as` 키워드 사용"})
             break
 
     # ── 외부 이미지 참조 금지
     if EXT_IMAGE_RE.search(doc):
         critical.append({"type": "external_image",
                          "docId": "(global)",
-                         "detail": "외부 이미지 참조 금지 — Mermaid 인라인만 허용"})
+                         "detail": "외부 이미지 참조 금지 — PlantUML 인라인만 허용"})
 
     # ── coverageMatrix 에 NFR 플레이스홀더 금지
     if re.search(r"\(NFR\)", doc):
@@ -211,7 +216,8 @@ def validate(payload: dict) -> dict:
             "sequenceDiagramCount": seq_count,
             "useCaseDiagramFound": uc_diagram_found,
             "contextDiagramFound": context_found,
-            "mermaidBlocks": len(blocks),
+            "plantumlBlocks": len(blocks),
+            "plantumlBadPair": bad_pair_count,
         },
     }
 

@@ -135,7 +135,7 @@ Priority 상위 5~10건. 단일 속성/카테고리 편향 금지.
 ## 4. 선정 편향 점검
 ```
 
-이슈 키 칸에는 `subkey`(FR_001/QA_001/CNST_001) 를 사용. Mermaid 는 선택 (`graph LR` 만 허용, `classDiagram` 금지).
+이슈 키 칸에는 `subkey`(FR_001/QA_001/CNST_001) 를 사용. PlantUML 은 선택 — `component` 다이어그램 권장 (`class`/`interface`/`abstract`/`enum` 키워드 금지), 블록은 ` ```plantuml ` 로 감싸고 `@startuml` / `@enduml` 쌍 필수.
 
 ---
 
@@ -149,7 +149,7 @@ Priority 상위 5~10건. 단일 속성/카테고리 편향 금지.
 - NFR 인데 Driver 에 포함되지 않은 항목 존재
 - `normalizedAttributes` 가 허용 어휘 밖의 키/값 사용
 - document 에서 `subkey` 대신 이슈 key / placeholder 노출
-- Mermaid 를 `classDiagram` 으로 작성, 또는 외부 이미지 참조
+- PlantUML 을 class 다이어그램으로 작성 (`class`/`interface` 등), 또는 외부 이미지 참조
 
 ### 점수
 - `score`: 0.0~1.0

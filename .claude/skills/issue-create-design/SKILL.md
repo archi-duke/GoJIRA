@@ -25,7 +25,7 @@ GoJIRA 프로젝트에 새 **설계 이슈** 를 생성합니다. `designLevel` 
 - `LEVEL` — `Architectural` 또는 `Detailed` (필수)
 - `SUMMARY` — 제목
 - `DESCRIPTION` — 상세
-- `ADIAGRAM`, `BDIAGRAM` — (선택) Mermaid
+- `ADIAGRAM`, `BDIAGRAM` — (선택) PlantUML 코드 (` ```plantuml ` 블록 포함, `@startuml` / `@enduml` 쌍 필수)
 - `PRIORITY` — (선택) 기본 `Medium`
 - `ASSIGNEE` — (선택)
 - ADSN 전용 (선택): `DMODEL`, `ARCHDIAGRAM`, `OBJECTIVES`, `PROS`, `CONS`, `SCORE`, `EVAL`, `SENSITIVITY`, `MITIGATION`, `RISK`, `DECISION`
@@ -47,12 +47,15 @@ curl -s "${GOJIRA_API}/Issue" \
   | jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design") | {key,subkey,issueType,summary}]'
 ```
 
-## Mermaid 주의
-`adiagram`(정적 구조), `bdiagram`(동적 동작) 필드에 Mermaid 코드를 작성할 때:
-- 노드 ID 는 영문만, 한글은 `[]` / `(())` label 로
-- Use Case 다이어그램을 `classDiagram` 으로 작성 금지
+## PlantUML 주의
+`adiagram`(정적 구조), `bdiagram`(동적 동작) 필드에 PlantUML 코드를 작성할 때:
+- 반드시 ` ```plantuml ` 코드펜스로 감싸고 내부는 `@startuml` ~ `@enduml` 쌍 포함
+- 정적: `component` / `package` / `node` / `artifact` / `database` 키워드 사용
+- 동적: `participant` / `actor` 선언 + `->` / `-->` / `->>` / `-->>` 화살표
+- Use Case 는 `actor` + `usecase` + `rectangle "..."` 로 (class 다이어그램 키워드 `class`/`interface`/`abstract`/`enum` 사용 금지)
+- 공백 있는 이름은 `"..."` 따옴표 또는 `as` 별칭 필수 (예: `participant "게임 서버" as Game` / `participant Game as "게임 서버"`)
 - 외부 이미지(`![](.../*.png)`) 참조 금지
-- 구문 오류 시 브라우저 렌더 실패
+- 구문 오류 시 PlantUML 서버 렌더 실패
 
 ## Step 1 — 설계 이슈 생성 (POST /Issue)
 
@@ -87,8 +90,8 @@ SUBKEY=$(echo "$RESP" | jq -r '.subkey')
 
 | 필드 | customfield | 의미 |
 |---|---|---|
-| adiagram | customfield_18204 | 정적 구조 다이어그램 (Mermaid) |
-| bdiagram | customfield_18205 | 동적 동작 다이어그램 (Mermaid) |
+| adiagram | customfield_18204 | 정적 구조 다이어그램 (PlantUML) |
+| bdiagram | customfield_18205 | 동적 동작 다이어그램 (PlantUML) |
 
 ```bash
 curl -s -X PUT "${GOJIRA_API}/Issue" \

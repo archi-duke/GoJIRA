@@ -18,7 +18,7 @@ allowed-tools: Bash, Read
 - **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
 - reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요
 - Step 1 도출 완료 시 **반드시 `draft-io.sh save`** — User Story / Use Case / Feature / document 전체 JSON 을 파일에 flush 후 generation 종료
-- Step 2 자가검증은 **반드시 `validate-usecases.py` 호출** — 에이전트가 직접 VOS 커버리지 / Mermaid 구문 / Actor 다양성 계산 금지
+- Step 2 자가검증은 **반드시 `validate-usecases.py` 호출** — 에이전트가 직접 VOS 커버리지 / PlantUML 구문 / Actor 다양성 계산 금지
 - critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-usecases.py` 로 재검증. 한 generation 당 1 iter
 - assistant 출력에는 긴 document JSON 뱉지 말 것. "저장 완료 / critical N건" 한두 줄만
 
@@ -162,7 +162,7 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 
 ### 1.4 Use Case Diagram (Feature 선정 전 작성)
 **모든 Use Case** 를 포함한 다이어그램을 이 단계에서 작성한다.
-- Use Case Diagram → `graph TB` (**절대 `classDiagram` 금지**)
+- Use Case Diagram → PlantUML **usecase 다이어그램** (`actor` + `usecase` 키워드, **절대 `class` 다이어그램 금지**)
 - 이 다이어그램은 Feature 선정 후에도 **수정하지 않음**
 
 ### 1.5 Feature 선정
@@ -176,31 +176,51 @@ Actor 와 1차적으로 직접 연결되는 Use Case 만 Feature 로 선정.
 각 **Feature** 에 Basic/Alternative/Exception Flow.
 Basic 5단계 이상이면 별도 UC 분해 검토.
 
-### 1.7 Mermaid 다이어그램 (시작 라인 정확히)
-- Context Diagram → `graph LR`
-- Use Case Diagram → `graph TB` (Step 1.4 에서 작성 완료, 그대로 사용)
-- Sequence Diagram (Feature별) → `sequenceDiagram`
+### 1.7 PlantUML 다이어그램 (블록 구조 엄수)
 
-예시:
+모든 다이어그램은 ` ```plantuml ... ``` ` 코드펜스로 감싸고 **반드시 `@startuml` / `@enduml` 쌍**을 포함한다.
+
+- **Context Diagram** — actor + rectangle 로 시스템 경계 표현 (블록 본문에 "Context" 또는 "컨텍스트" 라벨 포함)
+- **Use Case Diagram** — `actor` + `usecase` 키워드 (Step 1.4 에서 작성 완료, 그대로 사용)
+- **Sequence Diagram** (Feature 별) — `participant` + 화살표 (`->`, `-->`)
+
+예시 (Use Case Diagram):
 ````
-```mermaid
-graph TB
-    User[사용자]:::actor
-    UC1((로그인)):::feature
-    UC2((세션 관리))
-    User --> UC1
-    UC1 -.->|include| UC2
-    classDef actor fill:#fef3c7,stroke:#f59e0b
-    classDef feature fill:#dbeafe,stroke:#3b82f6
+```plantuml
+@startuml
+skinparam actorStyle stick
+left to right direction
+actor 사용자 as User
+rectangle "시스템" {
+  usecase "로그인" as UC1
+  usecase "세션 관리" as UC2
+}
+User --> UC1
+UC1 ..> UC2 : <<include>>
+@enduml
 ```
 ````
 
-- Feature 로 선정된 UC 에는 `:::feature` 스타일 적용하여 시각적 구분
-- Feature 미선정 UC 도 다이어그램에 그대로 포함
+- Feature 로 선정된 UC 는 `usecase "Name" as UC_N` 으로, 미선정 UC 도 다이어그램에 그대로 포함
+- `skinparam actorStyle stick` 을 기본값으로 사용해 UML 표준 stick figure 유지
 
-금지: classDiagram 으로 UC 표현, 외부 이미지(`![...](...png)`) 참조, Mermaid 노드 ID 에 공백/한글 직접 사용.
-**Sequence Diagram 에서 다중 수신자 쉼표 금지**: `Game-->>User1, User2: 메시지` → 개별 2줄로 분리.
-**participant 에 반드시 `as` 키워드 사용**: `participant User2 as 후공 사용자` (O) / `participant User2 후공 사용자` (X)
+예시 (Sequence Diagram):
+````
+```plantuml
+@startuml
+actor 사용자 as User
+participant "게임" as Game
+User -> Game: 추측 입력
+Game --> User: S/B 결과
+@enduml
+```
+````
+
+**금지**
+- `class` 다이어그램으로 Use Case 표현 (`class`/`interface`/`abstract`/`enum` 키워드 금지)
+- 외부 이미지 참조 (`![...](...png)`)
+- `@startuml` / `@enduml` 쌍 누락
+- participant/actor 이름에 공백이 있는데 따옴표도 `as` 도 없는 선언 (예: `participant 후공 사용자` — 잘못). `participant "후공 사용자" as U2` 또는 `participant U2 as "후공 사용자"` 로.
 
 ### 1.8 문서 템플릿 (use-cases.md)
 
@@ -254,7 +274,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "
 
 ## Step 2 — 자가검증 (스크립트 기반)
 
-**반드시 `validate-usecases.py` 호출**. 에이전트가 직접 커버리지 / Mermaid 구문 / Actor 다양성 계산 금지.
+**반드시 `validate-usecases.py` 호출**. 에이전트가 직접 커버리지 / PlantUML 구문 / Actor 다양성 계산 금지.
 
 ```bash
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
@@ -273,7 +293,8 @@ cat /tmp/${CODE}-uc-validation.json
   "suggestions": [...],
   "stats": {"vosKeys":N,"storyVosCovered":V1,"featureVosCovered":V2,
             "features":F,"sequenceDiagramCount":SD,
-            "useCaseDiagramFound":bool,"contextDiagramFound":bool,"mermaidBlocks":M}
+            "useCaseDiagramFound":bool,"contextDiagramFound":bool,
+            "plantumlBlocks":M,"plantumlBadPair":X}
 }
 ```
 
@@ -285,9 +306,9 @@ cat /tmp/${CODE}-uc-validation.json
 - `duplicate_docId`
 - `over_integration` — Feature 1건에 VOS 3건 이상 묶음
 - `single_actor_all` — Feature ≥3 이 모두 동일 Actor
-- `class_diagram_for_uc` — classDiagram 으로 UC 표현
+- `class_diagram_for_uc` — class 다이어그램으로 UC 표현
 - `missing_usecase_diagram` / `missing_sequence_diagram`
-- `mermaid_multi_recipient` — 쉼표로 다중 수신자
+- `plantuml_missing_pair` — `@startuml` / `@enduml` 쌍 누락
 - `external_image` — 외부 이미지 참조
 - `nfr_placeholder` — (NFR) 플레이스홀더
 
@@ -398,7 +419,7 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - Feature 생성: N건 (키 리스트)   (relink 은 0)
 - VOS-Feature 링크: 신규 NEW / 기존 유지 KEPT / ⚠ 제거 후보 REM (REM>0 이면 key 쌍 나열 + 수동 처리 안내)
 - 문서 저장: business/use-cases.md
-- Mermaid 다이어그램: Context / Use Case / Sequence
+- PlantUML 다이어그램: Context / Use Case / Sequence
 
 ### VOS 커버리지 매트릭스 (전 VOS ≥1 Feature, 전 Feature ≥1 VOS 연결)
 | VOS 키 | 매핑된 Feature | 비고 |
@@ -418,6 +439,6 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - 링크 linkType 은 정확히 `Contains(WBSGantt)` (JIRA DC 표준)
 - Platform-API `/file` 응답 content 는 base64 → `base64 -d`
 - use-cases.md 본문은 **UTF-8 plain markdown** (Platform-API 가 서버 측에서 base64 인코딩 처리)
-- Mermaid 코드블록은 반드시 ```mermaid ... ``` 로 감싸기
+- PlantUML 코드블록은 반드시 ` ```plantuml ` ... ` ``` ` 로 감싸고 `@startuml` / `@enduml` 쌍 포함
 - Feature 생성 후 subkey 를 응답에서 받아 docId 치환에 사용
 - MODE 요약: `full` — 신규 Feature create + 링크 + 문서 작성 / `relink` — 이슈 생성·수정 없음, 링크 차집합 POST + 문서 재작성. 두 모드 모두 `/Issue/link` 가 idempotent 아니므로 POST 전 기존 `issueLinks` 와 차집합 필수
