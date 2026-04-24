@@ -48,7 +48,14 @@ TOTAL=$(echo "$ISSUE_STATS" | jq '.total')
 HAS_VOS=$(echo "$ISSUE_STATS" | jq '[.byType[] | select(.type=="VOS")] | length > 0')
 HAS_FEATURE=$(echo "$ISSUE_STATS" | jq '[.byType[] | select(.type=="Feature")] | length > 0')
 HAS_REQ=$(echo "$ISSUE_STATS" | jq '[.byType[] | select(.type=="Requirement")] | length > 0')
-HAS_ADSN=$(echo "$ISSUE_STATS" | jq '[.byType[] | select(.type=="Architectural Design")] | length > 0')
+HAS_DRIVER=$(jq '[.[] | select(.issueType=="Requirement" and (.driverSelected // false) == true)] | length > 0' /tmp/gojira_issues.json)
+# style-define2 는 designPoint="시스템 스타일 결정" ADSN 을 만들고, design-decide2 는 그 외 designPoint 로 ADSN/DDSN 을 만든다.
+# 설계 결정 완료 판정에는 시스템 스타일용 ADSN 을 제외해야 함.
+HAS_NON_STYLE_ADSN=$(jq '[.[] | select((.issueType=="Architectural Design" or .issueType=="Detailed Design") and (.designPoint // "") != "시스템 스타일 결정")] | length > 0' /tmp/gojira_issues.json)
+# 스타일 선정 여부는 archSettings.chosenStyles.primary 존재로 판정
+HAS_CHOSEN_STYLES=$(curl -s "${GOJIRA_API}/Project" \
+  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | (.archSettings.chosenStyles.primary // [])] | flatten | length > 0' 2>/dev/null || echo "false")
 PROJDESC_LEN=$(echo "$PROJDESC" | wc -c | tr -d ' ')
 
 if [ "$TOTAL" = "0" ] && [ "$PROJDESC_LEN" -lt 100 ]; then
@@ -59,7 +66,11 @@ elif [ "$HAS_FEATURE" = "false" ]; then
   STAGE="usecase"
 elif [ "$HAS_REQ" = "false" ]; then
   STAGE="requirement"
-elif [ "$HAS_ADSN" = "false" ]; then
+elif [ "$HAS_DRIVER" = "false" ]; then
+  STAGE="driver"
+elif [ "$HAS_CHOSEN_STYLES" = "false" ]; then
+  STAGE="style"
+elif [ "$HAS_NON_STYLE_ADSN" = "false" ]; then
   STAGE="design"
 else
   STAGE="complete"
@@ -72,4 +83,8 @@ jq -n \
   --argjson issues "$ISSUE_STATS" \
   --argjson docs "$DOC_LIST" \
   --arg projdesc "$PROJDESC" \
-  '{code:$code, user:$user, nextStage:$stage, issues:$issues, docs:$docs, projectDescription:$projdesc}'
+  --argjson hasDriver "$HAS_DRIVER" \
+  --argjson hasChosenStyles "$HAS_CHOSEN_STYLES" \
+  --argjson hasNonStyleAdsn "$HAS_NON_STYLE_ADSN" \
+  '{code:$code, user:$user, nextStage:$stage, issues:$issues, docs:$docs, projectDescription:$projdesc,
+    flags:{hasDriver:$hasDriver, hasChosenStyles:$hasChosenStyles, hasNonStyleAdsn:$hasNonStyleAdsn}}'
