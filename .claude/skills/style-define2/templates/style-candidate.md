@@ -1,6 +1,7 @@
-# ST-{NN}: {조합 이름}
+# ADSN_{NNN}: {조합 이름}
 
 > 이 파일은 통합 스타일 후보 하나의 상세입니다. 상위 index: [../architecture-style.md](../architecture-style.md)
+> 파일명 및 제목의 `ADSN_{NNN}` 은 실제 JIRA ADSN 이슈의 subkey 와 동일합니다.
 
 ## 1. 조합 구성
 

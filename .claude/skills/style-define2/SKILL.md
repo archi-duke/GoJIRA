@@ -1,6 +1,6 @@
 ---
 name: style-define2
-description: Architecture Driver 로부터 정규화된 시스템 속성을 입력 받아, 카탈로그 스타일 엔진 점수를 참조해 **통합 스타일 조합 후보 2~3개** 를 구성하고 QA 가중 점수로 비교해 최종 선정합니다. 각 조합 후보를 ADSN 이슈로 생성(선정 조합만 decision 필드 기록, 혼합 허용), architecture/architecture-style.md (상위 index) + architecture/architecture-style/ST-NN-*.md (후보별 상세) 를 저장합니다. 개별 스타일은 ADSN 으로 만들지 않음. Self-loop 최대 3회. Claude Code 네이티브(curl/jq).
+description: Architecture Driver 로부터 정규화된 시스템 속성을 입력 받아, 카탈로그 스타일 엔진 점수를 참조해 **통합 스타일 조합 후보 2~3개** 를 구성하고 QA 가중 점수로 비교해 최종 선정합니다. 각 조합 후보를 ADSN 이슈로 생성(선정 조합만 decision 필드 기록, 혼합 허용), architecture/architecture-style.md (상위 index) + architecture/architecture-style/ADSN_NNN-*.md (후보별 상세, 파일명은 실제 subkey) 를 저장합니다. 개별 스타일은 ADSN 으로 만들지 않음. Self-loop 최대 3회. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
 
@@ -181,7 +181,7 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 
 각 후보는 다음 필드를 갖는다:
 - `candidateId` — A/B/C... (유일)
-- `docId` — `ST-1` / `ST-2` ... (유일)
+- `docId` — `ADSN-1` / `ADSN-2` ... (유일)
 - `name` — 조합 이름 (예: "Modular Monolith + Layered + Event-Driven")
 - `composition.primary/secondary/supporting` — `{id, name, role}` 배열
   - `id` 는 카탈로그의 **실존 스타일 id** (validator 가 체크)
@@ -230,7 +230,7 @@ cat > /tmp/${CODE}-styledef-draft-input.json <<'JSON'
   "candidates": [
     {
       "candidateId":"A",
-      "docId":"ST-1",
+      "docId":"ADSN-1",
       "name":"Modular Monolith + Layered + Event-Driven",
       "composition": {
         "primary":    [{"id":"modular-monolith","name":"Modular Monolith","role":"전체 모듈 경계"}],
@@ -248,7 +248,7 @@ cat > /tmp/${CODE}-styledef-draft-input.json <<'JSON'
     },
     {
       "candidateId":"B",
-      "docId":"ST-2",
+      "docId":"ADSN-2",
       "name":"Microservices + Event-Driven + CQRS",
       "composition": {
         "primary":    [{"id":"microservices","name":"Microservices","role":"독립 배포 단위"}],
@@ -272,8 +272,8 @@ cat > /tmp/${CODE}-styledef-draft-input.json <<'JSON'
   "document":{
     "index":"...architecture-style.md 마크다운 전체 (mermaid placeholder)",
     "candidateFiles":{
-      "ST-1":"...ST-1-modular-monolith.md 마크다운 전체 (mermaid placeholder)",
-      "ST-2":"...ST-2-microservices.md 마크다운 전체 (mermaid placeholder)"
+      "ADSN-1":"...ADSN-1-modular-monolith.md 마크다운 전체 (mermaid placeholder) — 저장 시 실제 subkey ADSN_NNN 으로 파일명 치환",
+      "ADSN-2":"...ADSN-2-microservices.md 마크다운 전체 (mermaid placeholder)"
     }
   }
 }
@@ -296,7 +296,7 @@ Step 1 draft 를 로드하고 **각 후보에 structuralDiagram / dynamicDiagram
 - **Dynamic View**: `sequenceDiagram` — 주요 시나리오의 시간 순 상호작용 (participant 에 `as` 키워드 필수, 쉼표 다중 수신자 금지)
 - 각 다이어그램은 ` ```mermaid ` / ` ``` ` 블록으로 감싼다
 - 같은 주제를 다르게 푸는 조합들이니 **공통 입력/출력을 동일하게 표현** 해 비교 가시성 확보
-- document.candidateFiles[ST-N] 의 mermaid placeholder 도 실제 내용으로 교체
+- document.candidateFiles[ADSN-N] 의 mermaid placeholder 도 실제 내용으로 교체
 
 작업 예:
 ```bash
@@ -312,7 +312,7 @@ for c in d["candidates"]:
     c["structuralDiagram"] = c.get("structuralDiagram") or "```mermaid\ngraph TB\n    Client --> API\n    API --> DB\n```"
     c["dynamicDiagram"]   = c.get("dynamicDiagram")   or "```mermaid\nsequenceDiagram\n    participant U as User\n    participant A as API\n    U->>A: request\n    A-->>U: response\n```"
 
-    # document.candidateFiles[ST-N] 본문의 placeholder 를 실제 블록으로 교체
+    # document.candidateFiles[ADSN-N] 본문의 placeholder 를 실제 블록으로 교체
     did = c["docId"]
     body = d["document"]["candidateFiles"].get(did, "")
     # 에이전트가 placeholder → 실제 mermaid 치환 로직 작성 (단순 replace 가능)
@@ -346,7 +346,7 @@ cat /tmp/${CODE}-styledef-validation.json
   "pass": bool,
   "score": 0.0~1.0,
   "score_effective": number,
-  "critical": [{"type":"...","docId":"ST-N","detail":"..."}],
+  "critical": [{"type":"...","docId":"ADSN-N","detail":"..."}],
   "suggestions": [...],
   "stats": {"candidates":N,"chosen":C,"selectedDocIds":[...],
             "qaWeightsTotal":T,"candidateFilesProvided":P,"indexProvided":bool}
@@ -363,7 +363,7 @@ cat /tmp/${CODE}-styledef-validation.json
 - `bad_weightedScore_type` / `bad_chosen_type`
 - `no_chosen_candidate` — chosen=true 후보 0건
 - `chosen_without_note` — chosen=true 인데 decisionNote 비어있음
-- `duplicate_docId` / `duplicate_candidateId` / `bad_docId_format` (ST-N 형식)
+- `duplicate_docId` / `duplicate_candidateId` / `bad_docId_format` (ADSN-N 형식)
 - `missing_diagram` — Step 1.5 미수행 (structuralDiagram / dynamicDiagram 블록 없음)
 - `index_missing` / `index_missing_section` / `candidate_file_missing` / `candidate_file_missing_section`
 - `empty_decisionSummary` / `empty_rationale`
@@ -505,37 +505,81 @@ cat /tmp/style_link_result.json
 
 ### 5.3 docId → subkey 치환 + 후보 파일 저장
 
+생성된 ADSN 이슈의 subkey(`ADSN_001`, `ADSN_002`, ...) 로 **파일명과 문서 본문의 모든 `ADSN-N` 참조를 치환**. 결과 파일명은 `architecture-style/ADSN_NNN-{slug}.md` 형태 — JIRA 이슈 subkey 와 완전 일치.
+
+치환 규칙:
+- `ADSN-1` → `ADSN_001` (단독 단어)
+- `ADSN-2` → `ADSN_002`
+- 파일 내부 링크(`./architecture-style/ADSN-NN-...`) 도 함께 치환
+
 ```bash
 python3 <<'PY'
 import json, os, subprocess, re
 d = json.load(open("/tmp/%s-styledef-draft.json" % os.environ["CODE"]))
 result = json.load(open("/tmp/style_adsn_result.json"))
-keys = result.get("keys", [])
+keys = result.get("keys", [])  # JIRA key 목록 (예: TEST-67, TEST-68)
 
 def slugify(name):
     s = re.sub(r"[^0-9A-Za-z가-힣+\-]+", "-", name).strip("-").lower()
-    return s[:60] if s else "st"
+    return s[:60] if s else "adsn"
 
 user = os.environ["USER"]
 code = os.environ["CODE"]
 script = os.environ["PROJECT_ROOT"] + "/.claude/skills/_scripts/doc-save.sh"
+gojira_api = os.environ.get("GOJIRA_API", "http://localhost:9001/api/v2")
 
-# 후보 파일 각각 저장
+# 각 candidate 의 docId(ADSN-N) → 실제 subkey(ADSN_NNN) 매핑 작성
+# issue-batch-create 응답 순서는 요청 순서와 동일하다는 전제. 확인을 위해 key 로 subkey 조회.
+import urllib.request
+def fetch_subkey(k):
+    req = urllib.request.Request(
+        f"{gojira_api}/Issue",
+        headers={"XBody": json.dumps({"prjID": code, "infoType": ""}), "X-User-Id": user},
+    )
+    arr = json.loads(urllib.request.urlopen(req, timeout=10).read())
+    for it in arr:
+        if it.get("key") == k:
+            return it.get("subkey") or k
+    return k
+
+docid_to_subkey = {}
 idx = 0
 for c in d["candidates"]:
-    candidate_key = keys[idx]; idx += 1
-    docid = c["docId"]              # ST-N
-    num = docid.split("-")[1].zfill(2)
+    key = keys[idx]; idx += 1
+    docid_to_subkey[c["docId"]] = fetch_subkey(key)
+print("docid → subkey:", docid_to_subkey)
+
+def substitute_refs(text):
+    # ADSN-N (단독 단어 경계) → ADSN_NNN
+    for did, sub in docid_to_subkey.items():
+        text = re.sub(r"\b" + re.escape(did) + r"\b", sub, text)
+    return text
+
+# 후보 파일 각각 저장 (파일명 = subkey)
+for c in d["candidates"]:
+    docid = c["docId"]
+    subkey = docid_to_subkey[docid]
     slug = slugify(c["name"])
-    path = f"architecture/architecture-style/ST-{num}-{slug}.md"
+    path = f"architecture/architecture-style/{subkey}-{slug}.md"
     body = d["document"]["candidateFiles"].get(docid, "")
-    # placeholder {KEY} 가 있다면 실제 key 로 치환 (뼈대에 사용한 경우)
-    body = body.replace("{" + c["candidateId"] + "_KEY}", candidate_key)
+    body = substitute_refs(body)
     p = subprocess.run(["bash", script, code, user, path], input=body, text=True, capture_output=True)
     print(f"  {path}: {p.stdout.strip()}")
 
-# index 파일
+# index 파일 — 본문 내 ADSN-N 참조도 subkey + 파일 링크도 재작성 필요
+# 링크 예: ./architecture-style/ADSN-01-... → ./architecture-style/ADSN_001-...
 index_body = d["document"]["index"]
+index_body = substitute_refs(index_body)
+# 후보 파일 링크가 ADSN-1 기준으로 생성됐다면 slug 포함 경로 치환
+for c in d["candidates"]:
+    docid = c["docId"]
+    subkey = docid_to_subkey[docid]
+    slug = slugify(c["name"])
+    # 가능한 기존 링크 패턴들을 subkey 기반으로 교체
+    old_prefix = f"architecture-style/{docid}-"
+    new_prefix = f"architecture-style/{subkey}-"
+    index_body = index_body.replace(old_prefix, new_prefix)
+
 p = subprocess.run(["bash", script, code, user, "architecture/architecture-style.md"],
                    input=index_body, text=True, capture_output=True)
 print(f"  architecture/architecture-style.md: {p.stdout.strip()}")
@@ -585,16 +629,16 @@ PATCH 실패 시 최종 보고에 ⚠. 다음 스킬이 영향 받을 수 있음
 ```
 ## 시스템 스타일 결정 완료 (v2 Claude Code)
 
-- 검토 후보: N개 (ST-01 ~ ST-NN)
+- 검토 후보: N개 (ADSN_001 ~ ADSN_NNN, 실제 subkey)
 - ADSN 생성: K건 (채택 C건 / 미채택 K-C건)
 - Requirement-Style 링크: L건 (채택안에만)
 - 문서:
   - architecture/architecture-style.md (상위 index)
-  - architecture/architecture-style/ST-01-*.md ~ ST-NN-*.md
+  - architecture/architecture-style/ADSN_001-*.md ~ ADSN_NNN-*.md (실제 subkey 기준)
 - archSettings.chosenStyles 업데이트: 성공 / ⚠
 
 ### 선정 결과
-- ST-NN {조합 이름}: 총점 X.XX — 채택
+- ADSN_NNN {조합 이름}: 총점 X.XX — 채택
   - Primary: {스타일}
   - Secondary: {스타일}
   - Supporting: {스타일(들)}

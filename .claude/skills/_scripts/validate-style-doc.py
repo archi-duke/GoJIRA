@@ -17,7 +17,7 @@ stdin JSON:
   "candidates": [
     {
       "candidateId": "A",
-      "docId": "ST-1",
+      "docId": "ADSN-1",
       "name": "Modular Monolith + Layered + Event-Driven",
       "composition": {
         "primary":    [{"id":"modular-monolith","name":"...","role":"..."}],
@@ -42,7 +42,7 @@ stdin JSON:
   "relatedDrivers": ["<key>", ...],                           # 선택
   "document": {
     "index": "<architecture-style.md>",
-    "candidateFiles": {"ST-1": "<...>", "ST-2": "<...>"}
+    "candidateFiles": {"ADSN-1": "<...>", "ADSN-2": "<...>"}
   }
 }
 
@@ -68,7 +68,7 @@ CANDIDATE_REQUIRED = {
 }
 APPROACH_DIAGRAM_FIELDS = {"structuralDiagram", "dynamicDiagram"}
 
-ST_ID_RE = re.compile(r"^ST-\d+$")
+ST_ID_RE = re.compile(r"^ADSN-\d+$")
 MERMAID_BLOCK_RE = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
 
 ROLE_KEYS = ["primary", "secondary", "supporting"]
@@ -155,7 +155,7 @@ def validate(payload: dict) -> dict:
 
         if doc_id and not ST_ID_RE.match(doc_id):
             critical.append({"type": "bad_docId_format", "docId": doc_id,
-                             "detail": "docId 는 ST-N 형식"})
+                             "detail": "docId 는 ADSN-N 형식"})
 
         for field in CANDIDATE_REQUIRED:
             val = c.get(field)

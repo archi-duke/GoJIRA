@@ -4,7 +4,7 @@
 
 프로젝트의 시스템 스타일은 **2~3개의 통합 스타일 후보** (Primary + Secondary + Supporting 조합) 를 QA(NFR) 가중 평가로 비교하여 최종 선정합니다. 개별 스타일은 ADSN 이슈로 만들지 않고, **각 조합 후보를 ADSN 이슈로** 만듭니다.
 
-각 후보 조합의 상세 비교·다이어그램·점수는 `architecture-style/ST-NN-*.md` 파일에 수록되며, 이 index 는 요약·결정 근거·Driver 추적성을 담당합니다.
+각 후보 조합의 상세 비교·다이어그램·점수는 `architecture-style/ADSN_NNN-*.md` 파일에 수록됩니다 (파일명은 이슈 생성 후 실제 subkey 로 치환). Step 1 초안 단계에서는 docId 로 `ADSN-1`, `ADSN-2` 를 쓰고 Step 5.3 저장 시 `ADSN_001`, `ADSN_002` 등으로 치환합니다.
 
 ---
 
@@ -12,9 +12,9 @@
 
 | 후보 | Primary | Secondary | Supporting | 총점 | 선정 | 상세 |
 |---|---|---|---|---|---|---|
-| ST-01 | {스타일} | {스타일} | {스타일(들)} | X.XX |  | [ST-01](./architecture-style/ST-01-{slug}.md) |
-| ST-02 | {스타일} | {스타일} | {스타일(들)} | X.XX | ✓ | [ST-02](./architecture-style/ST-02-{slug}.md) |
-| ST-03 | {스타일} | {스타일} | {스타일(들)} | X.XX |  | [ST-03](./architecture-style/ST-03-{slug}.md) |
+| ADSN_001 | {스타일} | {스타일} | {스타일(들)} | X.XX |  | [ADSN_001](./architecture-style/ADSN_001-{slug}.md) |
+| ADSN_002 | {스타일} | {스타일} | {스타일(들)} | X.XX | ✓ | [ADSN_002](./architecture-style/ADSN_002-{slug}.md) |
+| ADSN_003 | {스타일} | {스타일} | {스타일(들)} | X.XX |  | [ADSN_003](./architecture-style/ADSN_003-{slug}.md) |
 
 - **총점**: QA 가중 평균 (0.0 ~ 5.0). 가중치는 2 섹션 참조
 - **선정**: 최종 선정된 후보. 혼합 채택 시 복수 ✓
@@ -34,7 +34,7 @@
 
 ## 3. 최종 선정
 
-**선정안**: ST-NN — {조합 이름}
+**선정안**: ADSN_NNN — {조합 이름}
 **채택 ADSN 키**: {이슈 키}
 **선정 근거**:
 - 총점 기준 최고 (X.XX)
@@ -63,4 +63,4 @@
 
 | 후보 | 기각 이유 | 어떤 조건에서 재검토 가능한지 |
 |---|---|---|
-| ST-NN | ... | ... |
+| ADSN_NNN | ... | ... |
