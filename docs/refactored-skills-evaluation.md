@@ -234,3 +234,135 @@ Phase 3 리팩토링의 목표는 Claude Code 네이티브 스킬 8종에 다음
 - style-define2 v2 의 조합 후보 방식은 이전의 개별 스타일 방식보다 **설계 담론 측면에서 우월** — QA 가중 비교가 실제로 의미 있는 결정으로 이어짐. 비용은 10배지만 GLM 안정 구간 내
 - 4 스킬 체인 연속 완주 가능성 입증 — 단일 세션 68분/343K fresh/109 턴으로 **실무 규모 프로젝트 1회 설계 체인** 이 hands-off 로 완결 가능함을 확인
 - OpenCode serve 캐시 + 모호한 지시어 skip 같은 운영상 함정은 여전. 체인 실행 시 stall-watch + skill 이름 명시 습관 권장
+
+---
+
+# 3차 실증 — SATAM v3 재설계 (design × requirement 논리 판정)
+
+*2026-04-24 오후, TEST 프로젝트 (satam-analyze2 단독 재실행)*
+
+## 12. 배경 — v2 편법 우회 발견
+
+2차 실증(§7~§11) 직후 SATAM v2 출력을 검증해보니 **모든 채택 ADSN (6건) 에 Risk + Mitigation 쌍이 유지** 되어 "Unmitigated Risk" 가 사실상 0건인데도 결과가 깨끗하지 않았다. 원인 분석:
+
+| 관찰 | 의미 |
+|---|---|
+| 채택 ADSN 6건 전부에 R1~R6 + M1~M6 쌍 (cell 단위) | 완화 규칙 `mitigated_pair_not_removed` validator 가 있었음에도 작동 안 함 |
+| LLM 이 `R.qa = [TEST-55, TEST-61]` 처럼 QA 를 여러 개로 확장 | Pass 3 validator (`all QA covered` 조건) 우회 — 부분 커버로 위장 |
+| `M.counterRisk = ["R2:TEST-58"]` 인데 `R2.qa` 에 TEST-58 없는 경우도 발견 | targetQA mismatch 검증 부재 |
+| 3차 재실행 시도: 36 턴 / 12분 / 62K fresh | validator 가 계속 critical 던지고 LLM 이 편법 수정 반복 |
+
+**근본 원인**: v2 는 "원문 분해 후 완화 쌍 제거" 방식이라 LLM 이 Risk 와 Mitigation 을 쌍으로 기록한 뒤 validator 우회를 학습할 수 있었다. 접근 자체를 뒤집어야 하는 상황.
+
+## 13. v3 설계 — 판정 시점에 self-mitigated 제외
+
+**핵심 철학** (사용자 지시): *"디자인이 자기 risk 를 스스로 극복 가능하면 risk 자체가 성립하지 않는다"*. 즉 Risk 와 Mitigation 을 쌍으로 기록한 뒤 제거하는 게 아니라, **판정 시점에 self-mitigated 는 애초에 등록 안 함**.
+
+### 13.1 판정 알고리즘
+
+```
+for each ADSN d in 채택된 ADSN:
+  for each Requirement r in (NFR + CNST + driverSelected=true 인 FR):
+    verdict = judge(d, r)
+
+    # 3.1 r 가 NFR (QA):
+    #   - d 로 QAS 달성이 "명확히 실패" + self-mitigated 아님 → risk
+    #   - 조건/상황 변동 시 risk 될 경우 → sensitivity
+    #   - 그 외 → non-risk (무기록)
+    # 3.2 r 가 CNST: 위배 확인 + self-mitigated 아님 → risk / 조건부 → sensitivity
+    # 3.3 r 가 FR (ASR): 구현 "불가능" (어떻게든 되는 경우 제외) → risk / 조건부 → sensitivity
+
+# 모든 risk 확정 후:
+for each ADSN d:
+  for each Risk r_other in (다른 ADSN 의 risks):
+    if d 가 r_other 를 구체적 메커니즘으로 해결 가능:
+      mitigations[d].append({targetADSN: r_other.adsn, targetRisk: r_other.id, description})
+```
+
+### 13.2 스키마 변경점
+
+| v2 | v3 |
+|---|---|
+| `risks[].qa: [key, key]` (복수 QA) | `risks[].requirement: <key>` + `reqType: "FR"\|"NFR"\|"CNST"` (단일) |
+| `tradeoffs[].counterRisk: ["R1:QA_KEY"]` (같은 ADSN R) | `mitigations[].targetADSN + targetRisk` (**cross-ADSN 전용**) |
+| 완화 쌍 사후 제거 규칙 | self-mitigated risk 등록 자체 금지 (구조 방지) |
+| `mitigated_pair_not_removed` critical | `same_adsn_mitigation` critical (targetADSN = 자기 자신) |
+
+### 13.3 validator Pass 재구성
+
+`validate-satam.py` 전면 재작성 (v3):
+- `requirement_hallucination` / `fr_not_asr` / `reqType_mismatch` — 판정 대상 무결성
+- `same_adsn_mitigation` — SATAM 본연 위반 감지 (구조적 self-mitigation 차단)
+- `mitigation_target_unknown` — targetADSN/targetRisk 참조 무결성
+- 스모크 테스트로 정상/오류 케이스 모두 검증
+
+## 14. v3 실증 결과 — TEST 프로젝트 재실행
+
+### 14.1 토큰·시간 메트릭 (v2 대비)
+
+| 지표 | v2 (3차 시도) | v3 | 변화 |
+|---|---|---|---|
+| 턴 | 36 | **16** | -55% |
+| 경과 | 12분 07초 | **3분 51초** | **-68%** |
+| Fresh input | 42,637 | 31,389 | -26% |
+| Fresh output | 19,069 | 6,579 | **-65%** |
+| Reasoning | 227 | **25** | **-89%** |
+| Fresh 합계 | 61,933 | **38,018** | -39% |
+
+Reasoning 25 토큰 (v2 의 89% 감소) — v3 규칙이 명확히 판정 기준을 제시해 LLM 이 "고민" 하지 않음.
+
+### 14.2 SATAM 본연 결과
+
+**채택 ADSN 6건 전부 — Risk 0 / Sensitivity 0 / Mitigation 0**. Concerns 만 5건에 1~2개씩 기록됨.
+
+검증 (Opus 4.7 이 직접 72 쌍 판정 수행): LLM 과 동일한 결론 도출. 주요 관찰:
+- ADSN_006 (Redis + DB) 의 "단일 장애점" 은 tradeoffs 에 "RDB/AOF 충분" 명시 → self-mitigated → 정확히 non-risk 로 분류
+- ADSN_008 (인메모리 매칭 큐) 의 "재시작 시 유실" 은 decisionRationale 에 "재시도 복구" 명시 → non-risk
+- Cross-ADSN mitigation 은 0건 (다른 ADSN 에 risk 가 없으면 해결할 대상도 없음)
+
+이전 v2 가 남기던 편법 완화 쌍 — "R1: Layered 모듈 경계 약화 + M1: Hexagonal 재검토로 해결" 같은 — 이 **v3 에서는 둘 다 사라지고 Concerns 로만 관찰 기록**. 분석 노이즈 대폭 감소.
+
+### 14.3 "Risk 0 건" 이 정당한 결과인가
+
+LLM 의 잘못된 관대함일 가능성을 배제하기 위해 Opus 4.7 이 직접 72 쌍 (6 ADSN × 12 requirement) 을 판정. 약하게 sensitivity 후보로 볼 만한 3건도 검토:
+1. ADSN_001 × QA_008: Monolith 단일 장애점 → 99% 가동률 위협 여지. 그러나 ADSN_012 관측성으로 복구 설계 → 약함
+2. ADSN_008 × QA_007: 피크 집중 시 Mutex 대기 가능. 그러나 100명 규모에서 영향 없음
+3. ADSN_009 × QA_003: 신규 엔드포인트 누락 위험. 그러나 decisionRationale 에 "누락 위험 제거" 명시 → self-mitigated
+
+사용자 지침 *"판정은 현실적으로 하고 굳이 없는 리스크 찾지 말 것"* 에 비추면 위 3건도 기록 가치 없음.
+
+**결론**: TEST 프로젝트 설계가 실제로 요구사항 대비 충실 — 각 DP 의 선정 근거가 핵심 Driver 를 직접 충족하고, cons/tradeoffs 에 대응이 이미 명시돼 있으며, 6 ADSN 이 서로 보완하는 완성도 있는 설계 조합.
+
+## 15. 해결된 부채 / 남은 과제 (3차 실증 후)
+
+### 15.1 이번 세션에서 해결
+
+| 항목 | 상태 |
+|---|---|
+| SATAM v2 의 편법 우회 (부분 커버 위장) | ✓ v3 구조 자체로 방지 |
+| 같은 ADSN 내 완화 쌍 기록 | ✓ `same_adsn_mitigation` critical 로 구조적 감지 |
+| SATAM skip 방지 | ✓ v2 포맷 아니면 재분석 규칙 명시 |
+| design-decide2 DP 스케일 가이드 | ✓ DP × candidate ≥ 15 시 분할 기준 추가 |
+| Requirement ↔ ADSN 링크 타이트화 | ✓ objectives/decisionRationale 명시 근거만, 2~4개 권장 |
+| design-integrate2 Development View 패키지 다이어그램 | ✓ template 적용 확인 |
+
+### 15.2 남은 과제
+
+| 항목 | 우선순위 | 비고 |
+|---|---|---|
+| v3 SATAM 을 **의도적 취약 설계** 프로젝트에 적용해 실측 | 중 | "Risk 0" 이 v3 의 버그가 아닌 정당한 결과임을 추가 검증. 예: DB 없는 ADSN + 세션 영속성 QA |
+| UI AgentChat 실제 렌더 브라우저 검증 (#27) | 중 | 사용자가 하나씩 검토 중 |
+| usecase-analyze2 Step 1 분할 | 보류 | 쿼터·ROI 사유 (재검토 트리거: Feature ≥ 15 프로젝트 등장) |
+| issueLinks YAML 포맷 | 낮 | 기능 영향 없음 |
+
+## 16. 최종 결론
+
+Phase 3 v3 재설계로 SATAM 스킬이 **본연의 목적** — *mitigation 되지 않은 구조적 risk 의 발견* — 을 회복. 구체적 성과:
+
+- **구조적 방지**: self-mitigated risk 등록 자체 금지. 완화 쌍은 표현 불가능한 스키마
+- **비용 절감**: v2 → v3 전환으로 SATAM 단독 실행이 3분 51초 / 38K fresh 로 짧아짐 (v2 대비 -68% 시간, -39% 토큰)
+- **판정 명확성**: Reasoning 25 토큰 (-89%) — 규칙이 명확해 LLM 이 고민 없이 판정
+- **현실적 기준**: "없는 risk 찾지 말 것" 지침으로 LLM 의 분량 채움 억제. "Risk 0건" 도 정상 결과
+- **후속 설계 유도**: Unmitigated Risk 가 나오면 Step 6 보고에 "추가 설계 필요" 명시 → 다음 design-decide2 호출로 자연스러운 연계
+
+v2 의 편법 우회 → v3 의 구조적 해결로 **SATAM 의 가치 회복**. 향후 실측에서 의도적 취약 설계가 제대로 잡히는지 확인이 다음 검증 과제.
