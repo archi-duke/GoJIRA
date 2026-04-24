@@ -137,3 +137,100 @@ Phase 3 리팩토링의 목표는 Claude Code 네이티브 스킬 8종에 다음
 - `project_design_decide_mermaid_split.md` — design-decide2 Option C
 - `reference_tactics_for_skill.md` — turn vs generation 원리
 - `project_phase3_progress_apr22.md` — Phase 3 진행 맥락
+
+---
+
+# 2차 실증 — style-define2 v2 재설계 + 4 스킬 체인
+
+*2026-04-24, TEST 프로젝트, OpenCode 세션 `ses_242f5e0bfffe2cjMvFoiD5C5R1`*
+
+## 7. 배경
+
+1차 실증(§1~§6) 이후 사용자 피드백과 발견된 한계를 반영해 **style-define2 를 v2 로 재설계** 하고, 그 체인을 TEST 에서 재검증했다. 드라이버 선정 완료 상태에서 시작해 style → design-decide → design-integrate → satam 4 스킬을 단일 OpenCode 세션으로 연속 실행.
+
+### 7.1 v2 로 바뀐 것
+
+| 영역 | 변경 |
+|---|---|
+| `style-define2` | 통합 스타일 **조합 후보 2~3개** 를 ADSN 으로 만들고 QA 가중 점수로 비교 선정. 개별 스타일은 ADSN 금지. 파일: index + 후보별 파일 (DP 구조와 동일) |
+| 파일·ID 체계 | docId 는 논리적 `ADSN-N`, 저장 시 실제 subkey `ADSN_NNN` 으로 치환. 파일명 `architecture-style/ADSN_NNN-*.md` 로 JIRA 이슈 키와 1:1 매핑 |
+| `project-status.sh` | ADSN 존재 여부만 보던 완료 판정 → `designPoint != "시스템 스타일 결정"` 인 non-style ADSN 기준으로 수정 (`driver/style/design/complete` 단계 분리) |
+| `design-integrate2` Development View | ASCII 폴더 트리 → **패키지 다이어그램** (`graph TB` + `subgraph` 계층 + 의존 방향 + 책임 표) |
+| `satam-analyze2` | 기존 유지. Risk/Sensitivity/Concerns 3-way 분류 + 전역 ID 유니크 + cell-level mitigated risk 제외 규칙 (1차 평가 이후 추가된 메모리 피드백 반영) |
+
+## 8. 실측 결과 — 4 스킬 체인
+
+### 8.1 스킬별 성능 지표
+
+| 스킬 | 경과 | Fresh 합계 | Input | Output | Reasoning | Turns | 단일 최대 generation |
+|---|---|---|---|---|---|---|---|
+| `style-define2` (v2) | 11분 31초 | 77,901 | 57,504 | 16,193 | 4,204 | 39 | 154s (Step 2 validate 대기) |
+| `design-decide2` | 20분 37초 | 75,692 | 47,590 | 22,652 | 5,450 | 27 | **353s** (Step 1 DP 5×후보 2 batch = output 13,493) |
+| `design-integrate2` | 11분 55초 | 171,457 | 151,262 | 12,442 | 7,753 | 30 | 122s (Step 2 tool 실행) |
+| `satam-analyze2` | **3분 46초** | 17,646 | 13,075 | 4,332 | 239 | 13 | — (평균 10~30s) |
+| **4 스킬 누계** | **약 48분** | **342,696** | 269,431 | 55,619 | 17,646 | 109 | |
+
+세션 전체(대화 공백 포함) 는 약 68분, cache read 누계 8.3M.
+
+### 8.2 생산물 검증
+
+| 검증 항목 | 결과 |
+|---|---|
+| 스타일 조합 2개 ADSN 생성 (ADSN_001/002) | ✓ Modular Monolith + Layered 채택, + Hexagonal 미채택 |
+| `architecture-style.md` + 후보 파일 2개 | ✓ 파일명이 실제 subkey (`ADSN_001-*.md`, `ADSN_002-*.md`) 와 정확히 일치 |
+| DP 5개 식별 + 10 ADSN 생성 (ADSN_003~012) | ✓ 실시간 통신 / 게임 상태 관리 / 매칭 동시성 / 인증 / 관측성 |
+| 각 DP 채택 후보 1건 + decision 필드 | ✓ 6/6 (ADSN_004, 006, 008, 009, 012 + 001) |
+| `architecture-integrated.md` 4관점 | ✓ 10.8KB, Logical 컴포넌트 표 + ADSN 매핑 |
+| SATAM YAML 포맷 (ID: R1/S1/M1 + QA + Description + Counter Risk) | ✓ 전역 ID 유니크 (R1~R6+, S1~S4+, M1~M6+) |
+| `archSettings.chosenStyles` PATCH 영속화 | ✓ `{primary:[Modular Monolith], secondary:[Layered], supporting:[]}` |
+
+## 9. 관측·발견
+
+### 9.1 핵심 품질 지표
+
+- **스톨 0회** (4 스킬 109 턴 전체) — 어제 v1 에서 겪은 GLM 긴 reasoning 스톨이 v2 재설계 이후 재발하지 않음
+- **Reasoning 희박 유지** — 스킬별 4.2K / 5.4K / 7.7K / 0.2K (전체 17.6K) 로 여전히 낮음. R2 generation 경계가 계속 작동 중이라는 강한 신호
+- **Cache 재활용 비율** fresh 343K vs cache 8.3M ≈ **1:24** — OpenCode serve 의 prompt cache 가 연속 스킬 체인에서 유효
+
+### 9.2 스킬별 특징
+
+**style-define2 v2** — v1(83s/3.4K) 대비 약 **10배** 의 규모(11.5분/78K). 조합 후보 방식은 본질적으로 더 무거운 작업이지만 Mermaid 격리 + best-so-far 가 안정적으로 수렴. ID 체계(ADSN-N → ADSN_NNN) 치환은 기존 생성 파일 rename 포함 완결.
+
+**design-decide2** — DP 5개 × 후보 2개 = 10 ADSN 을 **단일 Step 1 에 batch 로 생성** (output 13,493 / 353초 단일 generation). 설계 의도(후보별 분할이 아닌 DP 전체 batch → Mermaid 격리 + validate 로 분리)대로 동작. DP 수가 더 많아지면(≥8) 이 구간이 스톨 리스크에 근접할 수 있음.
+
+**design-integrate2** — Fresh input 151K 중 첫 턴 107K 가 ADSN/driver/style 재로드. 겉보기 폭탄이지만 cache hit 이후 저렴. 단일 최대 generation 122s 로 범위 내.
+
+**satam-analyze2** — **3.8분 / 17.6K fresh / 13 turns** 로 체인 중 가장 가볍다. 채택된 6개 ADSN 만 분석 대상 + Mermaid 없음 + 파일 저장 없음(이슈 PUT 만) + reasoning 239 (1~2 iter 수렴).
+
+### 9.3 사건 기록
+
+- **"에제 마지막 작업!" 오해** — 사용자 오타를 에이전트가 "마무리 선언 요청" 으로 해석. SATAM 스킬을 호출하지 않고 "완료" 멘트만 출력 (2턴 / 8.25초 / 408 output). 이슈 필드에 남아있던 design-decide2 raw 텍스트를 SATAM 결과로 오인할 뻔함. **해결**: risk/sensitivity/mitigation/concerns 필드 전체 초기화 후 `"satam-analyze2 스킬로 ADSN 위험도 분석해줘"` 라고 스킬 이름을 명시해 재호출.
+  - **교훈**: 모호한 지시어에는 스킬 이름을 명시해야 안전. 에이전트가 skip 할 수 있는 조건을 줄이도록 SKILL.md 에 "ADSN 의 risk 필드가 비어있지 않아도 SATAM v2 포맷이 아니면 재분석" 규칙을 추가하는 것도 검토 가치
+
+- **OpenCode serve 캐시 이슈 재확인** — SKILL.md / validator 수정 후 serve 프로세스 재시작해야 반영됨. 세션 교체만으로는 부족. 1차 실증 당시 `feedback_opencode_skill_cache.md` 메모로 기록했던 규칙이 이번에도 유효.
+
+## 10. 부채·후속
+
+### 10.1 이번에 해결된 것
+
+| 항목 | 상태 |
+|---|---|
+| archSettings PATCH 영속화 실패 (§5.3) | ✓ **해결 확인** — `chosenStyles` PATCH 성공 후 Mongo 에 정상 저장됨 |
+| ADSN ID 체계 (style 후보 vs DP 후보 혼동) | ✓ 해결 — 파일명이 실제 subkey 와 일치, docId 치환 로직 명시화 |
+| 완료 판정 오동작 (style ADSN 을 design-decide 완료로 오인) | ✓ 해결 — `project-status.sh` non-style ADSN 기준으로 수정 |
+
+### 10.2 남은 과제
+
+| 항목 | 우선순위 | 비고 |
+|---|---|---|
+| `design-integrate2` Development View 패키지 다이어그램 반영 여부 재검증 | 중 | 이번 세션은 template 수정 **이전** 에 실행됨 가능성. serve 재시작 후 재실행해 실제 패키지 다이어그램 나오는지 확인 필요 |
+| `design-decide2` DP 수 스케일링 가이드 | 낮음 | DP × 후보 ≥ 15 시점에서 Step 1 분할 경계 문서화 |
+| SATAM skip 방지 가이드 | 낮음 | SKILL.md 에 "기존 필드가 비어있지 않아도 v2 포맷 아니면 재분석" 추가 검토 |
+| issueLinks YAML 포맷 (§4.2) | 낮음 | 여전히 미해결 (기능 동작에는 영향 없음) |
+
+## 11. 종합 결론
+
+- Phase 3 리팩토링 원칙(R1~R4 + Mermaid Option C) 이 **v2 재설계 이후에도 안정** 을 유지. 스톨 0회, reasoning 희박, cache 재활용 효율 유지
+- style-define2 v2 의 조합 후보 방식은 이전의 개별 스타일 방식보다 **설계 담론 측면에서 우월** — QA 가중 비교가 실제로 의미 있는 결정으로 이어짐. 비용은 10배지만 GLM 안정 구간 내
+- 4 스킬 체인 연속 완주 가능성 입증 — 단일 세션 68분/343K fresh/109 턴으로 **실무 규모 프로젝트 1회 설계 체인** 이 hands-off 로 완결 가능함을 확인
+- OpenCode serve 캐시 + 모호한 지시어 skip 같은 운영상 함정은 여전. 체인 실행 시 stall-watch + skill 이름 명시 습관 권장
