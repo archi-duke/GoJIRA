@@ -13,6 +13,18 @@ allowed-tools: Bash, Read
 - critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-satam.py` 로 재검증. 한 generation 당 1 iter
 - assistant 출력에는 전체 매핑 JSON 뱉지 말 것. "/tmp/... 저장" / "critical N건" 한두 줄만
 
+## 재분석 규칙 (skip 방지)
+
+ADSN 의 `risk / sensitivity / mitigation / concerns` 필드가 **비어있지 않아도 자동 skip 금지**. 기존 값이 **SATAM v2 YAML 포맷** (`ID : R1` / `QA : [...]` / `Description : ...` / `Counter Risk : [...]`) 이 아니면 **design-decide2 단계 잔여 원문으로 간주** 하고 재분석한다.
+
+판정 규칙 (Step 0 에서 실시):
+- `risk` 필드 원문에 `"ID :"` 문자열이 **없으면** → 원문/미분석 → 이번 스킬로 재작성
+- `"ID :"` 가 있으면 → v2 구조화 완료 → `Step 5` PUT 단계에서만 참조 (재분석 불필요)
+
+사용자가 "이전에 돌렸다" 고 해도 위 포맷 체크로 직접 판정. 신뢰하지 말 것.
+
+---
+
 ## 진행 상태 가시화 — `todowrite` (선택, OpenCode)
 
 OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 단계를 알려주면 UX 가 좋다. 강제 아님, Claude Code 에서는 무시. 자세한 규칙은 `.claude/skills/_shared/todowrite-guide.md`.

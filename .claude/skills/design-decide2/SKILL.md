@@ -91,6 +91,18 @@ Driver / 선정 스타일 / 품질속성에서 설계 결정이 필요한 관심
 
 **모든 Driver 는 최소 1 DP 로 다뤄져야 한다.**
 
+### 1.1a 스케일 가이드 (Step 1 batch 경계)
+
+Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (Mermaid 는 Step 1.5 에서 별도). 실측 기준:
+
+| DP × 후보 총합 | Step 1 단일 generation 예상 | 권장 조치 |
+|---|---|---|
+| ≤ 10 | ~15K output / 350s 이내 | 현상 유지 (단일 batch) |
+| 11~14 | ~20K output / 500s | 경고 — 단일 batch 허용하나 stall-watch 필수 |
+| ≥ 15 | ~25K+ / 700s+ | **분할 권장** — DP 를 5~6 개씩 chunk 로 쪼개 여러 턴에 걸쳐 draft 에 append (`draft-io.sh save` 사이에 일부 DP 만 생성하고 다음 generation 에서 나머지 이어쓰기) |
+
+2026-04-24 실측: DP 5 × 후보 2 = 10 일 때 output 13,493 / 353s (OK). DP 수나 후보 수가 이 범위를 넘으면 Step 1 을 chunk 로 분할해 stall 리스크 회피.
+
 ### 1.2 DP 별 필드 구성
 
 각 DP 에 다음을 채운다:
