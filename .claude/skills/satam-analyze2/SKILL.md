@@ -60,22 +60,71 @@ export USER="batman"
 
 ## 역할 / 핵심 목적
 
-소프트웨어 아키텍트. ATAM 변형(SATAM)으로 **각 ADSN 의 아키텍처 결정이 품질속성(QA)에 미치는 영향**을 구조화한다.
+소프트웨어 아키텍트. ATAM 변형(SATAM)으로 **각 아키텍처 설계(ADSN)가 프로젝트의 Requirement 달성을 위협하는 지점** 을 구조화한다.
 
-> **SATAM 의 한 줄 정의**: *해결되지 않은(unmitigated) risk 를 찾아 남기는 것*.
+> **SATAM 의 한 줄 정의**: *Mitigation 되지 않은 Risk 를 찾는 것*.
 
-이 관점으로 다음 규칙이 따라 나온다:
-- **완화된 Risk 는 미기록** (제거) — 이미 해결된 리스크를 SATAM 결과에 남기면 노이즈만 늘고 의사결정 방해
-- **Mitigation 없는 Risk 는 필수 기록** (보존) — 설계의 취약점 발견이 SATAM 의 가치
-- **남겨진 Unmitigated Risk 는 후속 설계(추가 ADSN/DDSN) 대상** — Step 6 보고에 "추가 설계 필요" 목록으로 표시해 다음 design-decide2 실행을 유도
+### v3 구조 (2026-04-24) — design × requirement 판정
 
-자유 서술 원문을 Risk / Sensitivity / Mitigation / Concerns 네 축으로 분해하고, 영향 받는 QA(NFR) 를 명시한다.
+기존 버전은 ADSN 의 원문(risk/sensitivity 필드)을 분해하는 방식이어서 LLM 이 "자기가 만든 risk 를 자기가 해결" 하는 완화 쌍을 기록하는 문제가 있었다. v3 는 **판정 시점에 이미 self-mitigated 를 제외** 한다.
 
-- Risk : 결정으로 인해 QA 가 저하될 수 있는 지점
-- Sensitivity Point : 결정이 특정 QA 에 크게 영향을 주는 지점
-- Trade-off : 한 QA 를 얻기 위해 다른 QA 를 포기하는 지점 — Counter Risk 명시 필수
+**핵심 규칙**: 디자인이 자기 risk 를 **스스로 극복 가능** 하면 **risk 자체가 성립하지 않음** — 등록 금지.
 
-원문에 없는 내용 창작 금지.
+**Mitigation 의미 재정의**: "이 디자인이 **다른 ADSN 의 risk 를 해결** 한다" 는 cross-ADSN 관계만 인정. 같은 ADSN 내에 R 과 해당 R 을 가리키는 M 이 함께 등장하면 **critical 오류**.
+
+### 판정 알고리즘
+
+모든 `(design, requirement)` 조합을 순회하며 아래 규칙으로 판정:
+
+```
+for each ADSN d in 채택된 ADSN 목록:
+  for each Requirement r in 프로젝트 Requirement 전체 (FR/NFR/CNST):
+    # FR 중 ASR(driverSelected=true) 아닌 것은 건너뜀
+    if r.reqtype == "FR" and not r.driverSelected: continue
+
+    verdict = judge(d, r)
+    # judge() 는 LLM 이 다음 로직으로 판정:
+
+    if r.reqtype == "NFR" (QA):
+      if   d 로 인해 r 의 QAS 달성이 "명확히 실패" 함을 확인 가능
+           AND d 가 그 실패를 스스로 극복 불가능
+        → risks.append({ADSN: d, requirement: r, description})
+      elif d 로 인해 r 의 QAS 달성이 "조건/상황 변동 시 risk 가 될" 수 있음
+        → sensitivities.append({...})
+      else: non-risk (무기록)
+
+    elif r.reqtype == "CNST":
+      if   d 로 인해 r 의 CNST 위배 발생이 확인 가능 AND 자체 극복 불가
+        → risks
+      elif d 로 인해 r 의 CNST 위배가 조건 변동 시 발생 가능
+        → sensitivities
+      else: non-risk
+
+    elif r.reqtype == "FR" and r.driverSelected:
+      if   d 로 인해 r 의 구현이 "불가능" 해짐 (어떻게든 되는 경우 제외)
+           AND 자체 극복 불가
+        → risks
+      elif d 로 인해 r 의 구현이 조건 변동 시 불가능해질 수 있음
+        → sensitivities
+      else: non-risk
+
+# 모든 risk 판정 완료 후, 각 디자인의 mitigation 검토:
+for each ADSN d:
+  for each Risk r_other in (d 외 다른 ADSN 들의 risks):
+    if d 가 r_other 를 해결 가능:
+      mitigations[d].append({targetADSN: r_other.adsn, targetRisk: r_other.id, description})
+```
+
+### 판정 지침
+
+- **"명확히 실패"**: 추측·가능성 수준 배제. 현 설계가 그대로 돌아가면 requirement 를 못 만족함이 설계상 확정적
+- **"자체 극복 가능"**: 설계의 `cons`/`tradeoffs`/`decisionRationale` 에 *이 risk 에 대한 대응 방안이 이미 포함* 돼있으면 스스로 해결 가능 → risk 등록 금지
+- **"어떻게든 되는 경우"**: FR 판정에서 성능·품질 타협 있어도 기본 구현은 가능하면 → non-risk
+- **Cross-ADSN Mitigation**: 다른 ADSN 의 구조·결정이 이 ADSN 의 risk 를 해소하는 경우만. 막연한 "다른 ADSN 과 함께 쓰면 괜찮음" 은 제외 — 구체적 해결 메커니즘 명시
+
+### Concerns
+
+위 판정 밖의 관찰 사항(팀 숙련도, 장기 모니터링 등) 은 `concerns` 로 별도 기록. 선택사항.
 
 ---
 
@@ -85,28 +134,36 @@ export USER="batman"
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
-# ADSN 목록 (issueLinks 포함)
-echo "=== ADSN 목록 ==="
+# 채택된 ADSN 목록 (decision 필드 있음) — 논리 판정에 필요한 전체 맥락 포함
+echo "=== 채택 ADSN 목록 ==="
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
   -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="Architectural Design")
-         | {key, subkey, summary, designPoint, decision,
-            risk, sensitivity, tradeoffs, mitigation, issueLinks}]'
+  | jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
+         | {key, subkey, summary, designPoint, designLevel,
+            objectives, decision, decisionRationale, approaches,
+            pros, cons, eval, tradeoffs, adiagram, bdiagram}]'
 
-# QA 참조 (Requirement 중 reqtype=NFR)
+# Requirement 전체 — FR/NFR/CNST, ASR 플래그 포함
 echo
-echo "=== QA(NFR) 참조 ==="
+echo "=== Requirement 전체 (FR/NFR/CNST + driverSelected) ==="
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
   -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="Requirement" and .reqtype=="NFR")
-         | {key, subkey, summary}]'
+  | jq '[.[] | select(.issueType=="Requirement")
+         | {key, subkey, summary, description, reqtype,
+            driverSelected: (.driverSelected // false),
+            qa, source, stimulus, environment, artifact, response, measure, responseScenario}]'
 ```
 
-ADSN 이 0건이면 **중단** 하고 "design_decide 를 먼저 실행하세요" 보고.
+ADSN(decision 필드 있는) 이 0건이면 **중단** — "design_decide2 를 먼저 실행하세요".
 
-각 ADSN 에 대해 `issueLinks` 중 타입명이 "Contains" 를 포함하는 링크에서 `inwardIssue.key` / `outwardIssue.key` 를 추출 → `linkedQAs` 로 사용.
+v3 SATAM 대상 Requirement:
+- **NFR 전부** (모든 QA)
+- **CNST 전부**
+- **FR 중 `driverSelected=true` (ASR)** — driverSelected=false 인 FR 은 제외
+
+즉 `driverSelected=true` 인 FR + NFR + CNST = SATAM 판정 대상 requirement 집합.
 
 ### Step 0 종료 — 수집 데이터 flush (필수)
 
@@ -115,18 +172,21 @@ ADSN 이 0건이면 **중단** 하고 "design_decide 를 먼저 실행하세요"
 ```bash
 ADSN_JSON=$(curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="Architectural Design")
-         | {key, summary, risk, sensitivity, tradeoffs, mitigation,
-            linkedQAs: [(.issueLinks // [])[]
-                        | select(.type.name | test("Contains"))
-                        | (.inwardIssue.key // .outwardIssue.key)] | unique}]
-        | reduce .[] as $i ({}; . + {($i.key): {risk:$i.risk, sensitivity:$i.sensitivity, tradeoffs:$i.tradeoffs, mitigation:$i.mitigation, linkedQAs:$i.linkedQAs}})')
+  | jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
+         | {key, summary, designPoint, objectives, decision, decisionRationale,
+            approaches, pros, cons, eval, tradeoffs, adiagram, bdiagram}]
+        | reduce .[] as $i ({}; . + {($i.key): $i})')
 
-QA_KEYS=$(curl -s "${GOJIRA_API}/Issue" \
+REQ_JSON=$(curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select(.issueType=="Requirement" and .reqtype=="NFR") | .key]')
+  | jq '[.[] | select(.issueType=="Requirement")
+         | select(.reqtype=="NFR" or .reqtype=="CNST" or (.reqtype=="FR" and (.driverSelected // false) == true))
+         | {key, summary, description, reqtype,
+            driverSelected: (.driverSelected // false),
+            qa, measure, responseScenario}]
+        | reduce .[] as $i ({}; . + {($i.key): $i})')
 
-jq -n --argjson a "$ADSN_JSON" --argjson q "$QA_KEYS" '{adsns:$a, qaKeys:$q}' \
+jq -n --argjson a "$ADSN_JSON" --argjson r "$REQ_JSON" '{adsns:$a, requirements:$r}' \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "satam" "context"
 ```
 
@@ -163,81 +223,133 @@ PY
 
 ## Step 1 — 초안 생성 (iter 1)
 
-### 1.1 3-way 분류 기준 (v2, 현실적 엄격화)
+### 1.1 판정 대상 & 분류 정의
 
-이전 버전은 "원문에 risk 라는 단어가 있으면 전부 risks 로" 분류해 거의 모든 ADSN 에 risk·sensitivity 가 채워지는 문제가 있었습니다. v2 는 **현실 설계 맥락 기반 엄격 분류** 를 적용합니다.
+v3 는 **design × requirement 이중 루프** 로 각 쌍의 관계를 판정해 Risk/Sensitivity 를 생성. 원문 분해가 아닌 **논리적 판정**.
 
-| 카테고리 | 기준 | 예시 |
+| 카테고리 | 의미 | 기록 조건 |
 |---|---|---|
-| **Risk (R)** | 현 수준 설계에서 **명확히 문제가 발생할 수밖에 없는** 사항. 구체적 impact·재현 조건이 이미 드러남. 정량화 가능하면 가치 높음 | "단일 DB 병목으로 초당 100 TPS 이상 처리 불가", "외부 SSO 장애 시 전 서비스 중단" |
-| **Sensitivity (S)** | 현재는 허용 수준이지만 **조건이 바뀌면 Risk 로 악화** 될 사항. "~ 초과 시 / ~ 증가 시 / ~ 변화 시" 표현이 자연스러운 것 | "사용자 10만 명 초과 시 캐시 병목", "지역 확장 시 지연 증가" |
-| **Concerns (C, 기타 우려)** | 관찰·검토 필요. 가능성 수준, 정량화 어렵거나 추상적, 완화 여부 불명확 | "팀의 Saga 패턴 숙련도 부족", "추후 문서화 필요", "도입한 기술의 커뮤니티 성숙도" |
-| **Mitigation (M)** | tradeoffs/mitigation 원문에서 **실제 Risk 에 대한 대응** 으로 제시된 것. Counter Risk 필수 |
+| **Risk (R)** | 이 설계가 이 requirement 달성을 **명확히 실패** 시킴 | 현 설계 그대로 돌아가면 requirement 를 못 만족함이 확정적. **그리고 이 설계 자체로 극복 불가** |
+| **Sensitivity (S)** | 현재는 괜찮지만 **조건/상황 변동 시 risk 로 전환** 가능 | "10만 명 초과 시", "지역 확장 시", "인프라 부재 시" 등 명시적 조건부 |
+| **Mitigation (M)** | 이 설계가 **다른 ADSN 의 risk 를 해결** 함 (cross-ADSN 전용) | 다른 ADSN 에 등록된 Risk 의 ID 를 `targetRisk` 로 참조 |
+| **Concerns (C)** | 위 3가지에 해당 안 되는 관찰·검토 사항 | 선택사항 |
 
-**분류 지침**:
-- "일반적으로 ~할 수 있음", "~할 가능성" 같이 확률·추측 수준 → **Risk 아님**. Concerns 나 제외
-- 원문에 풀어써진 "단점" 중 구체적 impact 없는 것은 Concerns 로
-- Risk / Sensitivity 가 **0건이어도 정상** (엄격 기준 충족 못하면 빈 배열)
-- Concerns 는 선택 사항 — 적을 필요 없으면 빈 배열
+### 1.2 판정 알고리즘 (각 ADSN 마다 전 Requirement 순회)
 
-**완화된 Risk 제외 규칙 (중요)**:
-같은 셀(동일 QA) 에서 Risk 와 해당 Risk 를 대응하는 Mitigation 이 **동시에 존재** 하면, 그 Risk 는 **이미 완화** 된 상태입니다. Risk 도 Mitigation 도 **둘 다 미기재**.
-- 구체 판정: Risk `Ri` 의 `qa` 집합이 `{Qa, Qb, ...}` 일 때, 원문 tradeoffs/mitigation 에 `Ri:Qa`, `Ri:Qb`... 를 **모두** 커버하는 Mitigation 이 있으면 → `Ri` 와 그 Mitigation **둘 다 버림**
-- 부분 커버 (일부 QA 만 대응) → Risk 는 커버되지 않은 QA 에 한해 남김, Mitigation 은 남김
-- 여러 Risk 를 대응하는 Mitigation 은 모든 대응 Risk 가 전부 다른 Mitigation 들로 이미 제거될 때만 함께 제거. 하나라도 남아있으면 Mitigation 도 유지
-- 제거된 쌍은 Concerns 로도 옮기지 않음 — 분석 노이즈 최소화가 목적
-- **(선택) 추적 기록 필요 시**: 해당 ADSN 의 `concerns` 에 `C_MITIGATED` prefix 로 한 줄 요약 (예: `C_MITIGATED_1 / QA: [...] / Description: "R? vs M? 쌍이 원문에 존재했으나 완화 확인되어 본 분석에서 제외"`). 필수는 아님, 팀이 후속 리뷰에서 참고하고 싶을 때만
+```
+risks[adsn] = []
+sensitivities[adsn] = []
+# mitigations 는 Risk 모두 판정 완료 후 2단계에서 생성
 
-### 1.2 매핑 엔트리 생성 절차
+for r in requirements:
+  if r.reqtype == "FR" and r.driverSelected != true:
+    continue
 
-각 ADSN 별로 `mapping[<ADSN_KEY>]` 엔트리 생성:
+  if r.reqtype == "NFR":
+    # QA(NFR) 판정: QAS 달성 관점
+    if 이 ADSN 으로 인해 r 의 QAS(응답 시간, 가용성 등) 달성이 명확히 실패:
+      if 이 ADSN 스스로 극복 가능 (cons/tradeoffs/decisionRationale 에 대응 명시):
+        continue   # risk 아님 — self-mitigated
+      else:
+        risks.append({requirement: r.key, reqType: "NFR", description})
+    elif 조건 변동 시 QAS 달성 실패 가능:
+      sensitivities.append({requirement: r.key, reqType: "NFR", description})
+    else:
+      continue   # non-risk
 
-1. `risk` 원문 의미 단위 분해 → 위 기준에 따라 **Risk 아니면 Concerns 로 재분류**. 엄격하게 통과한 것만 Risk 리스트 (id: R1, R2, ...)
-2. `sensitivity` 원문 분해 → Sensitivity 기준 부합만 S 리스트 (id: S1, S2, ...), 애매하면 Concerns 로
-3. `tradeoffs`/`mitigation` 원문 분해 → Mitigation 리스트 (id: M1, M2, ...)
-4. 위에서 분류 탈락한 관찰 사항들 → Concerns 리스트 (id: C1, C2, ...)
-5. 각 항목에 `qa` 배열 (영향 받는 QA 이슈 key) — Concerns 는 빈 배열 허용
-   - `linkedQAs` 우선, 부족 시 QA 참조 목록 summary 매칭. 억지 매핑 금지
-6. Mitigation 항목에 `counterRisk: ["R<id>:<QA_KEY>", ...]` 필수 (같은 ADSN 내 Risk ID)
+  elif r.reqtype == "CNST":
+    if 이 ADSN 으로 인해 r 의 CNST 위배 확인:
+      if 자체 극복 가능: continue
+      else: risks.append({requirement: r.key, reqType: "CNST", ...})
+    elif 조건 변동 시 CNST 위배 가능:
+      sensitivities.append({...})
 
-**ID 규칙 (v2 변경)**:
-- **Risk (`R`) / Sensitivity (`S`) / Mitigation (`M`) — 프로젝트 전체 Design 기준 전역 유일**
-  - 의미상 동일한 항목이 다른 ADSN 에 이미 있으면 → **같은 ID 재사용** (번호 중복 부여 금지)
-  - 새 항목은 프로젝트 전역 기존 최대 번호 + 1 로 할당. 예: 기존 R1~R5 있으면 신규는 R6
-  - Step 0 데이터 수집에서 기존 ADSN 의 원문으로부터 이미 쓰인 ID 풀 확보 필수
-- **Concerns (`C`)** — ADSN 국소 식별자. 같은 ADSN 내부 유일이면 충분. 다른 ADSN 과 번호 공유 무방
+  elif r.reqtype == "FR" and r.driverSelected:
+    if 이 ADSN 으로 인해 r 의 구현이 "불가능" 해짐:
+      # 어떻게든 성능 타협으로라도 되는 경우는 제외
+      if 자체 극복 가능: continue
+      else: risks.append({requirement: r.key, reqType: "FR", ...})
+    elif 조건 변동 시 구현 불가해질 수 있음:
+      sensitivities.append({...})
 
-**키 규칙**: 모든 키(ADSN key, qa[] 원소)는 **이슈 key** (예: `GOJIRA3-23`). subkey 금지.
-**빈 원문**: 해당 리스트는 `[]`.
+# Risk 목록이 모두 확정된 후, mitigation 생성:
+for d in adsns:
+  mitigations[d] = []
+  for r_other in (다른 ADSN 의 risks 전체):
+    if d 가 r_other 를 구체적 메커니즘으로 해결 가능:
+      mitigations[d].append({
+        targetADSN: r_other.adsn,
+        targetRisk: r_other.id,
+        description: "이 디자인이 어떤 메커니즘으로 해결하는지"
+      })
+```
 
-동일 ID 재사용 시 description 은 기존 것과 **의미상 같아야** 함. 문구가 완전히 동일할 필요는 없지만 같은 사실·상황을 가리켜야 함 — 상이하면 별도 신규 ID.
+### 1.3 판정 지침 (중요 — 편법 방지)
 
-### 1.3 JSON 스키마
+**현실적 판정 — 없는 risk 찾지 말 것**:
+- 분량 채우려고 억지 risk 만들기 금지. 판정 결과 **전 ADSN 의 risks·sensitivities 가 빈 배열** 이어도 완전히 정상
+- "가능성 있음", "~할 수도 있음", "일반적으로 ~" 같은 확률·추측 수준은 risk 아님. 설계상 확정적 impact 만
+- ADSN 의 cons 에 "약간의 오버헤드" 같은 문구가 있다고 기계적으로 risk 로 올리지 말 것 — requirement(QAS/CNST/ASR-FR) 달성을 실제로 방해하는 수준인지 매번 검토
 
-**JSON 필드명은 스키마 그대로 사용**. validator 는 **복수형 + concerns** 키만 인식. 각 항목은 `{id, description, qa}` 필수, Mitigation 은 + `counterRisk`.
+**자체 극복 가능 판정**: 이 ADSN 의 `cons`/`tradeoffs`/`decisionRationale` 에 *해당 requirement 에 대한 대응* 이 명시돼 있는지 확인. 있으면 risk 성립 안 함
+- 예: "Redis 단일 장애점" 이 cons 에 나오지만 tradeoffs 에 "RDB/AOF 로 복구 가능" 이 있으면 → self-mitigated → **risk 기록 금지**
+
+**"어떻게든 되는 경우 제외"** (FR 판정):
+- 성능·UX 타협이 있어도 기능 자체가 구현 가능하면 → non-risk
+- "구현 불가능" 이 명확한 경우만 risk (예: 선택한 프로토콜이 요구 프로토콜과 호환 불가)
+
+**Cross-ADSN Mitigation**: 막연히 "다른 ADSN 과 함께 쓰면" 이 아니라 *이 디자인의 구체적 특성이 어떻게 다른 ADSN 의 risk 를 해소하는지* 명시. 못 찾으면 `mitigations: []` 로 둘 것
+
+**self-mitigation 금지**: 같은 ADSN 의 risk 를 같은 ADSN 의 mitigation 이 가리키는 건 validator critical. 이미 self-mitigated 는 risk 등록 자체가 금지이므로 이 쌍은 구조적으로 나올 수 없어야 함
+
+### 1.4 ID 규칙
+
+- **R / S / M**: 프로젝트 전역 유일. 의미 동일한 기존 ID 재사용, 신규는 max+1
+- **C**: ADSN 국소
+
+### 1.5 JSON 스키마 (v3)
 
 ```json
 {
   "GOJIRA3-23": {
     "risks": [
-      {"id":"R1","description":"현 단일 DB 구성으로 초당 500 TPS 초과 처리 불가","qa":["GOJIRA3-15"]}
+      {
+        "id": "R1",
+        "requirement": "GOJIRA3-15",
+        "reqType": "NFR",
+        "description": "이 설계가 어떻게 이 QA 의 달성을 명확히 실패시키는지"
+      }
     ],
     "sensitivities": [
-      {"id":"S1","description":"사용자 10만 돌파 시 캐시 병목 가능","qa":["GOJIRA3-15"]}
+      {
+        "id": "S1",
+        "requirement": "GOJIRA3-16",
+        "reqType": "NFR",
+        "description": "어떤 조건 변화 시 risk 로 전환되는지"
+      }
     ],
-    "tradeoffs": [
-      {"id":"M1","description":"읽기 전용 레플리카 추가로 부하 분산","qa":["GOJIRA3-15"],"counterRisk":["R1:GOJIRA3-15"]}
+    "mitigations": [
+      {
+        "id": "M1",
+        "targetADSN": "GOJIRA3-30",
+        "targetRisk": "R5",
+        "description": "이 디자인이 다른 ADSN 의 R5 를 구체적으로 어떻게 해결하는지"
+      }
     ],
     "concerns": [
-      {"id":"C1","description":"Saga 패턴 팀 숙련도 — 사전 교육 필요","qa":[]},
-      {"id":"C2","description":"선정 메시지 브로커의 커뮤니티 버전 장기 지원 여부 모니터링","qa":[]}
+      {"id": "C1", "description": "팀 숙련도 등 기타 관찰사항"}
     ]
   }
 }
 ```
 
-- `concerns` 는 optional. 적을 게 없으면 `"concerns": []` 또는 필드 생략 가능
-- `concerns[].qa` 는 빈 배열 허용 (특정 QA 에 묶이지 않는 관찰)
+**스키마 변경점 (v2 대비)**:
+- `tradeoffs` → `mitigations` (필드명 변경, cross-ADSN 의미 반영)
+- `risks[].qa` → `risks[].requirement` + `reqType` (단일 requirement, 타입 명시)
+- `mitigations` 는 `targetADSN` + `targetRisk` 로 **다른 ADSN 의 R 을 참조**
+- `same_adsn_mitigation` 은 critical (targetADSN 이 자기 자신이면 오류)
+
+**키 규칙**: 모든 key 는 JIRA 이슈 key (예: `GOJIRA3-15`). subkey 금지.
 
 ### Step 1 종료 — draft flush (필수)
 
@@ -278,15 +390,16 @@ cat /tmp/${CODE}-satam-validation.json
 }
 ```
 
-스크립트가 잡는 critical:
+스크립트가 잡는 critical (v3):
 - `unknown_adsn` — Step 0 목록에 없는 키
-- `category_empty` — 원문 있는데 리스트 비어있음
 - `bad_id_format` — R1/S1/M1 형식 위반
 - `duplicate_id` — ADSN 내부 id 중복
-- `bad_qa_type` / `qa_hallucination` — qa 배열 오류 또는 미존재 키
-- `missing_description` / `missing_counter_risk` / `bad_counter_risk_format`
-- `counter_risk_external_adsn` — 외부 ADSN 의 Risk 참조
-- `no_qa_referenced` — 전 항목 qa=[]
+- `requirement_hallucination` — `requirement` 가 Step 0 requirements 풀에 없는 키
+- `fr_not_asr` — reqType=FR 인데 해당 requirement 의 driverSelected=false
+- `bad_reqType` — reqType 이 "FR"/"NFR"/"CNST" 셋 중 하나 아님
+- `same_adsn_mitigation` — mitigation.targetADSN 이 자기 자신 → **SATAM 본연 위반** (self-mitigated risk 는 애초에 등록 금지)
+- `mitigation_target_unknown` — targetADSN 또는 targetRisk 가 존재하지 않음
+- `missing_description`
 
 ### 통과 기준
 - `pass == true` → Step 5 진입
@@ -298,19 +411,19 @@ cat /tmp/${CODE}-satam-validation.json
 
 critical 항목만 **국소 수정** 후 draft 재저장. 아래 처리 지침 참조:
 
-### critical 유형별 처리 (토큰 절약 — 한 번에 올바르게 수정)
+### critical 유형별 처리 (v3)
 
 | critical type | 조치 |
 |---|---|
-| `mitigated_pair_not_removed` | **같은 ADSN 의 Risk R_id 와 해당 Risk 를 커버하는 Mitigation 을 mapping 에서 모두 삭제**. 남은 M 의 counterRisk 중 제거된 R 참조도 함께 정리. (선택) ADSN 의 `concerns` 에 `C_MITIGATED` prefix 로 한 줄 요약 추가 가능 |
-| `counter_risk_unknown` | counterRisk 참조 R-id 가 프로젝트 전역에 없음 → 해당 Mitigation 제거 or counterRisk 재작성 |
-| `missing_counter_risk` | Mitigation 에 counterRisk 필수 → 관련 Risk ID:QA_KEY 형식으로 채우거나 Mitigation 을 Concerns 로 재분류 |
-| `bad_counter_risk_format` | 형식은 `R<숫자>:<JIRA_KEY>` (예: `R1:TEST-55`). 수정 |
-| `id_format_*` / `duplicate_*` | ID 재할당. 전역 R/S/M 순서 유지 |
-| `qa_hallucination` / `no_qa_referenced` | QA 참조가 프로젝트 NFR 키 목록에 없음 → 제거 or 올바른 키로 교체 |
-| `analysis_skipped` | 해당 ADSN 을 다시 분석 — risks 또는 sensitivities 하나라도 생성 |
+| `same_adsn_mitigation` | **SATAM 본연 위반** — mitigation.targetADSN 이 자기 자신. 해당 mitigation 삭제 + 관련 risk 도 self-mitigated 이므로 삭제 (애초에 등록 금지) |
+| `mitigation_target_unknown` | targetADSN/targetRisk 참조 실패 → 해당 mitigation 제거 |
+| `requirement_hallucination` | requirement key 가 프로젝트 풀에 없음 → 올바른 key 로 교체 또는 삭제 |
+| `fr_not_asr` | reqType=FR 인데 driverSelected=false → 해당 risk/sensitivity 삭제 (ASR 아닌 FR 은 대상 아님) |
+| `bad_reqType` | "FR" / "NFR" / "CNST" 중 하나로 수정 |
+| `bad_id_format` / `duplicate_id` | ID 재할당 (전역 R/S/M 순서 유지, ADSN 내 C 국소) |
+| `missing_description` | description 채우기 |
 
-**`mitigated_pair_not_removed` 는 SATAM 본연 목적 위반** — 반드시 모두 해결. iter 종료 전 이 critical 0건이어야 함.
+**`same_adsn_mitigation` 은 SATAM 본연 위반** — iter 종료 전 0건이어야 함. self-mitigated risk 는 risk 로 **등록하지 말 것** (non-risk 로 무기록).
 
 실제 수정 코드:
 
@@ -340,36 +453,44 @@ echo "$CTX" | jq --argjson m "$MAPPING_FIXED" '. + {mapping:$m}' \
 
 ### 5.1 YAML 직렬화 포맷 (프론트엔드 parseRST 규격)
 
-Risk / Sensitivity:
+v3 스키마 (`requirement` + `reqType`) 를 저장 YAML 로 변환. UI parseRST 는 `QA:` 라벨을 기대하므로 **라벨명은 QA 유지**, 값은 requirement key 1개를 배열 형태로.
+
+Risk:
 ```
 - ID : R1
-  QA : [GOJIRA3-123, GOJIRA3-124]
+  QA : [GOJIRA3-123]
+  ReqType : NFR
   Description : ...
 ```
 
-Mitigation (Counter Risk 라인 추가):
+Sensitivity:
+```
+- ID : S1
+  QA : [GOJIRA3-124]
+  ReqType : CNST
+  Description : 조건 변화 시 ...
+```
+
+Mitigation (cross-ADSN 대상만):
 ```
 - ID : M1
-  QA : [GOJIRA3-123]
-  Counter Risk : ["R1:GOJIRA3-123"]
-  Description : ...
+  Target ADSN : GOJIRA3-30
+  Target Risk : R5
+  Description : 이 디자인이 R5 를 어떻게 해결하는지
 ```
 
-Concerns (QA 선택, Counter Risk 없음):
+Concerns:
 ```
 - ID : C1
-  Description : 팀의 Saga 패턴 숙련도 부족 — 사전 교육 필요
-- ID : C2
-  QA : [GOJIRA3-123]
-  Description : 특정 QA 에 묶이는 관찰이면 QA 라인 추가 가능
+  Description : 팀 숙련도 등 관찰사항
 ```
 
-**⚠ 포맷 주의 (이전 실측 버그):**
-- `QA : [...]` 는 **bare 키 + 콤마 + 공백** 형식. **따옴표로 감싸지 말 것** (`["TEST-61","TEST-55"]` ❌ → `[TEST-61, TEST-55]` ✅)
-- Python 에서 생성 시 `json.dumps(qa_list)` 금지. `"[" + ", ".join(qa_list) + "]"` 로 직접 조립
-- `Counter Risk` 는 **예외적으로 따옴표** 필요 (`["R1:GOJIRA3-123"]`) — 콜론 포함 문자열이라 구분자 혼동 방지
-- 항목 없는 리스트는 해당 필드를 빈 문자열 ""
-- Description 은 한 줄로 (개행 공백 치환)
+**⚠ 포맷 주의**:
+- `QA : [...]` 는 **bare 키 + 콤마 + 공백** 형식 (따옴표 없음)
+- Python 에서 `json.dumps(list)` 금지. `"[" + ", ".join(list) + "]"` 로 조립
+- Target ADSN / Target Risk 는 **bare key** 한 개씩 (배열 아님)
+- 항목 없는 리스트는 해당 필드 빈 문자열 ""
+- Description 한 줄 (개행 공백 치환)
 
 ### 5.2 PUT /Issue
 
