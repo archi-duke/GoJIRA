@@ -117,6 +117,35 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
   const [diffTab, setDiffTab] = useState('semantic');
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = parseInt(localStorage.getItem('docEditorSidebarWidth'), 10);
+    return Number.isFinite(saved) && saved >= 150 && saved <= 600 ? saved : 220;
+  });
+  const [resizing, setResizing] = useState(false);
+  useEffect(() => {
+    localStorage.setItem('docEditorSidebarWidth', String(sidebarWidth));
+  }, [sidebarWidth]);
+  const handleResizerMouseDown = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    setResizing(true);
+    const onMove = (ev) => {
+      const next = Math.max(150, Math.min(600, startWidth + ev.clientX - startX));
+      setSidebarWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      setResizing(false);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  };
   const chatWinRef = React.useRef(null);
   // 인터뷰 후 자동 이어서 AI 생성할 원본 요청 파일 (예: 'business/use-cases.md')
   const pendingAIFileRef = React.useRef(null);
@@ -833,7 +862,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
         projectAlert={projectAlert}
       />
       <div className="de-editor">
-        <div className="de-sidebar">
+        <div className="de-sidebar" style={{ width: sidebarWidth }}>
           <div className="de-sidebar-tabs">
             <button className={`de-sidebar-tab ${activeTab === 'main' ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setActiveTab('main'); setShowGraph(false); }}>Main</button>
@@ -963,6 +992,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
             return renderNode(root, '', 0);
           })()}
         </div>
+        <div className={`de-resizer${resizing ? ' active' : ''}`} onMouseDown={handleResizerMouseDown} />
         <div className="de-main">
           {showGraph ? (
             <DocGitGraph projectCode={projectCode} />
