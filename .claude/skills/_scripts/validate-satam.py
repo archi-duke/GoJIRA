@@ -230,6 +230,36 @@ def validate(payload: dict) -> dict:
                     critical.append({"type": "counter_risk_unknown", "adsn": adsn_key, "id": tid,
                                      "detail": f"counterRisk {c} 가 참조하는 {rid} 가 프로젝트 전역 Risk 풀에 없음"})
 
+    # Pass 3 — 완화된 R-M 쌍 제거 확인 (SATAM 본연 목적: unmitigated risk 찾기)
+    # 같은 ADSN 내 Mitigation 이 Risk 의 모든 QA 를 커버하면, Risk 와 그 Mitigation 둘 다 제거해야 함
+    for adsn_key, m in mapping.items():
+        risks = m.get("risks") or []
+        tradeoffs = m.get("tradeoffs") or []
+        covered_pairs = set()  # "R_id:QA_key" 형식 — 같은 ADSN 내 M 들이 커버하는 쌍
+        m_by_covered_rid = {}  # rid -> [M_id...] — 해당 Risk 를 커버하는 M 목록
+        for t in tradeoffs:
+            mid = t.get("id", "?")
+            for c in (t.get("counterRisk") or []):
+                if COUNTER_RE.match(c):
+                    covered_pairs.add(c)
+                    rid = c.split(":", 1)[0]
+                    m_by_covered_rid.setdefault(rid, []).append(mid)
+        for r in risks:
+            rid = r.get("id", "?")
+            r_qas = r.get("qa") or []
+            if not r_qas:
+                continue
+            # Risk 의 모든 QA 가 같은 ADSN 의 Mitigation 으로 커버되는가?
+            all_covered = all(f"{rid}:{qa}" in covered_pairs for qa in r_qas)
+            if all_covered:
+                mids = m_by_covered_rid.get(rid, [])
+                critical.append({
+                    "type": "mitigated_pair_not_removed",
+                    "adsn": adsn_key,
+                    "id": rid,
+                    "detail": f"{rid} 의 모든 QA ({', '.join(r_qas)}) 가 같은 ADSN 의 Mitigation {mids} 로 완전 커버됨 → Risk 와 해당 Mitigation 들을 **둘 다 제거** 해야 함 (SATAM 은 unmitigated risk 만 남김)",
+                })
+
     total_items = stats["risks"] + stats["sensitivities"] + stats["tradeoffs"] + max(1, len(adsns))
     score = max(0.0, 1.0 - len(critical) / max(1, total_items))
     score_effective = round(score - 0.5 * len(critical), 4)

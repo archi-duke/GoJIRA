@@ -58,8 +58,18 @@ export CODE="GOJIRA3"
 export USER="batman"
 ```
 
-## 역할
-소프트웨어 아키텍트. ATAM 변형(SATAM)으로 **각 ADSN 의 아키텍처 결정이 품질속성(QA)에 미치는 영향**을 구조화한다. 자유 서술 원문을 Risk / Sensitivity Point / Trade-off 세 축으로 분해하고, 영향 받는 QA(NFR) 를 명시한다.
+## 역할 / 핵심 목적
+
+소프트웨어 아키텍트. ATAM 변형(SATAM)으로 **각 ADSN 의 아키텍처 결정이 품질속성(QA)에 미치는 영향**을 구조화한다.
+
+> **SATAM 의 한 줄 정의**: *해결되지 않은(unmitigated) risk 를 찾아 남기는 것*.
+
+이 관점으로 다음 규칙이 따라 나온다:
+- **완화된 Risk 는 미기록** (제거) — 이미 해결된 리스크를 SATAM 결과에 남기면 노이즈만 늘고 의사결정 방해
+- **Mitigation 없는 Risk 는 필수 기록** (보존) — 설계의 취약점 발견이 SATAM 의 가치
+- **남겨진 Unmitigated Risk 는 후속 설계(추가 ADSN/DDSN) 대상** — Step 6 보고에 "추가 설계 필요" 목록으로 표시해 다음 design-decide2 실행을 유도
+
+자유 서술 원문을 Risk / Sensitivity / Mitigation / Concerns 네 축으로 분해하고, 영향 받는 QA(NFR) 를 명시한다.
 
 - Risk : 결정으로 인해 QA 가 저하될 수 있는 지점
 - Sensitivity Point : 결정이 특정 QA 에 크게 영향을 주는 지점
@@ -176,6 +186,7 @@ PY
 - 부분 커버 (일부 QA 만 대응) → Risk 는 커버되지 않은 QA 에 한해 남김, Mitigation 은 남김
 - 여러 Risk 를 대응하는 Mitigation 은 모든 대응 Risk 가 전부 다른 Mitigation 들로 이미 제거될 때만 함께 제거. 하나라도 남아있으면 Mitigation 도 유지
 - 제거된 쌍은 Concerns 로도 옮기지 않음 — 분석 노이즈 최소화가 목적
+- **(선택) 추적 기록 필요 시**: 해당 ADSN 의 `concerns` 에 `C_MITIGATED` prefix 로 한 줄 요약 (예: `C_MITIGATED_1 / QA: [...] / Description: "R? vs M? 쌍이 원문에 존재했으나 완화 확인되어 본 분석에서 제외"`). 필수는 아님, 팀이 후속 리뷰에서 참고하고 싶을 때만
 
 ### 1.2 매핑 엔트리 생성 절차
 
@@ -285,7 +296,23 @@ cat /tmp/${CODE}-satam-validation.json
 
 ## Step 3 — 수정 (pass=false)
 
-critical 항목만 **국소 수정** 후 draft 재저장:
+critical 항목만 **국소 수정** 후 draft 재저장. 아래 처리 지침 참조:
+
+### critical 유형별 처리 (토큰 절약 — 한 번에 올바르게 수정)
+
+| critical type | 조치 |
+|---|---|
+| `mitigated_pair_not_removed` | **같은 ADSN 의 Risk R_id 와 해당 Risk 를 커버하는 Mitigation 을 mapping 에서 모두 삭제**. 남은 M 의 counterRisk 중 제거된 R 참조도 함께 정리. (선택) ADSN 의 `concerns` 에 `C_MITIGATED` prefix 로 한 줄 요약 추가 가능 |
+| `counter_risk_unknown` | counterRisk 참조 R-id 가 프로젝트 전역에 없음 → 해당 Mitigation 제거 or counterRisk 재작성 |
+| `missing_counter_risk` | Mitigation 에 counterRisk 필수 → 관련 Risk ID:QA_KEY 형식으로 채우거나 Mitigation 을 Concerns 로 재분류 |
+| `bad_counter_risk_format` | 형식은 `R<숫자>:<JIRA_KEY>` (예: `R1:TEST-55`). 수정 |
+| `id_format_*` / `duplicate_*` | ID 재할당. 전역 R/S/M 순서 유지 |
+| `qa_hallucination` / `no_qa_referenced` | QA 참조가 프로젝트 NFR 키 목록에 없음 → 제거 or 올바른 키로 교체 |
+| `analysis_skipped` | 해당 ADSN 을 다시 분석 — risks 또는 sensitivities 하나라도 생성 |
+
+**`mitigated_pair_not_removed` 는 SATAM 본연 목적 위반** — 반드시 모두 해결. iter 종료 전 이 critical 0건이어야 함.
+
+실제 수정 코드:
 
 ```bash
 CTX=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "satam" "context")
@@ -382,11 +409,21 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 ## SATAM 분석 완료 (v2 Claude Code)
 
 - ADSN 업데이트: N건 (키 리스트)
-- Risks 총합: X / Sensitivities: Y / Trade-offs: Z
+- **Unmitigated Risks (핵심 산출물)**: U건 — 후속 설계 필요
+- 총계: Risks X / Sensitivities Y / Mitigations Z / Concerns C
 - 실패: F건 (키 + 사유)
 
+### ⚠ Unmitigated Risk 목록 (후속 design-decide2 또는 추가 ADSN/DDSN 대상)
+
+| ADSN | Risk ID | QA | Description | 제안 후속 설계 |
+|---|---|---|---|---|
+| ADSN_001 | R1 | QA_004 | 세션 소실 위험 | 세션 복구 전략 DP 추가 검토 |
+
+- 이 목록이 비어있으면 "모든 Risk 가 Mitigation 으로 커버됨" — SATAM 관점에서 현 설계 안정
+- 1건 이상이면 다음 design-decide2 호출 시 이 Risk 들을 새 DP 로 다루기 권장
+
 ### QA 매핑 요약
-| ADSN | Risks | Sensitivities | Trade-offs | 참조 QA 수 |
+| ADSN | Risks | Sensitivities | Mitigations | Concerns | 참조 QA 수 |
 
 ### Self-loop
 - iter N회 / selected=iter X (score_eff Y) / stop=pass|max_iter|...

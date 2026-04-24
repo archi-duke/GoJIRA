@@ -143,9 +143,15 @@ Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (Mermaid 는 St
 - 이 DP 에서 다른 강조가 필요하면 override (근거 필수 기록)
 - weights 합 = 1.00 (±0.02 허용)
 
-### 1.6 Requirement 매핑
+### 1.6 Requirement 매핑 (링크 타이트하게)
 
-`relatedRequirements` 에 FR/NFR/CNST 실존 JIRA key 배열. 모든 Driver 는 최소 1 DP 에 등장해야 함 (커버리지).
+`relatedRequirements` 에 FR/NFR/CNST 실존 JIRA key 배열. **링크 기준 엄격 적용**:
+
+- **DP 의 `objectives` 또는 `decisionRationale` 에서 명시적으로 이 Requirement 를 언급·근거로 사용한 경우에만** 링크
+- 간접 영향 / 일반적 관련성 / "이 스타일이 전체에 영향" 류 논리는 **제외** (과도 링크 방지)
+- 기준선: 한 DP 당 **2~4개** 링크. 5개 이상이면 "너무 많은 QA 에 근거 대는 중" 의 신호 → 링크 재검토
+- 모든 Driver 는 최소 1 DP 에 등장해야 함 (커버리지). 단, 이 커버리지는 **모든 DP 가 모든 Driver 를 링크** 라는 뜻이 **아님** — **전체 DP 집합 기준으로 모든 Driver 가 최소 1번**이면 충분
+- FR 은 해당 DP 의 후보안이 구현적으로 실현해야 하는 경우에만 링크 (구현 판정 기준). 일반 "관련 있음" 은 제외
 
 ### 1.7 문서 작성
 

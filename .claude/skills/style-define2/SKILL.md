@@ -466,6 +466,8 @@ cat /tmp/style_adsn_result.json
 
 `relatedDrivers` 에 명시된 Driver 들을 **채택된** ADSN 과 연결. 기각 후보는 링크 안 만듦 (불필요한 관계 생성 방지).
 
+**링크 기준 타이트하게**: 시스템 스타일은 모든 QA 에 간접 영향을 주지만 **모든 QA 를 relatedDrivers 에 넣지 말 것**. 선정 조합의 `decisionRationale` 에 근거로 **명시된 QA/CNST 만** 포함 — 보통 **2~4개**. 5개 이상 넣으면 Contains 관계의 의미가 희석되어 후속 SATAM 이 관련 없는 QA 에 대해서도 risk 를 만들려 시도하는 부작용 발생.
+
 > **중복 제거 필수** — `POST /Issue/link` idempotent 아님. Step 0 수집한 issueLinks 와 차집합 POST.
 
 ```bash
