@@ -86,7 +86,7 @@ ADSN/DDSN 이 0건이거나 `chosenStyles` 가 비었으면 **중단** 하고 "d
 - Logical View — 컴포넌트/모듈 책임
 - Process View — 런타임 동작, 동시성, 통신
 - Deployment View — 물리 배치, 인프라
-- Development View — 코드 모듈/패키지 구조
+- Development View — **패키지 다이어그램** (논리 패키지 + 의존 방향). 폴더 트리/ASCII 디렉터리 나열 금지 — 선정 스타일의 레이어/모듈 경계가 패키지 단위로 드러나야 하며, 각 패키지의 책임·의존 대상·반영 ADSN/DDSN 을 표로 병기
 
 ### 1.2 관점별 서술
 - ADSN/DDSN 결정이 **어느 관점에서 어떻게 반영되는지** (모든 결정 최소 1관점에 언급)
@@ -103,7 +103,7 @@ ADSN/DDSN 이 0건이거나 `chosenStyles` 가 비었으면 **중단** 하고 "d
 - Logical → `graph TB`
 - Process → `sequenceDiagram`
 - Deployment → `graph LR`
-- Development → `graph TB`
+- Development → `graph TB` 기반 **패키지 다이어그램** (각 패키지를 `subgraph` 로 그룹핑, 화살표로 의존 방향 표시). ASCII 폴더 트리 금지. 의존 방향이 스타일(Layered/Hexagonal 등) 의 규칙과 맞는지 검토
 
 **금지**: `classDiagram` 으로 컴포넌트/배포 표현, 외부 이미지(`![...](...png)`), Mermaid 노드 ID 에 공백/한글 직접 사용.
 

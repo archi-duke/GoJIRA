@@ -109,18 +109,46 @@ graph TB
 
 ## 5. (선택) Development View
 
-**관심**: 코드 구조 / 모듈 패키징 / 빌드 파이프라인
+**관심**: 논리 패키지 구조 / 계층·의존성 / 빌드 모듈 경계
 
-```
-src/
-  api/          # REST / RPC 엔드포인트
-  domain/       # 도메인 모델
-  infra/        # DB / 외부 서비스 어댑터
-  app/          # 유스케이스 서비스
-test/
-docs/
+폴더 트리가 아니라 **패키지 다이어그램** 으로 표현 — 각 패키지의 책임과 **패키지 간 의존 방향** 을 설계 관점에서 드러낸다. Layered/Hexagonal/Modular Monolith 등 선정 스타일의 경계가 패키지 구조에 어떻게 반영되는지가 보여야 한다.
+
+```mermaid
+graph TB
+    subgraph Presentation["Presentation Layer"]
+        API[api.rest]
+        WS[api.websocket]
+    end
+    subgraph Application["Application Layer"]
+        UC[application.usecase]
+        DTO[application.dto]
+    end
+    subgraph Domain["Domain Layer (Core)"]
+        MODEL[domain.model]
+        SERVICE[domain.service]
+        PORT[domain.port]
+    end
+    subgraph Infrastructure["Infrastructure Layer"]
+        REPO[infra.persistence]
+        EXT[infra.external]
+    end
+    Presentation --> Application
+    Application --> Domain
+    Infrastructure -.implements.-> PORT
+    Infrastructure --> MODEL
 ```
 
+**패키지 책임 표**
+
+| 패키지 | 책임 | 의존 대상 | 반영 ADSN/DDSN |
+|---|---|---|---|
+| `api.rest` | REST 엔드포인트, 요청/응답 변환 | `application.usecase` | ADSN_NNN |
+| `application.usecase` | 유스케이스 흐름 조립 | `domain.*` | ADSN_NNN |
+| `domain.model` | 엔티티·값객체 (순수) | — | ADSN_NNN |
+| `domain.port` | 외부 의존의 추상 (DIP) | — | ADSN_NNN |
+| `infra.persistence` | `domain.port` 구현 (DB 어댑터) | `domain.port`, `domain.model` | DDSN_NNN |
+
+- 의존 방향 규칙(예: 도메인은 인프라를 참조하지 않는다) 명시
 - **반영 ADSN/DDSN**: ...
 
 ---
