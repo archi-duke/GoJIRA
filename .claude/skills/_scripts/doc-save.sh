@@ -26,6 +26,16 @@ else
   CONTENT=$(cat)
 fi
 
+# .md 파일이면 PlantUML 결정적 자동 수정 (~30ms, 안전 — 변경 없으면 no-op)
+# DOC_FIX=0 환경변수로 비활성화 가능
+if [[ "${DOC_FIX:-1}" == "1" && "$DOCPATH" == *.md ]]; then
+  TMPMD=$(mktemp)
+  printf '%s' "$CONTENT" > "$TMPMD"
+  python3 "$(dirname "$0")/plantuml-fix.py" "$TMPMD" >/dev/null 2>&1 || true
+  CONTENT=$(cat "$TMPMD")
+  rm -f "$TMPMD"
+fi
+
 # base64 불필요 — Platform-API PUT /DocRepo/{code}/file 은 plain text content 수용
 BODY=$(jq -n --arg p "$DOCPATH" --arg c "$CONTENT" --arg m "[doc] ${DOCPATH} 저장" \
   '{path:$p, content:$c, message:$m}')
