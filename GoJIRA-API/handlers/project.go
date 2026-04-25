@@ -23,6 +23,10 @@ var archSettingsAllowedKeys = map[string]struct{}{
 	"satamDone":            {},
 	"designIntegrated":     {},
 	"viewsIncluded":        {},
+	// drift-check.py — workflow stage hash baseline & deferred impact tracking
+	"lastRunHash":      {},
+	"lastRunAt":        {},
+	"deferredImpacts":  {},
 }
 
 // POST /api/v{version}/Project
