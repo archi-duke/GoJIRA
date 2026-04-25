@@ -61,7 +61,13 @@
     {
       "id": "design-integrate",
       "label": "Architecture Integration",
-      "doc": "architecture/architecture-integrated.md",
+      "doc": [
+        "architecture/architecture-integrated.md",
+        "architecture/architecture-integrated/logical.md",
+        "architecture/architecture-integrated/process.md",
+        "architecture/architecture-integrated/deployment.md",
+        "architecture/architecture-integrated/development.md"
+      ],
       "issueTypes": [],
       "fields": [],
       "archSettingsKeys": ["designIntegrated", "viewsIncluded"]

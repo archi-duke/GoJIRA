@@ -1,199 +1,69 @@
-# 통합 설계 뷰 (Integrated Design Views)
+# Architecture Integrated
 
-## 1. 개요
+> **이 문서는 자동 생성된 index 입니다.** 4 개 view 의 짧은 머리말과 본문 링크, 그리고 view 간 entity 사전을 담습니다.
+>
+> 본문은 `architecture-integrated/` 하위 파일을 참조하세요.
 
-본 문서는 {프로젝트명} 의 ADSN/DDSN 결정을 **Logical / Process / Deployment / Development** 4가지 관점(Architectural Views)으로 통합해 아키텍처 전체를 서술한다.
+## 1. View 구성
+
+| View | 본문 | 핵심 관심사 | 추천 PlantUML |
+|---|---|---|---|
+| Logical | [logical.md](architecture-integrated/logical.md) | 컴포넌트/모듈 관계와 책임 | component |
+| Process | [process.md](architecture-integrated/process.md) | 런타임 프로세스 / 통신 / 동시성 | sequence / activity |
+| Deployment | [deployment.md](architecture-integrated/deployment.md) | 노드 / 배포 / 네트워크 토폴로지 | deployment (node, artifact) |
+| Development | [development.md](architecture-integrated/development.md) | 코드 구조 / 패키지 / 의존 방향 | package / component |
 
 - **선정 스타일**: {Primary} / {Secondary} / {Supporting}
-- **주요 ADSN 수**: {N}
-- **주요 DDSN 수**: {M}
+- **반영 ADSN 수**: {N} / **DDSN 수**: {M}
 
 ---
 
-## 2. Logical View
+## 2. Cross-View Entity Dictionary
 
-**관심**: 시스템이 제공하는 기능적 구성 요소와 그들 사이의 책임 분담
+view 간 동일 entity 가 동일 ID 로 등장해야 합니다 (validator critical 항목).
 
-### 2.1 주요 컴포넌트와 책임
-
-| 컴포넌트 | 책임 | 관련 ADSN/DDSN |
-|----------|------|----------------|
-| {컴포넌트명} | ... | ADSN_001 |
-| {컴포넌트명} | ... | ADSN_002, DDSN_001 |
-| ... | ... | ... |
-
-### 2.2 의존 관계 (component 다이어그램)
-
-```plantuml
-@startuml
-component "UI 레이어" as UI
-component "비즈니스 로직" as BL
-component "데이터 접근" as DAL
-database "저장소" as DB
-
-UI --> BL
-BL --> DAL
-DAL --> DB
-@enduml
-```
-
-### 2.3 반영된 ADSN/DDSN
-
-- `ADSN_001`: {Design Point} — ...
-- `DDSN_001`: {Design Point} — ...
-
----
-
-## 3. Process View
-
-**관심**: 런타임 동작 / 프로세스 간 상호작용 / 동시성
-
-### 3.1 런타임 상호작용 (sequence 다이어그램)
-
-```plantuml
-@startuml
-actor Client as C
-participant "API Gateway" as API
-participant Service as Svc
-queue "Queue" as Q
-
-C -> API: 요청
-API -> Svc: 라우팅
-Svc -> Q: 이벤트 발행
-Q --> Svc: ACK
-Svc --> API: 응답
-API --> C: 응답
-@enduml
-```
-
-### 3.2 비동기 / 이벤트 흐름
-
-```plantuml
-@startuml
-component "생산자" as P
-queue "메시지 큐" as Q
-component "소비자 1" as C1
-component "소비자 2" as C2
-
-P --> Q : event-A
-Q --> C1 : consume
-Q --> C2 : consume
-@enduml
-```
-
-### 3.3 반영된 ADSN/DDSN
-
-- `ADSN_XXX`: ...
-
----
-
-## 4. (선택) Deployment View
-
-**관심**: 물리적 배포 / 네트워크 토폴로지 / 인프라
-
-```plantuml
-@startuml
-node "VPC" {
-  node "ALB" as ALB
-
-  node "AZ-A" {
-    artifact "Web" as WebA
-    artifact "App" as AppA
-  }
-
-  node "AZ-B" {
-    artifact "Web" as WebB
-    artifact "App" as AppB
-  }
-
-  database "RDS Multi-AZ" as DB
-}
-
-ALB --> WebA
-ALB --> WebB
-WebA --> AppA
-WebB --> AppB
-AppA --> DB
-AppB --> DB
-@enduml
-```
-
-- **반영 ADSN/DDSN**: ...
-
----
-
-## 5. (선택) Development View
-
-**관심**: 논리 패키지 구조 / 계층·의존성 / 빌드 모듈 경계
-
-폴더 트리가 아니라 **PlantUML package 다이어그램** 으로 표현 — 각 패키지의 책임과 **패키지 간 의존 방향** 을 설계 관점에서 드러낸다. Layered/Hexagonal/Modular Monolith 등 선정 스타일의 경계가 패키지 구조에 어떻게 반영되는지가 보여야 한다.
-
-```plantuml
-@startuml
-package "Presentation Layer" {
-  [api.rest] as API
-  [api.websocket] as WS
-}
-
-package "Application Layer" {
-  [application.usecase] as UC
-  [application.dto] as DTO
-}
-
-package "Domain Layer (Core)" {
-  [domain.model] as MODEL
-  [domain.service] as SERVICE
-  [domain.port] as PORT
-}
-
-package "Infrastructure Layer" {
-  [infra.persistence] as REPO
-  [infra.external] as EXT
-}
-
-API --> UC
-WS --> UC
-UC --> SERVICE
-UC --> MODEL
-REPO ..|> PORT : implements
-EXT ..|> PORT : implements
-REPO --> MODEL
-@enduml
-```
-
-**패키지 책임 표**
-
-| 패키지 | 책임 | 의존 대상 | 반영 ADSN/DDSN |
+| ID | 이름 | 종류 | 등장 View |
 |---|---|---|---|
-| `api.rest` | REST 엔드포인트, 요청/응답 변환 | `application.usecase` | ADSN_NNN |
-| `application.usecase` | 유스케이스 흐름 조립 | `domain.*` | ADSN_NNN |
-| `domain.model` | 엔티티·값객체 (순수) | — | ADSN_NNN |
-| `domain.port` | 외부 의존의 추상 (DIP) | — | ADSN_NNN |
-| `infra.persistence` | `domain.port` 구현 (DB 어댑터) | `domain.port`, `domain.model` | DDSN_NNN |
+| {ID} | {표시명} | component / process / node / package | logical, process |
+| ... | ... | ... | ... |
 
-- 의존 방향 규칙(예: 도메인은 인프라를 참조하지 않는다) 명시
-- DIP 는 `..|>` (점선 + 속 빈 삼각형) 로 `implements` 표기
-- **반영 ADSN/DDSN**: ...
+> 이 표는 Step 1.5 결정적 통합에서 4 view 의 §2 entity 표를 합쳐 자동 채워집니다. 같은 ID 가 view 마다 다른 이름으로 나오면 critical.
 
 ---
 
-## 6. 관점 간 일관성 점검
+## 3. View 별 머리말
 
-| 체크 항목 | 결과 | 비고 |
-|-----------|------|------|
-| Logical 의 컴포넌트가 Process sequence 에 등장하는가 | ✓ | |
-| Logical 의 모듈이 Development 패키지 구조에 반영되는가 | ✓ | |
-| Process 의 요소가 Deployment 토폴로지에 배치 가능한가 | ✓ | |
-| 모든 ADSN/DDSN 이 최소 1 개 관점에 반영되었는가 | ✓ | |
+각 view 의 §1 개요 첫 단락. 본문 전체는 위 §1 의 링크에서 확인하세요.
 
-⚠️ 하나라도 불일치 있으면 Step 3 critical.
+### 3.1 Logical View
+
+(logical.md §1 개요 첫 단락 — Step 1.5 에서 자동 인용)
+
+### 3.2 Process View
+
+(process.md §1 개요 첫 단락)
+
+### 3.3 Deployment View
+
+(deployment.md §1 개요 첫 단락)
+
+### 3.4 Development View
+
+(development.md §1 개요 첫 단락)
 
 ---
 
-## 7. 후속 단계 포인트 (SATAM 집중 점검 후보)
+## 4. 통합 시점 / 입력
 
-- `ADSN_XXX` — Risk {요약}, 영향 QA: Performance, Availability
-- `ADSN_YYY` — Risk {요약}, 영향 QA: Security
-- ...
+- 생성: {timestamp}
+- 입력: ADSN/DDSN ({N}/{M}건), chosenStyles ({primary/secondary/supporting})
+- 4 view 모두 분리 산출 후 결정적 통합 (LLM 호출 0회)
+
+---
+
+## 5. 후속 단계 포인트 (SATAM 집중 점검 후보)
+
+- `ADSN_XXX` — Risk {요약}, 영향 QA: ...
+- `ADSN_YYY` — Risk {요약}, 영향 QA: ...
 
 (다음 단계 `satam-analyze2` 에서 각 ADSN 의 risk/sensitivity/mitigation 원문이 구조화됨)
