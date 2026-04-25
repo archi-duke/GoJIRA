@@ -5,6 +5,7 @@ import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
 import MermaidBlock from './MermaidBlock';
+import PlantUMLBlock from './PlantUMLBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import './DocEditor.css';
@@ -1068,14 +1069,17 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                             if (lang === 'mermaid') {
                               return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
                             }
+                            if (lang === 'plantuml') {
+                              return <PlantUMLBlock code={String(children).replace(/\n$/, '')} />;
+                            }
                             return <code className={className} {...props}>{children}</code>;
                           },
                           pre({ children, ...props }) {
-                            // mermaid 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
+                            // mermaid/plantuml 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
                             const arr = React.Children.toArray(children);
                             const only = arr.length === 1 ? arr[0] : null;
                             const cls = only?.props?.className || '';
-                            if (cls.includes('language-mermaid')) {
+                            if (cls.includes('language-mermaid') || cls.includes('language-plantuml')) {
                               return <>{children}</>;
                             }
                             return <pre {...props}>{children}</pre>;
