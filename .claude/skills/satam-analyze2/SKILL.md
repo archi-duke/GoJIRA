@@ -32,12 +32,12 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — ADSN + NFR(QA) 데이터 수집
+[ ] Step 0 — 진입 점검 (drift-check + 분기) + ADSN + NFR(QA) 데이터 수집
 [ ] Step 1 — risk/sensitivity/mitigation 매핑 초안
 [ ] Step 2 — 자가검증 (validate-satam.py)
 [ ] Step 3 — critical 수정 (반복)
 [ ] Step 5 — ADSN PUT + satamDone 플래그 영속화
-[ ] Step 6 — 최종 보고
+[ ] Step 6 — 최종 보고 + baseline 갱신
 ```
 
 ## 환경
@@ -128,7 +128,28 @@ for each ADSN d:
 
 ---
 
-## Step 0 — 데이터 수집
+## Step 0 — 진입 점검 (drift-check) + 데이터 수집
+
+### 0.1 drift-check (이슈 변동 여부 확인 — 필수)
+
+본 스킬의 책임 단계는 **`satam`** (workflow-graph.json). Step 0 진입 즉시 drift-check 를 호출해 **이슈 변동 여부 + 상위(`design-decide`) 변동 여부**를 확인하고, 그 결과로 진행 방식을 결정한다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
+```
+
+### 0.2 결과에 따른 분기
+
+| drift-check 결과 | 동작 |
+|---|---|
+| `satam` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 |
+| `satam` **DRIFT** (ADSN risk/sensitivity/mitigation 변동 감지) | 본 작업 진행 |
+| `satam` **CLEAN** + 상위(`design-decide`) **DRIFT** | 사용자에게 통지: "Design Decisions 가 변경됐습니다. SATAM 재분석이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
+| **모두 CLEAN** | **즉시 종료** — 본 스킬은 문서 산출이 없고 ADSN 이슈 필드 update + archSettings.satamDone 만 갱신하므로, 이슈/상위 모두 변동이 없으면 **강제 재생성도 의미 없음**. 사용자에게 yes/no 질문 없이 바로 Step 6 보고 출력 후 종료 (baseline 갱신 없음) |
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동.
+
+### 0.3 데이터 수집
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -524,11 +545,14 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 
 ---
 
-## Step 6 — 최종 보고
+## Step 6 — 최종 보고 + baseline 갱신
+
+### 6.1 보고 출력
 
 ```
-## SATAM 분석 완료 (v2 Claude Code)
+## SATAM 분석 완료 (v2 Claude Code) — MODE={full}
 
+- 진입 drift: satam=<NO-BASELINE|CLEAN|DRIFT>, design-decide=<...> (Step 0.1 결과)
 - ADSN 업데이트: N건 (키 리스트)
 - **Unmitigated Risks (핵심 산출물)**: U건 — 후속 설계 필요
 - 총계: Risks X / Sensitivities Y / Mitigations Z / Concerns C
@@ -553,6 +577,16 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 
 이어서 `ui_navigate(page=satam)` 로 SATAM 화면 전환 안내.
 
+### 6.2 baseline 갱신 (필수 — 본 작업이 실제로 진행된 경우)
+
+본 작업이 진행됐다면(NO-BASELINE 첫 실행 / DRIFT 처리) **반드시** `satam` stage 의 baseline 을 새 hash 로 갱신한다. Step 0.2 의 "모두 CLEAN" 즉시 종료 또는 상위 DRIFT 보류 결정으로 끝난 경우는 호출하지 않는다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" set-baseline --stage satam
+```
+
+이 명령은 archSettings.lastRunHash[satam] / lastRunAt[satam] 만 갱신 — 다른 stage 의 baseline 은 건드리지 않는다.
+
 ---
 
 ## 주의
@@ -561,3 +595,5 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 - Trade-off 의 `counterRisk` 는 **같은 ADSN 내** Risk ID 만 참조 (`R<id>:<QA_KEY>` 형식)
 - 문서 파일 생성 절대 금지 — 이슈 필드 3종 반영만
 - Step 0 flush / Step 1 draft save / Step 2 validate / Step 3 재-save / Step 5 PUT 루프 **모두 Bash tool call** 로 종료. 한 generation 에 몰아서 처리 금지
+- 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 본 스킬은 문서 산출이 없어 강제 재생성 모드 자체가 무의미 — 모두 CLEAN 이면 사용자 질문 없이 즉시 종료
+- baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage satam` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다

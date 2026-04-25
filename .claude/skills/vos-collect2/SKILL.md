@@ -43,9 +43,32 @@ export USER="batman"
 
 ---
 
-## Step 0 — 데이터 수집
+## Step 0 — 진입 점검 (drift-check) + 데이터 수집
 
-### project-description.md 읽기 (docs/{user} 우선, 없으면 main)
+### 0.1 drift-check (이슈 변동 여부 확인 — 필수)
+
+본 스킬의 책임 단계는 **`vos`** (workflow-graph.json). Step 0 진입 즉시 drift-check 를 호출해 **이슈 변동 여부 + 상위(`projdesc`) 변동 여부**를 확인하고, 그 결과로 진행 방식을 결정한다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
+```
+
+### 0.2 결과에 따른 분기
+
+| drift-check 결과 | 동작 |
+|---|---|
+| `vos` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 |
+| `vos` **DRIFT** (이슈 변동 감지) | 본 작업 진행 |
+| `vos` **CLEAN** + 상위(`projdesc`) **DRIFT** | 사용자에게 통지: "project-description 이 변경됐습니다. VOS 재정립이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
+| **모두 CLEAN** | 사용자에게 질문: "이슈 변동이 없습니다. 강제로 다시 돌릴까요? (예: 템플릿 변경, 정책 변경 등)" — `no` 면 **즉시 종료**, `yes` 면 강제 재생성 모드로 진행 |
+
+> **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(`issue-batch-create.sh` / `PUT /Issue` 등) 을 모두 스킵** 하고 archSettings/문서 갱신만 수행. 본 스킬은 VOS 이슈 자체를 만드는 게 핵심이라 강제 재생성 시 수행할 작업이 거의 없음 — Step 5 통째로 스킵하고 Step 6 보고만 출력해도 무방. 사실상 종료에 가깝다.
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
+
+### 0.3 데이터 수집
+
+#### project-description.md 읽기 (docs/{user} 우선, 없으면 main)
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -152,6 +175,8 @@ critical + suggestions 항목만 **국소 수정**. 나머지는 원문 유지. 
 
 ## Step 5 — 이슈 생성 (최종 items 반영)
 
+**강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — 이슈 생성/수정/삭제 모두 하지 않는다. 바로 Step 6 으로.
+
 ### create (새 이슈 생성) — ⚠️ 반드시 batch 스크립트 사용
 
 개별 `curl -X POST` 를 **절대 반복 호출하지 말 것** — Gitea git push race + subkey 충돌 발생.
@@ -189,12 +214,15 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 
 ---
 
-## Step 6 — 최종 보고
+## Step 6 — 최종 보고 + baseline 갱신
+
+### 6.1 보고 출력
 
 ```
-## VOS 수집 완료 (v2 Claude Code)
+## VOS 수집 완료 (v2 Claude Code) — MODE={full|forced-doc-regen}
 
-- 신규 생성: N건 (키 리스트)
+- 진입 drift: vos=<NO-BASELINE|CLEAN|DRIFT>, projdesc=<...> (Step 0.1 결과)
+- 신규 생성: N건 (키 리스트)   (forced-doc-regen 은 0)
 - 수정: M건
 - 재사용: K건
 - 삭제 마킹: L건 (⚠ 사용자 검토 필요)
@@ -206,6 +234,16 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 - unresolvedCritical: [...] (있는 경우)
 ```
 
+### 6.2 baseline 갱신 (필수 — 본 작업이 실제로 진행된 경우)
+
+본 작업이 진행됐다면(NO-BASELINE 첫 실행 / DRIFT 처리 / 강제 재생성) **반드시** `vos` stage 의 baseline 을 새 hash 로 갱신한다. Step 0.2 에서 "종료" 결정으로 끝난 경우는 호출하지 않는다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" set-baseline --stage vos
+```
+
+이 명령은 archSettings.lastRunHash[vos] / lastRunAt[vos] 만 갱신 — 다른 stage 의 baseline 은 건드리지 않는다.
+
 ---
 
 ## 주의
@@ -215,3 +253,5 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 - `jq`, `base64`, `curl` 이 PATH 에 있어야 함
 - 문서 인코딩 UTF-8
 - 한 번의 Claude Code 세션 안에서 Steps 1~5 모두 수행 (컨텍스트 유지). Step 0 과 Step 5 만 실제 Bash 호출, Step 1~4 는 에이전트 내부 추론.
+- 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 강제 재생성 yes 인 경우 이슈 생성/수정 step 들은 자동 스킵하고 문서/링크만 재생성
+- baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage vos` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다

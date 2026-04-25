@@ -18,13 +18,13 @@ allowed-tools: Bash, Read
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — 데이터 수집 (Drivers + archSettings)
+[ ] Step 0 — 진입 점검 (drift-check + 분기) + 데이터 수집 (Drivers + archSettings)
 [ ] Step 1 — DP + 후보안 엔티티 + QA 점수 초안 (plantuml 없음)
 [ ] Step 1.5 — 후보별 Structural/Dynamic PlantUML 추가
 [ ] Step 2 — 자가검증 (validate-design-decisions.py)
 [ ] Step 3 — critical 수정 (반복, 최대 iter 3)
 [ ] Step 5 — ADSN 이슈 생성 + 링크 + index/DP 문서 영속화
-[ ] Step 6 — 최종 보고
+[ ] Step 6 — 최종 보고 + baseline 갱신
 ```
 
 ## 환경
@@ -49,7 +49,30 @@ export USER="batman"
 
 ---
 
-## Step 0 — 데이터 수집
+## Step 0 — 진입 점검 (drift-check) + 데이터 수집
+
+### 0.1 drift-check (이슈 변동 여부 확인 — 필수)
+
+본 스킬의 책임 단계는 **`design-decide`** (workflow-graph.json). Step 0 진입 즉시 drift-check 를 호출해 **이슈 변동 여부 + 상위(`style`) 변동 여부**를 확인하고, 그 결과로 진행 방식을 결정한다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
+```
+
+### 0.2 결과에 따른 분기
+
+| drift-check 결과 | 동작 |
+|---|---|
+| `design-decide` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 |
+| `design-decide` **DRIFT** (이슈 변동 감지) | 본 작업 진행 |
+| `design-decide` **CLEAN** + 상위(`style`) **DRIFT** | 사용자에게 통지: "Style 이 변경됐습니다. design-decide 단계 재정립이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
+| **모두 CLEAN** | 사용자에게 질문: "이슈 변동이 없습니다. 문서/다이어그램만 강제로 재생성할까요? (예: 템플릿 변경, PlantUML 마이그레이션 등)" — `no` 면 **즉시 종료**, `yes` 면 강제 재생성 모드로 진행 |
+
+> **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(`issue-batch-create.sh` 등) 을 모두 스킵** 하고 index/DP 파일 재생성만 수행. 본 스킬에서 이슈 변경이 있는 step (Step 5.1) 을 통째로 건너뛴다.
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
+
+### 0.3 데이터 수집
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -374,6 +397,8 @@ cat /tmp/${CODE}-dd-draft.json \
 
 ### 5.1 ADSN 이슈 일괄 생성 (후보 단위)
 
+**강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — 새 ADSN/DDSN 생성/PUT 모두 하지 않는다. 바로 5.2 로 (5.2 도 새 키가 없으니 기존 키 재사용 또는 스킵).
+
 **각 DP 의 각 후보 를 개별 ADSN/DDSN 이슈로 생성**. designLevel 에 따라 issueType 이 달라진다:
 - `Architectural` → issueType `"Architectural Design"` (subkey `ADSN_NNN`)
 - `Detailed` → issueType `"Detailed Design"` (subkey `DDSN_NNN`)
@@ -524,13 +549,16 @@ PY
 
 ---
 
-## Step 6 — 최종 보고
+## Step 6 — 최종 보고 + baseline 갱신
+
+### 6.1 보고 출력
 
 ```
-## 설계 결정 완료 (v2 Claude Code)
+## 설계 결정 완료 (v2 Claude Code) — MODE={full|forced-doc-regen}
 
+- 진입 drift: design-decide=<NO-BASELINE|CLEAN|DRIFT>, style=<...> (Step 0.1 결과)
 - Design Point: N개 (DP-01 ~ DP-NN)
-- ADSN/DDSN 생성: 총 K건 (채택 C건 / 미채택 K-C건)
+- ADSN/DDSN 생성: 총 K건 (채택 C건 / 미채택 K-C건)   (forced-doc-regen 은 0)
   - Architectural: A건 / Detailed: D건
 - Requirement-Design 링크: L건
 - 문서:
@@ -554,6 +582,16 @@ PY
 - unresolvedCritical: [...]
 ```
 
+### 6.2 baseline 갱신 (필수 — 본 작업이 실제로 진행된 경우)
+
+본 작업이 진행됐다면(NO-BASELINE 첫 실행 / DRIFT 처리 / 강제 재생성) **반드시** `design-decide` stage 의 baseline 을 새 hash 로 갱신한다. Step 0.2 에서 "종료" 결정으로 끝난 경우는 호출하지 않는다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" set-baseline --stage design-decide
+```
+
+이 명령은 archSettings.lastRunHash[design-decide] / lastRunAt[design-decide] 만 갱신 — 다른 stage 의 baseline 은 건드리지 않는다.
+
 ---
 
 ## 주의
@@ -566,3 +604,5 @@ PY
 - **Step 1 에서 plantuml 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 plantuml 생성하면 스톨 리스크
 - `relatedRequirements` hallucination 금지 — Step 0 에서 수집한 실존 key 만
 - Step 0, 1, 1.5, 2, 3, 5 만 실제 Bash 호출, Step 4 는 내부 판단
+- 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 강제 재생성 yes 인 경우 이슈 생성/수정 step 들은 자동 스킵하고 문서/링크만 재생성
+- baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage design-decide` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다

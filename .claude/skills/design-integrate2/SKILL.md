@@ -20,12 +20,12 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — ADSN/DDSN + chosenStyles 수집
+[ ] Step 0 — 진입 점검 (drift-check + 분기) + ADSN/DDSN + chosenStyles 수집
 [ ] Step 1 — 4 관점 통합 초안 (Logical/Process/Deployment/Development)
 [ ] Step 2 — 자가검증 (validate-integrate-doc.py)
 [ ] Step 3 — critical 수정 (반복)
 [ ] Step 5 — architecture-integrated.md 저장 + designIntegrated 플래그
-[ ] Step 6 — 최종 보고
+[ ] Step 6 — 최종 보고 + baseline 갱신
 ```
 
 ## 환경
@@ -51,7 +51,30 @@ export USER="batman"
 
 ---
 
-## Step 0 — 데이터 수집
+## Step 0 — 진입 점검 (drift-check) + 데이터 수집
+
+### 0.1 drift-check (이슈 변동 여부 확인 — 필수)
+
+본 스킬의 책임 단계는 **`design-integrate`** (workflow-graph.json). Step 0 진입 즉시 drift-check 를 호출해 **이슈 변동 여부 + 상위(`design-decide`) 변동 여부**를 확인하고, 그 결과로 진행 방식을 결정한다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
+```
+
+### 0.2 결과에 따른 분기
+
+| drift-check 결과 | 동작 |
+|---|---|
+| `design-integrate` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 |
+| `design-integrate` **DRIFT** (designIntegrated 등 archSettings 변동) | 본 작업 진행 |
+| `design-integrate` **CLEAN** + 상위(`design-decide`) **DRIFT** | 사용자에게 통지: "Design Decisions 가 변경됐습니다. 통합 문서 재정립이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
+| **모두 CLEAN** | 사용자에게 질문: "변동이 없습니다. 통합 문서를 강제로 재생성할까요? (예: 템플릿 변경, PlantUML 마이그레이션 등)" — `no` 면 **즉시 종료**, `yes` 면 강제 재생성 모드로 진행 |
+
+> **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출이 본 스킬에 없으므로 별도 스킵 단계는 없음**. 본 스킬은 이슈를 만들지 않고 문서 + designIntegrated 플래그만 갱신하므로 강제 재생성 모드는 곧 통합 문서 재작성과 동일하게 진행하면 된다.
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
+
+### 0.3 데이터 수집
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -294,11 +317,14 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 
 ---
 
-## Step 6 — 최종 보고
+## Step 6 — 최종 보고 + baseline 갱신
+
+### 6.1 보고 출력
 
 ```
-## 디자인 통합 완료 (v2 Claude Code)
+## 디자인 통합 완료 (v2 Claude Code) — MODE={full|forced-doc-regen}
 
+- 진입 drift: design-integrate=<NO-BASELINE|CLEAN|DRIFT>, design-decide=<...> (Step 0.1 결과)
 - 관점: logical, process, deployment (N개)
 - 반영 ADSN: A건 / DDSN: D건 (subkey 본문 참조 기준)
 - PlantUML 블록: M건 (Logical component / Process sequence / Deployment node·artifact / Development package ...)
@@ -312,6 +338,16 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 - unresolvedCritical: [...]
 ```
 
+### 6.2 baseline 갱신 (필수 — 본 작업이 실제로 진행된 경우)
+
+본 작업이 진행됐다면(NO-BASELINE 첫 실행 / DRIFT 처리 / 강제 재생성) **반드시** `design-integrate` stage 의 baseline 을 새 hash 로 갱신한다. Step 0.2 에서 "종료" 결정으로 끝난 경우는 호출하지 않는다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" set-baseline --stage design-integrate
+```
+
+이 명령은 archSettings.lastRunHash[design-integrate] / lastRunAt[design-integrate] 만 갱신 — 다른 stage 의 baseline 은 건드리지 않는다.
+
 ---
 
 ## 주의
@@ -321,3 +357,5 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 - ADSN/DDSN 참조는 반드시 subkey (key 나 docId 금지)
 - 이슈 생성/변경 금지 — 문서만 산출
 - Step 0, 1 종료 flush, 2 validate, 3 재-flush, 5 문서 저장이 **모두 Bash tool call**. 에이전트가 "한 generation 에 몰아서" 처리하지 말 것 — 이게 GLM 스톨 방지의 핵심
+- 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 본 스킬은 이슈를 만들지 않으므로 강제 재생성 yes 와 일반 진행이 동일한 흐름
+- baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage design-integrate` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다

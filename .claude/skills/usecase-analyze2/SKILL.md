@@ -29,12 +29,12 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — 데이터 수집 (VOS + 기존 Feature/UC)
+[ ] Step 0 — 진입 점검 (drift-check + 분기) + 데이터 수집
 [ ] Step 1 — 초안 생성 (iter 1)
 [ ] Step 2 — 자가검증 (validate-usecases.py)
 [ ] Step 3 — critical 수정 (반복, 최대 iter 3)
 [ ] Step 5 — Feature/UC 이슈 + 링크 + use-cases.md 영속화
-[ ] Step 6 — 최종 보고
+[ ] Step 6 — 최종 보고 + baseline 갱신
 ```
 
 ## 환경
@@ -89,7 +89,30 @@ VOS ──(1:N)──▶ User Story ──(N:M)──▶ Use Case ──(선별)
 
 ---
 
-## Step 0 — 데이터 수집
+## Step 0 — 진입 점검 (drift-check) + 데이터 수집
+
+### 0.1 drift-check (이슈 변동 여부 확인 — 필수)
+
+본 스킬의 책임 단계는 **`usecase`** (workflow-graph.json). Step 0 진입 즉시 drift-check 를 호출해 **이슈 변동 여부 + 상위(`vos`) 변동 여부**를 확인하고, 그 결과로 진행 방식을 결정한다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
+```
+
+### 0.2 결과에 따른 분기
+
+| drift-check 결과 | 동작 |
+|---|---|
+| `usecase` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 (MODE 따라 full/relink) |
+| `usecase` **DRIFT** (이슈 변동 감지) | 본 작업 진행 (MODE 따라 full/relink) |
+| `usecase` **CLEAN** + 상위(`vos`) **DRIFT** | 사용자에게 통지: "VOS 가 변경됐습니다. usecase 단계 재정립이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
+| **모두 CLEAN** | 사용자에게 질문: "이슈 변동이 없습니다. 문서/다이어그램만 강제로 재생성할까요? (예: 템플릿 변경, PlantUML 마이그레이션 등)" — `no` 면 **즉시 종료**, `yes` 면 강제 재생성 모드로 진행 |
+
+> **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스는 MODE 와 무관하게 **이슈 생성/수정 전부 스킵 + 링크 차집합 + 문서 재생성**으로 동작 (사실상 relink 흐름). 새로 만들 이슈가 없는 게 자명하므로 자동 강등. SKILL 흐름상 Step 1 은 MODE=relink 축약 규칙을 따르고, Step 5.1 은 통째로 스킵.
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
+
+### 0.3 데이터 수집
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -106,7 +129,7 @@ echo "=== VOS 목록 ==="
 curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
   | jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client,issueLinks}]'
 
-# 기존 Feature (issueLinks + 전체 본문 — relink 에서 원문 그대로 보존)
+# 기존 Feature (issueLinks + 전체 본문 — relink/강제 재생성 에서 원문 그대로 보존)
 echo
 echo "=== 기존 Feature ==="
 curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
@@ -115,12 +138,15 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 
 - VOS 가 0건 → **중단** 하고 "vos-collect2 를 먼저 실행하세요" 보고
 - `MODE=relink` 인데 기존 Feature 0 건 → **중단** 하고 `MODE=full` 로 전환 권고 (재링크 대상 없음)
+- **강제 재생성 모드**인데 기존 Feature 0 건 → **중단** (재생성할 대상 없음)
 
 ---
 
 ## Step 1 — 초안 생성 (iter 1)
 
-### MODE=relink 축약 규칙
+### MODE=relink 또는 강제 재생성 모드 — 축약 규칙
+
+(MODE=relink 가 명시됐거나, Step 0.2 에서 drift CLEAN + 사용자 강제 재생성 yes 로 진입한 경우에 동일 적용)
 
 이슈 생성/수정/삭제 금지. 기존 Feature 원문(summary/actor/flows) 보존. 다음만 수행:
 
@@ -352,7 +378,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "
 
 ### 5.1 Feature 이슈 일괄 생성
 
-**MODE=relink 이면 이 섹션 전체 스킵** — 이슈 생성/수정/삭제 모두 하지 않는다. 바로 5.2 로.
+**MODE=relink 또는 강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — 이슈 생성/수정/삭제 모두 하지 않는다. 바로 5.2 로.
 
 create 모드 항목을 JSON 배열로 모아 batch 스크립트 **1회** 실행.
 `issue-batch-create.sh` 는 순차 POST + PUT(추가 필드) + 재시도를 자동 처리한다.
@@ -411,12 +437,15 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 
 ---
 
-## Step 6 — 최종 보고
+## Step 6 — 최종 보고 + baseline 갱신
+
+### 6.1 보고 출력
 
 ```
-## Use Case 분석 완료 (v2 Claude Code) — MODE={full|relink}
+## Use Case 분석 완료 (v2 Claude Code) — MODE={full|relink|forced-doc-regen}
 
-- Feature 생성: N건 (키 리스트)   (relink 은 0)
+- 진입 drift: usecase=<NO-BASELINE|CLEAN|DRIFT>, vos=<...> (Step 0.1 결과)
+- Feature 생성: N건 (키 리스트)   (relink / forced-doc-regen 은 0)
 - VOS-Feature 링크: 신규 NEW / 기존 유지 KEPT / ⚠ 제거 후보 REM (REM>0 이면 key 쌍 나열 + 수동 처리 안내)
 - 문서 저장: business/use-cases.md
 - PlantUML 다이어그램: Context / Use Case / Sequence
@@ -432,6 +461,16 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - unresolvedCritical: [...]
 ```
 
+### 6.2 baseline 갱신 (필수 — 본 작업이 실제로 진행된 경우)
+
+본 작업이 진행됐다면(NO-BASELINE 첫 실행 / DRIFT 처리 / 강제 재생성) **반드시** `usecase` stage 의 baseline 을 새 hash 로 갱신한다. Step 0.2 에서 "종료" 결정으로 끝난 경우는 호출하지 않는다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" set-baseline --stage usecase
+```
+
+이 명령은 archSettings.lastRunHash[usecase] / lastRunAt[usecase] 만 갱신 — 다른 stage 의 baseline 은 건드리지 않으므로 하류 단계의 영향 추적이 유지된다.
+
 ---
 
 ## 주의
@@ -442,3 +481,5 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - PlantUML 코드블록은 반드시 ` ```plantuml ` ... ` ``` ` 로 감싸고 `@startuml` / `@enduml` 쌍 포함
 - Feature 생성 후 subkey 를 응답에서 받아 docId 치환에 사용
 - MODE 요약: `full` — 신규 Feature create + 링크 + 문서 작성 / `relink` — 이슈 생성·수정 없음, 링크 차집합 POST + 문서 재작성. 두 모드 모두 `/Issue/link` 가 idempotent 아니므로 POST 전 기존 `issueLinks` 와 차집합 필수
+- 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 강제 재생성 yes 인 경우 MODE 와 무관하게 relink 흐름으로 강등
+- baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage usecase` 호출이 필수. 이걸 안 하면 다음 호출 때 또 DRIFT 로 잡혀 재실행 압력이 생긴다

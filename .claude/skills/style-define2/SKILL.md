@@ -18,13 +18,13 @@ allowed-tools: Bash, Read
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — 데이터 수집 + 엔진 점수 (참고용)
+[ ] Step 0 — 진입 점검 (drift-check + 분기) + 데이터 수집 + 엔진 점수 (참고용)
 [ ] Step 1 — 통합 스타일 조합 후보 2~3개 + QA 가중 평가 (plantuml 없음)
 [ ] Step 1.5 — 후보별 Structural/Dynamic PlantUML 추가
 [ ] Step 2 — 자가검증 (validate-style-doc.py)
 [ ] Step 3 — critical 수정 (반복, 최대 iter 3)
 [ ] Step 5 — 후보 ADSN 생성 + index/후보파일 저장 + archSettings.chosenStyles 업데이트
-[ ] Step 6 — 최종 보고
+[ ] Step 6 — 최종 보고 + baseline 갱신
 ```
 
 ## 환경
@@ -49,9 +49,32 @@ export USER="batman"
 
 ---
 
-## Step 0 — 선행 데이터 수집 + 엔진 점수
+## Step 0 — 진입 점검 (drift-check) + 데이터 수집
 
-### 0.1 normalizedAttributes 확보
+### 0.1 drift-check (이슈 변동 여부 확인 — 필수)
+
+본 스킬의 책임 단계는 **`style`** (workflow-graph.json). Step 0 진입 즉시 drift-check 를 호출해 **이슈 변동 여부 + 상위(`driver`) 변동 여부**를 확인하고, 그 결과로 진행 방식을 결정한다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
+```
+
+### 0.2 결과에 따른 분기
+
+| drift-check 결과 | 동작 |
+|---|---|
+| `style` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 |
+| `style` **DRIFT** (이슈 변동 감지) | 본 작업 진행 |
+| `style` **CLEAN** + 상위(`driver`) **DRIFT** | 사용자에게 통지: "Driver 가 변경됐습니다. style 단계 재정립이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
+| **모두 CLEAN** | 사용자에게 질문: "이슈 변동이 없습니다. 문서/다이어그램만 강제로 재생성할까요? (예: 템플릿 변경, PlantUML 마이그레이션 등)" — `no` 면 **즉시 종료**, `yes` 면 강제 재생성 모드로 진행 |
+
+> **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(`issue-batch-create.sh` 등) 을 모두 스킵** 하고 archSettings 갱신 + index/후보 파일 재생성만 수행. 본 스킬에서 이슈 변경이 있는 step (Step 5.1) 을 통째로 건너뛴다.
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
+
+### 0.3 데이터 수집 + 엔진 점수
+
+#### 0.3.1 normalizedAttributes 확보
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -96,7 +119,7 @@ echo "$NORM"
 
 `NORM` 이 `{}` 이면 **중단** → "먼저 driver-select2 를 실행하거나 normalizedAttributes JSON 을 제공하세요" 보고.
 
-### 0.2 카탈로그 읽기
+#### 0.3.2 카탈로그 읽기
 
 ```bash
 KN="$(git rev-parse --show-toplevel)/Agent-Service/knowledge/arch-styles"
@@ -106,7 +129,7 @@ ls "${KN}/styles/"
 
 각 스타일 파일은 `id / name / scope / summary / fit_signals / avoid_signals / quality_attributes / prerequisites / combines_well_with / conflicts_with / tradeoffs` 를 담는다.
 
-### 0.3 엔진 점수 계산 (참고용)
+#### 0.3.3 엔진 점수 계산 (참고용)
 
 **엔진은 개별 스타일 랭킹 도구로만 활용**. 최종 Primary/Secondary/Supporting 선정은 이번 스킬에서는 LLM 의 조합 설계가 담당 — 엔진 분류 그대로 쓰지 않는다.
 
@@ -125,7 +148,7 @@ cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}]
 - `primary/secondary/supporting` — 엔진 자동 분류 (참조만, 뒤집어도 무방)
 - `catalog_summary` — 이후 validator 에 `styleCatalogIds` 로 전달하거나 조합 시 스타일 id 확인에 사용
 
-### 0.4 기존 ADSN 스캔 (선택)
+#### 0.3.4 기존 ADSN 스캔 (선택)
 
 동일 프로젝트에 기존 스타일 ADSN 이 있으면 참고용으로 파악. 현재 `create` 중심 모드만 지원 — 기존 ADSN 재사용·수정 로직은 design-decide2 와 같은 패턴으로 후속 확장 가능.
 
@@ -411,6 +434,8 @@ cat /tmp/${CODE}-styledef-draft.json \
 
 ### 5.1 후보 ADSN 이슈 일괄 생성 (조합 단위만)
 
+**강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — 새 ADSN 생성/PUT 모두 하지 않는다. 바로 5.2 로 이동하되, 5.2 에서도 기존 ADSN 키를 재사용하므로 chosen 후보 키만 교체해 사용.
+
 **각 조합 후보를 개별 ADSN 이슈로 생성** (2~3건). 개별 스타일은 ADSN 생성하지 않음 — 이 스킬의 핵심 변경점.
 
 `chosen=true` 인 후보(들) 에만 `decision` 필드를 채운다. 나머지는 decision 빈 문자열.
@@ -627,13 +652,16 @@ PATCH 실패 시 최종 보고에 ⚠. 다음 스킬이 영향 받을 수 있음
 
 ---
 
-## Step 6 — 최종 보고
+## Step 6 — 최종 보고 + baseline 갱신
+
+### 6.1 보고 출력
 
 ```
-## 시스템 스타일 결정 완료 (v2 Claude Code)
+## 시스템 스타일 결정 완료 (v2 Claude Code) — MODE={full|forced-doc-regen}
 
+- 진입 drift: style=<NO-BASELINE|CLEAN|DRIFT>, driver=<...> (Step 0.1 결과)
 - 검토 후보: N개 (ADSN_001 ~ ADSN_NNN, 실제 subkey)
-- ADSN 생성: K건 (채택 C건 / 미채택 K-C건)
+- ADSN 생성: K건 (채택 C건 / 미채택 K-C건)   (forced-doc-regen 은 0)
 - Requirement-Style 링크: L건 (채택안에만)
 - 문서:
   - architecture/architecture-style.md (상위 index)
@@ -654,6 +682,16 @@ PATCH 실패 시 최종 보고에 ⚠. 다음 스킬이 영향 받을 수 있음
 - unresolvedCritical: [...]
 ```
 
+### 6.2 baseline 갱신 (필수 — 본 작업이 실제로 진행된 경우)
+
+본 작업이 진행됐다면(NO-BASELINE 첫 실행 / DRIFT 처리 / 강제 재생성) **반드시** `style` stage 의 baseline 을 새 hash 로 갱신한다. Step 0.2 에서 "종료" 결정으로 끝난 경우는 호출하지 않는다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" set-baseline --stage style
+```
+
+이 명령은 archSettings.lastRunHash[style] / lastRunAt[style] 만 갱신 — 다른 stage 의 baseline 은 건드리지 않는다.
+
 ---
 
 ## 주의
@@ -669,3 +707,5 @@ PATCH 실패 시 최종 보고에 ⚠. 다음 스킬이 영향 받을 수 있음
 - **Step 1 에서 plantuml 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 plantuml 생성하면 스톨 리스크
 - Step 0 / 1 / 1.5 / 2 / 3 / 5 만 실제 Bash 호출, Step 4 는 내부 판단
 - `archSettings.chosenStyles` 는 **평탄화된 Primary/Secondary/Supporting 리스트** — design-integrate2 가 이 형식을 기대
+- 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 강제 재생성 yes 인 경우 이슈 생성/수정 step 들은 자동 스킵하고 문서/링크만 재생성
+- baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage style` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다

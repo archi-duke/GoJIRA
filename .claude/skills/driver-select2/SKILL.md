@@ -39,7 +39,30 @@ export USER="batman"
 
 ---
 
-## Step 0 — 데이터 수집
+## Step 0 — 진입 점검 (drift-check) + 데이터 수집
+
+### 0.1 drift-check (이슈 변동 여부 확인 — 필수)
+
+본 스킬의 책임 단계는 **`driver`** (workflow-graph.json). Step 0 진입 즉시 drift-check 를 호출해 **이슈 변동 여부 + 상위(`requirement`) 변동 여부**를 확인하고, 그 결과로 진행 방식을 결정한다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
+```
+
+### 0.2 결과에 따른 분기
+
+| drift-check 결과 | 동작 |
+|---|---|
+| `driver` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 |
+| `driver` **DRIFT** (이슈 변동 감지) | 본 작업 진행 |
+| `driver` **CLEAN** + 상위(`requirement`) **DRIFT** | 사용자에게 통지: "Requirement 가 변경됐습니다. driver 단계 재정립이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
+| **모두 CLEAN** | 사용자에게 질문: "이슈 변동이 없습니다. drivers.md / archSettings 만 강제로 재생성할까요?" — `no` 면 **즉시 종료**, `yes` 면 강제 재생성 모드로 진행 |
+
+> **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(Requirement PUT / ASR 라벨 갱신 등) 을 모두 스킵** 하고 archSettings 갱신 + drivers.md 재저장만 수행. 본 스킬에서 이슈 변경이 있는 step (Step 5.1, 5.2) 을 통째로 건너뛴다.
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
+
+### 0.3 데이터 수집
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
@@ -176,6 +199,9 @@ critical + suggestions 항목만 국소 수정. 나머지 원문 유지. 수정 
 ## Step 5 — Requirement 업데이트 + 라벨 + 문서 저장
 
 ### 5.1 각 driver 에 대해 Requirement 업데이트
+
+**강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — Requirement 이슈 PUT 하지 않는다.
+
 ```bash
 curl -s -X PUT "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
@@ -186,6 +212,9 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 ```
 
 ### 5.2 ASR 라벨 부여 (선정된 Driver + 모든 NFR)
+
+**강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — labels 갱신 PUT 하지 않는다.
+
 ```bash
 # 현재 labels 조회 (XBody 헤더 방식) → ASR 누락 시 append
 LABELS=$(curl -s "${GOJIRA_API}/Issue" \
@@ -224,14 +253,17 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 
 ---
 
-## Step 6 — 최종 보고
+## Step 6 — 최종 보고 + baseline 갱신
+
+### 6.1 보고 출력
 
 ```
-## Architecture Driver 선정 완료 (v2 Claude Code)
+## Architecture Driver 선정 완료 (v2 Claude Code) — MODE={full|forced-doc-regen}
 
-- Driver 선정: N건 (키 + 카테고리 분포)
-- Requirement 업데이트: qad/qai/priority/risk/sensitivity
-- ASR 라벨: Driver + 모든 NFR
+- 진입 drift: driver=<NO-BASELINE|CLEAN|DRIFT>, requirement=<...> (Step 0.1 결과)
+- Driver 선정: N건 (키 + 카테고리 분포)   (forced-doc-regen 은 PUT 0)
+- Requirement 업데이트: qad/qai/priority/risk/sensitivity   (forced-doc-regen 은 스킵)
+- ASR 라벨: Driver + 모든 NFR   (forced-doc-regen 은 스킵)
 - 정규화 속성: {scalability: high, ...}
 - 문서 저장: architecture/drivers.md
 
@@ -248,6 +280,16 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - unresolvedCritical: [...]
 ```
 
+### 6.2 baseline 갱신 (필수 — 본 작업이 실제로 진행된 경우)
+
+본 작업이 진행됐다면(NO-BASELINE 첫 실행 / DRIFT 처리 / 강제 재생성) **반드시** `driver` stage 의 baseline 을 새 hash 로 갱신한다. Step 0.2 에서 "종료" 결정으로 끝난 경우는 호출하지 않는다.
+
+```bash
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" set-baseline --stage driver
+```
+
+이 명령은 archSettings.lastRunHash[driver] / lastRunAt[driver] 만 갱신 — 다른 stage 의 baseline 은 건드리지 않는다.
+
 ---
 
 ## 주의
@@ -257,3 +299,5 @@ echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "$
 - Platform-API `/file` 응답 content 는 base64 → `base64 -d`, 저장 시 plain UTF-8 전달
 - normalizedAttributes 는 허용 어휘 외 사용 금지
 - 한 세션에서 Steps 1~4 는 추론, Step 0 과 Step 5 는 실제 Bash 호출. 단 **Step 5 내부는 5.1~5.4 각각을 별도 Bash tool call 로 분할** — 한 generation 에 몰지 말 것
+- 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 강제 재생성 yes 인 경우 이슈 생성/수정 step 들은 자동 스킵하고 문서/링크만 재생성
+- baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage driver` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다
