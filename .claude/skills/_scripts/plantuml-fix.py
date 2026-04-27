@@ -56,6 +56,33 @@ def fix_sequence_destroy_arrow(body: str) -> tuple[str, int]:
     return new, n
 
 
+def fix_component_note_over(body: str) -> tuple[str, int]:
+    """component 다이어그램에서 sequence 문법인 `note over X, Y : <text>` 를
+    floating note (`note as N\\n...\\nend note`) 로 변환.
+
+    `note over` 는 sequence 전용. component 에 multi-target note 직접 대응 없음 →
+    floating note 로 의미 보존. 라벨 안 `\\n` literal 은 실제 줄바꿈으로 풀어
+    multi-line note 본문으로 변환.
+    """
+    pattern = re.compile(
+        r"^(\s*)note\s+over\s+[^:]+:\s*(.+)$",
+        re.MULTILINE,
+    )
+
+    counter = [0]
+
+    def repl(m: re.Match) -> str:
+        counter[0] += 1
+        indent = m.group(1)
+        label = m.group(2).rstrip()
+        lines = label.replace("\\n", "\n").splitlines()
+        body_text = "\n".join(indent + line for line in lines)
+        return f"{indent}note as N_auto{counter[0]}\n{body_text}\n{indent}end note"
+
+    new, n = pattern.subn(repl, body)
+    return new, n
+
+
 def fix_state_in_component(body: str) -> tuple[str, int]:
     """component/database/package 안의 `state "..." as X` → `[...] as X`."""
     pattern = re.compile(
@@ -190,6 +217,8 @@ def fix_block(body: str) -> tuple[str, dict[str, int]]:
     elif kind == "component":
         body, n2 = fix_state_in_component(body)
         counts["component_state_keyword"] = n2
+        body, n6 = fix_component_note_over(body)
+        counts["component_note_over"] = n6
 
     return body, counts
 
