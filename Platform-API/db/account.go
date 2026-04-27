@@ -47,7 +47,18 @@ func InitAccountIndexes() {
 
 	createUnique(Users(), "knoxId")
 	createUnique(AuthGroups(), "code")
-	createUnique(OrgUnits(), "code")
+
+	// orgUnits: 옛 code unique index 정리 (있으면 drop, 없으면 무시)
+	_ = OrgUnits().Indexes().DropOne(ctx, "code_1")
+
+	// orgUnits: name + type 복합 유니크 (code 폐지)
+	_, err0 := OrgUnits().Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "name", Value: 1}, {Key: "type", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	if err0 != nil {
+		log.Printf("index orgUnits compound (name,type): %v", err0)
+	}
 
 	// userProjects: userId + projectId 복합 유니크
 	_, err := UserProjects().Indexes().CreateOne(ctx, mongo.IndexModel{

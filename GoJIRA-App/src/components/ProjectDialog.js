@@ -1,8 +1,34 @@
 import React, { useState, useEffect } from 'react';
+import config from '../config';
 import './ProjectDialog.css';
+
+const PLATFORM_API = config.PLATFORM_API;
+
+function unitId(u) { return (u && (u._id || u.id)) || ''; }
+function findUnit(units, type, name) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return null;
+  return units.find((u) => u.type === type && u.name === trimmed) || null;
+}
+
+const STATUS_OPTIONS = ['To Do', 'In Progress', 'In Review', 'Done', 'Closed'];
+
+function userLabel(u) { return `${u.name} (${u.knoxId})`; }
+function findUserByInput(users, input) {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return null;
+  return (
+    users.find((u) => userLabel(u) === trimmed) ||
+    users.find((u) => u.knoxId === trimmed) ||
+    users.find((u) => u.name === trimmed) ||
+    null
+  );
+}
 
 export default function ProjectDialog({ project, mode, onClose, onSave }) {
   const [form, setForm] = useState({});
+  const [orgUnits, setOrgUnits] = useState([]);
+  const [users, setUsers] = useState([]);
 
   useEffect(() => {
     if (project) {
@@ -10,10 +36,28 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
     }
   }, [project]);
 
+  useEffect(() => {
+    fetch(`${PLATFORM_API}/Account/orgUnits`)
+      .then((r) => r.json())
+      .then((d) => setOrgUnits(Array.isArray(d) ? d : []))
+      .catch(() => {});
+    fetch(`${PLATFORM_API}/Account/users`)
+      .then((r) => r.json())
+      .then((d) => setUsers(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
+
   if (!project) return null;
 
   const isEdit = mode === 'edit';
   const title = isEdit ? '과제 편집' : '과제 상세정보';
+
+  const teamUnits = orgUnits.filter((u) => u.type === 'team');
+  const groupUnits = orgUnits.filter((u) => u.type === 'group');
+  const currentTeamUnit = findUnit(teamUnits, 'team', form.devTeam);
+  const groupOptions = groupUnits
+    .filter((u) => !currentTeamUnit || u.parentOrgUnitId === unitId(currentTeamUnit))
+    .map((u) => u.name);
 
   function handleChange(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -26,7 +70,36 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
     setForm((prev) => ({ ...prev, schedules: schedules }));
   }
 
-  function handleSubmit() {
+  async function ensureOrgUnit(name, type, parentName) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return null;
+    const existing = findUnit(orgUnits, type, trimmed);
+    if (existing) return unitId(existing);
+    let parentOrgUnitId = '';
+    if (type === 'group' && parentName) {
+      const parent = findUnit(orgUnits, 'team', parentName);
+      if (parent) parentOrgUnitId = unitId(parent);
+    }
+    try {
+      const res = await fetch(`${PLATFORM_API}/Account/orgUnits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed, type, parentOrgUnitId, sortOrder: 0 }),
+      });
+      const data = await res.json();
+      return (data && (data._id || data.id)) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function handleSubmit() {
+    if (form.devTeam) {
+      await ensureOrgUnit(form.devTeam, 'team');
+    }
+    if (form.devGroup) {
+      await ensureOrgUnit(form.devGroup, 'group', form.devTeam);
+    }
     if (onSave) onSave(form);
     onClose();
   }
@@ -51,56 +124,30 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
               onChange={(v) => handleChange('name', v)} />
             <Field label="JIRA Code" value={form.jiraCodes?.main?.jiraCode || ''} editable={isEdit && !form._id}
               onChange={(v) => setForm((prev) => ({ ...prev, jiraCodes: { main: { jiraCode: v } } }))} />
-            <Field label="상태" value={form.status} editable={isEdit}
+            <StatusField label="상태" value={form.status} editable={isEdit}
               onChange={(v) => handleChange('status', v)} />
             <Field label="Feature" value={form.feature} editable={isEdit}
               onChange={(v) => handleChange('feature', v)} />
-            <Field label="개발팀" value={form.devTeam} editable={isEdit}
+            <OrgUnitField label="개발팀" value={form.devTeam} editable={isEdit}
+              options={teamUnits.map((u) => u.name)}
               onChange={(v) => handleChange('devTeam', v)} />
-            <Field label="개발그룹" value={form.devGroup} editable={isEdit}
+            <OrgUnitField label="개발그룹" value={form.devGroup} editable={isEdit}
+              options={groupOptions}
               onChange={(v) => handleChange('devGroup', v)} />
           </div>
 
           {/* People */}
           <div className="dlg-section">담당자</div>
           <div className="dlg-grid">
-            <Field label="Architect" value={architect.name || ''} editable={false} />
-            <Field label="PL" value={pl.name || ''} editable={false} />
-            <Field label="Members"
-              value={(form.members || []).join(', ')} editable={false} />
+            <UserSingleField label="Architect" value={architect} users={users} editable={isEdit}
+              onChange={(u) => handleChange('architect', u || {})} />
+            <UserSingleField label="PL" value={pl} users={users} editable={isEdit}
+              onChange={(u) => handleChange('PL', u || {})} />
           </div>
-          {isEdit && (
-            <>
-              <label className="dlg-label" style={{marginTop:8}}>Auditors</label>
-              <div className="dlg-auditor-list">
-                {(form.auditors || []).map((a, i) => (
-                  <span key={i} className="dlg-auditor-tag">
-                    {a}
-                    <button className="dlg-auditor-remove" onClick={() => {
-                      setForm(prev => ({ ...prev, auditors: (prev.auditors || []).filter((_, idx) => idx !== i) }));
-                    }}>x</button>
-                  </span>
-                ))}
-                <input
-                  className="dlg-auditor-input"
-                  placeholder="추가할 ID 입력 후 Enter"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.target.value.trim()) {
-                      const val = e.target.value.trim();
-                      setForm(prev => ({ ...prev, auditors: [...(prev.auditors || []), val] }));
-                      e.target.value = '';
-                    }
-                  }}
-                />
-              </div>
-            </>
-          )}
-          {!isEdit && (form.auditors || []).length > 0 && (
-            <div className="dlg-field" style={{marginTop:8}}>
-              <label className="dlg-label">Auditors</label>
-              <span className="dlg-value">{(form.auditors || []).join(', ')}</span>
-            </div>
-          )}
+          <UserMultiField label="Members" value={form.members || []} users={users} editable={isEdit}
+            onChange={(arr) => handleChange('members', arr)} />
+          <UserMultiField label="Auditors" value={form.auditors || []} users={users} editable={isEdit}
+            onChange={(arr) => handleChange('auditors', arr)} />
 
           {/* Schedules */}
           <div className="dlg-section">마일스톤</div>
@@ -182,5 +229,177 @@ function Field({ label, value, editable, onChange }) {
         <span className="dlg-value">{value || '-'}</span>
       )}
     </div>
+  );
+}
+
+function StatusField({ label, value, editable, onChange }) {
+  // 기존 데이터에 표준 외 값이 있을 수 있으므로 동적으로 옵션 머지
+  const options = STATUS_OPTIONS.includes(value) || !value
+    ? STATUS_OPTIONS
+    : [value, ...STATUS_OPTIONS];
+  return (
+    <div className="dlg-field">
+      <label className="dlg-label">{label}</label>
+      {editable ? (
+        <select
+          className="dlg-input"
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">(선택)</option>
+          {options.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      ) : (
+        <span className="dlg-value">{value || '-'}</span>
+      )}
+    </div>
+  );
+}
+
+function OrgUnitField({ label, value, editable, options, onChange }) {
+  const listId = React.useId();
+  return (
+    <div className="dlg-field">
+      <label className="dlg-label">{label}</label>
+      {editable ? (
+        <>
+          <input
+            className="dlg-input"
+            list={listId}
+            value={value || ''}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <datalist id={listId}>
+            {(options || []).map((opt) => (
+              <option key={opt} value={opt} />
+            ))}
+          </datalist>
+        </>
+      ) : (
+        <span className="dlg-value">{value || '-'}</span>
+      )}
+    </div>
+  );
+}
+
+function UserSingleField({ label, value, users, editable, onChange }) {
+  const listId = React.useId();
+  const currentLabel = value && value.name && value.id ? userLabel({ knoxId: value.id, name: value.name }) : '';
+  const [text, setText] = React.useState(currentLabel);
+  React.useEffect(() => { setText(currentLabel); }, [currentLabel]);
+
+  if (!editable) {
+    return (
+      <div className="dlg-field">
+        <label className="dlg-label">{label}</label>
+        <span className="dlg-value">{(value && value.name) || '-'}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="dlg-field">
+      <label className="dlg-label">{label}</label>
+      <input
+        className="dlg-input"
+        list={listId}
+        value={text}
+        placeholder="이름 또는 ID"
+        onChange={(e) => {
+          const v = e.target.value;
+          setText(v);
+          if (!v.trim()) { onChange(null); return; }
+          const u = findUserByInput(users, v);
+          if (u && v === userLabel(u)) onChange({ id: u.knoxId, name: u.name });
+        }}
+        onBlur={() => {
+          const u = findUserByInput(users, text);
+          if (u) {
+            const lab = userLabel(u);
+            setText(lab);
+            onChange({ id: u.knoxId, name: u.name });
+          } else {
+            setText(currentLabel);
+          }
+        }}
+      />
+      <datalist id={listId}>
+        {users.map((u) => <option key={u.knoxId} value={userLabel(u)} />)}
+      </datalist>
+    </div>
+  );
+}
+
+function UserMultiField({ label, value, users, editable, onChange }) {
+  const listId = React.useId();
+  const list = value || [];
+  const userById = (knoxId) => users.find((u) => u.knoxId === knoxId);
+
+  function addUser(input) {
+    const u = findUserByInput(users, input);
+    if (!u) return false;
+    if (list.includes(u.knoxId)) return true;
+    onChange([...list, u.knoxId]);
+    return true;
+  }
+
+  function removeAt(i) {
+    onChange(list.filter((_, idx) => idx !== i));
+  }
+
+  if (!editable && list.length === 0) {
+    return (
+      <div className="dlg-field" style={{ marginTop: 8 }}>
+        <label className="dlg-label">{label}</label>
+        <span className="dlg-value">-</span>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <label className="dlg-label" style={{ marginTop: 8 }}>{label}</label>
+      <div className="dlg-auditor-list">
+        {list.map((knoxId, i) => {
+          const u = userById(knoxId);
+          return (
+            <span key={i} className="dlg-auditor-tag">
+              {u ? `${u.name} (${u.knoxId})` : knoxId}
+              {editable && (
+                <button className="dlg-auditor-remove" onClick={() => removeAt(i)}>x</button>
+              )}
+            </span>
+          );
+        })}
+        {editable && (
+          <>
+            <input
+              className="dlg-auditor-input"
+              list={listId}
+              placeholder="이름 또는 ID 입력 후 Enter"
+              onChange={(e) => {
+                const v = e.target.value;
+                const u = findUserByInput(users, v);
+                if (u && v === userLabel(u)) {
+                  if (addUser(v)) e.target.value = '';
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (addUser(e.target.value)) e.target.value = '';
+                }
+              }}
+            />
+            <datalist id={listId}>
+              {users
+                .filter((u) => !list.includes(u.knoxId))
+                .map((u) => <option key={u.knoxId} value={userLabel(u)} />)}
+            </datalist>
+          </>
+        )}
+      </div>
+    </>
   );
 }
