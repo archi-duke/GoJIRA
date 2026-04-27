@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
@@ -78,11 +79,15 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	decodeJSON(r, &req)
 
 	if req.RepoName == "" {
-		createdAt := time.Now()
-		if t, ok := prj["createdAt"].(time.Time); ok {
-			createdAt = t
+		name, _ := prj["name"].(string)
+		slug := translateRepoName(ctx, name)
+		if slug == "" {
+			slug = slugifyRepoName(name)
 		}
-		req.RepoName = fmt.Sprintf("%s_%s", code, createdAt.Format("20060102150405"))
+		if slug == "" {
+			slug = strings.ToLower(code)
+		}
+		req.RepoName = slug
 	}
 	if req.Description == "" {
 		name, _ := prj["name"].(string)
@@ -2019,4 +2024,86 @@ func toStringSlice(v interface{}) []string {
 		return t
 	}
 	return nil
+}
+
+// translateRepoName: 과제명을 OpenAI gpt-4o-mini 로 영문 slug 로 번역.
+// OPENAI_API_KEY 환경변수 미설정 / 호출 실패 / 비정상 응답 시 빈 문자열 반환.
+// 호출자가 빈 문자열이면 slugifyRepoName fallback 사용.
+// 결정적 출력을 위해 temperature=0. 응답을 한 번 더 slugifyRepoName 으로 sanitize.
+func translateRepoName(ctx context.Context, name string) string {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" || strings.TrimSpace(name) == "" {
+		return ""
+	}
+	body := map[string]interface{}{
+		"model":       "gpt-4o-mini",
+		"temperature": 0,
+		"max_tokens":  20,
+		"messages": []map[string]string{
+			{
+				"role": "system",
+				"content": "Convert the user's project title (often Korean or non-English) into a short English slug suitable for a GitHub repository name. Output rules: lowercase, alphanumeric and hyphens only, 1-3 words, max 30 characters, preserve meaning. Output ONLY the slug, no explanation, no quotes.",
+			},
+			{"role": "user", "content": name},
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return ""
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("translateRepoName: openai 호출 실패: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("translateRepoName: openai status %d", resp.StatusCode)
+		return ""
+	}
+	var data struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return ""
+	}
+	if len(data.Choices) == 0 {
+		return ""
+	}
+	return slugifyRepoName(data.Choices[0].Message.Content)
+}
+
+// slugifyRepoName: 과제명을 GitHub repo 이름으로 변환.
+// 영문 알파벳/숫자만 보존, 그 외(공백·한국어 등) 는 모두 '-' 로 치환.
+// 연속 '-' 압축 + 앞뒤 '-' 제거 + 소문자.
+// 예: "Test Prj" → "test-prj", "GoJIRA Sample 2" → "gojira-sample-2",
+// 한국어만 있어 결과가 빈 문자열이면 호출자가 fallback (project code) 처리.
+func slugifyRepoName(name string) string {
+	var b strings.Builder
+	prevDash := true // 앞부분 '-' 방지
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash {
+				b.WriteRune('-')
+				prevDash = true
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
 }
