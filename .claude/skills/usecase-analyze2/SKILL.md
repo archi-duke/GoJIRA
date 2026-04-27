@@ -16,11 +16,13 @@ allowed-tools: Bash, Read
 ## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
 
 - **한 번의 LLM generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 **반드시 Bash tool call 로 마무리** 해 generation 경계 형성
-- reasoning 은 각 Step 당 3~5 줄 이내. 장기 추론 불필요
-- Step 1 도출 완료 시 **반드시 `draft-io.sh save`** — User Story / Use Case / Feature / document 전체 JSON 을 파일에 flush 후 generation 종료
+- **Step 1 은 1.1~1.5 로 분할** — Entities / Features / Scenarios / Diagrams / 결정적 조립. 각 sub-step 끝에 **반드시 `draft-io.sh merge` 또는 `save`** 호출로 generation 경계
+- **결정적 조립 (Step 1.5)**: bash + jq + `usecase-assemble.py` 로 누적 draft 를 use-cases.md 로 변환한다. **LLM 호출 절대 금지**
+- reasoning 은 각 Step (또는 sub-step) 당 3~5 줄 이내. 장기 추론 불필요
 - Step 2 자가검증은 **반드시 `validate-usecases.py` 호출** — 에이전트가 직접 VOS 커버리지 / PlantUML 구문 / Actor 다양성 계산 금지
 - critical 수정 후 다시 `draft-io.sh save` → 이어 `validate-usecases.py` 로 재검증. 한 generation 당 1 iter
 - assistant 출력에는 긴 document JSON 뱉지 말 것. "저장 완료 / critical N건" 한두 줄만
+- (참고) Feature ≤ 3 인 작은 프로젝트는 단일 generation 도 가능 — 추후 임계 분기 추가 고려. 현재는 항상 분할 적용 (스톨 회피 우선)
 
 ## 진행 상태 가시화 — `todowrite` (선택, OpenCode)
 
@@ -29,18 +31,25 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — 진입 점검 (drift-check + 분기) + 데이터 수집
-[ ] Step 1 — 초안 생성 (iter 1)
-[ ] Step 2 — 자가검증 (validate-usecases.py)
-[ ] Step 3 — critical 수정 (반복, 최대 iter 3)
-[ ] Step 5 — Feature/UC 이슈 + 링크 + use-cases.md 영속화
-[ ] Step 6 — 최종 보고 + baseline 갱신
+[ ] Step 0   — 진입 점검 (drift-check + 분기) + 데이터 수집
+[ ] Step 1.1 — Entities (Domain + User Story + Use Case) — JSON only
+[ ] Step 1.2 — Features (선정 + relatedVOS + mode) — 시나리오는 비움
+[ ] Step 1.3 — Scenarios (basicflow / alternative / exception / pre·postcondition)
+[ ] Step 1.4 — Diagrams (Context / Use Case / Sequence × Feature) — PlantUML 만
+[ ] Step 1.5 — 결정적 문서 조립 (LLM 0회) — usecase-assemble.py
+[ ] Step 2   — 자가검증 (validate-usecases.py --stage=final)
+[ ] Step 3   — critical 수정 (반복, 최대 iter 3)
+[ ] Step 5   — Feature/UC 이슈 + 링크 + use-cases.md 영속화
+[ ] Step 6   — 최종 보고 + baseline 갱신
 ```
 
 ## 환경
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 - `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
-- 임시 파일: `/tmp/${CODE}-uc-{draft|validation}.json`
+- 임시 파일:
+  - `/tmp/${CODE}-uc-draft.json` — 누적 draft (Step 1.1~1.4 가 단계별로 merge)
+  - `/tmp/${CODE}-uc-validation.json` — 검증 결과
+  - `/tmp/${CODE}-uc-final.md` — Step 1.5 결정적 조립 결과 (use-cases.md 미저장 사본)
 
 ## 인자 추출
 
@@ -140,174 +149,256 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 - `MODE=relink` 인데 기존 Feature 0 건 → **중단** 하고 `MODE=full` 로 전환 권고 (재링크 대상 없음)
 - **강제 재생성 모드**인데 기존 Feature 0 건 → **중단** (재생성할 대상 없음)
 
+### 0.4 누적 draft 초기화
+
+다음 step 1.1~1.4 가 누적해서 채우는 draft 파일을 빈 객체로 시작 (`vosKeys` / `existingFeatureKeys` 만 채워둔다).
+
+```bash
+# vosKeys / existingFeatureKeys 는 위에서 수집한 결과로 채움
+jq -n --argjson vos "$VOS_KEYS_JSON" --argjson feat "$EXISTING_FEAT_KEYS_JSON" \
+   '{vosKeys: $vos, existingFeatureKeys: $feat,
+     domain: {}, userStories: [], useCases: [],
+     features: [], diagrams: {}, document: ""}' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "draft" "init"
+```
+
+이 tool call 로 Step 0 종료. 다음 generation 에서 Step 1.1 시작.
+
 ---
 
-## Step 1 — 초안 생성 (iter 1)
+## Step 1 — 분할 생성 (iter 1)
 
-### MODE=relink 또는 강제 재생성 모드 — 축약 규칙
+Step 1 은 **1.1 ~ 1.5 의 5 sub-step** 으로 나뉜다. 각 sub-step 은 한 generation 안에서만 처리하고, 끝에 반드시 `draft-io.sh save|merge` 로 generation 경계를 만든다.
 
-(MODE=relink 가 명시됐거나, Step 0.2 에서 drift CLEAN + 사용자 강제 재생성 yes 로 진입한 경우에 동일 적용)
+### MODE=relink / 강제 재생성 모드 축약 규칙 (모든 sub-step 공통)
 
-이슈 생성/수정/삭제 금지. 기존 Feature 원문(summary/actor/flows) 보존. 다음만 수행:
+이슈 생성/수정/삭제 금지. 기존 Feature 원문(summary/actor/flows) 그대로 보존. sub-step 별로:
 
-- 모든 항목 `mode=reuse` 고정, `existingKey` = Step 0 의 기존 Feature key, `docId` = 기존 subkey (예: UC_001) 그대로
-- 신규 Feature/UC 추가 금지 (커버리지 부족은 critical 보고만, 신규 create 는 MODE=full 로 재호출 권고)
-- `relatedVOS` 만 각 Feature 원문과 VOS 목록을 대조해 재산정 — **빈 배열 금지, 최소 1개 VOS 필수**
-- 모든 Step 1.1~1.9 (도메인 분석, User Story 파생, Use Case 도출, Diagram 작성, 시나리오 정의) 는 기존 문서에서 원문 그대로 취해 재작성 — 추가 도출 금지
+- **1.1**: 기존 use-cases.md 가 있으면 거기서 도메인/User Story/UC 표를 그대로 추출. 신규 도출 금지
+- **1.2**: 기존 Feature 의 summary/actor/subkey 를 그대로 옮기고 `mode=reuse`, `existingKey`= 기존 key, `docId` = 기존 subkey (예: UC_001). **`relatedVOS` 만 VOS 목록 대조해 재산정 — 빈 배열 금지**
+- **1.3**: 기존 Feature 본문에서 basicflow/alternative/exception/precondition/postcondition 그대로 취해 features 배열에 채움
+- **1.4**: 기존 use-cases.md 의 PlantUML 블록을 그대로 추출해 diagrams.context / usecase / sequences 에 보존
+- **1.5**: MODE=full 과 동일 — 결정적 조립 (LLM 호출 0회)
 
-그 외는 MODE=full 과 동일하게 Step 2 self-loop 수행.
+이후 Step 2 self-loop 는 MODE=full 과 동일하게 진행.
 
 ### MODE=full (기본)
 
-### 1.1 Business Domain 분석
-- 도메인 경계와 범위 (시스템 책임 영역)
-- 핵심 도메인 개념 (반복 등장 업무 용어)
+---
+
+## Step 1.1 — Entities (Domain + User Story + Use Case)
+
+**관심**: 도메인 경계 / 핵심 개념 / Actor 식별 / 도메인 규칙 + VOS → User Story → Use Case 파생.
+
+작성 규칙:
+- 본 sub-step 은 **JSON 만** 산출 — markdown / 다이어그램 절대 금지 (다음 단계들에서 채움)
+- 모든 VOS 가 최소 1개 User Story 를 가져야 함 (`vosKey` 필드)
+- User Story 분류: **A=Happy / B=Alternative / C=Exception**
+- 모든 User Story 는 반드시 하나의 Use Case 에 매핑 (`ucId` 필드)
+- Use Case 는 비슷한 목적 Story 묶기. "게임 시작 / 추측 입력 / 게임 종료" 처럼 다른 시점/입출력은 별도 UC
 - Actor 식별: Primary(가치 요청 트리거) / Supporting(협력)
-- 외부 시스템
-- 도메인 규칙/제약
-→ document "## 1. Business Domain 분석" 섹션
+- 암묵적 Story 능동 발굴: 계정/인증, 중단/이탈, 다중 사용자 동기화, 데이터 영속성
 
-### 1.2 User Story 파생 (VOS 기반)
-각 VOS 에서 User Story 를 파생시킨다. **모든 VOS 는 최소 1개 User Story 를 가져야 한다.**
-
-분류:
-- (A) 정상(Happy Path): 성공 진행
-- (B) 비정상(Alternative): 정상 흐름의 분기
-- (C) 예외(Exception): 오류/실패
-
-**암묵적 Story** 능동 발굴: 계정/인증, 중단/이탈, 다중 사용자 동기화, 데이터 영속성.
-
-→ document "## 2.1 User Story 목록" 표 (ID/Actor/분류/Story/원본 VOS/매핑 UC-ID)
-
-### 1.3 Use Case 도출
-- 비슷한 목적 Story 묶기 → Use Case
-- 다른 목적/시점/입출력 은 **별도 Use Case**
-- 예: "게임 시작" vs "추측 입력" vs "게임 종료" 는 별도 UC
-- **모든 User Story 는 반드시 하나의 UC 에 매핑**되어야 함
-- VOS → Story → UC 경로가 보장되므로 모든 VOS 가 최소 1개 UC 에 연결됨
-
-### 1.4 Use Case Diagram (Feature 선정 전 작성)
-**모든 Use Case** 를 포함한 다이어그램을 이 단계에서 작성한다.
-- Use Case Diagram → PlantUML **usecase 다이어그램** (`actor` + `usecase` 키워드, **절대 `class` 다이어그램 금지**)
-- 이 다이어그램은 Feature 선정 후에도 **수정하지 않음**
-
-### 1.5 Feature 선정
-Actor 와 1차적으로 직접 연결되는 Use Case 만 Feature 로 선정.
-- include/extend/보조 Use Case 는 Feature 에서 **제외**
-- 과도 통합 금지: "게임 플레이" 하나로 [시작/입력/결과/이력] 묶지 말 것
-- **Feature 로 선정되지 않은 Use Case 는 삭제하지 않는다** — Use Case 목록과 다이어그램 그대로 유지
-- VOS → Story → UC 파생 구조 상 **모든 VOS 에 대해 1개 이상의 Feature 연결이 보장됨**
-
-### 1.6 시나리오 정의
-각 **Feature** 에 Basic/Alternative/Exception Flow.
-Basic 5단계 이상이면 별도 UC 분해 검토.
-
-### 1.7 PlantUML 다이어그램 (블록 구조 엄수)
-
-모든 다이어그램은 ` ```plantuml ... ``` ` 코드펜스로 감싸고 **반드시 `@startuml` / `@enduml` 쌍**을 포함한다.
-
-- **Context Diagram** — actor + rectangle 로 시스템 경계 표현 (블록 본문에 "Context" 또는 "컨텍스트" 라벨 포함)
-- **Use Case Diagram** — `actor` + `usecase` 키워드 (Step 1.4 에서 작성 완료, 그대로 사용)
-- **Sequence Diagram** (Feature 별) — `participant` + 화살표 (`->`, `-->`)
-
-예시 (Use Case Diagram):
-````
-```plantuml
-@startuml
-skinparam actorStyle stick
-left to right direction
-actor 사용자 as User
-rectangle "시스템" {
-  usecase "로그인" as UC1
-  usecase "세션 관리" as UC2
-}
-User --> UC1
-UC1 ..> UC2 : <<include>>
-@enduml
-```
-````
-
-- Feature 로 선정된 UC 는 `usecase "Name" as UC_N` 으로, 미선정 UC 도 다이어그램에 그대로 포함
-- `skinparam actorStyle stick` 을 기본값으로 사용해 UML 표준 stick figure 유지
-
-예시 (Sequence Diagram):
-````
-```plantuml
-@startuml
-actor 사용자 as User
-participant "게임" as Game
-User -> Game: 추측 입력
-Game --> User: S/B 결과
-@enduml
-```
-````
-
-**금지**
-- `class` 다이어그램으로 Use Case 표현 (`class`/`interface`/`abstract`/`enum` 키워드 금지)
-- 외부 이미지 참조 (`![...](...png)`)
-- `@startuml` / `@enduml` 쌍 누락
-- participant/actor 이름에 공백이 있는데 따옴표도 `as` 도 없는 선언 (예: `participant 후공 사용자` — 잘못). `participant "후공 사용자" as U2` 또는 `participant U2 as "후공 사용자"` 로.
-
-### 1.8 문서 템플릿 (use-cases.md)
-
-**반드시** 아래 템플릿 파일의 구조를 따른다. 실행 전 먼저 읽어서 구조를 확인하라:
+### Step 1.1 종료 — draft merge
 
 ```bash
-cat "${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
-```
-
-섹션/번호를 빠뜨리지 말 것. 특히 **모든 Feature 에 대해 Sequence Diagram 필수** — 누락 시 critical.
-
-### 1.9 docId 부여
-각 Feature 에 `docId: "UC-N"` (1부터 순차). document 본문의 모든 Feature 표기에 **동일 docId 사용**. "(Feature 이슈 키)" 칸에 docId 를 그대로 적음 (Step 5 에서 실제 key 로 치환).
-
-### 1.10 relatedVOS + mode
-각 Feature 에 `relatedVOS: ["GOJIRA3-N", ...]` (VOS 목록 실존 키만).
-**최소 1개 VOS 키 필수 — 빈 배열 금지**. Feature 는 VOS → UC → Feature 로 도출된 것이므로 연결할 VOS 가 없는 Feature 는 정의상 부적절 (critical).
-mode: `create` / `reuse` / `modify` / `delete_mark` (existingKey 필요).
-
-### Step 1 종료 — draft flush (필수)
-
-User Story / Use Case / Feature / document 전체를 draft 파일로 저장하고 **이 generation 을 종료**. 다음 generation 에서 Step 2 검증.
-
-**JSON 필드명은 스키마 그대로 사용**. `vos` / `sourceVOS` 등 유사 필드로 대체 금지 — Step 2 validator 는 아래 키만 인식합니다.
-
-```bash
-cat > /tmp/${CODE}-uc-draft-input.json <<'JSON'
+# 본 generation 에서 도출한 entities 를 partial JSON 으로 merge
+cat > /tmp/${CODE}-uc-step1.1.json <<'JSON'
 {
-  "vosKeys": ["TEST-1","TEST-2", "..."],
-  "existingFeatureKeys": [],
+  "domain": {
+    "scope": "...시스템 책임 영역...",
+    "concepts": [{"name":"...","desc":"..."}],
+    "primaryActors": [{"name":"...","role":"..."}],
+    "supportingActors": [{"name":"...","role":"..."}],
+    "rules": ["..."]
+  },
   "userStories": [
     {"id":"US-1","actor":"사용자","category":"A","story":"...은(는) ...할 수 있다","vosKey":"TEST-1","ucId":"UC-1"}
   ],
   "useCases": [
-    {"id":"UC-1","summary":"...","stories":["US-1","US-2"]}
-  ],
-  "features": [
-    {"docId":"UC-1","summary":"...","actor":"사용자","basicflow":"1. ...\n2. ...","alternativeflow":"","exceptionflow":"","relatedVOS":["TEST-1"],"mode":"create","existingKey":""}
-  ],
-  "document": "...마크다운 전체 문자열..."
+    {"id":"UC-1","summary":"...","stories":["US-1","US-2"],"feature":true}
+  ]
 }
 JSON
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "draft" \
-  < /tmp/${CODE}-uc-draft-input.json
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "entities" \
+  < /tmp/${CODE}-uc-step1.1.json
 ```
 
-출력 한 줄만 assistant 메시지에. 전체 JSON 재출력 금지.
+(선택) 단계별 자가검증:
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-usecases.py" --stage=entities
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 Step 1.2 시작.
+
+---
+
+## Step 1.2 — Features 선정 (relatedVOS + mode)
+
+**관심**: Actor 와 1차 연결되는 Use Case 만 Feature 로 승격. include/extend/보조 UC 는 제외.
+
+작성 규칙:
+- features 배열에 `docId / summary / actor / relatedVOS / mode / existingKey` **만** 채움
+- **`basicflow` / `alternativeflow` / `exceptionflow` / `precondition` / `postcondition` 는 빈 문자열로 두기** — Step 1.3 에서 채움
+- `docId` = `UC-1`, `UC-2`, ... 1부터 순차. Use Case id 와 정합되어야 함 (1.1 에서 정한 UC 식별자 그대로)
+- `relatedVOS`: VOS 목록 실존 키만, **최소 1개 필수, 빈 배열 금지**
+- `mode`: `create` / `reuse` / `modify` / `delete_mark`
+- 과도 통합 금지: "게임 플레이" 하나로 [시작/입력/결과/이력] 묶지 말 것
+
+### Step 1.2 종료 — draft merge
+
+```bash
+cat > /tmp/${CODE}-uc-step1.2.json <<'JSON'
+{
+  "features": [
+    {"docId":"UC-1","summary":"...","actor":"사용자","relatedVOS":["TEST-1"],"mode":"create","existingKey":"",
+     "precondition":"","basicflow":"","alternativeflow":"","exceptionflow":"","postcondition":""}
+  ]
+}
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "features" \
+  < /tmp/${CODE}-uc-step1.2.json
+```
+
+(선택) 단계별 검증:
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-usecases.py" --stage=features
+```
+
+merge 는 docId 기준으로 항목별 머지. 같은 docId 가 있으면 필드 추가/갱신, 없으면 append.
+
+이 tool call 로 generation 종료. 다음 generation 에서 Step 1.3.
+
+---
+
+## Step 1.3 — Scenarios
+
+**관심**: 각 Feature 에 Basic / Alternative / Exception Flow + Pre/Postcondition 작성.
+
+작성 규칙:
+- features 배열을 그대로 두고 각 항목에 `basicflow` 등을 채워서 patch 한다 (docId 매칭)
+- Basic Flow 가 5단계 이상이면 별도 UC 분해 검토 (1.1 로 되돌아가야 할 신호 — 가능하면 sub-step 안에서 분해 안 함, 보고만)
+- 텍스트만 작성 — **다이어그램 작성 금지** (Step 1.4 에서)
+- Step 1.2 에서 만든 features 항목과 동일 `docId` 로 patch
+
+### Step 1.3 종료 — draft merge
+
+```bash
+cat > /tmp/${CODE}-uc-step1.3.json <<'JSON'
+{
+  "features": [
+    {"docId":"UC-1",
+     "precondition":"미로그인 상태",
+     "basicflow":"1. 사용자가 ID 입력\n2. 시스템이 인증 확인\n3. 세션 발급",
+     "alternativeflow":"- 자동 로그인 토큰이 있으면 ID 입력 생략",
+     "exceptionflow":"- 인증 실패 시 오류 메시지 표시",
+     "postcondition":"세션 생성됨"}
+  ]
+}
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "scenarios" \
+  < /tmp/${CODE}-uc-step1.3.json
+```
+
+(선택) 단계별 검증:
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-usecases.py" --stage=scenarios
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 Step 1.4.
+
+---
+
+## Step 1.4 — Diagrams (PlantUML)
+
+**관심**: Context / Use Case / Sequence × Feature 다이어그램 작성. 가장 큰 출력 + 가장 큰 스톨 위험 — 격리해서 한 generation 에서 모두 생성.
+
+작성 규칙:
+- 모든 다이어그램은 ` ```plantuml ... ``` ` 코드펜스 **없이** **PlantUML 본문만** (`@startuml ... @enduml`) 산출 — 코드펜스는 Step 1.5 결정적 조립이 자동으로 감싼다
+- **반드시 `@startuml` / `@enduml` 쌍** 포함
+- **Context Diagram** — actor + rectangle 로 시스템 경계 표현. 본문에 `Context` 또는 `컨텍스트` 라벨 포함
+- **Use Case Diagram** — `actor` + `usecase "..." as UC_NNN` + `rectangle "..."` 묶음. **모든 Use Case 포함** (Feature 미선정 UC 도). include/extend 는 점선 화살표 (`UC1 ..> UC2 : <<include>>`)
+- **Sequence Diagram** — **각 Feature(docId) 마다 1개 필수**. `participant "이름" as 별칭` 또는 공백 없는 별칭 사용
+- 기본 actor 스타일: `skinparam actorStyle stick` (use case / context 권장)
+- 레이아웃: `left to right direction` (use case / context 권장)
+
+**금지**
+- `class` / `interface` / `abstract` / `enum` 키워드 (Use Case 를 class 다이어그램으로 표현 절대 금지)
+- 외부 이미지 참조 (`![...](...png)`)
+- `@startuml` / `@enduml` 쌍 누락
+- participant/actor 이름에 공백 있는데 따옴표도 `as` 도 없는 선언 (`participant 후공 사용자` — 잘못. `participant "후공 사용자" as U2` 또는 `participant U2 as "후공 사용자"` 로)
+
+### Step 1.4 종료 — draft merge
+
+```bash
+# diagrams.sequences 의 키는 features[].docId 와 정확히 일치해야 한다 (validator 가 매칭)
+cat > /tmp/${CODE}-uc-step1.4.json <<'JSON'
+{
+  "diagrams": {
+    "context": "@startuml\nskinparam actorStyle stick\nleft to right direction\nactor 사용자 as User\nrectangle \"시스템\" as Sys\nrectangle \"외부 시스템\" as Ext\nUser --> Sys\nSys --> Ext\n' Context\n@enduml",
+    "usecase": "@startuml\nskinparam actorStyle stick\nleft to right direction\nactor 사용자 as User\nrectangle \"시스템\" {\n  usecase \"로그인\" as UC1\n  usecase \"세션 관리\" as UC2\n}\nUser --> UC1\nUC1 ..> UC2 : <<include>>\n@enduml",
+    "sequences": {
+      "UC-1": "@startuml\nactor 사용자 as User\nparticipant \"시스템\" as Sys\nUser -> Sys: 로그인 요청\nSys --> User: 세션 발급\n@enduml"
+    }
+  }
+}
+JSON
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "diagrams" \
+  < /tmp/${CODE}-uc-step1.4.json
+```
+
+(선택) 단계별 검증:
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-usecases.py" --stage=diagrams
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 Step 1.5 결정적 조립.
+
+---
+
+## Step 1.5 — 결정적 문서 조립 (LLM 0회 — 필수)
+
+누적된 draft (`/tmp/${CODE}-uc-draft.json`) 의 entities + features + diagrams 를 `usecase-assemble.py` 가 템플릿에 채워 use-cases.md 본문을 생성한다. **이 step 에서 LLM 호출 절대 금지**.
+
+```bash
+TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
+
+# 1) draft 로드 → assemble.py 로 markdown 생성 → /tmp 에 저장
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" --template "$TEMPLATE" \
+  > /tmp/${CODE}-uc-final.md
+echo "use-cases.md 길이=$(wc -c < /tmp/${CODE}-uc-final.md | tr -d ' ')"
+
+# 2) draft 의 document 필드에도 본문을 주입 (Step 2 validator 가 document 키를 본다)
+DOC_JSON=$(jq -Rs . < /tmp/${CODE}-uc-final.md)
+jq -n --argjson doc "$DOC_JSON" '{document: $doc}' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "final"
+```
+
+이 tool call 로 generation 종료. 다음 generation 에서 Step 2 자가검증.
 
 ---
 
 ## Step 2 — 자가검증 (스크립트 기반)
 
-**반드시 `validate-usecases.py` 호출**. 에이전트가 직접 커버리지 / PlantUML 구문 / Actor 다양성 계산 금지.
+**반드시 `validate-usecases.py --stage=final` 호출**. 에이전트가 직접 커버리지 / PlantUML 구문 / Actor 다양성 계산 금지.
 
 ```bash
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
-  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-usecases.py" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/validate-usecases.py" --stage=final \
   > /tmp/${CODE}-uc-validation.json
 cat /tmp/${CODE}-uc-validation.json
 ```
+
+> 단계별 (`entities` / `features` / `scenarios` / `diagrams`) 자가검증은 Step 1.x sub-step 내부에서 선택적으로 실행 가능. Step 2 는 항상 `--stage=final` 로 누적 결과를 한 번 더 검증한다.
 
 출력 스키마:
 ```json
@@ -346,17 +437,35 @@ cat /tmp/${CODE}-uc-validation.json
 
 ## Step 3 — 수정 (pass=false)
 
-validation output 의 critical 만 **국소 수정** 후 draft 재저장:
+validation output 의 critical 만 **국소 수정**. 수정할 키만 partial JSON 으로 만들어 `merge` 로 갱신.
 
 ```bash
-cat > /tmp/${CODE}-uc-draft-input.json <<'JSON'
-{ ...수정된 vosKeys / userStories / useCases / features / document... }
+# 예 1: 특정 Feature 의 relatedVOS 빈 배열 수정 (features 배열에 docId 매칭으로 머지)
+cat > /tmp/${CODE}-uc-fix.json <<'JSON'
+{
+  "features": [
+    {"docId":"UC-3","relatedVOS":["TEST-2"]}
+  ]
+}
 JSON
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "draft" \
-  < /tmp/${CODE}-uc-draft-input.json
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "fix" \
+  < /tmp/${CODE}-uc-fix.json
+
+# 예 2: 특정 Feature 의 Sequence Diagram 누락 수정
+jq -n '{diagrams:{sequences:{"UC-3":"@startuml\n...\n@enduml"}}}' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "fix"
+
+# 수정 반영 후 Step 1.5 결정적 조립을 다시 실행해 document 갱신 (필수)
+TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" --template "$TEMPLATE" \
+  > /tmp/${CODE}-uc-final.md
+DOC_JSON=$(jq -Rs . < /tmp/${CODE}-uc-final.md)
+jq -n --argjson doc "$DOC_JSON" '{document: $doc}' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "final"
 ```
 
-이 tool call 로 generation 종료. 다음 generation 에서 validate 재실행.
+이 tool call 로 generation 종료. 다음 generation 에서 Step 2 validate 재실행.
 
 ---
 
@@ -431,8 +540,12 @@ cat /tmp/uc_link_result.json
 
 ### 5.4 use-cases.md 저장
 
+draft 의 `document` 키 (Step 1.5 결정적 조립 결과) 를 그대로 doc-save.sh 에 흘려보낸다. doc-save.sh 가 plantuml-fix 결정적 자동 수정을 함께 적용한다.
+
 ```bash
-echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/use-cases.md"
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+  | jq -r '.document // ""' \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/use-cases.md"
 ```
 
 ---
@@ -483,3 +596,5 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 - MODE 요약: `full` — 신규 Feature create + 링크 + 문서 작성 / `relink` — 이슈 생성·수정 없음, 링크 차집합 POST + 문서 재작성. 두 모드 모두 `/Issue/link` 가 idempotent 아니므로 POST 전 기존 `issueLinks` 와 차집합 필수
 - 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 강제 재생성 yes 인 경우 MODE 와 무관하게 relink 흐름으로 강등
 - baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage usecase` 호출이 필수. 이걸 안 하면 다음 호출 때 또 DRIFT 로 잡혀 재실행 압력이 생긴다
+- **Step 1 분할**: 1.1~1.4 는 sub-step 1개 = generation 1개. 한 generation 에 두 sub-step 같이 처리하지 말 것 (스톨 방지). 각 sub-step 종료는 반드시 `draft-io.sh save|merge` Bash tool call
+- **Step 1.5 결정적 조립**: `usecase-assemble.py` + 템플릿만으로 use-cases.md 본문 산출 — LLM 호출 0회. PlantUML 본문은 Step 1.4 의 raw 형태 (`@startuml ... @enduml`) 그대로 두고 코드펜스는 1.5 에서 자동 추가됨
