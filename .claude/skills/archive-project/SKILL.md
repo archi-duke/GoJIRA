@@ -15,9 +15,8 @@ reset-project 와의 차이:
 ## 환경
 
 - `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
-- `GOJIRA_BACKUP_DIR` 기본값: `$HOME/.gojira-backups`
-- `REPO_BASE_DIR` 기본값: `/tmp/gojira-repos` (Platform-API 의 bare repo root)
+- 백업 위치는 Platform-API 가 결정 (`$HOME/.gojira-backups/{code}-{timestamp}.zip`)
+- 모든 단계 (dump/zip/repo 정리/Mongo hard delete) 는 `POST /Project/{code}/archive` 한 번 호출로 처리. UI 의 삭제 버튼과 동일 경로.
 
 ## 인자 추출
 
@@ -40,138 +39,62 @@ export CONFIRM="true"
 
 **파괴적 + 비가역 작업**입니다.
 - Mongo `projects` 문서, `issues` 컬렉션의 해당 이슈, Gitea 원격 레포, 로컬 bare repo 폴더 **모두** 삭제
-- 복구 수단은 **백업 zip 하나뿐** — 백업 생성 실패 시 삭제도 진행하지 않음 (fail-fast)
+- 복구 수단은 **백업 zip 하나뿐** — endpoint 가 zip 생성 실패하면 삭제 진행 안 함 (fail-fast)
 - dry-run 을 먼저 보이고, 사용자 "진행/확인/yes" 명시 동의 후에만 `CONFIRM=true`
 
 ## 1. 사전 체크
 
 ```bash
 PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
-BACKUP_DIR="${GOJIRA_BACKUP_DIR:-$HOME/.gojira-backups}"
-REPO_BASE_DIR="${REPO_BASE_DIR:-/tmp/gojira-repos}"
 CONFIRM="${CONFIRM:-false}"
 
 if [ -z "$CODE" ] || [ -z "$USER" ]; then
   echo "ERROR: CODE 와 USER 모두 필수"; exit 1
 fi
-
-mkdir -p "$BACKUP_DIR"
 ```
 
-## 2. 영향 범위 산정 — dry-run
+## 2. Dry-run — 영향 범위 확인
 
 ```bash
-# reset dry-run 으로 이슈 수 + archSettings 상태 확인
-IMPACT=$(curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
+DRY=$(curl -s -X POST "${PLATFORM_API}/Project/${CODE}/archive" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d '{"confirm":false,"resetIssues":true,"resetArchSettings":true,"deleteProject":true}')
-echo "$IMPACT" | jq '{jiraCode, wouldDelete}'
+  -d '{"confirm":false}')
+echo "$DRY" | jq .
+```
 
-# 프로젝트 문서에서 repo 정보 확인
-PRJ=$(curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}")
-REPO_OWNER=$(echo "$PRJ" | jq -r '.[0].documents.owner // empty')
-REPO_NAME=$(echo "$PRJ" | jq -r '.[0].documents.repoName // empty')
-REPO_PATH="${REPO_BASE_DIR}/${REPO_OWNER}/${REPO_NAME}.git"
-echo "repo: $REPO_PATH"
-[ -d "$REPO_PATH" ] && echo "  (exists)" || echo "  (MISSING — Gitea 삭제 스킵될 수 있음)"
-
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-ARCHIVE_PATH="${BACKUP_DIR}/${CODE}-${TIMESTAMP}.zip"
-echo "archive: $ARCHIVE_PATH"
+응답 예시:
+```json
+{
+  "code": "GOJIRA3",
+  "mode": "dry-run",
+  "repoOwner": "gojira",
+  "repoName": "gojira3-prj",
+  "dumpBytes": 12345,
+  "message": "DRY-RUN. confirm=true 로 재호출 시 zip 생성 + 자원 정리 실행"
+}
 ```
 
 ## 3. Dry-run 최종 보고 (confirm != true)
 
-`CONFIRM` 이 `true` 가 아니면 Step 2 결과 + 백업 예상 경로를 보고하고 **종료**. 실제 실행 금지. 사용자에게 "`CONFIRM=true` 로 재호출 필요" 안내.
+`CONFIRM` 이 `true` 가 아니면 Step 2 결과를 보고하고 **종료**. 실제 실행 금지. 사용자에게 "`CONFIRM=true` 로 재호출 필요" 안내.
 
 ## 4. 실제 실행 (confirm=true)
 
-### 4-1. 작업 디렉토리 준비
-
 ```bash
-WORK_DIR=$(mktemp -d -t gojira-archive-XXXXXX)
-mkdir -p "${WORK_DIR}/mongo" "${WORK_DIR}/repo"
-echo "작업 디렉토리: $WORK_DIR"
-```
-
-### 4-2. Mongo dump → mongo/*.json
-
-```bash
-DUMP=$(curl -s "${GOJIRA_API}/Project/${CODE}/dump" -H "X-User-Id: ${USER}")
-if [ "$(echo "$DUMP" | jq -r '.error // empty')" != "" ]; then
-  echo "ERROR: dump 실패 — $(echo $DUMP | jq -r .error)"; rm -rf "$WORK_DIR"; exit 1
-fi
-
-echo "$DUMP" | jq '.project' > "${WORK_DIR}/mongo/project.json"
-echo "$DUMP" | jq '.issues'  > "${WORK_DIR}/mongo/issues.json"
-echo "mongo dump: $(jq 'length' < ${WORK_DIR}/mongo/issues.json) 이슈"
-```
-
-### 4-3. 로컬 bare repo 복사 → repo/
-
-```bash
-if [ -n "$REPO_OWNER" ] && [ -n "$REPO_NAME" ] && [ -d "$REPO_PATH" ]; then
-  # bare repo 전체를 repo/ 아래로 복사 (.git 내용이 그대로 들어감)
-  cp -R "$REPO_PATH" "${WORK_DIR}/repo/${REPO_NAME}.git"
-  echo "repo copied: $(du -sh ${WORK_DIR}/repo | awk '{print $1}')"
-else
-  echo "WARNING: bare repo 경로 없음 — repo/ 비워둠"
-fi
-```
-
-### 4-4. manifest.json 작성
-
-```bash
-cat > "${WORK_DIR}/manifest.json" <<MANIFEST
-{
-  "schemaVersion": "1",
-  "jiraCode": "${CODE}",
-  "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "createdBy": "${USER}",
-  "mongo": {
-    "project": "mongo/project.json",
-    "issues": "mongo/issues.json"
-  },
-  "repo": {
-    "owner": "${REPO_OWNER}",
-    "repoName": "${REPO_NAME}",
-    "path": "repo/${REPO_NAME}.git"
-  }
-}
-MANIFEST
-cat "${WORK_DIR}/manifest.json"
-```
-
-### 4-5. zip 으로 묶기
-
-```bash
-(cd "$WORK_DIR" && zip -qr "$ARCHIVE_PATH" manifest.json mongo repo)
-ls -lh "$ARCHIVE_PATH"
-rm -rf "$WORK_DIR"
-
-# zip 생성 실패 시 fail-fast — 삭제 진행하지 않음
-if [ ! -f "$ARCHIVE_PATH" ]; then
-  echo "ERROR: 백업 zip 생성 실패 — 삭제 중단"; exit 2
-fi
-```
-
-### 4-6. Gitea 원격 + 로컬 클론 삭제
-
-```bash
-curl -s -X DELETE "${PLATFORM_API}/DocRepo/${CODE}/github" \
-  -H "X-User-Id: ${USER}" \
-  -w "\nGITEA DELETE -> %{http_code}\n"
-```
-
-### 4-7. Mongo hard delete (이슈 + archSettings + projects 문서)
-
-```bash
-curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
+RESULT=$(curl -s -X POST "${PLATFORM_API}/Project/${CODE}/archive" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d '{"confirm":true,"resetIssues":true,"resetArchSettings":true,"deleteProject":true}' \
-  | jq '{mode, deletedCount, failedCount, archSettingsCleared, projectDeleted}'
+  -d '{"confirm":true}')
+echo "$RESULT" | jq .
 ```
+
+응답:
+- `mode`: "executed"
+- `backupPath`: `$HOME/.gojira-backups/{code}-{timestamp}.zip`
+- `repoArchived`: bare repo 가 zip 에 포함됐는지
+- `githubDeleted`: GitHub repo 삭제 여부
+- `reset`: GoJIRA-API 의 hard-delete 결과 (`{deletedCount, archSettingsCleared, projectDeleted, ...}`)
+
+zip 안 구조 (참고): `mongo/dump.json` + `manifest.json` + `repo/{owner}/{repoName}.git/...`
 
 ## 5. 최종 보고
 
@@ -179,22 +102,18 @@ curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
 ## 프로젝트 아카이브 완료
 
 - projectCode: ${CODE}
-- 백업 zip: ${ARCHIVE_PATH} (크기 N)
-- 백업 내용:
-  - manifest.json
-  - mongo/project.json, mongo/issues.json (N개 이슈)
-  - repo/${REPO_NAME}.git/ (bare repo 전체)
-- Gitea 삭제: HTTP {code}
-- Mongo hard delete: {이슈 N건 / archSettings / projects 문서}
+- 백업 zip: {backupPath}
+- 백업 내용 (zip): mongo/dump.json + manifest.json + repo/{owner}/{repoName}.git/
+- GitHub 삭제: {githubDeleted}
+- Mongo hard delete: {reset.deletedCount} 이슈 / archSettings / projects 문서
 - 복원: 차후 `restore-project` 스킬 (schemaVersion=1 호환)
 ```
 
-dry-run 은 영향 범위 + 백업 예상 경로 + "CONFIRM=true 재호출 필요" 안내.
+dry-run 은 영향 범위 + 백업 위치 안내 + "CONFIRM=true 재호출 필요" 안내.
 
 ## 주의
 
 - `CONFIRM=true` 는 반드시 사용자 명시 동의 후에만
-- 백업 zip 생성 실패 시 삭제 단계 (4-6/4-7) 진행 금지 — 데이터 손실 방지
-- bare repo 경로가 다르면 `REPO_BASE_DIR` 환경변수로 override
+- 단일 endpoint 가 zip 생성 → 자원 정리 → hard delete 를 atomic 흐름으로 처리. zip 생성 실패 시 endpoint 가 정리 단계로 진행하지 않으므로 데이터 안전
 - 백업 zip 의 schemaVersion 은 차후 restore-project 의 호환성 체크에 사용
-- zip 도구: macOS/Linux 기본 `zip` 명령 사용 (미설치 환경 대비 필요 시 Python `zipfile` 로 대체)
+- 이전(2026-04-27 이전) 버전의 SKILL.md 는 dump/copy/zip/delete repo/reset 을 단계별 bash 로 직접 수행했음. 이 endpoint 가 같은 흐름을 Go 로 옮긴 것이라 결과는 동일
