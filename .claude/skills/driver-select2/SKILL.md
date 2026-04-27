@@ -234,14 +234,35 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
 
 `PATCH /Project/{CODE}/archSettings` 한 번 호출로 두 필드 동시 merge. 다른 archSettings 필드(chosenStyles/satamDone 등)는 건드리지 않음.
 
+**HTTP status 검증 필수** — 실패 시 silent 통과하면 하류 스킬(style-define2/design-decide2)이 drivers.md fallback 파싱 (~70초 비효율) 으로 빠진다. 본 단계가 실패하면 Step 5.4/6.2 진행 전에 사용자에게 알리고 수동 점검 유도.
+
 ```bash
 # NORM_JSON: Step 1.7 에서 만든 normalizedAttributes JSON 객체
 # 가중치는 Step 0 에서 결정된 W_QAD / W_QAI 사용
-curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+RESP=$(curl -s -w '\n%{http_code}' -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
   -d "$(jq -n --argjson n "$NORM_JSON" --argjson wq "$W_QAD" --argjson wi "$W_QAI" \
-    '{normalizedAttributes:$n, priorityWeight:{qad:$wq, qai:$wi}}')" \
-  | jq '{updated, archSettings}'
+    '{normalizedAttributes:$n, priorityWeight:{qad:$wq, qai:$wi}}')")
+STATUS=$(printf '%s' "$RESP" | tail -1)
+BODY=$(printf '%s' "$RESP" | sed '$d')
+
+if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
+  echo "$BODY" | jq '{updated, normalizedAttributes_keys: (.archSettings.normalizedAttributes | keys), priorityWeight: .archSettings.priorityWeight}'
+  echo "✓ archSettings PATCH 성공 (status=$STATUS)"
+
+  # 사후 GET 으로 실제 영속화 확인 (선택, 강력 권장)
+  GET_BODY=$(curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}")
+  HAS_NORM=$(echo "$GET_BODY" | jq '.[0].archSettings.normalizedAttributes | length')
+  HAS_W=$(echo "$GET_BODY" | jq '.[0].archSettings.priorityWeight | length')
+  if [[ "$HAS_NORM" == "0" || "$HAS_W" == "0" ]]; then
+    echo "⚠ PATCH 응답은 200 이지만 GET 검증에서 normalizedAttributes/priorityWeight 가 비어있음 (norm=$HAS_NORM, weight=$HAS_W). 최종 보고에 ⚠ 표기 + 수동 재시도 권고."
+  fi
+else
+  echo "⚠ archSettings PATCH 실패 (status=$STATUS)"
+  echo "$BODY"
+  echo "→ 하류 스킬(style-define2/design-decide2) 에서 ~70초 fallback 파싱 비효율 발생 예상."
+  echo "→ 수동 재시도하거나 사용자에게 알려 archSettings 직접 점검 권고. Step 5.4/6.2 진행 전 사용자 결정 필요."
+fi
 ```
 
 실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define2) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
