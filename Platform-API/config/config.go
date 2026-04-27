@@ -19,6 +19,7 @@ var (
 	RepoBaseDir    = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 	WebhookURL     = envOrDefault("PLATFORM_WEBHOOK_URL", "")
 	WebhookSecret  = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
+	GoJiraAPI      = envOrDefault("PLATFORM_GOJIRA_API", "http://localhost:9001/api/v2")
 
 	SMTPHost = envOrDefault("SMTP_HOST", "")
 	SMTPPort = envOrDefault("SMTP_PORT", "587")
@@ -43,6 +44,7 @@ func init() {
 	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 	WebhookURL = envOrDefault("PLATFORM_WEBHOOK_URL", "")
 	WebhookSecret = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
+	GoJiraAPI = envOrDefault("PLATFORM_GOJIRA_API", "http://localhost:9001/api/v2")
 	SMTPHost = envOrDefault("SMTP_HOST", "")
 	SMTPPort = envOrDefault("SMTP_PORT", "587")
 	SMTPUser = envOrDefault("SMTP_USER", "")

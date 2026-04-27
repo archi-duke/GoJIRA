@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import './ProjectMap.css';
 import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
+import { modalAlert, modalPrompt } from './AlertModal';
 import config from '../config';
 
 const API_BASE = config.API_BASE;
@@ -86,7 +87,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
     })
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) setProjects(data);
+        if (Array.isArray(data)) setProjects(data.filter((p) => p.status !== 'Deleted'));
       })
       .catch(() => setProjects([]));
 
@@ -146,7 +147,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
     setCtxMenu({ x: e.clientX, y: e.clientY, project });
   }
 
-  function handleMenuAction(action, project) {
+  async function handleMenuAction(action, project) {
     switch (action) {
       case 'detail':
         setDialog({ project, mode: 'detail' });
@@ -154,17 +155,36 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       case 'edit':
         setDialog({ project, mode: 'edit' });
         break;
-      case 'delete':
-        if (window.confirm(`"${project.name}" 과제를 삭제하시겠습니까?`)) {
-          fetch(`${API_BASE}/Project`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...project, status: 'Deleted' }),
-          }).then(() => {
-            setProjects((prev) => prev.filter((p) => getJiraCode(p) !== getJiraCode(project)));
+      case 'delete': {
+        const code = getJiraCode(project);
+        const input = await modalPrompt(
+          `"${project.name}" 과제를 영구 삭제합니다.\n백업 zip 이 ~/.gojira-backups/ 에 만들어진 후 이슈/문서/repo 가 모두 정리됩니다.\n계속하려면 과제명을 정확히 입력해주세요.`,
+          '',
+          {
+            dangerous: true,
+            confirmLabel: '삭제',
+            validate: (v) => v === project.name,
+          }
+        );
+        if (input !== project.name) return;
+        try {
+          const res = await fetch(`${PLATFORM_API}/Project/${encodeURIComponent(code)}/archive`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-User-Id': user || 'batman' },
+            body: JSON.stringify({ confirm: true }),
           });
+          const data = await res.json();
+          if (!res.ok) {
+            await modalAlert('삭제 실패: ' + (data.error || res.statusText));
+            return;
+          }
+          setProjects((prev) => prev.filter((p) => getJiraCode(p) !== code));
+          await modalAlert(`삭제 완료\n백업: ${data.backupPath || '(없음)'}\nGitHub repo: ${data.githubDeleted ? '삭제' : '미삭제'}`);
+        } catch (e) {
+          await modalAlert('삭제 중 오류: ' + e.message);
         }
         break;
+      }
       case 'relationMap':
         if (onRelationMap) onRelationMap(project);
         break;
@@ -212,9 +232,10 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),
     })
+      .then(() => fetch(`${API_BASE}/Project`, { headers: { XBody: JSON.stringify({}) } }))
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) setProjects(data);
+        if (Array.isArray(data)) setProjects(data.filter((p) => p.status !== 'Deleted'));
       });
   }
 
@@ -568,6 +589,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
           onSave={handleDialogSave}
         />
       )}
+
     </div>
   );
 }

@@ -20,9 +20,10 @@ export function modalConfirm(message) {
 }
 
 // prompt() 대체
-export function modalPrompt(message, defaultValue = '') {
+// options: { dangerous?: boolean, confirmLabel?: string, validate?: (input)=>boolean }
+export function modalPrompt(message, defaultValue = '', options = {}) {
   return new Promise(resolve => {
-    if (showPromptFn) showPromptFn({ message, defaultValue, resolve });
+    if (showPromptFn) showPromptFn({ message, defaultValue, options, resolve });
   });
 }
 
@@ -68,7 +69,11 @@ export default function AlertModal() {
             <input className="am-input" autoFocus
               value={modal.inputValue}
               onChange={e => setModal(m => ({ ...m, inputValue: e.target.value }))}
-              onKeyDown={e => { if (e.key === 'Enter') close(modal.inputValue); }}
+              onKeyDown={e => {
+                if (e.key !== 'Enter') return;
+                if (modal.options?.validate && !modal.options.validate(modal.inputValue)) return;
+                close(modal.inputValue);
+              }}
             />
           )}
         </div>
@@ -79,12 +84,26 @@ export default function AlertModal() {
           {modal.type === 'prompt' && (
             <button className="am-cancel-btn" onClick={() => close(null)}>취소</button>
           )}
-          <button className="am-ok-btn" autoFocus={modal.type !== 'prompt'}
-            onClick={() => {
-              if (modal.type === 'alert') close(undefined);
-              if (modal.type === 'confirm') close(true);
-              if (modal.type === 'prompt') close(modal.inputValue);
-            }}>확인</button>
+          {(() => {
+            const validateFn = modal.type === 'prompt' ? modal.options?.validate : null;
+            const isValid = !validateFn || validateFn(modal.inputValue);
+            const disabled = !isValid;
+            const style = disabled
+              ? { background: '#ccc', color: '#666', cursor: 'not-allowed' }
+              : modal.options?.dangerous
+              ? { background: 'tomato', color: '#fff' }
+              : undefined;
+            return (
+              <button className="am-ok-btn" autoFocus={modal.type !== 'prompt'}
+                disabled={disabled}
+                style={style}
+                onClick={() => {
+                  if (modal.type === 'alert') close(undefined);
+                  if (modal.type === 'confirm') close(true);
+                  if (modal.type === 'prompt') close(modal.inputValue);
+                }}>{modal.options?.confirmLabel || '확인'}</button>
+            );
+          })()}
         </div>
       </div>
     </div>

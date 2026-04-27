@@ -121,6 +121,9 @@ func main() {
 		// Git 플랫폼 사용자 목록
 		r.Get("/Git/users", handlers.GitUsersHandler)
 
+		// Project archive (zip 백업 + 모든 자원 정리)
+		r.Post("/Project/{code}/archive", handlers.ProjectArchiveHandler)
+
 		// DocRepo — 문서 이력관리 (projectCode 기반)
 		r.Route("/DocRepo", func(r chi.Router) {
 			r.Get("/", handlers.DocRepoListHandler)
