@@ -43,6 +43,16 @@ func Init() {
 		log.Printf("Warning: index creation: %v", err)
 	}
 
+	// Ensure unique index on usecase_artifacts.projectId (1:1 with project)
+	uaCol := database.Collection("usecase_artifacts")
+	uaIdx := mongo.IndexModel{
+		Keys:    bson.D{{Key: "projectId", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := uaCol.Indexes().CreateOne(ctx, uaIdx); err != nil {
+		log.Printf("Warning: usecase_artifacts index creation: %v", err)
+	}
+
 	log.Println("MongoDB connected:", config.MongoURI)
 }
 

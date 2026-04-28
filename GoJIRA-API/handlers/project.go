@@ -23,6 +23,8 @@ var archSettingsAllowedKeys = map[string]struct{}{
 	"satamDone":            {},
 	"designIntegrated":     {},
 	"viewsIncluded":        {},
+	// 결정적 조립용 보조 데이터 (이슈에 없는 메타)
+	"styleQAWeights":       {}, // style-define2 후보 비교 가중치
 	// drift-check.py — workflow stage hash baseline & deferred impact tracking
 	"lastRunHash":      {},
 	"lastRunAt":        {},
@@ -302,6 +304,11 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			archCleared = true
 		}
+	}
+
+	// usecase_artifacts 도 함께 정리 — relink/강제 재생성 모드의 stale 데이터 재활용 방지.
+	if err := db.DeleteUsecaseArtifact(ctx, prj["_id"]); err != nil {
+		log.Printf("usecase_artifacts delete failed: %v", err)
 	}
 
 	projectDeleted := false

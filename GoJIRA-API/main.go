@@ -101,6 +101,8 @@ func main() {
 		r.Patch("/Project/{jiraCode}/archSettings", handlers.ProjectArchSettingsPatchHandler)
 		r.Post("/Project/{jiraCode}/reset", handlers.ProjectResetHandler)
 		r.Get("/Project/{jiraCode}/dump", handlers.ProjectDumpHandler)
+		r.Get("/Project/{jiraCode}/usecase-artifacts", handlers.UsecaseArtifactGetHandler)
+		r.Put("/Project/{jiraCode}/usecase-artifacts", handlers.UsecaseArtifactPutHandler)
 		r.Get("/Project/alerts", handlers.ProjectAlertsHandler)
 	})
 

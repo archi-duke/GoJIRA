@@ -70,6 +70,24 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 
 > **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(`issue-batch-create.sh` 등) 을 모두 스킵** 하고 archSettings 갱신 + index/후보 파일 재생성만 수행. 본 스킬에서 이슈 변경이 있는 step (Step 5.1) 을 통째로 건너뛴다.
 
+### 0.2.1 Fast path — 강제 재생성 + 기존 ADSN 존재 시 LLM 0회 재생성
+
+**강제 재생성 모드 + 기존 시스템 스타일 ADSN 이슈가 존재**하면 Step 1~Step 1.5 (LLM 흐름 전체) 스킵 + Step 5.1/5.2/5.4 도 스킵하고 Step 5.3 만 결정적 조립으로 실행.
+
+```bash
+GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+EXISTING_STYLE_ADSN=$(curl -s "${GOJIRA_API}/Issue" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | select(.issueType=="Architectural Design" and (.designPoint // "") == "시스템 스타일 결정")] | length')
+echo "기존 시스템 스타일 ADSN: ${EXISTING_STYLE_ADSN}건"
+```
+
+| 조건 | 동작 |
+|---|---|
+| 강제 재생성 + `EXISTING_STYLE_ADSN >= 1` | **fast path** — `FAST_PATH=true` 로 두고 Step 1~1.5 스킵, Step 5.3 에서 `style-assemble.py --from-mongo` 호출 (LLM 0회) |
+| 강제 재생성 + ADSN 0건 | 강제 재생성 의미 없음 — **중단**, full mode 권고 |
+| MODE=full | 기존 흐름 그대로 (Step 1.2 의 qaWeights 는 Step 5.4 직후 archSettings 에 PUT) |
+
 진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
 
 ### 0.3 데이터 수집 + 엔진 점수
@@ -162,6 +180,17 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 ---
 
 ## Step 1 — 조합 후보 초안 (iter 1, PlantUML 없음)
+
+### Fast path 분기 (Step 0.2.1 결과 적용)
+
+`FAST_PATH=true` 면 **Step 1~Step 1.5 전부 스킵**, 바로 Step 5.3 (결정적 조립) 으로 점프.
+
+```bash
+if [ "${FAST_PATH:-false}" = "true" ]; then
+  echo "fast path — Step 1~1.5 스킵"
+  # 다음 generation 에서 Step 5.3 으로 이동
+fi
+```
 
 ### 1.1 조합 후보 설계
 
@@ -533,7 +562,32 @@ cat /tmp/style_link_result.json
 
 ### 5.3 docId → subkey 치환 + 후보 파일 저장
 
-생성된 ADSN 이슈의 subkey(`ADSN_001`, `ADSN_002`, ...) 로 **파일명과 문서 본문의 모든 `ADSN-N` 참조를 치환**. 결과 파일명은 `architecture-style/ADSN_NNN-{slug}.md` 형태 — JIRA 이슈 subkey 와 완전 일치.
+**Fast path (`FAST_PATH=true`)**: docId 치환 불필요 (이슈가 이미 subkey 보유). `style-assemble.py --from-mongo` 가 ADSN 이슈 + archSettings 만으로 결정적 조립. LLM 0회.
+
+```bash
+if [ "${FAST_PATH:-false}" = "true" ]; then
+  TMP_OUT=/tmp/${CODE}-styledef-out
+  rm -rf "$TMP_OUT"
+  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-assemble.py" \
+    --from-mongo "${CODE}" --user "${USER}" --out-dir "$TMP_OUT"
+
+  # index 저장
+  cat "$TMP_OUT/architecture-style.md" \
+    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-style.md"
+
+  # 후보 파일 일괄 저장
+  for f in "$TMP_OUT"/architecture-style/*.md; do
+    rel="architecture/architecture-style/$(basename "$f")"
+    cat "$f" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "$rel"
+  done
+  echo "fast path 저장 완료"
+  # Step 5.4 (chosenStyles PATCH) 도 스킵 — 기존 archSettings 그대로
+  # 다음 generation 에서 Step 6 보고
+  exit 0
+fi
+```
+
+**기존 흐름 (MODE=full)**: 생성된 ADSN 이슈의 subkey(`ADSN_001`, `ADSN_002`, ...) 로 **파일명과 문서 본문의 모든 `ADSN-N` 참조를 치환**. 결과 파일명은 `architecture-style/ADSN_NNN-{slug}.md` 형태 — JIRA 이슈 subkey 와 완전 일치.
 
 치환 규칙:
 - `ADSN-1` → `ADSN_001` (단독 단어)
@@ -646,6 +700,15 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
   -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
   -d "$(jq -n --argjson c "$CHOSEN_JSON" '{chosenStyles:$c}')" \
   | jq '{updated, archSettings}'
+
+# qaWeights 도 archSettings 에 영속화 — fast path 결정적 조립용
+QAW_JSON=$(jq '.qaWeights' /tmp/${CODE}-styledef-draft.json)
+if [ "$QAW_JSON" != "null" ] && [ -n "$QAW_JSON" ]; then
+  curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+    -d "$(jq -n --argjson w "$QAW_JSON" '{styleQAWeights:$w}')" \
+    | jq '.updated'
+fi
 ```
 
 PATCH 실패 시 최종 보고에 ⚠. 다음 스킬이 영향 받을 수 있음.
