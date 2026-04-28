@@ -83,6 +83,24 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 
 > **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스는 MODE 와 무관하게 **이슈 생성/수정 전부 스킵 + 링크 차집합 + 문서 재생성**으로 동작 (사실상 relink 흐름). 새로 만들 이슈가 없는 게 자명하므로 자동 강등. SKILL 흐름상 Step 1 은 MODE=relink 축약 규칙을 따르고, Step 5.1 은 통째로 스킵.
 
+### 0.2.1 Fast path — MODE=relink / 강제 재생성 + 기존 Requirement 존재 시 LLM 0회 재생성
+
+**MODE=relink 또는 강제 재생성 + 기존 Requirement ≥ 1건** 이면 Step 1 LLM 흐름 전체 스킵 + Step 5.1/5.2 도 스킵, Step 5.4 만 결정적 조립으로.
+
+```bash
+GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+EXISTING_REQ=$(curl -s "${GOJIRA_API}/Issue" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | select(.issueType=="Requirement")] | length')
+echo "기존 Requirement: ${EXISTING_REQ}건"
+```
+
+| 조건 | 동작 |
+|---|---|
+| relink/regen + `EXISTING_REQ >= 1` | **fast path** — `FAST_PATH=true`, Step 1 스킵, Step 5.4 에서 `requirement-assemble.py --from-mongo` |
+| relink/regen + 0건 | 중단, MODE=full 권고 |
+| MODE=full | 기존 흐름 그대로 (이슈가 source of truth, 추가 archSettings 영속화 불필요) |
+
 진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
 
 ### 0.3 데이터 수집
@@ -406,6 +424,21 @@ DOCUMENT=$(echo "$DOCUMENT" | sed "s/\bFR-1\b/FR_001/g" | sed "s/\bNFR-1\b/QA_00
 ```
 
 ### 5.4 requirements.md 저장
+
+**Fast path (`FAST_PATH=true`)**: Requirement 이슈 + Feature 이슈만으로 결정적 조립 (LLM 0회).
+
+```bash
+if [ "${FAST_PATH:-false}" = "true" ]; then
+  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/requirement-assemble.py" \
+    --from-mongo "${CODE}" --user "${USER}" \
+    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/requirements.md"
+  echo "fast path 저장 완료"
+  exit 0
+fi
+```
+
+**기존 흐름 (MODE=full)**:
+
 ```bash
 echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/requirements.md"
 ```

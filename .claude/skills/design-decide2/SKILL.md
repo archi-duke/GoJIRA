@@ -70,6 +70,24 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 
 > **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(`issue-batch-create.sh` 등) 을 모두 스킵** 하고 index/DP 파일 재생성만 수행. 본 스킬에서 이슈 변경이 있는 step (Step 5.1) 을 통째로 건너뛴다.
 
+### 0.2.1 Fast path — 강제 재생성 + 기존 ADSN 존재 시 LLM 0회 재생성
+
+**강제 재생성 + 기존 설계 결정 ADSN/DDSN (designPoint != "시스템 스타일 결정") 이 존재** 하면 Step 1~Step 1.5 스킵 + Step 5.1/5.2 도 스킵하고 Step 5.3 만 결정적 조립.
+
+```bash
+GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+EXISTING_DD=$(curl -s "${GOJIRA_API}/Issue" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | select((.issueType=="Architectural Design" or .issueType=="Detailed Design") and (.designPoint // "") != "시스템 스타일 결정" and (.designPoint // "") != "")] | length')
+echo "기존 설계 결정 ADSN/DDSN: ${EXISTING_DD}건"
+```
+
+| 조건 | 동작 |
+|---|---|
+| 강제 재생성 + `EXISTING_DD >= 1` | **fast path** — `FAST_PATH=true`, Step 1~1.5 스킵, Step 5.3 에서 `design-decide-assemble.py --from-mongo` |
+| 강제 재생성 + 0건 | 중단, full mode 권고 |
+| MODE=full | 기존 흐름 + Step 5 끝에 designDecideQAWeights archSettings PATCH |
+
 진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
 
 ### 0.3 데이터 수집
@@ -104,6 +122,16 @@ curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\
 ---
 
 ## Step 1 — 초안 생성 (iter 1, PlantUML 없음)
+
+### Fast path 분기 (Step 0.2.1 결과 적용)
+
+`FAST_PATH=true` 면 Step 1~Step 1.5 전부 스킵, 바로 Step 5.3 으로.
+
+```bash
+if [ "${FAST_PATH:-false}" = "true" ]; then
+  echo "fast path — Step 1~1.5 스킵"
+fi
+```
 
 ### 1.1 Design Point 식별
 
@@ -498,7 +526,28 @@ cat /tmp/dd_link_result.json
 
 ### 5.3 docId → subkey 치환 + DP 파일 저장
 
-각 DP 의 후보별 ADSN 이슈 키가 확정됐으므로, document 본문의 candidate placeholder (`{A_KEY}` 등) 를 실제 이슈 키로 치환한 뒤 저장.
+**Fast path (`FAST_PATH=true`)**: ADSN/DDSN 이슈 + archSettings.designDecideQAWeights 만으로 결정적 조립. LLM 0회.
+
+```bash
+if [ "${FAST_PATH:-false}" = "true" ]; then
+  TMP_OUT=/tmp/${CODE}-dd-out
+  rm -rf "$TMP_OUT"
+  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/design-decide-assemble.py" \
+    --from-mongo "${CODE}" --user "${USER}" --out-dir "$TMP_OUT"
+
+  cat "$TMP_OUT/design-decisions.md" \
+    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/design-decisions.md"
+
+  for f in "$TMP_OUT"/design-decisions/*.md; do
+    rel="architecture/design-decisions/$(basename "$f")"
+    cat "$f" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "$rel"
+  done
+  echo "fast path 저장 완료"
+  exit 0
+fi
+```
+
+**기존 흐름 (MODE=full)**: 각 DP 의 후보별 ADSN 이슈 키가 확정됐으므로, document 본문의 candidate placeholder (`{A_KEY}` 등) 를 실제 이슈 키로 치환한 뒤 저장.
 
 ```bash
 python3 <<'PY'
@@ -546,6 +595,22 @@ p = subprocess.run(["bash", script, code, user, "architecture/design-decisions.m
 print(f"  architecture/design-decisions.md: {p.stdout.strip()}")
 PY
 ```
+
+### 5.4 designDecideQAWeights archSettings PATCH (full mode 만)
+
+DP별 qaWeights 를 fast path 결정적 조립용 archSettings 에 영속화.
+
+```bash
+QAW_JSON=$(jq '[.designs[] | {designPoint, qaWeights}]' /tmp/${CODE}-dd-draft.json)
+if [ "$QAW_JSON" != "null" ] && [ -n "$QAW_JSON" ]; then
+  curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+    -d "$(jq -n --argjson w "$QAW_JSON" '{designDecideQAWeights:$w}')" \
+    | jq '.updated'
+fi
+```
+
+PATCH 실패 시 최종 보고에 ⚠. fast path 재생성 시 가중치 섹션 placeholder 처리됨.
 
 ---
 
