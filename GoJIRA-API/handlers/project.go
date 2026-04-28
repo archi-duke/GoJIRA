@@ -24,7 +24,8 @@ var archSettingsAllowedKeys = map[string]struct{}{
 	"designIntegrated":     {},
 	"viewsIncluded":        {},
 	// 결정적 조립용 보조 데이터 (이슈에 없는 메타)
-	"styleQAWeights":       {}, // style-define2 후보 비교 가중치
+	"styleQAWeights":        {}, // style-define2 후보 비교 가중치
+	"designDecideQAWeights": {}, // design-decide2 DP별 가중치 ([{designPoint, qaWeights}, ...])
 	// drift-check.py — workflow stage hash baseline & deferred impact tracking
 	"lastRunHash":      {},
 	"lastRunAt":        {},

@@ -60,6 +60,24 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 
 > **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(Requirement PUT / ASR 라벨 갱신 등) 을 모두 스킵** 하고 archSettings 갱신 + drivers.md 재저장만 수행. 본 스킬에서 이슈 변경이 있는 step (Step 5.1, 5.2) 을 통째로 건너뛴다.
 
+### 0.2.1 Fast path — 강제 재생성 + 기존 Driver 존재 시 LLM 0회 재생성
+
+**강제 재생성 + 기존 driverSelected=true Requirement ≥ 1건** 이면 Step 1 LLM 흐름 전체 스킵 + Step 5.1/5.2/5.3 도 스킵, Step 5.4 만 결정적 조립으로.
+
+```bash
+GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+EXISTING_DR=$(curl -s "${GOJIRA_API}/Issue" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  | jq '[.[] | select(.issueType=="Requirement" and (.driverSelected==true or (.labels // []) | index("ASR") != null))] | length')
+echo "기존 Driver: ${EXISTING_DR}건"
+```
+
+| 조건 | 동작 |
+|---|---|
+| 강제 재생성 + `EXISTING_DR >= 1` | **fast path** — `FAST_PATH=true`, Step 1 + Step 5.1~5.3 스킵, Step 5.4 에서 `driver-assemble.py --from-mongo` |
+| 강제 재생성 + 0건 | 중단, full mode 권고 |
+| MODE=full | 기존 흐름 (이미 archSettings.normalizedAttributes 영속화됨) |
+
 진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
 
 ### 0.3 데이터 수집
@@ -268,6 +286,21 @@ fi
 실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define2) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
 
 ### 5.4 architecture/drivers.md 저장
+
+**Fast path (`FAST_PATH=true`)**: Driver Requirement + archSettings.normalizedAttributes 만으로 결정적 조립 (LLM 0회).
+
+```bash
+if [ "${FAST_PATH:-false}" = "true" ]; then
+  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/driver-assemble.py" \
+    --from-mongo "${CODE}" --user "${USER}" \
+    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/drivers.md"
+  echo "fast path 저장 완료"
+  exit 0
+fi
+```
+
+**기존 흐름 (MODE=full)**:
+
 ```bash
 echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/drivers.md"
 ```
