@@ -152,9 +152,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   useEffect(() => { sessionStorage.setItem('gojira_rm_R', String(showReserved)); }, [showReserved]);
   useEffect(() => { sessionStorage.setItem('gojira_rm_T', String(showTest)); }, [showTest]);
   const [selectedKey, setSelectedKey] = useState(null);
-  const [assistLoading, setAssistLoading] = useState(null); // 로딩 중인 컬럼 id
-  const [assistResult, setAssistResult] = useState(null); // { columnId, suggestions: [{action, ...}] }
-  const [assistChecked, setAssistChecked] = useState({}); // { index: bool }
   const [sortByHighlight, setSortByHighlight] = useState(false);
   const [positions, setPositions] = useState({});
   const [linking, setLinking] = useState(null);   // { fromKey }
@@ -382,41 +379,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     window.open(url, 'gojira-agent', 'width=480,height=720');
   }
 
-  async function handleAssistApply() {
-    if (!assistResult) return;
-    const selected = assistResult.suggestions.filter((_, i) => assistChecked[i]);
-    if (selected.length === 0) { setAssistResult(null); return; }
-    setAssistLoading(assistResult.columnId);
-    for (const s of selected) {
-      try {
-        if (s.action === 'add') {
-          await fetch(`${API_BASE}/Agent/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-            body: JSON.stringify({
-              message: `${projectCode}에 ${s.issueType || 'Requirement'} 이슈를 생성해줘. 제목: ${s.summary}`,
-            }),
-          });
-        } else if (s.action === 'update' && s.key) {
-          await fetch(`${API_BASE}/Agent/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-            body: JSON.stringify({ message: `${s.key} 이슈의 요약을 "${s.summary}"로 수정해줘` }),
-          });
-        } else if (s.action === 'delete' && s.key) {
-          await fetch(`${API_BASE}/Agent/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-            body: JSON.stringify({ message: `${s.key} 이슈를 삭제해줘` }),
-          });
-        }
-      } catch {}
-    }
-    setAssistResult(null);
-    setAssistLoading(null);
-    handlePull(); // 새로고침
-  }
-
   async function addIssue(subtype) {
     let issueType, reqtype = '';
     switch (subtype) {
@@ -566,15 +528,12 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
                   {col.label}
                   {editMode && (
                     <button className="rm-ai-btn" title={`${col.label} AI 자동생성`}
-                      disabled={assistLoading === col.id}
                       onClick={() => handleColumnAssist(col)}>
-                      {assistLoading === col.id ? '...' : (
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill={COLUMN_STAR_COLORS[col.id] || '#f4b400'}>
-                          <path d="M8 4 L9.4 10.6 L16 12 L9.4 13.4 L8 20 L6.6 13.4 L0 12 L6.6 10.6 Z" />
-                          <path d="M17 2 L17.8 6.2 L22 7 L17.8 7.8 L17 12 L16.2 7.8 L12 7 L16.2 6.2 Z" />
-                          <path d="M16 14 L16.6 17 L19.5 17.6 L16.6 18.2 L16 21 L15.4 18.2 L12.5 17.6 L15.4 17 Z" />
-                        </svg>
-                      )}
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill={COLUMN_STAR_COLORS[col.id] || '#f4b400'}>
+                        <path d="M8 4 L9.4 10.6 L16 12 L9.4 13.4 L8 20 L6.6 13.4 L0 12 L6.6 10.6 Z" />
+                        <path d="M17 2 L17.8 6.2 L22 7 L17.8 7.8 L17 12 L16.2 7.8 L12 7 L16.2 6.2 Z" />
+                        <path d="M16 14 L16.6 17 L19.5 17.6 L16.6 18.2 L16 21 L15.4 18.2 L12.5 17.6 L15.4 17 Z" />
+                      </svg>
                     </button>
                   )}
                 </div>
@@ -783,39 +742,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         {selectedKey && ` | 선택: ${selectedKey}`}
         {linking && ' | 연결 그리기 중 (ESC 취소)'}
       </div>
-
-      {/* AI Assist 승인 모달 */}
-      {assistResult && (
-        <div className="rm-assist-overlay" onClick={() => setAssistResult(null)}>
-          <div className="rm-assist-modal" onClick={e => e.stopPropagation()}>
-            <div className="rm-assist-modal-header">
-              <span>AI 제안: {assistResult.columnLabel}</span>
-              <button className="rm-assist-modal-close" onClick={() => setAssistResult(null)}>&times;</button>
-            </div>
-            <div className="rm-assist-modal-body">
-              {assistResult.suggestions.map((s, i) => (
-                <label key={i} className={`rm-assist-item rm-assist-${s.action}`}>
-                  <input type="checkbox" checked={!!assistChecked[i]}
-                    onChange={e => setAssistChecked(prev => ({ ...prev, [i]: e.target.checked }))} />
-                  <span className="rm-assist-action">{s.action === 'add' ? '추가' : s.action === 'update' ? '수정' : '삭제'}</span>
-                  <span className="rm-assist-summary">
-                    {s.key && <strong>[{s.key}] </strong>}
-                    {s.summary}
-                  </span>
-                  {s.reason && <span className="rm-assist-reason">{s.reason}</span>}
-                </label>
-              ))}
-            </div>
-            <div className="rm-assist-modal-footer">
-              <button className="rm-assist-apply" onClick={handleAssistApply}
-                disabled={!Object.values(assistChecked).some(Boolean)}>
-                선택 항목 적용 ({Object.values(assistChecked).filter(Boolean).length}건)
-              </button>
-              <button className="rm-assist-cancel" onClick={() => setAssistResult(null)}>취소</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Issue Detail Dialog */}
       {detailIssue && (
