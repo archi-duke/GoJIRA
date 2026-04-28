@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """usecase-assemble.py — usecase-analyze2 Step 1.5 결정적 조립 (LLM 0회).
 
-stdin: 누적 draft JSON (Step 1.1 entities + 1.2 features + 1.3 scenarios + 1.4 diagrams)
+입력 모드 (택1):
+  (a) stdin: 누적 draft JSON (Step 1.1 entities + 1.2 features + 1.3 scenarios + 1.4 diagrams)
+  (b) --from-mongo CODE [--user USER]: GoJIRA-API 에서 usecase_artifacts + Feature/VOS 이슈를
+      fetch 해 (a) 와 동일 형태의 payload 로 조립. **MODE=relink / 강제 재생성에서 LLM 0회 산출용**.
+
 stdout: business/use-cases.md 본문 (UTF-8 markdown)
 
 입력 스키마 (필요한 키만 사용):
@@ -42,7 +46,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import urllib.error
+import urllib.request
 
 
 # ─── 섹션 빌더 ----------------------------------------------------------------
@@ -294,16 +301,101 @@ def assemble(payload: dict, template: str) -> str:
     return out
 
 
+def _http_get_json(url: str, user: str) -> dict:
+    req = urllib.request.Request(url, headers={"X-User-Id": user})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _http_get_issues(api: str, code: str, user: str) -> list:
+    """/Issue 는 XBody 헤더로 JSON 본문을 받는다."""
+    xbody = json.dumps({"prjID": code, "infoType": ""})
+    req = urllib.request.Request(
+        f"{api}/Issue",
+        headers={"X-User-Id": user, "XBody": xbody},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def build_payload_from_mongo(code: str, user: str, api: str) -> dict:
+    """artifact + Feature/VOS 이슈 → assemble payload."""
+    art = _http_get_json(f"{api}/Project/{code}/usecase-artifacts", user)
+    if not art.get("exists"):
+        print(
+            f"ERROR: usecase-artifacts not found for {code} — "
+            "MODE=full 1회 실행으로 artifact 영속화 필요",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
+    issues = _http_get_issues(api, code, user)
+    vos = [i for i in issues if i.get("issueType") == "VOS"]
+    feats = [i for i in issues if i.get("issueType") == "Feature"]
+
+    vos_keys = [v.get("key") for v in vos if v.get("key")]
+
+    # Feature 이슈 → assemble.features 형태 (subkey 가 docId).
+    features = []
+    for f in feats:
+        related = []
+        for ln in (f.get("issueLinks") or []):
+            t = ((ln.get("type") or {}).get("name")) or ""
+            if t != "Contains(WBSGantt)":
+                continue
+            inward = ((ln.get("inwardIssue") or {}).get("key")) or ""
+            if inward and inward in vos_keys:
+                related.append(inward)
+        features.append({
+            "docId": f.get("subkey") or f.get("key", ""),
+            "summary": f.get("summary", ""),
+            "actor": f.get("actor", ""),
+            "precondition": f.get("precondition", ""),
+            "basicflow": f.get("basicflow", ""),
+            "alternativeflow": f.get("alternativeflow", ""),
+            "exceptionflow": f.get("exceptionflow", ""),
+            "postcondition": f.get("postcondition", ""),
+            "relatedVOS": sorted(set(related)),
+            "mode": "reuse",
+            "existingKey": f.get("key", ""),
+        })
+
+    return {
+        "vosKeys": art.get("vosKeys") or vos_keys,
+        "domain": art.get("domain") or {},
+        "userStories": art.get("userStories") or [],
+        "useCases": art.get("useCases") or [],
+        "features": features,
+        "diagrams": art.get("diagrams") or {},
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--template", help="템플릿 파일 (marker 기반). 미지정 시 내장 템플릿 사용")
+    parser.add_argument("--from-mongo", dest="from_mongo", metavar="CODE",
+                        help="GoJIRA-API 에서 artifact + Feature/VOS 이슈 fetch (stdin 미사용)")
+    parser.add_argument("--user", default=os.environ.get("USER", "system"),
+                        help="X-User-Id (--from-mongo 모드에서 필요)")
+    parser.add_argument("--api", default=os.environ.get("GOJIRA_API", "http://localhost:9001/api/v2"),
+                        help="GoJIRA-API base URL")
     args = parser.parse_args()
 
-    try:
-        payload = json.load(sys.stdin)
-    except json.JSONDecodeError as exc:
-        print(f"ERROR: invalid JSON: {exc}", file=sys.stderr)
-        return 2
+    if args.from_mongo:
+        try:
+            payload = build_payload_from_mongo(args.from_mongo, args.user, args.api)
+        except urllib.error.HTTPError as exc:
+            print(f"ERROR: HTTP {exc.code} — {exc.reason}", file=sys.stderr)
+            return 4
+        except urllib.error.URLError as exc:
+            print(f"ERROR: connect — {exc}", file=sys.stderr)
+            return 4
+    else:
+        try:
+            payload = json.load(sys.stdin)
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: invalid JSON: {exc}", file=sys.stderr)
+            return 2
 
     template = DEFAULT_TEMPLATE
     if args.template:

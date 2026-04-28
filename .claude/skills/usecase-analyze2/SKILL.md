@@ -119,6 +119,23 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 
 > **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스는 MODE 와 무관하게 **이슈 생성/수정 전부 스킵 + 링크 차집합 + 문서 재생성**으로 동작 (사실상 relink 흐름). 새로 만들 이슈가 없는 게 자명하므로 자동 강등. SKILL 흐름상 Step 1 은 MODE=relink 축약 규칙을 따르고, Step 5.1 은 통째로 스킵.
 
+### 0.2.1 Artifact fast path — MODE=relink / 강제 재생성 + artifact 존재 시 LLM 0회 재생성
+
+`MODE=relink` 또는 `강제 재생성` 모드에서 `usecase_artifacts` 가 이미 존재하면 **Step 1.1~1.4 전부 스킵**하고 바로 Step 1.5 결정적 조립으로 점프한다.
+
+```bash
+GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+ART_EXISTS=$(curl -s "${GOJIRA_API}/Project/${CODE}/usecase-artifacts" \
+  -H "X-User-Id: ${USER}" | jq -r '.exists // false')
+echo "artifact exists: ${ART_EXISTS}"
+```
+
+| 조건 | 동작 |
+|---|---|
+| MODE=relink 또는 강제 재생성 + `ART_EXISTS=true` | **fast path** — Step 1.1~1.4 스킵, Step 1.5 에서 `usecase-assemble.py --from-mongo ${CODE}` 호출 (LLM 0회), Step 2 자가검증, Step 5.4 문서 저장만. Step 5.1 (이슈 create) 은 어차피 스킵 |
+| MODE=relink + `ART_EXISTS=false` | **legacy relink** — 기존 use-cases.md 에서 LLM 으로 추출 후 Step 1.5. Step 1.1·1.4 종료에 artifact PUT 추가됐으니 다음 호출부터는 fast path |
+| MODE=full | 기존 흐름 그대로 (Step 1.1·1.4 종료에서 artifact PUT 자동 영속화) |
+
 진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
 
 ### 0.3 데이터 수집
@@ -170,7 +187,17 @@ jq -n --argjson vos "$VOS_KEYS_JSON" --argjson feat "$EXISTING_FEAT_KEYS_JSON" \
 
 Step 1 은 **1.1 ~ 1.5 의 5 sub-step** 으로 나뉜다. 각 sub-step 은 한 generation 안에서만 처리하고, 끝에 반드시 `draft-io.sh save|merge` 로 generation 경계를 만든다.
 
-### MODE=relink / 강제 재생성 모드 축약 규칙 (모든 sub-step 공통)
+### Artifact fast path 분기 (Step 0.2.1 결과 적용)
+
+`MODE=relink / 강제 재생성` + `ART_EXISTS=true` → **Step 1.1~1.4 모두 스킵**, 환경변수 `FAST_PATH=true` 로 두고 바로 Step 1.5 (`--from-mongo` 모드) 호출. LLM 호출 없음.
+
+```bash
+export FAST_PATH=true
+```
+
+→ 다음 generation 에서 Step 1.5 진입.
+
+### MODE=relink / 강제 재생성 모드 축약 규칙 (artifact 없는 legacy 케이스 — sub-step 공통)
 
 이슈 생성/수정/삭제 금지. 기존 Feature 원문(summary/actor/flows) 그대로 보존. sub-step 별로:
 
@@ -199,7 +226,7 @@ Step 1 은 **1.1 ~ 1.5 의 5 sub-step** 으로 나뉜다. 각 sub-step 은 한 g
 - Actor 식별: Primary(가치 요청 트리거) / Supporting(협력)
 - 암묵적 Story 능동 발굴: 계정/인증, 중단/이탈, 다중 사용자 동기화, 데이터 영속성
 
-### Step 1.1 종료 — draft merge
+### Step 1.1 종료 — draft merge + artifact PUT
 
 ```bash
 # 본 generation 에서 도출한 entities 를 partial JSON 으로 merge
@@ -223,6 +250,13 @@ JSON
 
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "entities" \
   < /tmp/${CODE}-uc-step1.1.json
+
+# **artifact 영속화** — 다음 호출(MODE=relink/강제 재생성) 에서 LLM 0회 재생성용
+GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+jq '{domain, userStories, useCases}' /tmp/${CODE}-uc-step1.1.json \
+  | curl -s -X PUT "${GOJIRA_API}/Project/${CODE}/usecase-artifacts" \
+      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+      --data-binary @- | jq '.updated'
 ```
 
 (선택) 단계별 자가검증:
@@ -334,7 +368,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "
 - `@startuml` / `@enduml` 쌍 누락
 - participant/actor 이름에 공백 있는데 따옴표도 `as` 도 없는 선언 (`participant 후공 사용자` — 잘못. `participant "후공 사용자" as U2` 또는 `participant U2 as "후공 사용자"` 로)
 
-### Step 1.4 종료 — draft merge
+### Step 1.4 종료 — draft merge + artifact PUT
 
 ```bash
 # diagrams.sequences 의 키는 features[].docId 와 정확히 일치해야 한다 (validator 가 매칭)
@@ -352,6 +386,13 @@ JSON
 
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "diagrams" \
   < /tmp/${CODE}-uc-step1.4.json
+
+# **artifact 영속화** — diagrams + vosKeys 도 함께
+GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+jq --argjson vos "$VOS_KEYS_JSON" '{diagrams, vosKeys: $vos}' /tmp/${CODE}-uc-step1.4.json \
+  | curl -s -X PUT "${GOJIRA_API}/Project/${CODE}/usecase-artifacts" \
+      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+      --data-binary @- | jq '.updated'
 ```
 
 (선택) 단계별 검증:
@@ -366,18 +407,49 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "
 
 ## Step 1.5 — 결정적 문서 조립 (LLM 0회 — 필수)
 
-누적된 draft (`/tmp/${CODE}-uc-draft.json`) 의 entities + features + diagrams 를 `usecase-assemble.py` 가 템플릿에 채워 use-cases.md 본문을 생성한다. **이 step 에서 LLM 호출 절대 금지**.
+누적된 draft (`/tmp/${CODE}-uc-draft.json`) 또는 `usecase_artifacts` mongo 컬렉션에서 entities + features + diagrams 를 가져와 `usecase-assemble.py` 가 템플릿에 채워 use-cases.md 본문을 생성한다. **이 step 에서 LLM 호출 절대 금지**.
 
 ```bash
 TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
 
-# 1) draft 로드 → assemble.py 로 markdown 생성 → /tmp 에 저장
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
-  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" --template "$TEMPLATE" \
-  > /tmp/${CODE}-uc-final.md
+if [ "${FAST_PATH:-false}" = "true" ]; then
+  # fast path: artifact + Feature/VOS 이슈 mongo 직접 fetch (Step 1.1~1.4 스킵 케이스)
+  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" \
+    --from-mongo "${CODE}" --user "${USER}" --template "$TEMPLATE" \
+    > /tmp/${CODE}-uc-final.md
+else
+  # 기존 흐름: draft.json 로드 → assemble
+  bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
+    | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" --template "$TEMPLATE" \
+    > /tmp/${CODE}-uc-final.md
+fi
 echo "use-cases.md 길이=$(wc -c < /tmp/${CODE}-uc-final.md | tr -d ' ')"
 
-# 2) draft 의 document 필드에도 본문을 주입 (Step 2 validator 가 document 키를 본다)
+# draft 의 document 필드에도 본문을 주입 (Step 2 validator 가 document 키를 본다)
+# fast path 의 경우 draft.json 이 비어있을 수 있으니 먼저 init 한 뒤 merge.
+if [ "${FAST_PATH:-false}" = "true" ] && [ ! -f "/tmp/${CODE}-uc-draft.json" ]; then
+  # 검증에 필요한 최소 골격 (vosKeys + features) 을 mongo 에서 한 번 더 빌드
+  python3 - <<PY > /tmp/${CODE}-uc-draft-init.json
+import json, urllib.request, sys
+api="${GOJIRA_API:-http://localhost:9001/api/v2}"
+def get(u):
+    req=urllib.request.Request(u, headers={"X-User-Id":"${USER}"})
+    return json.loads(urllib.request.urlopen(req,timeout=10).read())
+art=get(f"{api}/Project/${CODE}/usecase-artifacts")
+issues_req=urllib.request.Request(f"{api}/Issue", headers={"X-User-Id":"${USER}","XBody":json.dumps({"prjID":"${CODE}","infoType":""})})
+issues=json.loads(urllib.request.urlopen(issues_req,timeout=15).read())
+print(json.dumps({
+  "vosKeys": [i["key"] for i in issues if i.get("issueType")=="VOS"],
+  "domain": art.get("domain") or {},
+  "userStories": art.get("userStories") or [],
+  "useCases": art.get("useCases") or [],
+  "features": [],
+  "diagrams": art.get("diagrams") or {}
+}))
+PY
+  bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "uc" "draft" "init" \
+    < /tmp/${CODE}-uc-draft-init.json
+fi
 DOC_JSON=$(jq -Rs . < /tmp/${CODE}-uc-final.md)
 jq -n --argjson doc "$DOC_JSON" '{document: $doc}' \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "final"
