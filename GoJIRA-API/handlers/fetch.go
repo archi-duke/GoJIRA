@@ -28,17 +28,10 @@ func IssueFetchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	count, pulledKeys, err := db.PullFromJiraFiltered(ctx, req.PrjID, issueTypes)
+	count, _, err := db.PullFromJiraFiltered(ctx, req.PrjID, issueTypes)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	// Pull한 이슈 키를 프로젝트 issues 목록에 추가 (기존 목록 유지, 신규만 추가)
-	if req.PrjID != "" && len(pulledKeys) > 0 {
-		for _, k := range pulledKeys {
-			db.AddIssueToProject(ctx, req.PrjID, k)
-		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{

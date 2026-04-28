@@ -257,41 +257,6 @@ func DeleteProjectByCode(ctx context.Context, jiraCode string) (bool, error) {
 	return res.DeletedCount > 0, nil
 }
 
-// AddIssueToProject adds an issue key to the project's issues array
-func AddIssueToProject(ctx context.Context, jiraCode string, issueKey string) error {
-	_, err := Projects().UpdateOne(ctx,
-		bson.M{"jiraCodes.main.jiraCode": jiraCode},
-		bson.M{"$addToSet": bson.M{"issues": issueKey}},
-	)
-	return err
-}
-
-// RemoveIssueFromProject removes an issue key from the project's issues array
-func RemoveIssueFromProject(ctx context.Context, jiraCode string, issueKey string) error {
-	_, err := Projects().UpdateOne(ctx,
-		bson.M{"jiraCodes.main.jiraCode": jiraCode},
-		bson.M{"$pull": bson.M{"issues": issueKey}},
-	)
-	return err
-}
-
-// ReplaceIssueKeyInProject replaces old key with new key in the project's issues array
-func ReplaceIssueKeyInProject(ctx context.Context, jiraCode string, oldKey, newKey string) error {
-	if err := RemoveIssueFromProject(ctx, jiraCode, oldKey); err != nil {
-		return err
-	}
-	return AddIssueToProject(ctx, jiraCode, newKey)
-}
-
-
-func UpdateProjectIssues(ctx context.Context, jiraCode string, keys []string) error {
-	_, err := Projects().UpdateOne(ctx,
-		bson.M{"jiraCodes.main.jiraCode": jiraCode},
-		bson.M{"$set": bson.M{"issues": keys}},
-	)
-	return err
-}
-
 // --- Accounts ---
 
 func UpsertAccount(ctx context.Context, jiraID string, doc bson.M) error {

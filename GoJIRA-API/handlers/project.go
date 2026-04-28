@@ -252,10 +252,10 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 영향 범위 조회: key prefix 로 시작하는 이슈들
+	// 영향 범위 조회: 이 프로젝트(projectId) 에 속한 이슈들
 	issueKeys := []string{}
 	if resetIssues {
-		issues, err := db.FindAllIssues(ctx, bson.M{"key": bson.M{"$regex": "^" + jiraCode + "-"}})
+		issues, err := db.FindAllIssues(ctx, bson.M{"projectId": prj["_id"]})
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -293,12 +293,6 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		deleted = append(deleted, k)
-	}
-	// projects.issues 배열 자체도 비움 (안전망 — 개별 $pull 이 누락됐을 가능성)
-	if resetIssues {
-		if err := db.UpdateProjectField(ctx, jiraCode, "issues", []string{}); err != nil {
-			log.Printf("reset issues array warn: %v", err)
-		}
 	}
 
 	archCleared := false
@@ -355,7 +349,7 @@ func ProjectDumpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issuesArr, err := db.FindAllIssues(ctx, bson.M{"key": bson.M{"$regex": "^" + jiraCode + "-"}})
+	issuesArr, err := db.FindAllIssues(ctx, bson.M{"projectId": prj["_id"]})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

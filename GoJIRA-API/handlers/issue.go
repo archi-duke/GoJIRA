@@ -64,6 +64,14 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	// 0) project 존재 확인 + _id 확보 (이슈는 project._id 로 단일 소속)
+	prj := db.FindProjectByCode(ctx, prjKey)
+	if prj == nil {
+		respondError(w, http.StatusNotFound, "project not found: "+prjKey)
+		return
+	}
+	projectID := prj["_id"]
+
 	// 1) key 할당
 	num, err := db.NextIssueNum(ctx, prjKey)
 	if err != nil {
@@ -123,13 +131,11 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	for k, v := range doc {
 		cacheDoc[k] = v
 	}
+	cacheDoc["projectId"] = projectID
 	cacheDoc["_dirty"] = false
 	cacheDoc["_syncedAt"] = time.Now()
 	if err := db.UpsertIssue(ctx, key, cacheDoc); err != nil {
 		log.Printf("cache upsert warn key=%s: %v", key, err)
-	}
-	if err := db.AddIssueToProject(ctx, prjKey, key); err != nil {
-		log.Printf("project.issues add warn key=%s: %v", key, err)
 	}
 
 	log.Printf("created issue %s subkey=%s user=%s (YAML)", key, subkey, user)
@@ -168,35 +174,16 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 
 	if req.PrjID != "" {
 		prjDoc := db.FindProjectByCode(ctx, req.PrjID)
-		if prjDoc != nil {
-			var issueKeys []string
-			if raw, ok := prjDoc["issues"]; ok {
-				switch arr := raw.(type) {
-				case bson.A:
-					for _, v := range arr {
-						if s, ok := v.(string); ok {
-							issueKeys = append(issueKeys, s)
-						}
-					}
-				case []interface{}:
-					for _, v := range arr {
-						if s, ok := v.(string); ok {
-							issueKeys = append(issueKeys, s)
-						}
-					}
-				}
-			}
-			if len(issueKeys) > 0 {
-				prjFilter := bson.M{"key": bson.M{"$in": issueKeys}}
-				if filter != nil {
-					filter = bson.M{"$and": []bson.M{filter, prjFilter}}
-				} else {
-					filter = prjFilter
-				}
-			} else {
-				respondJSON(w, http.StatusOK, []bson.M{})
-				return
-			}
+		if prjDoc == nil {
+			respondJSON(w, http.StatusOK, []bson.M{})
+			return
+		}
+		// 이슈는 projectId 로 단일 소속
+		prjFilter := bson.M{"projectId": prjDoc["_id"]}
+		if filter != nil {
+			filter = bson.M{"$and": []bson.M{filter, prjFilter}}
+		} else {
+			filter = prjFilter
 		}
 	}
 
@@ -324,9 +311,9 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteIssueInternal encapsulates the full delete flow: Gitea YAML + Mongo issues
-// collection + all projects' issues arrays. Called by IssueDeleteHandler (single key)
-// and ProjectResetHandler (bulk). Gitea YAML delete failure is logged but not fatal —
-// callers still succeed on Mongo-level delete.
+// collection. Called by IssueDeleteHandler (single key) and ProjectResetHandler (bulk).
+// Gitea YAML delete failure is logged but not fatal — callers still succeed on Mongo-level delete.
+// 이슈는 projectId 로 단일 소속이므로 별도 배열 정리는 불필요.
 func deleteIssueInternal(ctx context.Context, code, key, user string) error {
 	isOwnIssue := code != "" && strings.HasPrefix(key, code+"-")
 
@@ -338,18 +325,9 @@ func deleteIssueInternal(ctx context.Context, code, key, user string) error {
 				log.Printf("YAML delete warn key=%s: %v", key, err)
 			}
 		}
-		if err := db.DeleteIssueByKey(ctx, key); err != nil {
-			return err
-		}
-		projects, _ := db.FindAllProjects(ctx, nil)
-		for _, prj := range projects {
-			pcode := extractJiraCode(prj)
-			if pcode != "" {
-				db.RemoveIssueFromProject(ctx, pcode, key)
-			}
-		}
-	} else if code != "" {
-		db.RemoveIssueFromProject(ctx, code, key)
+	}
+	if err := db.DeleteIssueByKey(ctx, key); err != nil {
+		return err
 	}
 	return nil
 }

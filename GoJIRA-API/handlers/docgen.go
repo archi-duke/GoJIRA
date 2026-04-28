@@ -86,24 +86,14 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 이슈 가져오기
-	issueKeys := bson.A{}
-	if arr, ok := prjDoc["issues"]; ok {
-		switch v := arr.(type) {
-		case bson.A:
-			issueKeys = v
-		case []interface{}:
-			issueKeys = bson.A(v)
-		}
-	}
-	if len(issueKeys) == 0 {
-		respondError(w, http.StatusBadRequest, "프로젝트에 등록된 이슈가 없습니다")
-		return
-	}
-
-	issues, err := db.FindAllIssues(ctx, bson.M{"key": bson.M{"$in": issueKeys}})
+	// 이슈 가져오기 (projectId 단일 소속)
+	issues, err := db.FindAllIssues(ctx, bson.M{"projectId": prjDoc["_id"]})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(issues) == 0 {
+		respondError(w, http.StatusBadRequest, "프로젝트에 등록된 이슈가 없습니다")
 		return
 	}
 
