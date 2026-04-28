@@ -7,6 +7,160 @@ import './AgentChat.css';
 const API = config.GOJIRA_API || config.API_BASE;
 const STREAM_API = config.AGENT_API || API;
 
+// ── <thinking> 태그 파서: 스트리밍 중 안전하게 thinking / response 분리 ──
+const OPEN_TAGS = ['<thinking>', '<think>'];
+const CLOSE_TAGS = ['</thinking>', '</think>'];
+
+function partialTagLen(s, tags) {
+  let max = 0;
+  for (const tag of tags) {
+    const maxLen = Math.min(tag.length - 1, s.length);
+    for (let len = maxLen; len > max; len--) {
+      if (s.slice(-len) === tag.slice(0, len)) { max = len; break; }
+    }
+  }
+  return max;
+}
+
+function splitContent(buf, startInThinking) {
+  const segs = [];
+  let cursor = 0;
+  let inThinking = startInThinking;
+  while (cursor < buf.length) {
+    const tags = inThinking ? CLOSE_TAGS : OPEN_TAGS;
+    let nextIdx = -1, matched = null;
+    for (const tag of tags) {
+      const idx = buf.indexOf(tag, cursor);
+      if (idx !== -1 && (nextIdx === -1 || idx < nextIdx)) { nextIdx = idx; matched = tag; }
+    }
+    if (nextIdx === -1) {
+      const rest = buf.slice(cursor);
+      const partial = partialTagLen(rest, tags);
+      const emit = rest.length - partial;
+      if (emit > 0) segs.push({ type: inThinking ? 'thinking' : 'response', text: rest.slice(0, emit) });
+      return { segments: segs, remainder: rest.slice(emit), inThinking };
+    }
+    if (nextIdx > cursor) segs.push({ type: inThinking ? 'thinking' : 'response', text: buf.slice(cursor, nextIdx) });
+    cursor = nextIdx + matched.length;
+    inThinking = !inThinking;
+  }
+  return { segments: segs, remainder: '', inThinking };
+}
+
+function formatParams(params) {
+  return Object.entries(params || {}).map(([k, v]) => {
+    const str = typeof v === 'string' ? v : JSON.stringify(v);
+    const short = str.length > 40 ? str.slice(0, 40) + '…' : str;
+    return `${k}=${short}`;
+  }).join(', ');
+}
+
+function mergeSegments(existing, incoming) {
+  const out = [...existing];
+  for (const s of incoming) {
+    const last = out[out.length - 1];
+    if (last && last.type === s.type && (s.type === 'thinking' || s.type === 'response')) {
+      out[out.length - 1] = { ...last, text: (last.text || '') + (s.text || '') };
+    } else {
+      out.push({ ...s });
+    }
+  }
+  return out;
+}
+
+function stepsToSegments(steps) {
+  let segs = [];
+  let inThinking = false;
+  let pendingContent = '';
+  for (const s of steps || []) {
+    if (s.type === 'reasoning') {
+      const txt = s.data?.content || '';
+      if (txt) segs = mergeSegments(segs, [{ type: 'thinking', text: txt.endsWith('\n') ? txt : txt + '\n' }]);
+    } else if (s.type === 'tool_call') {
+      segs.push({ type: 'action', tool: s.data?.tool || '?', params: s.data?.params || {}, status: 'running' });
+    } else if (s.type === 'tool_result') {
+      let i = segs.length - 1;
+      while (i >= 0 && !(segs[i].type === 'action' && segs[i].status === 'running')) i--;
+      const patch = {
+        status: s.data?.status === 'success' ? 'ok' : 'err',
+        summary: s.data?.summary || '',
+        detail: s.data?.detail || '',
+      };
+      if (i >= 0) segs[i] = { ...segs[i], ...patch };
+      else segs.push({ type: 'action', tool: s.data?.tool || '?', params: {}, ...patch });
+    } else if (s.type === 'content') {
+      const combined = pendingContent + (s.data?.text || '');
+      const { segments, remainder, inThinking: next } = splitContent(combined, inThinking);
+      pendingContent = remainder;
+      inThinking = next;
+      segs = mergeSegments(segs, segments);
+    } else if (s.type === 'error') {
+      segs = mergeSegments(segs, [{ type: 'response', text: `\n[ERROR] ${s.data?.message || ''}\n` }]);
+    }
+  }
+  if (pendingContent) {
+    segs = mergeSegments(segs, [{ type: inThinking ? 'thinking' : 'response', text: pendingContent }]);
+  }
+  return segs;
+}
+
+function contentToSegments(content) {
+  if (!content) return [];
+  const { segments } = splitContent(content, false);
+  return mergeSegments([], segments);
+}
+
+// OpenCode 원본 parts → segments 변환. 저장 포맷이 OpenCode native 로 바뀌면서 추가.
+function partsToSegments(parts) {
+  let segs = [];
+  let inThinking = false;
+  let pendingText = '';
+  for (const p of parts || []) {
+    const t = p.type;
+    if (t === 'reasoning') {
+      // text 구간이 남아있으면 먼저 flush
+      if (pendingText) {
+        const r = splitContent(pendingText, inThinking);
+        pendingText = r.remainder;
+        inThinking = r.inThinking;
+        segs = mergeSegments(segs, r.segments);
+      }
+      const txt = p.text || '';
+      if (txt) segs = mergeSegments(segs, [{ type: 'thinking', text: txt.endsWith('\n') ? txt : txt + '\n' }]);
+    } else if (t === 'text') {
+      pendingText += (p.text || '');
+    } else if (t === 'tool') {
+      if (pendingText) {
+        const r = splitContent(pendingText, inThinking);
+        pendingText = r.remainder;
+        inThinking = r.inThinking;
+        segs = mergeSegments(segs, r.segments);
+      }
+      const state = p.state || {};
+      const status = state.status;
+      const tool = p.tool || '?';
+      const params = state.input || {};
+      if (status === 'completed') {
+        const out = state.output;
+        const outStr = typeof out === 'string' ? out : (out ? JSON.stringify(out) : '');
+        const summary = outStr.length > 200 ? outStr.slice(0, 200) + '...' : outStr;
+        const detail = outStr.length > 500 ? outStr.slice(0, 500) : outStr;
+        segs.push({ type: 'action', tool, params, status: 'ok', summary, detail });
+      } else if (status === 'error') {
+        const err = String(state.error || 'unknown');
+        segs.push({ type: 'action', tool, params, status: 'err', summary: err.slice(0, 200), detail: err });
+      } else {
+        segs.push({ type: 'action', tool, params, status: 'running' });
+      }
+    }
+    // step-start, step-finish 는 무시
+  }
+  if (pendingText) {
+    segs = mergeSegments(segs, [{ type: inThinking ? 'thinking' : 'response', text: pendingText }]);
+  }
+  return segs;
+}
+
 export default function AgentChat({ user, authority, context, onClose, standalone, autoMessage, newSession, interviewPrompt, continueTo }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -21,6 +175,30 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const abortRef = useRef(null);
+  const [showThinking, setShowThinking] = useState(true);
+  // 폴링 기반 대기 상태 (서버 타임아웃 제거 후 UI 가 관리)
+  const [permissionPending, setPermissionPending] = useState(false);
+  const [stuckSince, setStuckSince] = useState(0);  // 정체 시작 시각(ms) — 0 이면 정체 아님
+
+  async function handleCancel() {
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
+    // stale _streaming 플래그 클리어 — 다음 턴이 이 메시지에 흘러들지 않게
+    setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+    setPermissionPending(false);
+    setStuckSince(0);
+    if (sessionId) {
+      try {
+        await fetch(`${STREAM_API}/Agent/session/${sessionId}/cancel`, {
+          method: 'POST',
+          headers: { 'X-User-Id': user || '' },
+        });
+      } catch(_){}
+    }
+    setLoading(false);
+  }
 
   // LLM 모델 선택 상태
   const [llmActive, setLlmActive] = useState('');
@@ -35,21 +213,42 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const isMaster = authority && (authority.USR || 0) >= 15;
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: loading ? 'auto' : 'smooth' });
+  }, [messages, loading]);
 
   const loadSession = useCallback(async (sid) => {
     if (!sid) return;
     try {
-      const res = await fetch(`${API}/Agent/session/${sid}`, {
+      const res = await fetch(`${STREAM_API}/Agent/session/${sid}`, {
         headers: { 'X-User-Id': user || '' },
       });
       if (res.ok) {
         const data = await res.json();
-        const msgs = (data.messages || []).map(m => {
-          const msg = m.role ? m : Object.fromEntries(Object.entries(m));
-          return { role: msg.role, content: msg.content, actions: msg.actions, suggestions: msg.suggestions };
-        }).filter(m => m.role && m.content);
+        const raw = data.messages || [];
+        const msgs = [];
+        for (let i = 0; i < raw.length; i++) {
+          const m = raw[i].role ? raw[i] : Object.fromEntries(Object.entries(raw[i]));
+          if (m.role === 'assistant' && Array.isArray(m.parts)) {
+            // 새 포맷: OpenCode 원본 parts 를 직접 렌더
+            const segs = partsToSegments(m.parts);
+            if (segs.length) msgs.push({ role: 'assistant', segments: segs });
+          } else if (m.role === 'process') {
+            // 레거시 포맷 호환
+            const segs = stepsToSegments(m.steps || []);
+            const next = raw[i + 1];
+            if (next && next.role === 'assistant') {
+              i++;
+              if (segs.length) msgs.push({ role: 'assistant', segments: segs, actions: next.actions, suggestions: next.suggestions });
+            } else if (segs.length) {
+              msgs.push({ role: 'assistant', segments: segs });
+            }
+          } else if (m.role === 'assistant') {
+            if (!m.content) continue;
+            msgs.push({ role: 'assistant', segments: contentToSegments(m.content), actions: m.actions, suggestions: m.suggestions });
+          } else if (m.content) {
+            msgs.push({ role: m.role, content: m.content });
+          }
+        }
         setMessages(msgs);
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
@@ -189,145 +388,212 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     return () => window.removeEventListener('message', onContinue);
   }, []);
 
-  async function handleSend() {
-    const text = input.trim();
-    if (!text || loading) return;
-    setInput('');
-    setMessages(prev => [
-      ...prev,
-      { role: 'user', content: text },
-      { role: 'process', steps: [], open: false },
-    ]);
-    setLoading(true);
+  function connectEventSource(sid) {
+    // 스트리밍 파서 상태 (assistant 메시지 단위)
+    let inThinking = false;
+    let pendingContent = '';
 
-    let contentBuf = '';
-    let finalActions = [];
-
-    function addStep(step) {
+    function updateStreaming(fn) {
       setMessages(prev => {
-        const idx = prev.findLastIndex(m => m.role === 'process');
-        if (idx === -1) return prev;
-        const proc = { ...prev[idx], steps: [...prev[idx].steps, step] };
-        return [...prev.slice(0, idx), proc, ...prev.slice(idx + 1)];
+        let idx = prev.length - 1;
+        while (idx >= 0 && !(prev[idx].role === 'assistant' && prev[idx]._streaming)) idx--;
+        if (idx < 0) {
+          const msg = { role: 'assistant', _streaming: true, segments: fn([]) };
+          return [...prev, msg];
+        }
+        const msg = prev[idx];
+        return [...prev.slice(0, idx), { ...msg, segments: fn(msg.segments || []) }, ...prev.slice(idx + 1)];
       });
     }
 
-    function handleSSE(type, data) {
-      const ts = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    function appendSegments(list) {
+      if (!list.length) return;
+      updateStreaming(segs => mergeSegments(segs, list));
+    }
+
+    function pushAction(action) {
+      updateStreaming(segs => [...segs, action]);
+    }
+
+    function patchLastRunningAction(patch) {
+      updateStreaming(segs => {
+        for (let i = segs.length - 1; i >= 0; i--) {
+          if (segs[i].type === 'action' && segs[i].status === 'running') {
+            return [...segs.slice(0, i), { ...segs[i], ...patch }, ...segs.slice(i + 1)];
+          }
+        }
+        return [...segs, { type: 'action', tool: '?', params: {}, ...patch }];
+      });
+    }
+
+    function handleContent(delta) {
+      const combined = pendingContent + (delta || '');
+      const { segments, remainder, inThinking: nextState } = splitContent(combined, inThinking);
+      pendingContent = remainder;
+      inThinking = nextState;
+      appendSegments(segments);
+    }
+
+    function handleEvt(type, data) {
       switch (type) {
         case 'session':
-          if (data.sessionId) {
-            setSessionId(data.sessionId);
-            sessionStorage.setItem('agent_sessionId', data.sessionId);
-          }
-          break;
         case 'thinking':
-          // thinking은 스피너 상태 유지 용도 (step에 추가하지 않음)
           break;
         case 'reasoning':
-          addStep({ type: 'reasoning', data, ts });
-          // Thought 단계는 별도 채팅 메시지로 노출 (모든 사용자 그룹)
-          // 마지막 Thought는 done 시점에 제거 (최종 답변과 중복 방지)
-          if ((data.step || 'thought') === 'thought' && data.content) {
-            setMessages(prev => [...prev, { role: 'thought', content: data.content }]);
-          }
+          if (data.content) appendSegments([{ type: 'thinking', text: data.content }]);
           break;
         case 'tool_call':
-          addStep({ type: 'tool_call', data, ts });
-          break;
-        case 'progress':
-          addStep({ type: 'progress', data, ts });
+          pushAction({ type: 'action', tool: data.tool, params: data.params || {}, status: 'running' });
           break;
         case 'tool_result':
-          addStep({ type: 'tool_result', data, ts });
-          // ui_navigate 등 _action이 있으면 메인 앱에 전달
-          if (data._action === 'navigate' && data._payload) {
-            // 같은 origin → BroadcastChannel
-            try { const ch = new BroadcastChannel('gojira-navigate'); ch.postMessage(data._payload); ch.close(); } catch {}
-            // 다른 origin (Platform-App↔GoJIRA-App) → window.opener.postMessage
-            if (window.opener) {
-              window.opener.postMessage({ type: 'gojira-navigate', ...data._payload }, '*');
-            }
-          }
+          patchLastRunningAction({
+            status: data.status === 'success' ? 'ok' : 'err',
+            summary: data.summary || '',
+            detail: data.detail || '',
+          });
           break;
         case 'content':
-          contentBuf += data.text;
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last && last._streaming) {
-              return [...prev.slice(0, -1), { ...last, content: contentBuf }];
-            }
-            return [...prev, { role: 'assistant', content: contentBuf, _streaming: true }];
-          });
+          handleContent(data.text);
           break;
         case 'done':
-          finalActions = data.actions || [];
-          setMessages(prev => {
-            // 1) streaming 메시지 제거
-            let next = prev.filter(m => !m._streaming);
-            // 2) 마지막 thought 메시지 제거 (최종 답변과 중복될 가능성 차단)
-            const lastThoughtIdx = next.map(m => m.role).lastIndexOf('thought');
-            if (lastThoughtIdx >= 0) {
-              next = [...next.slice(0, lastThoughtIdx), ...next.slice(lastThoughtIdx + 1)];
-            }
-            // 3) 작업 과정 접힘 유지
-            next = next.map(m =>
-              m.role === 'process' && m.steps.length > 0 ? { ...m, open: false } : m
-            );
-            return [...next, {
-              role: 'assistant',
-              content: data.reply || contentBuf,
-              actions: finalActions,
-            }];
-          });
-          // applyToEditor / documentSaved: 자동 위임/연쇄 호출 결과까지 재귀 탐색하여
-          // 생성된 모든 문서를 편집기로 통지
-          if (finalActions.length > 0) {
-            const sent = new Set();
-            // 같은 origin 통신 채널 (같은 창에 임베드된 경우, 또는 popup 모두 커버)
-            let bc = null;
-            try { bc = new BroadcastChannel('gojira-doc'); } catch {}
-            const dispatch = (payload) => {
-              if (window.opener) {
-                try { window.opener.postMessage(payload, '*'); } catch {}
-              }
-              if (bc) {
-                try { bc.postMessage(payload); } catch {}
-              }
-              // 같은 창 내 다른 컴포넌트(임베디드 시) — window.postMessage 자체에도 전달
-              try { window.postMessage(payload, '*'); } catch {}
-            };
-            const visit = (node) => {
-              if (!node || typeof node !== 'object') return;
-              if (node.applyToEditor && node.filePath && node.content && !sent.has(node.filePath)) {
-                dispatch({
-                  type: 'gojira-doc-apply',
-                  filePath: node.filePath,
-                  content: node.content,
-                });
-                sent.add(node.filePath);
-              } else if (node.documentSaved && !sent.has(node.documentSaved)) {
-                dispatch({
-                  type: 'gojira-doc-reload',
-                  filePath: node.documentSaved,
-                });
-                sent.add(node.documentSaved);
-              }
-              for (const v of Object.values(node)) {
-                if (Array.isArray(v)) v.forEach(visit);
-                else if (v && typeof v === 'object') visit(v);
-              }
-            };
-            finalActions.forEach(a => visit(a.result));
-            if (bc) setTimeout(() => bc.close(), 200);
+          if (pendingContent) {
+            appendSegments([{ type: inThinking ? 'thinking' : 'response', text: pendingContent }]);
+            pendingContent = '';
           }
+          setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
           break;
         case 'error':
-          addStep({ type: 'error', data, ts });
+          appendSegments([{ type: 'response', text: `\n[ERROR] ${data.message || ''}\n` }]);
           break;
-        default: break;
+        default:
+          break;
       }
     }
+
+    setLoading(true);
+    return new Promise((resolve) => {
+      // 이벤트-침묵 + 상태 폴링 (서버 타임아웃 없음) + SSE 끊김 자동 재연결 + done 시 세션 재로드
+      const SILENCE_MS = 10_000;
+      const POLL_INTERVAL_MS = 1_000;
+      const STUCK_THRESHOLD_MS = 30_000;
+      let silenceTimer = null;
+      let pollTimer = null;
+      let lastEventAt = Date.now();
+      let lastEventId = 0;         // id: 헤더로 받은 마지막 이벤트 ID — 재연결용
+      let finished = false;
+      let es = null;
+
+      const evtTypes = ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'];
+
+      function openEventSource() {
+        const evtUrl = `${STREAM_API}/Agent/session/${sid}/events` + (lastEventId ? `?lastEventId=${lastEventId}` : '');
+        const source = new EventSource(evtUrl);
+        evtTypes.forEach(t => source.addEventListener(t, onEvent));
+        source.onerror = () => {
+          // CLOSED 상태는 재연결 실패. 폴링이 in-progress 판정하면 수동 재연결로 이어진다.
+          // 여기서 곧바로 finish 하지 않음 (서버가 아직 진행 중일 수 있음).
+        };
+        return source;
+      }
+
+      async function finish(local) {
+        if (finished) return;
+        finished = true;
+        if (silenceTimer) clearTimeout(silenceTimer);
+        if (pollTimer) clearInterval(pollTimer);
+        if (es) { try { es.close(); } catch(_){} }
+        setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+        setPermissionPending(false);
+        setStuckSince(0);
+        // done 확정 시 Mongo 최신 상태로 대화창 재구성 — SSE 누락 이벤트 복구
+        if (local === 'poll-stop' || local === 'done-event' || local === 'es-closed') {
+          try { await loadSession(sid); } catch(_){}
+        }
+        setLoading(false);
+        resolve();
+      }
+
+      function maybeReconnect() {
+        if (finished) return;
+        if (!es || es.readyState === 2 /* CLOSED */) {
+          try { if (es) es.close(); } catch(_){}
+          es = openEventSource();
+        }
+      }
+
+      async function pollOnce() {
+        try {
+          const r = await fetch(`${STREAM_API}/Agent/session/${sid}/state`, {
+            headers: { 'X-User-Id': user || '' },
+          });
+          if (!r.ok) return;
+          const s = await r.json();
+          if (!s.active) { finish('inactive'); return; }
+          if (s.finish && ['stop','end_turn','length','content-filter'].includes(s.finish)) {
+            finish('poll-stop'); return;
+          }
+          setPermissionPending(!!s.hasPermissionPending);
+          if (s.hasPermissionPending) {
+            setStuckSince(0);
+            maybeReconnect();
+            return;
+          }
+          // in-progress: SSE 끊겼으면 재연결, 장기 정체면 힌트
+          maybeReconnect();
+          const stuckFor = s.lastActivityAt ? (Date.now() - s.lastActivityAt) : 0;
+          if (stuckFor > STUCK_THRESHOLD_MS) {
+            setStuckSince(prev => prev || Date.now());
+          } else {
+            setStuckSince(0);
+          }
+        } catch {}
+      }
+
+      function startPolling() {
+        if (pollTimer || finished) return;
+        pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+        pollOnce();
+      }
+
+      function armSilenceTimer() {
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(startPolling, SILENCE_MS);
+      }
+
+      abortRef.current = { abort: () => finish('abort') };
+
+      function onEvent(e) {
+        lastEventAt = Date.now();
+        if (e.lastEventId) {
+          const n = parseInt(e.lastEventId, 10);
+          if (!isNaN(n)) lastEventId = n;
+        }
+        armSilenceTimer();
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        setPermissionPending(false);
+        setStuckSince(0);
+        try { handleEvt(e.type, JSON.parse(e.data)); } catch {}
+        if (e.type === 'done') finish('done-event');
+      }
+
+      es = openEventSource();
+      armSilenceTimer();
+    });
+  }
+
+  async function handleSend() {
+    const text = input.trim();
+    if (!text) return;
+    // 대화 중이면 기존 스트림 정리 (subscriber 는 chat/send 의 reset_subscriber 가 처리)
+    if (loading && abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
+    setInput('');
+    // 이전 턴 stale _streaming 플래그 클리어 후 user 메시지 append
+    setMessages(prev => [
+      ...prev.map(m => m._streaming ? { ...m, _streaming: false } : m),
+      { role: 'user', content: text },
+    ]);
 
     // 인터뷰 모드: 첫 전송 시 인터뷰 질문 + 답변을 묶어서 전송
     let sendText = text;
@@ -344,51 +610,21 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     }
 
     try {
-      const res = await fetch(`${STREAM_API}/Agent/chat/stream`, {
+      // 1) 메시지 전송 (즉시 반환)
+      const sendRes = await fetch(`${STREAM_API}/Agent/chat/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
         body: JSON.stringify({ sessionId, message: sendText, context: sendContext }),
       });
+      if (!sendRes.ok) throw new Error(`전송 실패: ${sendRes.status}`);
+      const sendData = await sendRes.json();
+      const activeSid = sendData.sessionId;
+      if (activeSid) { setSessionId(activeSid); sessionStorage.setItem('agent_sessionId', activeSid); }
 
-      if (!res.ok || !res.body) {
-        const fb = await fetch(`${API}/Agent/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-          body: JSON.stringify({ sessionId, message: sendText, context: sendContext }),
-        });
-        const data = await fb.json();
-        if (data.sessionId) { setSessionId(data.sessionId); sessionStorage.setItem('agent_sessionId', data.sessionId); }
-        setMessages(prev => [
-          ...prev.filter(m => m.role !== 'process' || m.steps.length > 0),
-          { role: 'assistant', content: data.reply, actions: data.actions, suggestions: data.suggestions },
-        ]);
-        setLoading(false);
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        let eventType = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) { eventType = line.slice(7).trim(); }
-          else if (line.startsWith('data: ') && eventType) {
-            try { handleSSE(eventType, JSON.parse(line.slice(6))); } catch {}
-            eventType = '';
-          }
-        }
-      }
+      // 2) EventSource 로 이벤트 수신 (재사용 가능한 connectEventSource)
+      await connectEventSource(activeSid);
     } catch (err) {
-      setMessages(prev => {
-        const filtered = prev.filter(m => m.role !== 'process' || m.steps.length > 0);
-        return [...filtered, { role: 'assistant', content: `연결 오류: ${err.message}` }];
-      });
+      setMessages(prev => [...prev, { role: 'assistant', content: `연결 오류: ${err.message}` }]);
     }
     setLoading(false);
   }
@@ -400,10 +636,62 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
+  async function handleReconnect() {
+    if (!sessionId) return;
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
+    setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+
+    // Mongo 에서 저장 상태 다시 로드 (완료된 턴들 정확히)
+    let inProgress = false;
+    try {
+      const res = await fetch(`${STREAM_API}/Agent/session/${sessionId}`, { headers: { 'X-User-Id': user || '' } });
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data.messages || [];
+        const msgs = [];
+        for (let i = 0; i < raw.length; i++) {
+          const m = raw[i].role ? raw[i] : Object.fromEntries(Object.entries(raw[i]));
+          if (m.role === 'assistant' && Array.isArray(m.parts)) {
+            const segs = partsToSegments(m.parts);
+            if (segs.length) msgs.push({ role: 'assistant', segments: segs });
+          } else if (m.role === 'process') {
+            const segs = stepsToSegments(m.steps || []);
+            const next = raw[i + 1];
+            if (next && next.role === 'assistant') {
+              i++;
+              if (segs.length) msgs.push({ role: 'assistant', segments: segs, actions: next.actions, suggestions: next.suggestions });
+            } else if (segs.length) {
+              msgs.push({ role: 'assistant', segments: segs });
+            }
+          } else if (m.role === 'assistant') {
+            if (!m.content) continue;
+            msgs.push({ role: 'assistant', segments: contentToSegments(m.content), actions: m.actions, suggestions: m.suggestions });
+          } else if (m.content) {
+            msgs.push({ role: m.role, content: m.content });
+          }
+        }
+        setMessages(msgs);
+        // 턴 진행 중 판정: Mongo 의 마지막 원본 메시지가 user 면 아직 assistant 가 저장 안 됨 = 진행 중
+        const lastRaw = raw[raw.length - 1];
+        inProgress = !!(lastRaw && lastRaw.role === 'user');
+      }
+    } catch(_) {}
+
+    // 진행 중인 턴만 EventSource 재연결 (완료 턴 재생으로 인한 중복 방지).
+    // 완료 턴이면 loading 을 내려서 '추론중' / 중지 버튼 stuck 상태 해소.
+    if (inProgress) {
+      await connectEventSource(sessionId);
+    } else {
+      setLoading(false);
+    }
+  }
+
   async function loadSessions(query) {
     const q = query ? `?q=${encodeURIComponent(query)}` : '';
     try {
-      const res = await fetch(`${API}/Agent/sessions${q}`, { headers: { 'X-User-Id': user || '' } });
+      const res = await fetch(`${STREAM_API}/Agent/sessions${q}`, { headers: { 'X-User-Id': user || '' } });
       if (res.ok) setSessions(await res.json());
     } catch {}
   }
@@ -414,129 +702,11 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   function handleKeyDown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }
   function handleSuggestion(text) { setInput(text); setTimeout(() => inputRef.current?.focus(), 0); }
 
-  function toggleProcess(idx) {
-    setMessages(prev => prev.map((m, i) => i === idx ? { ...m, open: !m.open } : m));
-  }
-
-  // ─── 디버그 상세(detail) 접기 ───
-  function toggleDetail(msgIdx, stepIdx) {
+  function toggleAction(msgIdx, segIdx) {
     setMessages(prev => prev.map((m, i) => {
-      if (i !== msgIdx || m.role !== 'process') return m;
-      const steps = m.steps.map((s, j) => j === stepIdx ? { ...s, detailOpen: !s.detailOpen } : s);
-      return { ...m, steps };
+      if (i !== msgIdx || !m.segments) return m;
+      return { ...m, segments: m.segments.map((s, j) => j === segIdx ? { ...s, open: !s.open } : s) };
     }));
-  }
-
-  function renderProcess(msg, idx) {
-    const steps = msg.steps || [];
-    const toolCount = steps.filter(s => s.type === 'tool_result').length;
-    const isRunning = loading && !messages.some(m => m._streaming) && idx === messages.findLastIndex(m => m.role === 'process');
-
-    // 일반 사용자: 스피너 + 진행 메시지(progress 단계만) 표시
-    if (!isMaster) {
-      const progressSteps = steps.filter(s => s.type === 'progress');
-      if (!isRunning && progressSteps.length === 0) return null;
-      return (
-        <div className="ac-process">
-          <div className="ac-proc-header">
-            {isRunning && <span className="ac-proc-spinner" />}
-            <span className="ac-proc-label">{isRunning ? '작업 중...' : '완료'}</span>
-          </div>
-          {progressSteps.length > 0 && (
-            <div className="ac-proc-body">
-              {progressSteps.map((s, i) => (
-                <div key={i} className="ac-ps-line">
-                  <span className="ac-ps-text">• {s.data.message}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // Master: 전체 디버그 뷰
-    return (
-      <div className="ac-process">
-        <div className="ac-proc-header" onClick={() => toggleProcess(idx)}>
-          {isRunning
-            ? <span className="ac-proc-spinner" />
-            : <span className="ac-proc-arrow">{msg.open ? '\u25BC' : '\u25B6'}</span>
-          }
-          <span className="ac-proc-label">{isRunning ? '작업 중...' : '작업 과정'}</span>
-          {toolCount > 0 && <span className="ac-proc-badge">{toolCount} tools</span>}
-        </div>
-        {msg.open && (
-          <div className="ac-proc-body">
-            {steps.map((step, i) => (
-              <div key={i} className={`ac-proc-step ac-ps-${step.type}`}>
-                {step.type === 'reasoning' && (
-                  <div className={`ac-ps-line ac-ps-reasoning ac-ps-${step.data.step || 'thought'}`}>
-                    <span className={`ac-ps-tag ${
-                      step.data.step === 'action' ? 'ac-tag-action' :
-                      step.data.step === 'observation' ? 'ac-tag-obs' :
-                      step.data.step === 'answer' ? 'ac-tag-answer' :
-                      'ac-tag-reason'
-                    }`}>
-                      {{ thought: 'Thought', action: 'Action', observation: 'Observation', answer: 'Answer' }[step.data.step] || 'Thought'}
-                    </span>
-                    <span className="ac-ps-text">{step.data.content}</span>
-                  </div>
-                )}
-                {step.type === 'progress' && (
-                  <div className="ac-ps-line">
-                    <span className="ac-ps-tag ac-tag-action">PROG</span>
-                    <span className="ac-ps-text">
-                      <strong>{step.data.stage}</strong> — {step.data.message}
-                    </span>
-                    <span className="ac-ps-ts">{step.ts}</span>
-                  </div>
-                )}
-                {step.type === 'tool_call' && (
-                  <div className="ac-ps-line">
-                    <span className="ac-ps-tag ac-tag-call">CALL</span>
-                    <span className="ac-ps-text">
-                      <strong>{step.data.tool}</strong>
-                      {Object.keys(step.data.params || {}).length > 0 && (
-                        <span className="ac-ps-params">
-                          ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})
-                        </span>
-                      )}
-                    </span>
-                    <span className="ac-ps-ts">{step.ts}</span>
-                  </div>
-                )}
-                {step.type === 'tool_result' && (
-                  <div className="ac-ps-result-wrap">
-                    <div className="ac-ps-line" onClick={() => toggleDetail(idx, i)} style={{cursor:'pointer'}}>
-                      <span className={`ac-ps-tag ${step.data.status === 'success' ? 'ac-tag-ok' : 'ac-tag-err'}`}>
-                        {step.data.status === 'success' ? 'OK' : 'ERR'}
-                      </span>
-                      <span className="ac-ps-text">
-                        {step.data.tool} &rarr; {step.data.summary}
-                      </span>
-                      <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
-                      {step.data.detail && (
-                        <span className="ac-ps-expand">{step.detailOpen ? '\u25BC' : '...'}</span>
-                      )}
-                    </div>
-                    {step.detailOpen && step.data.detail && (
-                      <pre className="ac-ps-detail">{step.data.detail}</pre>
-                    )}
-                  </div>
-                )}
-                {step.type === 'error' && (
-                  <div className="ac-ps-line">
-                    <span className="ac-ps-tag ac-tag-err">ERR</span>
-                    <span className="ac-ps-text">{step.data.message}</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
   }
 
   return (
@@ -604,6 +774,29 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             </div>
           )}
           <div className="ac-header-btns">
+            <button className="ac-header-btn" onClick={handleReconnect}
+              title="세션 재연결 (SSE 끊고 다시 연결)" style={{opacity: sessionId ? 1 : 0.3}}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 4v6h-6"/>
+                <path d="M1 20v-6h6"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+                <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+              </svg>
+            </button>
+            {isMaster && (
+              <button className="ac-header-btn" onClick={async () => {
+                if (!sessionId) return;
+                try {
+                  await fetch(`${STREAM_API}/Agent/session/${sessionId}/terminal`, { method: 'POST' });
+                } catch {}
+              }} title="터미널에서 OpenCode 세션 보기" style={{opacity: sessionId ? 1 : 0.3}}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <polyline points="7 9 10 12 7 15" />
+                  <line x1="13" y1="15" x2="17" y2="15" />
+                </svg>
+              </button>
+            )}
             <button className="ac-header-btn" onClick={handleShowHistory} title="대화 이력">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5A5.5 5.5 0 1 1 8 2.5a5.5 5.5 0 0 1 0 11zM8.5 4H7v4.5l3.5 2 .75-1.23L8.5 7.5V4z"/></svg>
             </button>
@@ -620,6 +813,16 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               <input className="ac-search-input" value={searchQuery} onChange={handleSearch}
                 placeholder="대화 내용 검색..." autoFocus />
             </div>
+            {sessions.length > 0 && (
+              <div style={{ textAlign: 'right', padding: '0 8px 6px' }}>
+                <button style={{ background: 'none', border: 'none', color: '#c33', cursor: 'pointer', fontSize: '12px' }}
+                  onClick={async () => {
+                    if (!window.confirm('모든 대화 이력을 삭제하시겠습니까?')) return;
+                    await fetch(`${STREAM_API}/Agent/sessions`, { method: 'DELETE', headers: { 'X-User-Id': user || '' } });
+                    setSessions([]); setSessionId(null); sessionStorage.removeItem('agent_sessionId'); setMessages([]);
+                  }}>전체 삭제</button>
+              </div>
+            )}
             <div className="ac-session-list">
               {sessions.length === 0 ? (
                 <div className="ac-empty">대화 이력이 없습니다</div>
@@ -627,7 +830,17 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 <div key={s.sessionId || s.id} className={`ac-session-item ${(s.sessionId || s.id) === sessionId ? 'ac-session-active' : ''}`}
                   onClick={() => handleSelectSession(s.sessionId || s.id)}>
                   <div className="ac-session-title">{s.title}</div>
-                  <div className="ac-session-date">{s.updatedAt}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="ac-session-date">{s.updatedAt}</div>
+                    <button style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '11px' }}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const sid = s.sessionId || s.id;
+                        await fetch(`${STREAM_API}/Agent/session/${sid}`, { method: 'DELETE', headers: { 'X-User-Id': user || '' } });
+                        setSessions(prev => prev.filter(x => (x.sessionId || x.id) !== sid));
+                        if (sid === sessionId) { setSessionId(null); sessionStorage.removeItem('agent_sessionId'); setMessages([]); }
+                      }}>삭제</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -647,28 +860,57 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 </div>
               )}
               {messages.map((msg, i) => {
-                if (msg.role === 'process') {
-                  const rendered = renderProcess(msg, i);
-                  return rendered ? <div key={i} className="ac-msg ac-msg-process">{rendered}</div> : null;
-                }
-                if (msg.role === 'thought') {
+                if (msg.role === 'user') {
                   return (
-                    <div key={i} className="ac-msg ac-msg-thought">
-                      <div className="ac-msg-content">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
-                      </div>
+                    <div key={i} className="ac-msg ac-msg-user">
+                      <div className="ac-msg-content"><span>{msg.content}</span></div>
                     </div>
                   );
                 }
+                // assistant
+                const segments = msg.segments || (msg.content ? [{ type: 'response', text: msg.content }] : []);
                 return (
-                  <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
-                    <div className="ac-msg-content">
-                      {msg.role === 'assistant' ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
-                      ) : (
-                        <span>{msg.content}</span>
-                      )}
-                    </div>
+                  <div key={i} className="ac-msg ac-msg-assistant">
+                    {segments.map((seg, j) => {
+                      if (seg.type === 'thinking') {
+                        if (!showThinking) return null;
+                        return (
+                          <div key={j} className="ac-seg-thinking">{seg.text}</div>
+                        );
+                      }
+                      if (seg.type === 'action') {
+                        if (!showThinking) return null;
+                        const statusLabel = seg.status === 'ok' ? 'OK' : seg.status === 'err' ? 'ERR' : '…';
+                        const statusCls = seg.status === 'ok' ? 'ac-seg-status-ok' : seg.status === 'err' ? 'ac-seg-status-err' : 'ac-seg-status-run';
+                        return (
+                          <div key={j} className="ac-seg-action">
+                            <div className="ac-seg-action-header" onClick={() => toggleAction(i, j)}>
+                              <span className="ac-seg-arrow">{seg.open ? '▼' : '▶'}</span>
+                              <code className="ac-seg-tool">{seg.tool}({formatParams(seg.params)})</code>
+                              <span className={`ac-seg-status ${statusCls}`}>{statusLabel}</span>
+                            </div>
+                            {seg.open && (seg.summary || seg.detail) && (
+                              <div className="ac-seg-action-body">
+                                {seg.summary && <div className="ac-seg-summary">{seg.summary}</div>}
+                                {seg.detail && <pre className="ac-seg-detail">{seg.detail}</pre>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      // response
+                      return (
+                        <div key={j} className="ac-msg-content ac-seg-response">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{seg.text || ''}</ReactMarkdown>
+                        </div>
+                      );
+                    })}
+                    {msg._streaming && (
+                      <div className="ac-seg-pending">
+                        <span className="ac-dot" /><span className="ac-dot" /><span className="ac-dot" />
+                        <span className="ac-seg-pending-label">추론 중...</span>
+                      </div>
+                    )}
                     {msg.actions && msg.actions.length > 0 && (
                       <div className="ac-actions">
                         {msg.actions.map((a, j) => (
@@ -689,13 +931,29 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                   </div>
                 );
               })}
-              {loading && !messages.some(m => m._streaming) && !messages.some(m => m.role === 'process') && (
+              {loading && !messages.some(m => m._streaming) && (
                 <div className="ac-msg ac-msg-assistant">
                   <div className="ac-msg-content ac-typing">생각하는 중...</div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
+            {(permissionPending || stuckSince > 0) && (
+              <div style={{
+                padding: '8px 12px', fontSize: 13, background: permissionPending ? '#fff7d6' : '#f3f4f6',
+                borderTop: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 12,
+              }}>
+                <span style={{ flex: 1, color: '#374151' }}>
+                  {permissionPending
+                    ? '⏸ OpenCode 가 권한 요청을 대기 중입니다. 터미널에서 `opencode attach` 로 승인하거나 아래 버튼으로 중단하세요.'
+                    : `⏳ ${Math.floor((Date.now() - stuckSince) / 1000)}초째 응답이 없습니다. 계속 기다리거나 완료 처리 가능합니다.`}
+                </span>
+                <button
+                  onClick={handleCancel}
+                  style={{ padding: '4px 10px', border: '1px solid #d1d5db', background: 'lightgray', color: '#000', cursor: 'pointer', fontSize: 12 }}
+                >완료 처리</button>
+              </div>
+            )}
             <div className="ac-input-resize"
               onMouseDown={e => {
                 e.preventDefault();
@@ -711,6 +969,19 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               }}
             />
             <div className="ac-input-area">
+              <button
+                onClick={() => setShowThinking(p => !p)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  padding: '2px 6px', marginRight: '4px', flexShrink: 0,
+                  display: 'inline-flex', alignItems: 'center',
+                }}
+                title={showThinking ? '추론/Action 감추기' : '추론/Action 보기'}
+              >
+                <img src="/icons/thinking-toggle.png" alt="toggle"
+                  style={{ width: 18, height: 18, opacity: showThinking ? 1 : 0.35, transition: 'opacity 0.15s' }}
+                />
+              </button>
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => {
                   setInput(e.target.value);
@@ -719,7 +990,10 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder="메시지를 입력하세요..." rows={1} />
-              <button className="ac-send" onClick={handleSend} disabled={loading || !input.trim()}>전송</button>
+              {loading && (
+                <button className="ac-send" onClick={handleCancel} style={{ background: '#c33', color: '#fff' }} title="현재 응답 중지">중지</button>
+              )}
+              <button className="ac-send" onClick={handleSend} disabled={!input.trim()} title={loading ? '현재 응답 중단 후 새 메시지 전송' : '전송'}>전송</button>
             </div>
           </>
         )}

@@ -16,7 +16,7 @@
 .ac-msg-user { align-self: flex-end; }
 .ac-msg-assistant { align-self: flex-start; }
 .ac-msg-user .ac-msg-content { background: #2c3e50; color: #fff; border-radius: 12px 12px 2px 12px; padding: 10px 14px; font-size: 13px; line-height: 1.5; }
-.ac-msg-assistant .ac-msg-content { background: #f5f5f5; color: #333; border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; line-height: 1.6; }
+.ac-msg-assistant .ac-msg-content { background: #e8ecef; color: #333; border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; line-height: 1.6; }
 .ac-msg-assistant .ac-msg-content p { margin: 4px 0; }
 .ac-msg-assistant .ac-msg-content table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
 .ac-msg-assistant .ac-msg-content th, .ac-msg-assistant .ac-msg-content td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }

@@ -43,7 +43,7 @@ func SeedAccountData() {
 	count, _ := OrgUnits().CountDocuments(ctx, bson.M{"_id": "org_root"})
 	if count == 0 {
 		insertDoc(ctx, OrgUnits(), bson.M{
-			"_id": "org_root", "code": "ROOT", "name": "Organization",
+			"_id": "org_root", "name": "Organization",
 			"type": "company", "parentOrgUnitId": "", "sortOrder": 0,
 		})
 		log.Println("seed: orgUnit ROOT created")

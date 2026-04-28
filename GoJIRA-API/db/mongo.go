@@ -217,6 +217,46 @@ func UpdateProjectField(ctx context.Context, jiraCode string, field string, valu
 	return err
 }
 
+// UpdateProjectFields merges multiple fields into the project document with $set.
+// Keys may use dot notation (e.g. "archSettings.normalizedAttributes") for nested paths.
+// Returns (matched bool, error). matched=false when no project with the given code exists.
+func UpdateProjectFields(ctx context.Context, jiraCode string, fields bson.M) (bool, error) {
+	if len(fields) == 0 {
+		return true, nil
+	}
+	res, err := Projects().UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+		bson.M{"$set": fields},
+	)
+	if err != nil {
+		return false, err
+	}
+	return res.MatchedCount > 0, nil
+}
+
+// UnsetProjectField removes a single top-level field from the project document.
+// Used by reset flows that need a true absence (not a null value).
+func UnsetProjectField(ctx context.Context, jiraCode, field string) error {
+	_, err := Projects().UpdateOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+		bson.M{"$unset": bson.M{field: ""}},
+	)
+	return err
+}
+
+// DeleteProjectByCode removes the project document entirely from the projects
+// collection. Used by archive flows (deleteProject=true in reset). Returns
+// (matched bool, error). matched=false when no such project exists.
+func DeleteProjectByCode(ctx context.Context, jiraCode string) (bool, error) {
+	res, err := Projects().DeleteOne(ctx,
+		bson.M{"jiraCodes.main.jiraCode": jiraCode},
+	)
+	if err != nil {
+		return false, err
+	}
+	return res.DeletedCount > 0, nil
+}
+
 // AddIssueToProject adds an issue key to the project's issues array
 func AddIssueToProject(ctx context.Context, jiraCode string, issueKey string) error {
 	_, err := Projects().UpdateOne(ctx,

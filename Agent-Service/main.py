@@ -1,5 +1,6 @@
 """GoJIRA Agent Service — FastAPI 엔트리포인트."""
 
+import os
 import logging
 
 from fastapi import FastAPI
@@ -7,8 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from core.database import ensure_indexes
-from skills.registry import get_registry
-from routers.agent import router as agent_router
+
+USE_OPENCODE = os.environ.get("USE_OPENCODE_BRIDGE", "1") == "1"
+if USE_OPENCODE:
+    from opencode_bridge.router import router as agent_router
+else:
+    from skills.registry import get_registry  # legacy
+    from routers.agent import router as agent_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,10 +42,12 @@ app.include_router(agent_router)
 
 @app.on_event("startup")
 async def startup():
-    log.info("Agent Service 시작 (port=%d)", settings.agent_service_port)
+    mode = "opencode_bridge" if USE_OPENCODE else "legacy(ReACT)"
+    log.info("Agent Service 시작 (port=%d, mode=%s)", settings.agent_service_port, mode)
     ensure_indexes()
-    registry = get_registry()
-    log.info("스킬 %d개 로드 완료", len(registry._order))
+    if not USE_OPENCODE:
+        registry = get_registry()
+        log.info("스킬 %d개 로드 완료", len(registry._order))
 
 
 @app.get("/health")

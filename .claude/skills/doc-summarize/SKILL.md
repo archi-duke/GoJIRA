@@ -1,15 +1,33 @@
 ---
 name: doc-summarize
-description: GoJIRA 프로젝트의 설계문서를 요약합니다 (LLM 기반)
-argument-hint: "[project-code] --file FILE"
+description: GoJIRA 프로젝트의 설계문서를 에이전트가 직접 읽어 요약합니다.
 allowed-tools: Bash
 ---
 
-프로젝트의 설계문서를 LLM 기반으로 요약합니다.
+Platform-API `GET /DocRepo/{code}/file` 로 문서를 읽어 에이전트(LLM)가 직접 한국어 요약을 작성합니다.
 
-## 문서 요약
-!`gojira-cli doc summarize --project $0 --file "$1"`
+## 환경
+- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 
-결과를 한국어로 정리합니다:
-- 문서의 주요 내용과 목적을 요약합니다
-- 핵심 결정사항을 포함합니다
+## 인자
+- `CODE` — projectCode
+- `USER` — X-User-Id
+- `FILE` — 요약할 문서 경로
+- `REF` — (선택) 브랜치 (기본 `main`)
+
+```bash
+export CODE="GOJIRA3"
+export USER="batman"
+export FILE="architecture/architecture-integrated.md"
+export REF="${REF:-main}"
+export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+```
+
+## 문서 읽기
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "${FILE}"
+```
+
+## 요약 규칙
+- 문서의 목적 / 주요 섹션 / 핵심 결정사항을 한국어로 정리
+- 불필요한 원문 재출력 지양

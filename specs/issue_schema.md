@@ -65,18 +65,22 @@
 
 | 필드명 | 타입 | JIRA 필드 | 적용 | 설명 |
 |--------|------|-----------|------|------|
+| designLevel | string | - | ADSN+DDSN | 설계 수준 (`Architectural` / `Detailed`) |
+| designPoint | string | - | ADSN+DDSN | Design Point 이름 (설계 결정 대상) |
 | dmodel | string | customfield_18218 | ADSN | 디자인이 적용된 도메인 모델(또는 시스템)의 영역 |
-| archdiagram | string | customfield_18215 | ADSN | 디자인의 통합 구조 |
 | objectives | string | customfield_18206 | ADSN | 디자인의 주요 목표 |
+| approaches | string | - | ADSN+DDSN | 검토된 대안 목록 (JSON 문자열) |
+| decision | string | customfield_18211 | ADSN | 디자인 채택여부. 비어있지 않으면 최종 선택된 설계안 |
+| decisionRationale | string | - | ADSN+DDSN | 설계 결정 근거 (Driver 역추적 포함) |
 | pros | string | customfield_18207 | ADSN | 디자인의 장점 |
 | cons | string | customfield_18208 | ADSN | 디자인의 단점 |
 | score | string | customfield_18209 | ADSN | 디자인의 평가 점수 (주로 5점 또는 10점 기준) |
 | eval | string | customfield_18210 | ADSN | 디자인의 평가 내용 |
-| sensitivity | string | customfield_18212 | ADSN | 디자인이 악영향을 주는 Requirement과 내용. 현재 기준으로 Risk는 아니지만 조건이 변하면 Risk로 발전할 수 있는 내용 (Sensitive 양식 참조) |
-| nonrisk | string | customfield_18214 | ADSN | 디자인이 좋은 영향을 주는 Requirement과 내용 (사용안함, reserved) |
-| mitigation | string | customfield_18213 | ADSN | 디자인이 악영향을 감소시키는 대상 Risk 정보 (Mitigation 양식 참조) |
-| risk | string | customfield_18216 | ADSN | 디자인이 악영향을 주는 Requirement과 내용. 현재 기준으로 명확히 해당 요구사항을 달성하는데 장애가 확정적인 사항 (Risk 양식 참조) |
-| decision | string | customfield_18211 | ADSN | 디자인 채택여부. 이 필드가 비어있지 않으면 최종 선택된 설계안 (내용은 무관) |
+| tradeoffs | string | - | ADSN+DDSN | 트레이드오프 원문 (satam_analyze 전) |
+| sensitivity | string | customfield_18212 | ADSN | 조건 변화 시 Risk로 발전 가능한 사항 (Sensitive 양식 참조) |
+| risk | string | customfield_18216 | ADSN | 요구사항 달성에 확정적 장애 사항 (Risk 양식 참조) |
+| mitigation | string | customfield_18213 | ADSN | Risk 악영향 감소 대응 조치 (Mitigation 양식 참조) |
+| nonrisk | string | customfield_18214 | ADSN | 디자인이 좋은 영향을 주는 Requirement과 내용 (reserved) |
 | adiagram | string | customfield_18204 | ADSN+DDSN | 디자인의 구조 다이어그램(정적) |
 | bdiagram | string | customfield_18205 | ADSN+DDSN | 디자인의 동적 동작 다이어그램 |
 

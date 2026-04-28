@@ -315,34 +315,43 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	isOwnIssue := req.PrjID != "" && strings.HasPrefix(req.Key, req.PrjID+"-")
-
-	if isOwnIssue {
-		existing, _ := db.FindIssueByKey(ctx, req.Key)
-		subkey, _ := (existing)["subkey"].(string)
-		if subkey != "" {
-			if err := clients.DeleteFile(req.PrjID, issueYamlPath(subkey), fmt.Sprintf("[issue] delete %s", req.Key), user); err != nil {
-				log.Printf("YAML delete warn key=%s: %v", req.Key, err)
-			}
-		}
-		if err := db.DeleteIssueByKey(ctx, req.Key); err != nil {
-			respondError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		projects, _ := db.FindAllProjects(ctx, nil)
-		for _, prj := range projects {
-			code := extractJiraCode(prj)
-			if code != "" {
-				db.RemoveIssueFromProject(ctx, code, req.Key)
-			}
-		}
-	} else {
-		if req.PrjID != "" {
-			db.RemoveIssueFromProject(ctx, req.PrjID, req.Key)
-		}
+	if err := deleteIssueInternal(ctx, req.PrjID, req.Key, user); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
 	respondJSON(w, http.StatusOK, "issue deleted")
+}
+
+// deleteIssueInternal encapsulates the full delete flow: Gitea YAML + Mongo issues
+// collection + all projects' issues arrays. Called by IssueDeleteHandler (single key)
+// and ProjectResetHandler (bulk). Gitea YAML delete failure is logged but not fatal —
+// callers still succeed on Mongo-level delete.
+func deleteIssueInternal(ctx context.Context, code, key, user string) error {
+	isOwnIssue := code != "" && strings.HasPrefix(key, code+"-")
+
+	if isOwnIssue {
+		existing, _ := db.FindIssueByKey(ctx, key)
+		subkey, _ := existing["subkey"].(string)
+		if subkey != "" {
+			if err := clients.DeleteFile(code, issueYamlPath(subkey), fmt.Sprintf("[issue] delete %s", key), user); err != nil {
+				log.Printf("YAML delete warn key=%s: %v", key, err)
+			}
+		}
+		if err := db.DeleteIssueByKey(ctx, key); err != nil {
+			return err
+		}
+		projects, _ := db.FindAllProjects(ctx, nil)
+		for _, prj := range projects {
+			pcode := extractJiraCode(prj)
+			if pcode != "" {
+				db.RemoveIssueFromProject(ctx, pcode, key)
+			}
+		}
+	} else if code != "" {
+		db.RemoveIssueFromProject(ctx, code, key)
+	}
+	return nil
 }
 
 // ── 유틸 ──

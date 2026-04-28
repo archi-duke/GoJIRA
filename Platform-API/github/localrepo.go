@@ -39,6 +39,11 @@ func getRepoLock(owner, repo string) *sync.Mutex {
 }
 
 // git 명령 실행
+// GitCmd — 외부 패키지에서도 호출 가능한 git 명령 실행.
+func GitCmd(dir string, args ...string) (string, error) {
+	return gitCmd(dir, args...)
+}
+
 func gitCmd(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir

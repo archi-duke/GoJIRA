@@ -1,7 +1,8 @@
 // Package clients — 외부 서비스 HTTP 클라이언트.
 //
 // DocRepo: Platform-API 의 /DocRepo/{code}/* 엔드포인트 래퍼.
-// 이슈 YAML 등 git 원천 파일을 user 브랜치에 저장/삭제한다.
+// 이슈 YAML 등을 user 브랜치 worktree 에 저장/삭제한다.
+// Platform-API 가 로컬 worktree 에 직접 write (Gitea API push 없음).
 package clients
 
 import (
@@ -17,8 +18,7 @@ import (
 
 var docRepoHTTP = &http.Client{Timeout: 30 * time.Second}
 
-// SaveFile — PUT /DocRepo/{code}/file  (user 브랜치 커밋)
-// Platform-API 가 X-User-Id 헤더로 docs/{user} 브랜치를 식별한다.
+// SaveFile — PUT /DocRepo/{code}/file  (Platform-API 가 로컬 worktree 에 write)
 func SaveFile(code, path, content, message, user string) error {
 	if user == "" {
 		return fmt.Errorf("user required")
@@ -47,9 +47,7 @@ func SaveFile(code, path, content, message, user string) error {
 	return nil
 }
 
-// DeleteFile — DELETE /DocRepo/{code}/file  (user 브랜치)
-// Platform-API 는 path/message 를 JSON body 로 받는다.
-// 404 는 성공으로 취급 (이미 없음).
+// DeleteFile — DELETE /DocRepo/{code}/file  (Platform-API 가 로컬 worktree 에서 삭제)
 func DeleteFile(code, path, message, user string) error {
 	if user == "" {
 		return fmt.Errorf("user required")

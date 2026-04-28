@@ -155,6 +155,72 @@
   background: #1a6da0;
 }
 
+/* Milestone mini gantt */
+.dlg-ms-wrap {
+  position: relative;
+  margin: -6px 0 -4px;
+  padding-bottom: 4px;
+}
+.dlg-ms-svg {
+  display: block;
+  user-select: none;
+}
+.dlg-ms-line {
+  stroke: #cfd8dc;
+  stroke-width: 1.5;
+}
+.dlg-ms-g .dlg-ms-circle {
+  fill: #fff;
+  stroke: #888;
+  stroke-width: 1.5;
+  transition: stroke 0.1s, fill 0.1s;
+}
+.dlg-ms-g.editable {
+  cursor: pointer;
+}
+.dlg-ms-g.editable:hover .dlg-ms-circle {
+  stroke: #2980b9;
+}
+.dlg-ms-g.selected .dlg-ms-circle {
+  fill: #2980b9;
+  stroke: #1a6da0;
+}
+.dlg-ms-g.selected .dlg-ms-name {
+  fill: #2980b9;
+  font-weight: 700;
+}
+.dlg-ms-name {
+  font-size: 11px;
+  fill: #2c3e50;
+  font-weight: 600;
+}
+.dlg-ms-date {
+  font-size: 10px;
+  fill: #888;
+}
+.dlg-ms-edit-popup {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid #2980b9;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+.dlg-ms-edit-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #2980b9;
+}
+.dlg-ms-edit-input {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
 /* Auditors */
 .dlg-auditor-list {
   display: flex;

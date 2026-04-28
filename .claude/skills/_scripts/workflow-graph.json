@@ -1,0 +1,96 @@
+{
+  "_comment": "워크플로우 단계 의존 그래프 + 각 단계의 관심 필드 정의. drift-check.py 가 이 정의로 stage hash 를 계산.",
+  "stages": [
+    {
+      "id": "projdesc",
+      "label": "Project Description",
+      "doc": "business/project-description.md",
+      "issueTypes": [],
+      "fields": []
+    },
+    {
+      "id": "vos",
+      "label": "VOS",
+      "doc": null,
+      "issueTypes": ["VOS"],
+      "fields": ["key", "summary", "description", "client"]
+    },
+    {
+      "id": "usecase",
+      "label": "Use Case + Feature",
+      "doc": "business/use-cases.md",
+      "issueTypes": ["Feature"],
+      "fields": ["key", "summary", "description", "actor", "precondition", "basicflow", "alternativeflow", "exceptionflow", "postcondition"],
+      "linkFields": ["issueLinks"]
+    },
+    {
+      "id": "requirement",
+      "label": "Requirement",
+      "doc": "business/requirements.md",
+      "issueTypes": ["Requirement"],
+      "fields": ["key", "summary", "description", "reqtype", "qa", "measure", "source", "stimulus", "environment", "artifact", "response", "responseScenario"],
+      "linkFields": ["issueLinks"]
+    },
+    {
+      "id": "driver",
+      "label": "Architecture Driver",
+      "doc": "architecture/drivers.md",
+      "issueTypes": ["Requirement"],
+      "filter": {"driverSelected": true},
+      "fields": ["key", "qad", "qai", "priority", "importance", "difficulty", "labels"],
+      "archSettingsKeys": ["normalizedAttributes", "priorityWeight"]
+    },
+    {
+      "id": "style",
+      "label": "Architecture Style",
+      "doc": "architecture/architecture-style.md",
+      "issueTypes": ["Architectural Design"],
+      "filter": {"designPoint": "시스템 스타일 결정"},
+      "fields": ["key", "summary", "objectives", "approaches", "pros", "cons", "score", "eval", "decision", "decisionRationale"],
+      "archSettingsKeys": ["chosenStyles"]
+    },
+    {
+      "id": "design-decide",
+      "label": "Design Decisions",
+      "doc": "architecture/design-decisions.md",
+      "issueTypes": ["Architectural Design", "Detailed Design"],
+      "filterNot": {"designPoint": "시스템 스타일 결정"},
+      "fields": ["key", "summary", "designLevel", "designPoint", "objectives", "approaches", "pros", "cons", "score", "eval", "decision", "decisionRationale"],
+      "linkFields": ["issueLinks"]
+    },
+    {
+      "id": "design-integrate",
+      "label": "Architecture Integration",
+      "doc": [
+        "architecture/architecture-integrated.md",
+        "architecture/architecture-integrated/logical.md",
+        "architecture/architecture-integrated/process.md",
+        "architecture/architecture-integrated/deployment.md",
+        "architecture/architecture-integrated/development.md"
+      ],
+      "issueTypes": [],
+      "fields": [],
+      "archSettingsKeys": ["designIntegrated", "viewsIncluded"]
+    },
+    {
+      "id": "satam",
+      "label": "SATAM",
+      "doc": null,
+      "issueTypes": ["Architectural Design"],
+      "filterNot": {"designPoint": "시스템 스타일 결정"},
+      "fields": ["key", "risk", "sensitivity", "mitigation"],
+      "archSettingsKeys": ["satamDone"]
+    }
+  ],
+  "dependencies": {
+    "projdesc": ["vos"],
+    "vos": ["usecase"],
+    "usecase": ["requirement"],
+    "requirement": ["driver"],
+    "driver": ["style"],
+    "style": ["design-decide"],
+    "design-decide": ["design-integrate", "satam"],
+    "design-integrate": [],
+    "satam": []
+  }
+}

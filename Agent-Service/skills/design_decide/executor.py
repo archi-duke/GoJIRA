@@ -1,45 +1,81 @@
-"""설계 결정 스킬 — Driver + Style → ADSN/DDSN + contains 링크 + architecture/design-decisions.md."""
+"""설계 결정 스킬 v2 — SKILL.md 통합 self-loop.
+
+LLM 이 generate → self-critique (Driver 커버리지 + ADR 품질) → revise → best-so-far 를
+단일 호출로 수행. Python 은 IO, 이슈 생성, 링크, docId 치환, 문서 저장만 담당.
+"""
 
 import os
 import re
 import json
-from typing import Dict, Any, List
+from typing import Any, Dict, Optional
 
 from core.database import issues, projects
+from core.llm import call_llm
 from clients.platform_api import PlatformClient
 from skills.helpers import (
     create_issue, link_issues, dispatch_by_mode,
-    load_prompt,
     build_docid_subkey_map, substitute_doc_ids,
 )
-from skills.critique import iterate_generate_critique, trail_summary, load_step_policy
+from skills.critique import load_step_policy
 
 
 _SKILL_DIR = os.path.dirname(__file__)
+_SKILL_MD_PATH = os.path.join(_SKILL_DIR, "SKILL.md")
 
 _DESIGN_LEVEL_TO_TYPE = {
     "Architectural": "Architectural Design",
     "Detailed": "Detailed Design",
 }
 
-# 설계 이슈 저장용 extras
+# 설계 이슈 저장용 extras 필드
 _COMMON_FIELDS = ("designPoint", "approaches", "decision", "decisionRationale",
                   "tradeoffs", "risk", "sensitivity", "pros", "cons")
 
 
-def _extract_json_obj(raw: str):
+def _load_skill_md() -> str:
+    with open(_SKILL_MD_PATH, encoding="utf-8") as f:
+        text = f.read()
+    m = re.match(r"^---\n.*?\n---\n(.*)$", text, re.DOTALL)
+    return m.group(1) if m else text
+
+
+def _build_prompt(skill_body: str, code: str, normalized_json: str,
+                  chosen: dict, drivers_json: str, driver_count: int,
+                  req_json: str, req_count: int,
+                  existing_design_json: str, design_count: int,
+                  criteria: str, policy_text: str) -> str:
+    return (
+        f"{skill_body}\n\n"
+        f"---\n\n"
+        f"## 주입 데이터\n\n"
+        f"### projectCode\n{code}\n\n"
+        f"### normalized_json\n```json\n{normalized_json}\n```\n\n"
+        f"### chosen_styles\n"
+        f"- Primary: {', '.join(chosen.get('primary') or []) or '(없음)'}\n"
+        f"- Secondary: {', '.join(chosen.get('secondary') or []) or '(없음)'}\n"
+        f"- Supporting: {', '.join(chosen.get('supporting') or []) or '(없음)'}\n\n"
+        f"### drivers ({driver_count}건, priority 순)\n```json\n{drivers_json}\n```\n\n"
+        f"### req_list (Requirement 전체, {req_count}건 — relatedRequirements 유효 키 풀)\n```json\n{req_json}\n```\n\n"
+        f"### existing_designs ({design_count}건)\n```json\n{existing_design_json}\n```\n\n"
+        f"### criteria\n{criteria}\n\n"
+        f"### policy\n{policy_text}\n\n"
+        f"이제 위 `실행 흐름` 섹션대로 수행하고 지정된 JSON 하나만 출력하라."
+    )
+
+
+def _extract_json_obj(raw: str) -> Optional[Dict[str, Any]]:
+    raw = raw.strip()
     try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else None
+        return json.loads(raw)
     except json.JSONDecodeError:
-        m = re.search(r'\{.*\}', raw, re.DOTALL)
-        if m:
-            try:
-                data = json.loads(m.group())
-                return data if isinstance(data, dict) else None
-            except json.JSONDecodeError:
-                return None
-    return None
+        pass
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group())
+    except json.JSONDecodeError:
+        return None
 
 
 def _item_extras(item: dict) -> dict:
@@ -48,7 +84,6 @@ def _item_extras(item: dict) -> dict:
         v = item.get(f)
         if v is None or v == "":
             continue
-        # approaches 는 리스트/객체일 수 있어 JSON 직렬화
         extras[f] = v if isinstance(v, (str, int, float, bool)) else json.dumps(v, ensure_ascii=False)
     return extras
 
@@ -87,12 +122,12 @@ async def execute(params: dict, user: str) -> dict:
             "message": "선행 산출물이 부족합니다 (drivers / chosenStyles / normalizedAttributes). style_define 을 먼저 실행하세요.",
         }
 
-    # 전체 Requirement (relatedRequirements 유효성 검증용)
     req_list = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"}, "issueType": "Requirement"},
         {"key": 1, "subkey": 1, "summary": 1, "reqtype": 1, "_id": 0},
     ))
     valid_req_keys = {r["key"] for r in req_list}
+    driver_keys = {d["key"] for d in drivers}
 
     existing_designs = list(issues().find(
         {"key": {"$regex": f"^{re.escape(code)}-"},
@@ -102,77 +137,43 @@ async def execute(params: dict, user: str) -> dict:
     existing_design_keys = {d["key"] for d in existing_designs}
     existing_design_by_key = {d["key"]: d for d in existing_designs}
 
-    await emit_progress("design_decide", "설계안 결정 시작")
+    await emit_progress("design_decide", "설계안 결정 시작 (v2 self-loop)")
 
-    drivers_json = json.dumps(drivers, ensure_ascii=False, indent=2)
-    req_json = json.dumps(req_list, ensure_ascii=False, indent=2)
-    existing_design_json = json.dumps(existing_designs, ensure_ascii=False, indent=2)
-    normalized_json = json.dumps(normalized, ensure_ascii=False, indent=2)
-
-    generate_prompt = load_prompt(_SKILL_DIR, "generate").format(
-        code=code,
-        normalized_json=normalized_json,
-        primary=", ".join(chosen.get("primary") or []),
-        secondary=", ".join(chosen.get("secondary") or []),
-        supporting=", ".join(chosen.get("supporting") or []),
-        drivers_json=drivers_json,
-        driver_count=len(drivers),
-        req_count=len(req_list),
-        req_json=req_json,
-        design_count=len(existing_designs),
-        existing_design_json=existing_design_json,
-    )
-
-    critique_tpl = load_prompt(_SKILL_DIR, "critique")
-    revise_tpl = load_prompt(_SKILL_DIR, "revise")
-
+    # 2. LLM 단일 호출 (self-loop 내장)
     policy = load_step_policy(
         "workflow-architecture-design.md",
         "디자인 포인트 선정 및 설계안 결정 (Architectural Approach)",
     )
-
-    context_block = (
-        f"## Driver 목록\n{drivers_json}\n\n"
-        f"## 선정 스타일\nPrimary: {chosen.get('primary')}\nSecondary: {chosen.get('secondary')}\n"
-        f"Supporting: {chosen.get('supporting')}"
+    skill_body = _load_skill_md()
+    prompt = _build_prompt(
+        skill_body, code,
+        json.dumps(normalized, ensure_ascii=False, indent=2),
+        chosen,
+        json.dumps(drivers, ensure_ascii=False, indent=2), len(drivers),
+        json.dumps(req_list, ensure_ascii=False, indent=2), len(req_list),
+        json.dumps(existing_designs, ensure_ascii=False, indent=2), len(existing_designs),
+        policy.get("criteria", ""), policy.get("policy_text", ""),
     )
-
-    def _critique_prompt(draft: str) -> str:
-        return critique_tpl.format(
-            context_block=context_block,
-            draft=draft[:8000],
-            criteria=policy["criteria"],
-            policy=policy["policy_text"],
-        )
-
-    def _revise_prompt(draft: str, critique: dict) -> str:
-        issues_text = "\n".join(f"- {i}" for i in critique.get("issues", []))
-        return revise_tpl.format(
-            drivers_json=drivers_json,
-            draft=draft[:10000],
-            issues_text=issues_text,
-        )
-
-    raw, critique_trail = await iterate_generate_critique(
-        generate_prompt, _critique_prompt, _revise_prompt,
-        max_iter=policy["max_iter"],
-        threshold=policy["threshold"],
-        on_fail=policy["on_fail"],
-    )
+    raw = await call_llm(prompt)
 
     parsed = _extract_json_obj(raw)
-    if not parsed:
+    if not parsed or "finalDesigns" not in parsed:
         return {
             "projectCode": code,
             "status": "failed",
-            "message": "LLM 응답을 파싱할 수 없습니다.",
+            "message": "LLM 응답 파싱 실패.",
             "raw": raw[:500],
+            "created": [], "reused": [], "modified": [], "markedForDeletion": [],
         }
 
-    designs = parsed.get("designs") or []
-    document = parsed.get("document") or ""
+    designs = parsed.get("finalDesigns") or []
+    document = parsed.get("finalDocument") or ""
+    coverage_matrix = parsed.get("finalCoverage") or {}
+    iterations = parsed.get("iterations") or []
+    stop_reason = parsed.get("stopReason", "")
+    unresolved = parsed.get("unresolvedCritical") or []
 
-    # 이슈 생성 (dispatch_by_mode)
+    # 3. 이슈 생성 (dispatch_by_mode)
     async def _create_fn(item):
         level = (item.get("designLevel") or "Architectural")
         if level not in _DESIGN_LEVEL_TO_TYPE:
@@ -198,24 +199,30 @@ async def execute(params: dict, user: str) -> dict:
 
     buckets = await dispatch_by_mode(designs, existing_design_keys, _create_fn, _update_fields_fn, user)
 
-    # Requirement contains ADSN/DDSN 링크
+    # 4. Requirement contains ADSN/DDSN 링크
     linked = []
-    for bucket_name in ("created", "modified"):
-        for entry in buckets[bucket_name]:
+    covered_drivers: set = set()
+    for bucket_name in ("created", "modified", "reused"):
+        for entry in buckets.get(bucket_name, []):
             design_key = entry["key"]
             for req_key in (entry["item"].get("relatedRequirements") or []):
                 if req_key in valid_req_keys:
                     try:
                         await link_issues(req_key, design_key, "contains", user=user)
                         linked.append({"from": req_key, "to": design_key})
-                    except Exception:
-                        pass
+                        if req_key in driver_keys:
+                            covered_drivers.add(req_key)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger("agent.design_decide").warning(
+                            "link 실패 %s → %s: %s", req_key, design_key, e
+                        )
 
-    # docId → subkey 치환
+    # 5. docId → subkey 치환
     docid_map = build_docid_subkey_map(buckets, existing_design_by_key)
     document, leftover_doc_ids = substitute_doc_ids(document, docid_map)
 
-    # architecture/design-decisions.md 저장
+    # 6. architecture/design-decisions.md 저장
     client = PlatformClient()
     saved_path = None
     save_error = None
@@ -225,14 +232,17 @@ async def execute(params: dict, user: str) -> dict:
                 code,
                 "architecture/design-decisions.md",
                 document,
-                f"설계 결정 (신규 {len(buckets['created'])} / 수정 {len(buckets['modified'])})",
+                f"설계 결정 (신규 {len(buckets['created'])} / 수정 {len(buckets['modified'])}, v2)",
                 req_user,
             )
             saved_path = "architecture/design-decisions.md"
         except Exception as e:
             save_error = str(e)
 
-    tsum = trail_summary(critique_trail)
+    # 7. Driver 커버리지 감사
+    orphan_drivers = [k for k in driver_keys if k not in covered_drivers]
+
+    # 8. 요약
     parts = [
         f"설계 이슈 — 신규 {len(buckets['created'])}, 재사용 {len(buckets['reused'])}, "
         f"수정 {len(buckets['modified'])}, 삭제마킹 {len(buckets['markedForDeletion'])}",
@@ -242,17 +252,27 @@ async def execute(params: dict, user: str) -> dict:
         parts.append("design-decisions.md 저장 완료")
     elif save_error:
         parts.append(f"문서 저장 실패: {save_error}")
-    if leftover_doc_ids:
-        parts.append(f"⚠ 미치환 docId {len(leftover_doc_ids)}건: {', '.join(leftover_doc_ids[:5])}")
-    if tsum:
-        parts.append(tsum)
-    msg = " / ".join(parts)
+    base_msg = " / ".join(parts)
 
-    await emit_progress("design_decide", f"설계 결정 완료 — {msg}")
+    iter_info = ""
+    if iterations:
+        iter_info = f" (iter {len(iterations)}회, best=iter{parsed.get('selectedIter')}, stop={stop_reason})"
+
+    notes = ""
+    if leftover_doc_ids:
+        notes += f" / ⚠ 미치환 docId {len(leftover_doc_ids)}건"
+    if orphan_drivers:
+        notes += f" / ⚠ 미커버 Driver {len(orphan_drivers)}건: {', '.join(orphan_drivers[:5])}"
+
+    await emit_progress("design_decide", f"설계 결정 완료 — {base_msg}")
+
+    status = "completed"
+    if orphan_drivers or unresolved:
+        status = "partial"
 
     return {
         "projectCode": code,
-        "status": "completed",
+        "status": status,
         "created": buckets["created"],
         "reused": buckets["reused"],
         "modified": buckets["modified"],
@@ -261,8 +281,18 @@ async def execute(params: dict, user: str) -> dict:
         "linkedCount": len(linked),
         "documentSaved": saved_path,
         "saveError": save_error,
-        "critiqueTrail": critique_trail,
+        "iterations": iterations,
+        "selectedIter": parsed.get("selectedIter"),
+        "stopReason": stop_reason,
+        "unresolvedCritical": unresolved,
+        "coverageMatrix": coverage_matrix,
         "docIdMap": docid_map,
         "leftoverDocIds": leftover_doc_ids,
-        "message": msg,
+        "coverage": {
+            "totalDrivers": len(driver_keys),
+            "covered": len(covered_drivers),
+            "orphan": len(orphan_drivers),
+            "orphanKeys": orphan_drivers[:20],
+        },
+        "message": base_msg + iter_info + notes,
     }

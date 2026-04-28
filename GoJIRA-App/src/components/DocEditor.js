@@ -5,6 +5,7 @@ import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
 import MermaidBlock from './MermaidBlock';
+import PlantUMLBlock from './PlantUMLBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import './DocEditor.css';
@@ -85,7 +86,7 @@ function renderYamlValue(v) {
   return <span className="de-yaml-value">{v}</span>;
 }
 
-export default function DocEditor({ project, user, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
+export default function DocEditor({ project, user, authority, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
   const projectCode = project?.jiraCodes?.main?.jiraCode || '';
   const hasRepo = !!project?.documents?.repoName;
 
@@ -117,6 +118,35 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [diffTab, setDiffTab] = useState('semantic');
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = parseInt(localStorage.getItem('docEditorSidebarWidth'), 10);
+    return Number.isFinite(saved) && saved >= 150 && saved <= 600 ? saved : 220;
+  });
+  const [resizing, setResizing] = useState(false);
+  useEffect(() => {
+    localStorage.setItem('docEditorSidebarWidth', String(sidebarWidth));
+  }, [sidebarWidth]);
+  const handleResizerMouseDown = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    setResizing(true);
+    const onMove = (ev) => {
+      const next = Math.max(150, Math.min(600, startWidth + ev.clientX - startX));
+      setSidebarWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      setResizing(false);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  };
   const chatWinRef = React.useRef(null);
   // 인터뷰 후 자동 이어서 AI 생성할 원본 요청 파일 (예: 'business/use-cases.md')
   const pendingAIFileRef = React.useRef(null);
@@ -833,12 +863,33 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         projectAlert={projectAlert}
       />
       <div className="de-editor">
-        <div className="de-sidebar">
+        <div className="de-sidebar" style={{ width: sidebarWidth }}>
           <div className="de-sidebar-tabs">
             <button className={`de-sidebar-tab ${activeTab === 'main' ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setActiveTab('main'); setShowGraph(false); }}>Main</button>
             <button className={`de-sidebar-tab ${activeTab === 'workspace' ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setActiveTab('workspace'); setShowGraph(false); }}>작업공간</button>
+            {(authority?.USR || 0) >= 15 && (
+              <button
+                className="de-sidebar-tab de-graph-btn"
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`${API}/${projectCode}/open-folder`, {
+                      method: 'POST', headers: { 'X-User-Id': user || '' }
+                    });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({}));
+                      alert(err.error || '폴더 열기 실패');
+                    }
+                  } catch { alert('서버 연결 실패'); }
+                }}
+                title="작업공간 폴더 열기"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z"/>
+                </svg>
+              </button>
+            )}
             <button
               className={`de-sidebar-tab de-graph-btn ${showGraph ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setShowGraph(!showGraph); if (!showGraph) setSelectedFile(null); }}
@@ -942,6 +993,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             return renderNode(root, '', 0);
           })()}
         </div>
+        <div className={`de-resizer${resizing ? ' active' : ''}`} onMouseDown={handleResizerMouseDown} />
         <div className="de-main">
           {showGraph ? (
             <DocGitGraph projectCode={projectCode} />
@@ -1017,14 +1069,17 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                             if (lang === 'mermaid') {
                               return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
                             }
+                            if (lang === 'plantuml') {
+                              return <PlantUMLBlock code={String(children).replace(/\n$/, '')} />;
+                            }
                             return <code className={className} {...props}>{children}</code>;
                           },
                           pre({ children, ...props }) {
-                            // mermaid 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
+                            // mermaid/plantuml 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
                             const arr = React.Children.toArray(children);
                             const only = arr.length === 1 ? arr[0] : null;
                             const cls = only?.props?.className || '';
-                            if (cls.includes('language-mermaid')) {
+                            if (cls.includes('language-mermaid') || cls.includes('language-plantuml')) {
                               return <>{children}</>;
                             }
                             return <pre {...props}>{children}</pre>;

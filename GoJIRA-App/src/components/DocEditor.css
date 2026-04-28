@@ -26,13 +26,15 @@
 .mermaid-error-src { background: #fff; border: 1px solid #eee; border-radius: 4px; padding: 8px; font-size: 11px; color: #555; overflow: auto; max-height: 200px; margin: 0; }
 
 .de-editor { display: flex; flex: 1; overflow: hidden; }
-.de-sidebar { width: 220px; border-right: 1px solid #e0e0e0; overflow-y: auto; background: #fafafa; flex-shrink: 0; display: flex; flex-direction: column; }
+.de-sidebar { width: 220px; overflow-y: auto; background: #fafafa; flex-shrink: 0; display: flex; flex-direction: column; }
+.de-resizer { width: 4px; background: #e0e0e0; cursor: col-resize; flex-shrink: 0; transition: background 0.15s; }
+.de-resizer:hover, .de-resizer.active { background: #999; }
 .de-sidebar-tabs { display: flex; border-bottom: 1px solid #e0e0e0; }
 .de-sidebar-tab { flex: 1; padding: 7px 0; border: none; background: none; font-size: 12px; color: #888; cursor: pointer; }
 .de-sidebar-tab:hover { background: #f0f0f0; }
 .de-sidebar-tab-active { color: #2c3e50; font-weight: 600; border-bottom: 2px solid #2c3e50; }
 .de-sidebar-header { padding: 8px 12px; font-size: 11px; color: #888; border-bottom: 1px solid #eee; display: flex; align-items: center; }
-.de-folder-header { padding: 6px 12px; font-size: 12px; font-weight: 600; color: #555; background: #f0f0f0; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.de-folder-header { padding: 6px 12px; font-size: 12px; font-weight: 600; color: #555; display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .de-folder-icon { font-size: 13px; }
 .de-folder-toggle { display: inline-block; width: 12px; font-size: 9px; color: #888; margin-right: 2px; user-select: none; }
 .de-folder-header:hover { background: #e8e8e8; }

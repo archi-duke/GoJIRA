@@ -1,22 +1,35 @@
 ---
 name: pr-list
-description: GoJIRA 프로젝트의 Pull Request 목록을 조회합니다
-argument-hint: "[project-code] [--state STATE]"
+description: GoJIRA 프로젝트의 Pull Request 목록을 조회합니다.
 allowed-tools: Bash
 ---
 
-프로젝트의 Pull Request 목록을 조회합니다.
+Platform-API `GET /DocRepo/{code}/prs?state=...` 로 PR 목록을 조회합니다.
 
-## 전체 PR 조회 (기본: open)
-!`gojira-cli pr list --project $ARGUMENTS`
+## 환경
+- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 
-## 상태별 필터링
+## 인자
+- `CODE` — projectCode
+- `USER` — X-User-Id
+- `STATE` — `open` | `closed` | `all` (기본 `open`)
+
+```bash
+export CODE="GOJIRA3"
+export USER="batman"
+export STATE="${STATE:-open}"
+export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 ```
-gojira-cli pr list --project PROJECT --state open
-gojira-cli pr list --project PROJECT --state closed
-gojira-cli pr list --project PROJECT --state all
+
+## 조회
+🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
+
+```bash
+curl -s "${PLATFORM_API}/DocRepo/${CODE}/prs?state=${STATE}" \
+  -H "X-User-Id: ${USER}" \
+  > /tmp/gojira_prs.json
+
+jq '[.[] | {number, title, state, author: (.user.login // .author // null), head: (.head.ref // null)}]' /tmp/gojira_prs.json
 ```
 
-결과를 한국어로 정리합니다:
-- PR 수를 먼저 알려줍니다
-- PR 번호, 제목, 상태, 작성자를 마크다운 표로 정리합니다
+결과를 한국어로 정리: PR 수 → 번호/제목/상태/작성자 마크다운 표.

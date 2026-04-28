@@ -5,6 +5,7 @@ const config = {
   API_BASE: process.env.REACT_APP_API_BASE || 'http://localhost:9001/api/v2',
   // Agent Service (Python, 스트리밍)
   AGENT_API: process.env.REACT_APP_AGENT_API || 'http://localhost:9002/api/v2',
+  PLANTUML_SERVER: process.env.REACT_APP_PLANTUML_SERVER || 'http://localhost:8080/svg/',
   SSO_URL: process.env.REACT_APP_SSO_URL || 'https://sso.example.com',
   USE_SSO: false,
   DEV_USER: 'batman',

@@ -34,7 +34,6 @@ type AuthGroup struct {
 // OrgUnit 조직 단위
 type OrgUnit struct {
 	ID              string    `json:"id" bson:"_id,omitempty"`
-	Code            string    `json:"code" bson:"code"`
 	Name            string    `json:"name" bson:"name"`
 	Type            string    `json:"type" bson:"type"`
 	ParentOrgUnitID string    `json:"parentOrgUnitId" bson:"parentOrgUnitId"`

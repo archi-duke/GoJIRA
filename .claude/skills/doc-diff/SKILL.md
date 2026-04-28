@@ -1,15 +1,33 @@
 ---
 name: doc-diff
-description: main 브랜치와 사용자 브랜치 간의 문서 차이를 분석합니다
-argument-hint: "[project-code] --file FILE"
+description: main 브랜치와 사용자 브랜치(docs/{user}) 간의 문서 차이를 분석합니다.
 allowed-tools: Bash
 ---
 
-main 브랜치와 사용자 브랜치 간의 문서 차이를 분석합니다.
+Platform-API `/DocRepo/{code}/file` 로 두 브랜치의 파일을 가져와 diff 합니다.
 
-## 문서 비교
-!`gojira-cli doc diff --project $0 --file "$1"`
+## 환경
+- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 
-결과를 한국어로 정리합니다:
-- 추가/삭제/수정된 내용을 구분하여 보여줍니다
-- 변경 요약을 제공합니다
+## 인자
+- `CODE` — projectCode
+- `USER` — X-User-Id
+- `FILE` — 비교할 문서 경로 (예: `business/project-description.md`)
+
+```bash
+export CODE="GOJIRA3"
+export USER="batman"
+export FILE="business/project-description.md"
+export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+```
+
+## 파일 조회 + diff
+```bash
+# main 브랜치 문서 (doc-read.sh 는 docs/{user} fallback 하므로, main 고정을 위해 USER=main 전달)
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "main" "${FILE}" > /tmp/doc-main.txt 2>/dev/null || true
+# docs/{user} 브랜치 문서
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "${FILE}" > /tmp/doc-user.txt 2>/dev/null || true
+diff -u /tmp/doc-main.txt /tmp/doc-user.txt || true
+```
+
+결과를 한국어로 정리: 추가/삭제/수정 구분 + 요약.

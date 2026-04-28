@@ -26,6 +26,21 @@ const SUBTYPE_COLORS = {
   DDSN: '#7030a0',
 };
 
+const COLUMN_STAR_COLORS = {
+  vos: SUBTYPE_COLORS.VOS,
+  feature: SUBTYPE_COLORS.Feature,
+  requirement: SUBTYPE_COLORS.FR,
+  design: SUBTYPE_COLORS.ADSN,
+  test: '#999',
+};
+
+const COLUMN_AGENT_MESSAGES = {
+  vos: '{name}({code}) 과제의 VOS 수집해줘',
+  feature: '{name}({code}) 과제의 use case 분석해줘',
+  requirement: '{name}({code}) 과제의 Requirements 정재해줘',
+  design: '{name}({code}) 과제의 설계 진행해줘',
+};
+
 /* ---------- helpers ---------- */
 
 function getSubtype(issue) {
@@ -45,20 +60,26 @@ function buildConnections(issues) {
   const keySet = new Set(issues.map((i) => i.key));
   const issueMap = {};
   issues.forEach((i) => { issueMap[i.key] = i; });
+  const colOrder = { VOS: 0, Feature: 1, Requirement: 2, 'Architectural Design': 3, 'Detailed Design': 3, Test: 4 };
   const conns = [];
   const seen = new Set();
   issues.forEach((issue) => {
     (issue.issueLinks || []).forEach((link) => {
-      const target = link.outwardIssue;
-      if (target && keySet.has(target.key)) {
-        const id = `${issue.key}->${target.key}`;
-        if (!seen.has(id)) {
-          const targetIssue = issueMap[target.key];
-          const sameType = targetIssue && targetIssue.issueType === issue.issueType;
-          conns.push({ id, linkId: link.id, from: issue.key, to: target.key, type: link.type?.name || '', sameType });
-          seen.add(id);
-        }
-      }
+      const targets = [link.outwardIssue, link.inwardIssue].filter(Boolean);
+      targets.forEach((target) => {
+        if (!keySet.has(target.key) || target.key === issue.key) return;
+        const pairId = [issue.key, target.key].sort().join('<>');
+        if (seen.has(pairId)) return;
+        seen.add(pairId);
+        const targetIssue = issueMap[target.key];
+        const sameType = targetIssue && targetIssue.issueType === issue.issueType;
+        // 왼쪽 칼럼 → 오른쪽 칼럼 방향으로 정렬
+        const myCol = colOrder[issue.issueType] ?? 99;
+        const tgtCol = colOrder[targetIssue?.issueType] ?? 99;
+        const from = myCol <= tgtCol ? issue.key : target.key;
+        const to = myCol <= tgtCol ? target.key : issue.key;
+        conns.push({ id: `${from}->${to}`, linkId: link.id, from, to, type: link.type?.name || '', sameType });
+      });
     });
   });
   // Same-type connections first (rendered behind), cross-type on top
@@ -350,49 +371,15 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     return prefix + String(maxNum + 1).padStart(3, '0');
   }
 
-  async function handleColumnAssist(col) {
-    if (assistLoading) return;
-    setAssistLoading(col.id);
-    setAssistResult(null);
-    setAssistChecked({});
-    try {
-      const existingIssues = col.issues.map(i => ({
-        key: i.key, issueType: i.issueType, reqtype: i.reqtype, subkey: i.subkey,
-        summary: i.summary, description: i.description || '',
-      }));
-      const res = await fetch(`${API_BASE}/Agent/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-        body: JSON.stringify({
-          message: `${projectCode} 프로젝트의 ${col.label} 컬럼 이슈를 분석해줘.
-기존 이슈: ${JSON.stringify(existingIssues)}
-규칙:
-- 기존 이슈는 삭제하지 마
-- 추가가 필요한 이슈가 있으면 action: "add"로 제안
-- 수정이 필요한 이슈가 있으면 action: "update", key와 변경 내용 포함
-- 삭제 권고가 있으면 action: "delete", key와 이유 포함
-- 순수 JSON 배열만 응답: [{"action":"add|update|delete", "issueType":"...", "summary":"...", "reason":"...", "key":"..."}]`,
-          context: { page: 'relationMap', projectCode, columnId: col.id },
-        }),
-      });
-      const data = await res.json();
-      // reply에서 JSON 배열 파싱
-      let suggestions = [];
-      try {
-        const text = data.reply || '';
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
-        if (jsonMatch) suggestions = JSON.parse(jsonMatch[0]);
-      } catch {}
-      if (suggestions.length > 0) {
-        setAssistResult({ columnId: col.id, columnLabel: col.label, suggestions });
-        setAssistChecked(Object.fromEntries(suggestions.map((s, i) => [i, s.action === 'add'])));
-      } else {
-        alert(`${col.label} 컬럼: 추가/수정/삭제 제안이 없습니다.`);
-      }
-    } catch (e) {
-      alert('Agent Assist 오류: ' + e.message);
+  function handleColumnAssist(col) {
+    const tmpl = COLUMN_AGENT_MESSAGES[col.id];
+    if (!tmpl) {
+      alert(`${col.label} 컬럼은 자동 메시지가 정의되지 않았습니다.`);
+      return;
     }
-    setAssistLoading(null);
+    const msg = tmpl.replace('{name}', project.name).replace('{code}', projectCode);
+    const url = `http://localhost:3001/?mode=agent&autoMessage=${encodeURIComponent(msg)}&project=${encodeURIComponent(projectCode)}&newSession=1`;
+    window.open(url, 'gojira-agent', 'width=480,height=720');
   }
 
   async function handleAssistApply() {
@@ -582,11 +569,10 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
                       disabled={assistLoading === col.id}
                       onClick={() => handleColumnAssist(col)}>
                       {assistLoading === col.id ? '...' : (
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                          <text x="2" y="17" fontSize="14" fontWeight="bold" fontFamily="Arial">AI</text>
-                          <circle cx="18" cy="4" r="1.5" fill="#f4b400" />
-                          <circle cx="21" cy="8" r="1" fill="#f4b400" />
-                          <circle cx="17" cy="10" r="1.2" fill="#f4b400" />
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill={COLUMN_STAR_COLORS[col.id] || '#f4b400'}>
+                          <path d="M8 4 L9.4 10.6 L16 12 L9.4 13.4 L8 20 L6.6 13.4 L0 12 L6.6 10.6 Z" />
+                          <path d="M17 2 L17.8 6.2 L22 7 L17.8 7.8 L17 12 L16.2 7.8 L12 7 L16.2 6.2 Z" />
+                          <path d="M16 14 L16.6 17 L19.5 17.6 L16.6 18.2 L16 21 L15.4 18.2 L12.5 17.6 L15.4 17 Z" />
                         </svg>
                       )}
                     </button>

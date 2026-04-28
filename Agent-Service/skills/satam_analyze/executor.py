@@ -1,21 +1,91 @@
-"""SATAM 분석 스킬 — ADSN 의 risk/sensitivity/tradeoffs 원문을 구조화 YAML 로 변환해
-각 ADSN 이슈의 risk/sensitivity/mitigation 필드에 직접 반영한다.
+"""SATAM 분석 스킬 v2 — SKILL.md 통합 self-loop.
 
-문서 파일은 생성하지 않는다. 프론트엔드 SATAM 컴포넌트가 이 필드를 직접 파싱해 렌더링한다.
+LLM 이 내부에서 generate → self-critique(QA 매핑/카테고리 검증) → revise → best-so-far 를
+단일 호출로 수행. Python 은 IO(ADSN/QA 조회), 결과 파싱, 이슈 필드 저장만 담당.
+
+문서 파일은 생성하지 않는다. 프론트엔드 SATAM 컴포넌트가 각 ADSN 이슈의
+risk/sensitivity/mitigation YAML 필드를 직접 파싱해 렌더링한다.
 """
 
+import os
 import re
 import json
-from typing import List, Dict
+from typing import Any, Dict, List, Optional
 
 from core.database import issues, projects
 from core.llm import call_llm
+
+
+_SKILL_DIR = os.path.dirname(__file__)
+_SKILL_MD_PATH = os.path.join(_SKILL_DIR, "SKILL.md")
+
+
+def _load_skill_md() -> str:
+    with open(_SKILL_MD_PATH, encoding="utf-8") as f:
+        text = f.read()
+    m = re.match(r"^---\n.*?\n---\n(.*)$", text, re.DOTALL)
+    return m.group(1) if m else text
+
+
+def _build_prompt(skill_body: str, code: str,
+                  adsn_inputs: List[Dict], qa_refs: List[Dict]) -> str:
+    adsn_json = json.dumps(adsn_inputs, ensure_ascii=False, indent=2)
+    qa_json = json.dumps(qa_refs, ensure_ascii=False, indent=2)
+    return (
+        f"{skill_body}\n\n"
+        f"---\n\n"
+        f"## 주입 데이터\n\n"
+        f"### projectCode\n{code}\n\n"
+        f"### adsn_inputs ({len(adsn_inputs)}건)\n```json\n{adsn_json}\n```\n\n"
+        f"### qa_refs ({len(qa_refs)}건)\n```json\n{qa_json}\n```\n\n"
+        f"이제 위 `실행 흐름` 섹션대로 수행하고 지정된 JSON 하나만 출력하라."
+    )
+
+
+def _extract_json_obj(raw: str) -> Optional[Dict[str, Any]]:
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group())
+    except json.JSONDecodeError:
+        return None
+
+
+def _serialize_items(items: List[Dict], counter: bool) -> str:
+    """항목 리스트를 프론트엔드 parseRST 포맷의 YAML 로 직렬화."""
+    if not items:
+        return ""
+    lines = []
+    for it in items:
+        iid = (it.get("id") or "").strip()
+        if not iid:
+            continue
+        qa = it.get("qa") or []
+        cr = it.get("counterRisk") or it.get("counter_risk") or []
+        desc = (it.get("description") or "").strip().replace("\n", " ")
+        lines.append(f"- ID : {iid}")
+        if qa:
+            lines.append(f"  QA : [{', '.join(qa)}]")
+        if counter and cr:
+            quoted = ", ".join('"' + c + '"' for c in cr)
+            lines.append(f"  Counter Risk : [{quoted}]")
+        if desc:
+            lines.append(f"  Description : {desc}")
+    return "\n".join(lines)
 
 
 async def execute(params: dict, user: str) -> dict:
     code = params.get("projectCode", "")
     if not code:
         raise ValueError("projectCode 필수")
+
+    from core.progress import emit_progress
 
     prefix = {"key": {"$regex": f"^{re.escape(code)}-"}}
     qa_issues = list(issues().find(
@@ -34,10 +104,9 @@ async def execute(params: dict, user: str) -> dict:
             "adsnCount": 0,
         }
 
-    # 1) LLM 에 넘길 입력 데이터 준비
+    # 1) LLM 입력 데이터 준비
     adsn_inputs = []
     for ad in adsn_issues:
-        # contains 링크로 연결된 QA 키
         linked_qas = []
         for ln in ad.get("issueLinks") or []:
             t = (ln.get("type") or {}).get("name", "")
@@ -58,15 +127,35 @@ async def execute(params: dict, user: str) -> dict:
             "linkedQAs": linked_qas,
         })
 
-    # 2) LLM 프롬프트 — 각 ADSN 의 원문 텍스트를 구조화 YAML 로 변환. QA 연결 추론.
-    prompt = _build_prompt(code, adsn_inputs, qa_issues)
-    raw = await call_llm(prompt)
-    mapping = _extract_json(raw) or {}
+    await emit_progress("satam_analyze", f"SATAM 분석 시작 — ADSN {len(adsn_inputs)}건 (v2 self-loop)")
 
-    # 3) 각 ADSN 이슈의 risk/sensitivity/mitigation 필드를 업데이트
-    updated_keys = []
-    failed = []
+    # 2) SKILL.md + 주입 데이터로 단일 LLM 호출 (self-loop 내장)
+    skill_body = _load_skill_md()
+    prompt = _build_prompt(skill_body, code, adsn_inputs, qa_issues)
+    raw = await call_llm(prompt)
+
+    parsed = _extract_json_obj(raw)
+    if not parsed or "finalMapping" not in parsed:
+        return {
+            "projectCode": code,
+            "status": "failed",
+            "message": "LLM 응답 파싱 실패.",
+            "raw": raw[:500],
+            "adsnCount": len(adsn_inputs),
+            "updatedCount": 0,
+        }
+
+    mapping: Dict[str, Dict] = parsed.get("finalMapping") or {}
+    iterations = parsed.get("iterations") or []
+    stop_reason = parsed.get("stopReason", "")
+    unresolved = parsed.get("unresolvedCritical") or []
+
+    # 3) 각 ADSN 이슈의 risk/sensitivity/mitigation 필드 업데이트
+    updated_keys: List[str] = []
+    failed: List[Dict] = []
     risk_total = sens_total = miti_total = 0
+
+    from core import issuestore
 
     for ad in adsn_inputs:
         key = ad["key"]
@@ -80,14 +169,13 @@ async def execute(params: dict, user: str) -> dict:
         miti_yaml = _serialize_items(miti_items, counter=True)
 
         try:
-            from core import issuestore
             doc = issuestore.get_issue(key)
             if not doc:
                 raise ValueError(f"이슈 없음: {key}")
             doc.risk = risk_yaml
             doc.sensitivity = sens_yaml
             doc.mitigation = miti_yaml
-            await issuestore.save_issue(doc, user, commit_message=f"[satam] {key} R/S/M 업데이트")
+            await issuestore.save_issue(doc, user, commit_message=f"[satam] {key} R/S/M 업데이트 (v2)")
             updated_keys.append(key)
             risk_total += len(risk_items)
             sens_total += len(sens_items)
@@ -101,9 +189,24 @@ async def execute(params: dict, user: str) -> dict:
         {"$set": {"archSettings.satamDone": True}},
     )
 
+    iter_info = ""
+    if iterations:
+        iter_info = f" (iter {len(iterations)}회, best=iter{parsed.get('selectedIter')}, stop={stop_reason})"
+
+    base_msg = (
+        f"SATAM 분석 완료 — ADSN {len(updated_keys)}건의 risk/sensitivity/mitigation 갱신. "
+        f"Risks {risk_total} / Sensitivities {sens_total} / Trade-offs {miti_total}."
+    )
+
+    await emit_progress("satam_analyze", base_msg + iter_info)
+
+    status = "completed"
+    if failed or unresolved:
+        status = "partial"
+
     return {
         "projectCode": code,
-        "status": "completed",
+        "status": status,
         "satamDone": True,
         "adsnCount": len(adsn_inputs),
         "updatedCount": len(updated_keys),
@@ -111,110 +214,13 @@ async def execute(params: dict, user: str) -> dict:
         "sensitivityCount": sens_total,
         "mitigationCount": miti_total,
         "failed": failed,
+        "iterations": iterations,
+        "selectedIter": parsed.get("selectedIter"),
+        "stopReason": stop_reason,
+        "unresolvedCritical": unresolved,
         "nextAction": {"skill": "ui_navigate", "params": {"projectCode": code, "page": "satam"}},
         "message": (
-            f"SATAM 분석 완료 — ADSN {len(updated_keys)}건의 risk/sensitivity/mitigation 필드 갱신. "
-            f"Risks {risk_total} / Sensitivities {sens_total} / Trade-offs {miti_total}. "
-            "SATAM 화면으로 이동하려면 ui_navigate(page=satam) 를 호출하세요."
+            base_msg + iter_info +
+            " SATAM 화면으로 이동하려면 ui_navigate(page=satam) 를 호출하세요."
         ),
     }
-
-
-def _build_prompt(code: str, adsn_inputs: List[Dict], qa_refs: List[Dict]) -> str:
-    adsn_json = json.dumps(adsn_inputs, ensure_ascii=False, indent=2)
-    qa_json = json.dumps(qa_refs, ensure_ascii=False, indent=2)
-    return f"""프로젝트 {code} 의 SATAM 분석을 수행한다.
-각 ADSN 이슈의 riskText / sensitivityText / tradeoffText 원문을 읽어 구조화된 항목 리스트로 변환하고,
-영향받는 QA(Quality Attribute) 이슈 key 를 매핑한다. 이 결과는 각 ADSN 이슈의 risk/sensitivity/mitigation
-필드에 YAML 로 저장되어 프론트엔드 SATAM 컴포넌트가 직접 파싱한다.
-
-## 입력
-
-### ADSN 목록 (각 항목의 원문을 구조화 대상)
-{adsn_json}
-
-### QA 참조 (Requirement 중 NFR) — Risk/Sensitivity/Trade-off 가 영향주는 대상
-{qa_json}
-
-## 출력 (반드시 단일 JSON, 코드블록 없이)
-
-{{
-  "<ADSN_ISSUE_KEY>": {{
-    "risks": [
-      {{ "id": "R1", "qa": ["QA_ISSUE_KEY", ...], "description": "..." }}
-    ],
-    "sensitivities": [
-      {{ "id": "S1", "qa": ["QA_ISSUE_KEY", ...], "description": "..." }}
-    ],
-    "tradeoffs": [
-      {{ "id": "M1", "qa": ["QA_ISSUE_KEY", ...], "counterRisk": ["R1:QA_ISSUE_KEY", ...], "description": "..." }}
-    ]
-  }},
-  ...
-}}
-
-## 규칙 (엄수)
-
-1. **키는 ADSN 이슈 key** (예: "{code}-23"). subkey 사용 금지
-2. **ID 순차**: ADSN 별로 R1,R2... / S1,S2... / M1,M2... 부여. 다른 ADSN 과 번호 공유 안 함 (ADSN 내부에서 유일)
-3. **QA 매핑**: `qa` 배열은 **이슈 key** 형식 (subkey 금지). `linkedQAs` 우선 사용, 없거나 부족하면 QA 참조 목록에서 summary 로 매칭해 선택
-4. **Counter Risk (Trade-off 전용)**: 해당 Mitigation 이 완화하는 Risk 의 `"R1:QA_ISSUE_KEY"` 조합 배열. 같은 ADSN 내 Risk ID 참조
-5. **원문 유지**: 원문(riskText/sensitivityText/tradeoffText) 이 의미상 분리 가능한 복수 항목이면 여러 항목으로 분해, 단일이면 1개 항목. 임의 창작 금지
-6. **빈 원문은 빈 배열**: 원문이 비어있으면 해당 리스트는 `[]`
-7. **출력은 JSON 객체 단일** — 앞뒤 설명, 코드블록 모두 금지. 바로 `{{` 로 시작"""
-
-
-def _extract_json(text: str) -> Dict:
-    """LLM 응답에서 JSON 객체 추출."""
-    t = text.strip()
-    # ```json ... ``` 블록 제거
-    m = re.search(r"```(?:json)?\s*\n(.*?)```", t, re.DOTALL | re.IGNORECASE)
-    if m:
-        t = m.group(1).strip()
-    # 첫 { 부터 매칭되는 } 까지
-    start = t.find("{")
-    if start < 0:
-        return {}
-    depth = 0
-    for i in range(start, len(t)):
-        ch = t[i]
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(t[start:i + 1])
-                except json.JSONDecodeError:
-                    return {}
-    return {}
-
-
-def _serialize_items(items: List[Dict], counter: bool) -> str:
-    """항목 리스트를 SATAM 프론트엔드 parseRST 포맷의 YAML 로 직렬화.
-
-    형식:
-      - ID : R1
-        QA : [KEY1, KEY2]
-        Counter Risk : ["R1:KEY1", ...]   (mitigation 전용)
-        Description : ...
-    """
-    if not items:
-        return ""
-    lines = []
-    for it in items:
-        iid = (it.get("id") or "").strip()
-        if not iid:
-            continue
-        qa = it.get("qa") or []
-        cr = it.get("counterRisk") or it.get("counter_risk") or []
-        desc = (it.get("description") or "").strip().replace("\n", " ")
-        lines.append(f"- ID : {iid}")
-        if qa:
-            lines.append(f"  QA : [{', '.join(qa)}]")
-        if counter and cr:
-            quoted = ", ".join('"' + c + '"' for c in cr)
-            lines.append(f"  Counter Risk : [{quoted}]")
-        if desc:
-            lines.append(f"  Description : {desc}")
-    return "\n".join(lines)

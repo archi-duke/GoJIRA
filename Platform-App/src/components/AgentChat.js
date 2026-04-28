@@ -17,6 +17,23 @@ export default function AgentChat({ user, authority, context, onClose }) {
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const abortRef = useRef(null);
+  const [showProcess, setShowProcess] = useState(true);
+
+  async function handleCancel() {
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch(_){}
+    }
+    if (sessionId) {
+      try {
+        await fetch(`${STREAM_API}/Agent/session/${sessionId}/cancel`, {
+          method: 'POST',
+          headers: { 'X-User-Id': user || '' },
+        });
+      } catch(_){}
+    }
+    setLoading(false);
+  }
 
   // Master 그룹: authority.USR >= 15
   const isMaster = authority && (authority.USR || 0) >= 15;
@@ -94,17 +111,23 @@ export default function AgentChat({ user, authority, context, onClose }) {
           // thinking은 스피너 상태 유지 용도 (step에 추가하지 않음)
           break;
         case 'reasoning':
-          addStep({ type: 'reasoning', data, ts });
+          if (showProcess) addStep({ type: 'reasoning', data, ts });
           break;
         case 'tool_call':
           addStep({ type: 'tool_call', data, ts });
           break;
         case 'tool_result':
           addStep({ type: 'tool_result', data, ts });
+          if (contentBuf) {
+            setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
+            contentBuf = '';
+          }
           break;
         case 'content':
           contentBuf += data.text;
           setMessages(prev => {
+            const lastUser = [...prev].reverse().find(m => m.role === 'user');
+            if (lastUser && contentBuf.trim() === lastUser.content.trim()) return prev;
             const last = prev[prev.length - 1];
             if (last && last._streaming) {
               return [...prev.slice(0, -1), { ...last, content: contentBuf }];
@@ -134,10 +157,13 @@ export default function AgentChat({ user, authority, context, onClose }) {
     }
 
     try {
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       const res = await fetch(`${STREAM_API}/Agent/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
         body: JSON.stringify({ sessionId, message: text, context }),
+        signal: ctrl.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -354,8 +380,54 @@ export default function AgentChat({ user, authority, context, onClose }) {
               )}
               {messages.map((msg, i) => {
                 if (msg.role === 'process') {
-                  const rendered = renderProcess(msg, i);
-                  return rendered ? <div key={i} className="ac-msg ac-msg-process">{rendered}</div> : null;
+                  if (!showProcess) return null;
+                  const steps = msg.steps || [];
+                  if (steps.length === 0 && !(loading && i === messages.findLastIndex(m => m.role === 'process'))) return null;
+                  const isRunning = loading && i === messages.findLastIndex(m => m.role === 'process');
+                  return (
+                    <div key={i} className="ac-msg ac-msg-process">
+                      <div className="ac-proc-body">
+                        {steps.map((step, j) => (
+                          <div key={j} className={`ac-proc-step ac-ps-${step.type}`}>
+                            {step.type === 'reasoning' && (
+                              <div className="ac-ps-line ac-ps-reasoning">
+                                <span className="ac-ps-tag ac-tag-reason">Thought</span>
+                                <span className="ac-ps-text">{step.data.content}</span>
+                              </div>
+                            )}
+                            {step.type === 'tool_call' && (
+                              <div className="ac-ps-line">
+                                <span className="ac-ps-tag ac-tag-call">CALL</span>
+                                <span className="ac-ps-text"><strong>{step.data.tool}</strong>
+                                  {Object.keys(step.data.params || {}).length > 0 && (
+                                    <span className="ac-ps-params"> ({Object.entries(step.data.params).map(([k,v]) => `${k}=${v}`).join(', ')})</span>
+                                  )}
+                                </span>
+                                <span className="ac-ps-ts">{step.ts}</span>
+                              </div>
+                            )}
+                            {step.type === 'tool_result' && (
+                              <div className="ac-ps-result-wrap">
+                                <div className="ac-ps-line" onClick={() => toggleDetail(i, j)} style={{cursor:'pointer'}}>
+                                  <span className={`ac-ps-tag ${step.data.status === 'success' ? 'ac-tag-ok' : 'ac-tag-err'}`}>
+                                    {step.data.status === 'success' ? 'OK' : 'ERR'}
+                                  </span>
+                                  <span className="ac-ps-text">{step.data.tool} &rarr; {step.data.summary}</span>
+                                  <span className="ac-ps-dur">{step.data.duration_ms}ms</span>
+                                  {step.data.detail && <span className="ac-ps-expand">{step.detailOpen ? '\u25BC' : '...'}</span>}
+                                </div>
+                                {step.detailOpen && step.data.detail && <pre className="ac-ps-detail">{step.data.detail}</pre>}
+                              </div>
+                            )}
+                            {step.type === 'error' && (
+                              <div className="ac-ps-line"><span className="ac-ps-tag ac-tag-err">ERR</span><span className="ac-ps-text">{step.data.message}</span></div>
+                            )}
+                          </div>
+                        ))}
+                        {isRunning && <div className="ac-ps-line"><span className="ac-proc-spinner" /> <span className="ac-ps-text">작업 중...</span></div>}
+                      </div>
+                    </div>
+                  );
                 }
                 return (
                   <div key={i} className={`ac-msg ac-msg-${msg.role}`}>
@@ -394,10 +466,23 @@ export default function AgentChat({ user, authority, context, onClose }) {
               <div ref={messagesEndRef} />
             </div>
             <div className="ac-input-area">
+              <button
+                onClick={() => setShowProcess(p => !p)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: '11px', color: showProcess ? '#e67e22' : '#999',
+                  padding: '2px 6px', marginRight: '4px', flexShrink: 0
+                }}
+                title={showProcess ? '추론 과정 감추기' : '추론 과정 보기'}
+              >{showProcess ? '◉' : '○'}</button>
               <textarea ref={inputRef} className="ac-input" value={input}
                 onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder="메시지를 입력하세요..." rows={1} />
-              <button className="ac-send" onClick={handleSend} disabled={loading || !input.trim()}>전송</button>
+              {loading ? (
+                <button className="ac-send" onClick={handleCancel} style={{ background: '#c33', color: '#fff' }}>중지</button>
+              ) : (
+                <button className="ac-send" onClick={handleSend} disabled={!input.trim()}>전송</button>
+              )}
             </div>
           </>
         )}

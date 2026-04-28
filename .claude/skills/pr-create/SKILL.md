@@ -1,20 +1,36 @@
 ---
 name: pr-create
-description: 사용자 브랜치에서 main으로 Pull Request를 생성합니다
-argument-hint: "[project-code] [--title \"...\"]"
+description: 사용자 브랜치(docs/{user})에서 main 으로 Pull Request 를 생성합니다. 쓰기 작업.
 allowed-tools: Bash
 disable-model-invocation: true
 ---
 
-사용자 브랜치에서 main 브랜치로 Pull Request를 생성합니다. 쓰기 작업이므로 실행 전 사용자 확인이 필요합니다.
+Platform-API `POST /DocRepo/{code}/pr` 로 PR 을 생성합니다. 쓰기 작업 — 실행 전 사용자 확인.
 
-## PR 생성
-!`gojira-cli pr create --project $ARGUMENTS`
+## 환경
+- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
 
-## 제목 지정
+## 인자
+- `CODE` — projectCode
+- `USER` — X-User-Id (head 브랜치는 `docs/${USER}`)
+- `TITLE` — (선택) PR 제목 (생략 시 `[CODE] 설계문서 배포 요청`)
+- `BODY` — (선택) PR 본문
+
+```bash
+export CODE="GOJIRA3"
+export USER="batman"
+export TITLE=""
+export BODY=""
+export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+[ -z "$TITLE" ] && TITLE="[${CODE}] 설계문서 배포 요청"
 ```
-gojira-cli pr create --project PROJECT --title "PR 제목"
+
+## 생성
+```bash
+curl -s -X POST "${PLATFORM_API}/DocRepo/${CODE}/pr" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -d "$(jq -n --arg t "$TITLE" --arg b "$BODY" --arg h "docs/${USER}" \
+    '{title:$t, body:$b, head:$h, base:"main"}')"
 ```
 
-생성된 PR 번호와 URL을 사용자에게 알려줍니다.
-title 생략 시 브랜치명 기반으로 자동 생성됩니다.
+결과의 PR 번호와 URL 을 사용자에게 보고합니다.

@@ -96,7 +96,7 @@ export default function AccountManager({ user }) {
             orgUnits={orgUnits}
             onEdit={(o) => setEditItem({ mode: 'edit', tab: 'orgUnits', data: { ...o } })}
             onDelete={(id) => handleDelete('orgUnits', id)}
-            onCreate={() => setEditItem({ mode: 'create', tab: 'orgUnits', data: { code: '', name: '', type: 'team', parentOrgUnitId: '' } })}
+            onCreate={() => setEditItem({ mode: 'create', tab: 'orgUnits', data: { name: '', type: 'team', parentOrgUnitId: '' } })}
           />
         )}
       </div>
@@ -206,12 +206,11 @@ function OrgUnitTable({ orgUnits, onEdit, onDelete, onCreate }) {
       </div>
       <table className="am-table">
         <thead>
-          <tr><th>코드</th><th>이름</th><th>유형</th><th>상위 조직</th><th></th></tr>
+          <tr><th>이름</th><th>유형</th><th>상위 조직</th><th></th></tr>
         </thead>
         <tbody>
           {sorted.map(o => (
             <tr key={o._id}>
-              <td>{o.code}</td>
               <td>{o.name}</td>
               <td>{o.type}</td>
               <td>{parentMap[o.parentOrgUnitId] || o.parentOrgUnitId || '-'}</td>
@@ -338,7 +337,6 @@ function EditDialog({ item, authGroups, orgUnits, onClose, onSave }) {
           )}
           {item.tab === 'orgUnits' && (
             <>
-              <label>코드<input value={form.code || ''} onChange={e => set('code', e.target.value)} disabled={!isCreate} /></label>
               <label>이름<input value={form.name || ''} onChange={e => set('name', e.target.value)} /></label>
               <label>유형
                 <select value={form.type || 'team'} onChange={e => set('type', e.target.value)}>
