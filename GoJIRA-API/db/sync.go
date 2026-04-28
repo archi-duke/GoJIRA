@@ -185,6 +185,14 @@ func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []s
 	var result map[string]interface{}
 	var err error
 
+	// 이슈는 projectId 로 단일 소속. projectKey 가 주어지면 _id 확보해서 함께 저장.
+	var projectID interface{}
+	if projectKey != "" {
+		if prj := FindProjectByCode(ctx, projectKey); prj != nil {
+			projectID = prj["_id"]
+		}
+	}
+
 	if projectKey != "" || len(issueTypes) > 0 {
 		// Build JQL
 		clauses := []string{}
@@ -228,6 +236,9 @@ func PullFromJiraFiltered(ctx context.Context, projectKey string, issueTypes []s
 
 		// Transform to cache_schema format
 		doc := TransformToCache(issue)
+		if projectID != nil {
+			doc["projectId"] = projectID
+		}
 		doc["_dirty"] = false
 		doc["_syncedAt"] = time.Now()
 
