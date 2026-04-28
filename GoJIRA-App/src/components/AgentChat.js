@@ -231,7 +231,17 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           if (m.role === 'assistant' && Array.isArray(m.parts)) {
             // 새 포맷: OpenCode 원본 parts 를 직접 렌더
             const segs = partsToSegments(m.parts);
-            if (segs.length) msgs.push({ role: 'assistant', segments: segs });
+            if (segs.length) {
+              msgs.push({ role: 'assistant', segments: segs });
+            } else {
+              // parts 가 비어있는 케이스 — 모델 스톨/거부/타임아웃으로 응답 미생성.
+              // 누락하면 화면에서 마지막 메시지가 사라진 것처럼 보이므로 placeholder 표시.
+              const modelID = (m.info && m.info.modelID) || 'unknown';
+              msgs.push({
+                role: 'assistant',
+                segments: [{ type: 'response', text: `(모델 ${modelID} 가 응답을 생성하지 못했습니다)` }],
+              });
+            }
           } else if (m.role === 'process') {
             // 레거시 포맷 호환
             const segs = stepsToSegments(m.steps || []);
@@ -655,7 +665,15 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           const m = raw[i].role ? raw[i] : Object.fromEntries(Object.entries(raw[i]));
           if (m.role === 'assistant' && Array.isArray(m.parts)) {
             const segs = partsToSegments(m.parts);
-            if (segs.length) msgs.push({ role: 'assistant', segments: segs });
+            if (segs.length) {
+              msgs.push({ role: 'assistant', segments: segs });
+            } else {
+              const modelID = (m.info && m.info.modelID) || 'unknown';
+              msgs.push({
+                role: 'assistant',
+                segments: [{ type: 'response', text: `(모델 ${modelID} 가 응답을 생성하지 못했습니다)` }],
+              });
+            }
           } else if (m.role === 'process') {
             const segs = stepsToSegments(m.steps || []);
             const next = raw[i + 1];
