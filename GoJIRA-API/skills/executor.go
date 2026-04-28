@@ -34,20 +34,12 @@ func executeSkill(ctx context.Context, skill *SkillDef, params map[string]interf
 		return execIssueQuery(ctx, params)
 	case "doc_list":
 		return execDocList(params)
-	case "doc_summarize":
-		return execDocSummarize(params, user)
-	case "doc_diff":
-		return execDocDiff(params, user)
 	case "pr_list":
 		return execPRList(params)
 	case "doc_history":
 		return execDocHistory(params)
-	case "schedule_analyze":
-		return execScheduleAnalyze(ctx, params)
 	case "satam_analyze":
 		return execSATAMAnalyze(ctx, params)
-	case "issue_analyze":
-		return execIssueAnalyze(ctx, params)
 	// 변경
 	case "issue_create":
 		return execIssueCreate(ctx, params, user)
@@ -158,51 +150,6 @@ func execDocList(params map[string]interface{}) (interface{}, error) {
 	return map[string]interface{}{"projectCode": code, "files": files, "count": len(files)}, nil
 }
 
-func execDocSummarize(params map[string]interface{}, user string) (interface{}, error) {
-	code, _ := params["projectCode"].(string)
-	fp, _ := params["filePath"].(string)
-	if code == "" || fp == "" {
-		return nil, fmt.Errorf("projectCode, filePath 필수")
-	}
-	content, err := FetchFileContent(code, fp, "main")
-	if err != nil {
-		content, err = FetchFileContent(code, fp, "docs/"+user)
-		if err != nil {
-			return nil, fmt.Errorf("파일 조회 실패")
-		}
-	}
-	if content == "" {
-		return map[string]interface{}{"summary": "파일이 비어 있습니다."}, nil
-	}
-	prompt := config.LoadPrompt("skill-doc-summarize.txt", map[string]string{"FilePath": fp, "Content": truncate(content, 8000)})
-	if prompt == "" {
-		prompt = fmt.Sprintf("다음 문서를 한국어로 요약:\n\n%s", truncate(content, 8000))
-	}
-	summary, _ := CallLLM(prompt)
-	return map[string]interface{}{"projectCode": code, "filePath": fp, "summary": summary}, nil
-}
-
-func execDocDiff(params map[string]interface{}, user string) (interface{}, error) {
-	code, _ := params["projectCode"].(string)
-	fp, _ := params["filePath"].(string)
-	if code == "" || fp == "" {
-		return nil, fmt.Errorf("projectCode, filePath 필수")
-	}
-	mc, _ := FetchFileContent(code, fp, "main")
-	uc, _ := FetchFileContent(code, fp, "docs/"+user)
-	if mc == uc {
-		return map[string]interface{}{"filePath": fp, "hasDiff": false, "summary": "차이 없음"}, nil
-	}
-	prompt := config.LoadPrompt("skill-diff-explain.txt", map[string]string{
-		"FilePath": fp, "MainContent": truncate(mc, 4000), "UserContent": truncate(uc, 4000),
-	})
-	if prompt == "" {
-		prompt = fmt.Sprintf("두 버전 비교:\n=== main ===\n%s\n=== user ===\n%s", truncate(mc, 4000), truncate(uc, 4000))
-	}
-	explanation, _ := CallLLM(prompt)
-	return map[string]interface{}{"filePath": fp, "hasDiff": true, "explanation": explanation}, nil
-}
-
 func execPRList(params map[string]interface{}) (interface{}, error) {
 	code, _ := params["projectCode"].(string)
 	state, _ := params["state"].(string)
@@ -284,41 +231,6 @@ func execDocHistory(params map[string]interface{}) (interface{}, error) {
 		results = append(results, C{SHA: sha, Message: msg, Author: name, Date: date})
 	}
 	return map[string]interface{}{"projectCode": code, "branch": branch, "count": len(results), "commits": results}, nil
-}
-
-func execScheduleAnalyze(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	code, _ := params["projectCode"].(string)
-	if code == "" {
-		return nil, fmt.Errorf("projectCode 필수")
-	}
-	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	prj := db.FindProjectByCode(qCtx, code)
-	if prj == nil {
-		return nil, fmt.Errorf("프로젝트 없음: %s", code)
-	}
-	name, _ := prj["name"].(string)
-	status, _ := prj["status"].(string)
-	issues, _ := db.FindAllIssues(qCtx, bson.M{"key": bson.M{"$regex": "^" + code + "-"}})
-	var total, done, prog int
-	for _, i := range issues {
-		total++
-		if s, _ := i["status"].(string); s == "Done" {
-			done++
-		} else if s == "In Progress" {
-			prog++
-		}
-	}
-	info := fmt.Sprintf("프로젝트: %s (%s), 상태: %s, 이슈: 총%d 완료%d 진행%d 미착수%d, 오늘: %s",
-		name, code, status, total, done, prog, total-done-prog, time.Now().Format("2006-01-02"))
-	prompt := config.LoadPrompt("skill-schedule-analyze.txt", map[string]string{"ScheduleInfo": info})
-	if prompt == "" {
-		prompt = "프로젝트 일정 분석:\n" + info
-	}
-	analysis, _ := CallLLM(prompt)
-	return map[string]interface{}{"projectCode": code, "projectName": name,
-		"issueStats": map[string]int{"total": total, "done": done, "inProgress": prog},
-		"analysis": analysis}, nil
 }
 
 // ─── 변경 Skill ───
@@ -526,94 +438,6 @@ func execSATAMAnalyze(ctx context.Context, params map[string]interface{}) (inter
 		"mitigMissing":   mitigMissing,
 		"items":          items,
 		"analysis":       analysis,
-	}, nil
-}
-
-// ─── 이슈 관계 분석 ───
-
-func execIssueAnalyze(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	code, _ := params["projectCode"].(string)
-	if code == "" {
-		return nil, fmt.Errorf("projectCode 필수")
-	}
-	qCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	issues, _ := db.FindAllIssues(qCtx, bson.M{"key": bson.M{"$regex": "^" + code + "-"}})
-
-	// 타입별 통계
-	typeCounts := map[string]int{}
-	keyToType := map[string]string{}
-	containedBy := map[string]string{} // 하위 → 상위
-	linkCount := map[string]int{}
-
-	for _, issue := range issues {
-		key := str(issue, "key")
-		iType := str(issue, "issueType")
-		typeCounts[iType]++
-		keyToType[key] = iType
-
-		// issueLinks 분석
-		var links []interface{}
-		switch v := issue["issueLinks"].(type) {
-		case []interface{}:
-			links = v
-		case bson.A:
-			links = []interface{}(v)
-		}
-		for _, l := range links {
-			lm := toMapI(l)
-			if lm == nil {
-				continue
-			}
-			lt, _ := lm["type"].(string)
-			linkCount[lt]++
-			if lt == "contain" {
-				if inward, ok := lm["inward"].(string); ok {
-					containedBy[key] = inward
-				}
-			}
-		}
-	}
-
-	// 고아 이슈 (contain 관계 없는 이슈, VOS 제외)
-	var orphans []map[string]string
-	for _, issue := range issues {
-		key := str(issue, "key")
-		iType := str(issue, "issueType")
-		if iType == "VOS" {
-			continue // VOS는 최상위이므로 고아가 아님
-		}
-		if _, ok := containedBy[key]; !ok {
-			orphans = append(orphans, map[string]string{
-				"key": key, "issueType": iType, "summary": str(issue, "summary"),
-			})
-		}
-	}
-
-	// contain 체인 통계
-	chainStats := map[string]int{
-		"VOS→Feature":        0,
-		"Feature→Requirement": 0,
-		"Requirement→ADSN":   0,
-	}
-	for child, parent := range containedBy {
-		pType := keyToType[parent]
-		cType := keyToType[child]
-		chain := pType + "→" + cType
-		if _, ok := chainStats[chain]; ok {
-			chainStats[chain]++
-		}
-	}
-
-	return map[string]interface{}{
-		"projectCode": code,
-		"typeCounts":  typeCounts,
-		"linkCounts":  linkCount,
-		"chainStats":  chainStats,
-		"orphanCount": len(orphans),
-		"orphans":     orphans,
-		"totalIssues": len(issues),
 	}, nil
 }
 
