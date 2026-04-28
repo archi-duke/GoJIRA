@@ -29,6 +29,7 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
   const [form, setForm] = useState({});
   const [orgUnits, setOrgUnits] = useState([]);
   const [users, setUsers] = useState([]);
+  const [selectedMsIdx, setSelectedMsIdx] = useState(null);
 
   useEffect(() => {
     if (project) {
@@ -146,40 +147,18 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
           </div>
           <UserMultiField label="Members" value={form.members || []} users={users} editable={isEdit}
             onChange={(arr) => handleChange('members', arr)} />
-          <UserMultiField label="Auditors" value={form.auditors || []} users={users} editable={isEdit}
+          <UserMultiField label="Auditors" sectionLabel value={form.auditors || []} users={users} editable={isEdit}
             onChange={(arr) => handleChange('auditors', arr)} />
 
           {/* Schedules */}
           <div className="dlg-section">마일스톤</div>
-          <table className="dlg-table">
-            <thead>
-              <tr><th>이름</th><th>기한</th></tr>
-            </thead>
-            <tbody>
-              {schedules.map((s, i) => {
-                const name = Object.keys(s)[0];
-                const dateVal = Object.values(s)[0];
-                const display = dateVal ? dateVal.slice(0, 10) : '';
-                return (
-                  <tr key={i}>
-                    <td>{name}</td>
-                    <td>
-                      {isEdit ? (
-                        <input
-                          type="date"
-                          className="dlg-input"
-                          value={display}
-                          onChange={(e) => handleScheduleChange(i, e.target.value + 'T00:00:00.000Z')}
-                        />
-                      ) : (
-                        display
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <MilestoneGantt
+            schedules={schedules}
+            editable={isEdit}
+            selectedIdx={selectedMsIdx}
+            onSelect={setSelectedMsIdx}
+            onChange={handleScheduleChange}
+          />
 
           {/* PLM Code */}
           {form.PLMCode && form.PLMCode.length > 0 && (
@@ -332,7 +311,7 @@ function UserSingleField({ label, value, users, editable, onChange }) {
   );
 }
 
-function UserMultiField({ label, value, users, editable, onChange }) {
+function UserMultiField({ label, sectionLabel, value, users, editable, onChange }) {
   const listId = React.useId();
   const list = value || [];
   const userById = (knoxId) => users.find((u) => u.knoxId === knoxId);
@@ -349,18 +328,22 @@ function UserMultiField({ label, value, users, editable, onChange }) {
     onChange(list.filter((_, idx) => idx !== i));
   }
 
+  const labelEl = sectionLabel
+    ? <div className="dlg-section">{label}</div>
+    : <label className="dlg-label" style={{ marginTop: 8 }}>{label}</label>;
+
   if (!editable && list.length === 0) {
     return (
-      <div className="dlg-field" style={{ marginTop: 8 }}>
-        <label className="dlg-label">{label}</label>
+      <>
+        {labelEl}
         <span className="dlg-value">-</span>
-      </div>
+      </>
     );
   }
 
   return (
     <>
-      <label className="dlg-label" style={{ marginTop: 8 }}>{label}</label>
+      {labelEl}
       <div className="dlg-auditor-list">
         {list.map((knoxId, i) => {
           const u = userById(knoxId);
@@ -401,5 +384,124 @@ function UserMultiField({ label, value, users, editable, onChange }) {
         )}
       </div>
     </>
+  );
+}
+
+function MilestoneGantt({ schedules, editable, selectedIdx, onSelect, onChange }) {
+  const wrapRef = React.useRef(null);
+  const [width, setWidth] = useState(480);
+  const H = 60;
+  const PAD_L = 24;
+  const PAD_R = 24;
+  const innerW = Math.max(width - PAD_L - PAD_R, 1);
+  const yLine = 28;
+  const R = 7;
+
+  useEffect(() => {
+    if (!wrapRef.current) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setWidth(Math.max(entry.contentRect.width, 200));
+    });
+    ro.observe(wrapRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!editable || selectedIdx == null) return;
+    const onKey = (e) => { if (e.key === 'Escape') onSelect(null); };
+    const onMouseDown = (e) => {
+      if (e.target.closest('.dlg-ms-g')) return;
+      if (e.target.closest('.dlg-ms-edit-popup')) return;
+      onSelect(null);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onMouseDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [editable, selectedIdx, onSelect]);
+
+  const items = (schedules || []).map((s, i) => {
+    const name = Object.keys(s)[0];
+    const dateStr = Object.values(s)[0];
+    const date = dateStr ? new Date(dateStr) : null;
+    return { idx: i, name, dateStr, date };
+  });
+
+  const validDates = items.map((m) => m.date).filter(Boolean);
+  const minDate = validDates.length ? new Date(Math.min(...validDates)) : null;
+  const maxDate = validDates.length ? new Date(Math.max(...validDates)) : null;
+  const span = minDate && maxDate ? maxDate - minDate : 0;
+  const allHaveDate = items.length > 0 && items.every((m) => m.date);
+
+  function xFor(idx, date) {
+    if (allHaveDate && span > 0) {
+      return PAD_L + ((date - minDate) / span) * innerW;
+    }
+    if (items.length === 1) return PAD_L + innerW / 2;
+    return PAD_L + (idx / (items.length - 1)) * innerW;
+  }
+
+  const positioned = items.map((m) => ({ ...m, x: xFor(m.idx, m.date) }));
+
+  if (positioned.length === 0) {
+    return (
+      <div className="dlg-ms-wrap" ref={wrapRef}>
+        <div className="dlg-text" style={{ color: '#888' }}>마일스톤이 없습니다.</div>
+      </div>
+    );
+  }
+
+  const firstX = positioned[0].x;
+  const lastX = positioned[positioned.length - 1].x;
+  const selected = selectedIdx != null ? positioned[selectedIdx] : null;
+  const inputDate = selected && selected.dateStr ? selected.dateStr.slice(0, 10) : '';
+
+  return (
+    <div className="dlg-ms-wrap" ref={wrapRef}>
+      <svg className="dlg-ms-svg" width={width} height={H}>
+        <line x1={firstX} y1={yLine} x2={lastX} y2={yLine} className="dlg-ms-line" />
+        {positioned.map((m, i) => {
+          const isSel = selectedIdx === i;
+          return (
+            <g
+              key={i}
+              className={`dlg-ms-g ${editable ? 'editable' : ''} ${isSel ? 'selected' : ''}`}
+              onClick={editable ? () => onSelect(i) : undefined}
+            >
+              <text x={m.x} y={yLine - R - 4} textAnchor="middle" className="dlg-ms-name">
+                {m.name}
+              </text>
+              <circle cx={m.x} cy={yLine} r={R} className="dlg-ms-circle" />
+              <text x={m.x} y={yLine + R + 12} textAnchor="middle" className="dlg-ms-date">
+                {m.dateStr ? m.dateStr.slice(5, 10) : '-'}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      {editable && selected && (() => {
+        const isFirst = selected.idx === 0;
+        const isLast = selected.idx === positioned.length - 1;
+        const tx = isFirst ? '0%' : isLast ? '-100%' : '-50%';
+        return (
+        <div
+          className="dlg-ms-edit-popup"
+          style={{ left: selected.x, top: yLine + R + 16, transform: `translateX(${tx})` }}
+        >
+          <span className="dlg-ms-edit-name">{selected.name}</span>
+          <input
+            type="date"
+            className="dlg-input dlg-ms-edit-input"
+            value={inputDate}
+            autoFocus
+            onChange={(e) => onChange(selected.idx, e.target.value + 'T00:00:00.000Z')}
+            onKeyDown={(e) => { if (e.key === 'Escape') onSelect(null); }}
+          />
+        </div>
+        );
+      })()}
+    </div>
   );
 }

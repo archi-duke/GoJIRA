@@ -252,6 +252,13 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
   }, []);
 
   function newProjectTemplate() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const addMonths = (n) => {
+      const d = new Date(today);
+      d.setMonth(d.getMonth() + n);
+      return d.toISOString();
+    };
     return {
       name: '',
       jiraCodes: { main: { jiraCode: '' } },
@@ -263,7 +270,11 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       architect: { name: '', knoxID: '', department: '' },
       PL: { name: '', knoxID: '', department: '' },
       schedules: [
-        { PA: '' }, { EA: '' }, { ER1: '' }, { ER2: '' }, { CA: '' },
+        { PA: today.toISOString() },
+        { EA: addMonths(1) },
+        { ER1: addMonths(2) },
+        { ER2: addMonths(3) },
+        { CA: addMonths(4) },
       ],
       PLMCode: [],
     };
