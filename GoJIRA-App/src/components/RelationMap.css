@@ -70,26 +70,6 @@
 .rm-ai-btn:hover { background: #e8f4ff; border-color: #2980b9; }
 .rm-ai-btn:disabled { opacity: 0.4; cursor: default; }
 
-/* AI Assist 승인 모달 */
-.rm-assist-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 200; display: flex; align-items: center; justify-content: center; }
-.rm-assist-modal { background: #fff; border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.2); width: 520px; max-height: 70vh; display: flex; flex-direction: column; }
-.rm-assist-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #eee; font-size: 15px; font-weight: 600; color: #2c3e50; }
-.rm-assist-modal-close { border: none; background: none; font-size: 20px; cursor: pointer; color: #999; }
-.rm-assist-modal-body { flex: 1; overflow-y: auto; padding: 12px 18px; }
-.rm-assist-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; cursor: pointer; }
-.rm-assist-item:hover { background: #fafafa; }
-.rm-assist-action { font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
-.rm-assist-add .rm-assist-action { background: #e6ffec; color: #1a7f37; }
-.rm-assist-update .rm-assist-action { background: #fff8e1; color: #e67e22; }
-.rm-assist-delete .rm-assist-action { background: #ffebe9; color: #cf222e; }
-.rm-assist-summary { flex: 1; color: #333; }
-.rm-assist-reason { display: block; font-size: 11px; color: #888; margin-top: 2px; }
-.rm-assist-modal-footer { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid #eee; justify-content: flex-end; }
-.rm-assist-apply { padding: 6px 16px; border: none; border-radius: 4px; background: #2c3e50; color: #fff; cursor: pointer; font-size: 13px; }
-.rm-assist-apply:hover { background: #34495e; }
-.rm-assist-apply:disabled { background: #ccc; cursor: default; }
-.rm-assist-cancel { padding: 6px 16px; border: none; border-radius: 4px; background: lightgray; color: #000; cursor: pointer; font-size: 13px; }
-
 /* ===== Card ===== */
 .rm-card {
   position: relative;

@@ -32,8 +32,6 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
   const [sortKey, setSortKey] = useState('key');
   const [sortAsc, setSortAsc] = useState(true);
   const [detailIssue, setDetailIssue] = useState(null);
-  const [assistLoading, setAssistLoading] = useState(false);
-  const [assistResult, setAssistResult] = useState(null);
 
   // 필터 옵션 (sessionStorage에서 복원, 기본 모두 ON)
   const [showV, setShowV] = useState(() => sessionStorage.getItem('gojira_il_V') !== 'false');
@@ -167,56 +165,6 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
     { key: 'status', label: 'Status', width: 100 },
     { key: 'priority', label: 'Priority', width: 90 },
   ];
-
-  async function handleAssistGenerate(issueType) {
-    if (assistLoading) return;
-    setAssistLoading(true);
-    setAssistResult(null);
-    try {
-      const res = await fetch(`${API_BASE}/Agent/assist`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-        body: JSON.stringify({
-          action: 'generate',
-          context: { page: 'issues', projectCode, issueType },
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.result?.suggestions?.length > 0) {
-        setAssistResult({ issueType, suggestions: data.result.suggestions });
-      } else {
-        alert(data.error || '이슈 제안을 생성할 수 없습니다.');
-      }
-    } catch (err) {
-      alert('Agent Assist 오류: ' + err.message);
-    }
-    setAssistLoading(false);
-  }
-
-  async function handleAssistApply() {
-    if (!assistResult?.suggestions) return;
-    setAssistLoading(true);
-    let created = 0;
-    for (const s of assistResult.suggestions) {
-      try {
-        await fetch(`${API_BASE}/Agent/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-          body: JSON.stringify({
-            message: `${projectCode}에 ${s.issueType || assistResult.issueType} 이슈를 생성해줘. 제목: ${s.summary}. 설명: ${s.description || ''}`,
-          }),
-        });
-        created++;
-      } catch {}
-    }
-    setAssistResult(null);
-    setAssistLoading(false);
-    // 이슈 목록 새로고침
-    if (created > 0) {
-      alert(`${created}건의 이슈가 생성되었습니다.`);
-      handlePull();
-    }
-  }
 
   function cellValue(issue, col) {
     const v = issue[col.key];
@@ -358,37 +306,8 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
 
       <div className="il-statusbar">
         <span>총 {sorted.length}건</span>
-        {editMode && (
-          <div className="il-assist-btns">
-            <button className="il-assist-btn" onClick={() => handleAssistGenerate('VOS')} disabled={assistLoading}>VOS 자동생성</button>
-            <button className="il-assist-btn" onClick={() => handleAssistGenerate('Feature')} disabled={assistLoading}>Feature 자동생성</button>
-            <button className="il-assist-btn" onClick={() => handleAssistGenerate('Requirement')} disabled={assistLoading}>Req 자동생성</button>
-            <button className="il-assist-btn" onClick={() => handleAssistGenerate('Architectural Design')} disabled={assistLoading}>ADSN 자동생성</button>
-            {assistLoading && <span className="il-assist-loading">생성 중...</span>}
-          </div>
-        )}
       </div>
 
-      {/* Assist Preview */}
-      {assistResult && (
-        <div className="il-assist-preview">
-          <div className="il-assist-preview-header">
-            <span>Agent 제안: {assistResult.issueType} {assistResult.suggestions.length}건</span>
-            <div>
-              <button className="il-assist-btn il-assist-apply" onClick={handleAssistApply}>전체 적용</button>
-              <button className="il-assist-btn" onClick={() => setAssistResult(null)}>닫기</button>
-            </div>
-          </div>
-          <div className="il-assist-preview-list">
-            {assistResult.suggestions.map((s, i) => (
-              <div key={i} className="il-assist-preview-item">
-                <strong>{s.issueType || assistResult.issueType}</strong>: {s.summary}
-                {s.description && <p className="il-assist-desc">{s.description}</p>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Issue Detail Dialog */}
       {detailIssue && (

@@ -45,7 +45,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
   const loadSession = useCallback(async (sid) => {
     if (!sid) return;
     try {
-      const res = await fetch(`${API}/Agent/session/${sid}`, {
+      const res = await fetch(`${STREAM_API}/Agent/session/${sid}`, {
         headers: { 'X-User-Id': user || '' },
       });
       if (res.ok) {
@@ -167,16 +167,9 @@ export default function AgentChat({ user, authority, context, onClose }) {
       });
 
       if (!res.ok || !res.body) {
-        const fb = await fetch(`${API}/Agent/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-User-Id': user || '' },
-          body: JSON.stringify({ sessionId, message: text, context }),
-        });
-        const data = await fb.json();
-        if (data.sessionId) { setSessionId(data.sessionId); sessionStorage.setItem('agent_sessionId', data.sessionId); }
         setMessages(prev => [
           ...prev.filter(m => m.role !== 'process' || m.steps.length > 0),
-          { role: 'assistant', content: data.reply, actions: data.actions, suggestions: data.suggestions },
+          { role: 'assistant', content: 'Agent-Service 연결 실패' },
         ]);
         setLoading(false);
         return;
@@ -219,7 +212,7 @@ export default function AgentChat({ user, authority, context, onClose }) {
   async function loadSessions(query) {
     const q = query ? `?q=${encodeURIComponent(query)}` : '';
     try {
-      const res = await fetch(`${API}/Agent/sessions${q}`, { headers: { 'X-User-Id': user || '' } });
+      const res = await fetch(`${STREAM_API}/Agent/sessions${q}`, { headers: { 'X-User-Id': user || '' } });
       if (res.ok) setSessions(await res.json());
     } catch {}
   }
