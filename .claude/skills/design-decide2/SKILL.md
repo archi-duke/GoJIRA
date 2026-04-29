@@ -531,77 +531,39 @@ cat /tmp/dd_link_result.json
 
 링크 실패는 silent drop 금지 — 보고에 건수 명시.
 
-### 5.3 docId → subkey 치환 + DP 파일 저장
+### 5.3 design-decisions.md (index) + DP별 파일 저장 — 결정적 조립 (LLM 0회)
 
-**Fast path (`FAST_PATH=true`)**: ADSN/DDSN 이슈 + archSettings.designDecideQAWeights 만으로 결정적 조립. LLM 0회.
+**MODE=full / fast path 동일 흐름**: Step 5.1~5.2 직후 mongo ADSN 이슈가 실제 subkey 와 함께 등록되어 있으므로 `design-decide-assemble.py --from-mongo` 가 결정적 조립. candidate placeholder 치환 / LLM `$DOCUMENT` echo 모두 폐기.
+
+⚠️ MODE=full 에선 Step 5.4 의 `designDecideQAWeights` PATCH 가 본 단계 **이전에** 실행되어 있어야 함 (assemble.py 가 archSettings 읽음). 본 SKILL 흐름상 5.4 가 5.3 뒤에 있으니 순서 조정:
 
 ```bash
-if [ "${FAST_PATH:-false}" = "true" ]; then
-  TMP_OUT=/tmp/${CODE}-dd-out
-  rm -rf "$TMP_OUT"
-  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/design-decide-assemble.py" \
-    --from-mongo "${CODE}" --user "${USER}" --out-dir "$TMP_OUT"
-
-  cat "$TMP_OUT/design-decisions.md" \
-    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/design-decisions.md"
-
-  for f in "$TMP_OUT"/design-decisions/*.md; do
-    rel="architecture/design-decisions/$(basename "$f")"
-    cat "$f" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "$rel"
-  done
-  echo "fast path 저장 완료"
-  exit 0
+# (full mode 한정) 먼저 designDecideQAWeights 를 PATCH — 5.4 의 PATCH 부분
+QAW_JSON=$(jq '[.designs[] | {designPoint, qaWeights}]' /tmp/${CODE}-dd-draft.json 2>/dev/null)
+if [ -n "$QAW_JSON" ] && [ "$QAW_JSON" != "null" ] && [ "${FAST_PATH:-false}" != "true" ]; then
+  curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
+    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+    -d "$(jq -n --argjson w "$QAW_JSON" '{designDecideQAWeights:$w}')" \
+    | jq '.updated'
 fi
+
+# 결정적 조립 + 저장 (MODE=full / fast path 공통)
+TMP_OUT=/tmp/${CODE}-dd-out
+rm -rf "$TMP_OUT"
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/design-decide-assemble.py" \
+  --from-mongo "${CODE}" --user "${USER}" --out-dir "$TMP_OUT"
+
+cat "$TMP_OUT/design-decisions.md" \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/design-decisions.md"
+
+for f in "$TMP_OUT"/design-decisions/*.md; do
+  rel="architecture/design-decisions/$(basename "$f")"
+  cat "$f" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "$rel"
+done
+echo "design-decisions.md + DP별 파일 저장 완료 (결정적 조립)"
 ```
 
-**기존 흐름 (MODE=full)**: 각 DP 의 후보별 ADSN 이슈 키가 확정됐으므로, document 본문의 candidate placeholder (`{A_KEY}` 등) 를 실제 이슈 키로 치환한 뒤 저장.
-
-```bash
-python3 <<'PY'
-import json, os, subprocess, re, urllib.parse
-d = json.load(open("/tmp/%s-dd-draft.json" % os.environ["CODE"]))
-result = json.load(open("/tmp/dd_result.json"))
-keys = result.get("keys", [])
-
-# DP 순서대로 후보 key 매핑
-idx = 0
-dp_file_bodies = dict(d["document"].get("dpFiles", {}))
-for design in d["designs"]:
-    dp_id = design["docId"]
-    body = dp_file_bodies.get(dp_id, "")
-    for a in design["approaches"]:
-        candidate_key = keys[idx]; idx += 1
-        # placeholder {A_KEY} / {B_KEY} / {C_KEY} 형식을 실제 key 로 치환
-        body = body.replace("{" + a["candidateId"] + "_KEY}", candidate_key)
-    dp_file_bodies[dp_id] = body
-
-# 파일 저장
-def slugify(name):
-    s = re.sub(r"[^0-9A-Za-z가-힣-]+", "-", name).strip("-").lower()
-    return s[:50] if s else "dp"
-
-user = os.environ["USER"]
-code = os.environ["CODE"]
-script = os.environ["PROJECT_ROOT"] + "/.claude/skills/_scripts/doc-save.sh"
-
-# DP 별 파일
-for design in d["designs"]:
-    dp_id = design["docId"]
-    num = dp_id.split("-")[1].zfill(2)
-    slug = slugify(design["designPoint"])
-    path = f"architecture/design-decisions/DP-{num}-{slug}.md"
-    body = dp_file_bodies.get(dp_id, "")
-    p = subprocess.run(["bash", script, code, user, path], input=body, text=True, capture_output=True)
-    print(f"  {path}: {p.stdout.strip()}")
-
-# index 파일
-index_body = d["document"]["index"]
-# index 내부의 {dp-link-DP-1} placeholder 를 실제 상대경로로 치환 (있는 경우)
-p = subprocess.run(["bash", script, code, user, "architecture/design-decisions.md"],
-                   input=index_body, text=True, capture_output=True)
-print(f"  architecture/design-decisions.md: {p.stdout.strip()}")
-PY
-```
+**FAST_PATH=true 면** Step 1~1.5 + 5.1/5.2 모두 스킵, Step 5.4 (qaWeights PATCH) 도 스킵 (기존 archSettings 그대로) 한 후 위 명령만 실행 후 `exit 0`.
 
 ### 5.4 designDecideQAWeights archSettings PATCH (full mode 만)
 

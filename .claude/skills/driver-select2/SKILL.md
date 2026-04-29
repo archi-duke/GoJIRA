@@ -292,25 +292,18 @@ fi
 
 실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define2) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
 
-### 5.4 architecture/drivers.md 저장
+### 5.4 architecture/drivers.md 저장 — 결정적 조립 (LLM 0회)
 
-**Fast path (`FAST_PATH=true`)**: Driver Requirement + archSettings.normalizedAttributes 만으로 결정적 조립 (LLM 0회).
-
-```bash
-if [ "${FAST_PATH:-false}" = "true" ]; then
-  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/driver-assemble.py" \
-    --from-mongo "${CODE}" --user "${USER}" \
-    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/drivers.md"
-  echo "fast path 저장 완료"
-  exit 0
-fi
-```
-
-**기존 흐름 (MODE=full)**:
+**MODE=full / fast path 동일 흐름**: Step 5.1~5.3 직후 mongo 이슈 + archSettings.normalizedAttributes 가 갖춰져 있으므로 `driver-assemble.py` 가 결정적 조립. LLM `$DOCUMENT` echo 폐기.
 
 ```bash
-echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/drivers.md"
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/driver-assemble.py" \
+  --from-mongo "${CODE}" --user "${USER}" \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/drivers.md"
+echo "drivers.md 저장 완료 (결정적 조립)"
 ```
+
+**FAST_PATH=true 면** Step 1 + 5.1~5.3 모두 스킵하고 위 명령만 실행 후 `exit 0`.
 
 ---
 

@@ -567,113 +567,29 @@ cat /tmp/style_link_result.json
 
 링크 실패는 silent drop 금지 — 보고에 건수 명시.
 
-### 5.3 docId → subkey 치환 + 후보 파일 저장
+### 5.3 architecture-style.md + 후보 파일 저장 — 결정적 조립 (LLM 0회)
 
-**Fast path (`FAST_PATH=true`)**: docId 치환 불필요 (이슈가 이미 subkey 보유). `style-assemble.py --from-mongo` 가 ADSN 이슈 + archSettings 만으로 결정적 조립. LLM 0회.
-
-```bash
-if [ "${FAST_PATH:-false}" = "true" ]; then
-  TMP_OUT=/tmp/${CODE}-styledef-out
-  rm -rf "$TMP_OUT"
-  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-assemble.py" \
-    --from-mongo "${CODE}" --user "${USER}" --out-dir "$TMP_OUT"
-
-  # index 저장
-  cat "$TMP_OUT/architecture-style.md" \
-    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-style.md"
-
-  # 후보 파일 일괄 저장
-  for f in "$TMP_OUT"/architecture-style/*.md; do
-    rel="architecture/architecture-style/$(basename "$f")"
-    cat "$f" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "$rel"
-  done
-  echo "fast path 저장 완료"
-  # Step 5.4 (chosenStyles PATCH) 도 스킵 — 기존 archSettings 그대로
-  # 다음 generation 에서 Step 6 보고
-  exit 0
-fi
-```
-
-**기존 흐름 (MODE=full)**: 생성된 ADSN 이슈의 subkey(`ADSN_001`, `ADSN_002`, ...) 로 **파일명과 문서 본문의 모든 `ADSN-N` 참조를 치환**. 결과 파일명은 `architecture-style/ADSN_NNN-{slug}.md` 형태 — JIRA 이슈 subkey 와 완전 일치.
-
-치환 규칙:
-- `ADSN-1` → `ADSN_001` (단독 단어)
-- `ADSN-2` → `ADSN_002`
-- 파일 내부 링크(`./architecture-style/ADSN-NN-...`) 도 함께 치환
+**MODE=full / fast path 동일 흐름**: Step 5.1~5.2 직후 mongo ADSN 이슈가 실제 subkey 와 함께 등록되어 있으므로 `style-assemble.py --from-mongo` 가 결정적 조립. LLM `$DOCUMENT` echo + sed 치환 모두 폐기. docId→subkey 매핑은 assemble 내부에서 자동 처리 (이슈의 subkey 직접 사용).
 
 ```bash
-python3 <<'PY'
-import json, os, subprocess, re
-d = json.load(open("/tmp/%s-styledef-draft.json" % os.environ["CODE"]))
-result = json.load(open("/tmp/style_adsn_result.json"))
-keys = result.get("keys", [])  # JIRA key 목록 (예: TEST-67, TEST-68)
+TMP_OUT=/tmp/${CODE}-styledef-out
+rm -rf "$TMP_OUT"
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-assemble.py" \
+  --from-mongo "${CODE}" --user "${USER}" --out-dir "$TMP_OUT"
 
-def slugify(name):
-    s = re.sub(r"[^0-9A-Za-z가-힣+\-]+", "-", name).strip("-").lower()
-    return s[:60] if s else "adsn"
+# index 저장
+cat "$TMP_OUT/architecture-style.md" \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "architecture/architecture-style.md"
 
-user = os.environ["USER"]
-code = os.environ["CODE"]
-script = os.environ["PROJECT_ROOT"] + "/.claude/skills/_scripts/doc-save.sh"
-gojira_api = os.environ.get("GOJIRA_API", "http://localhost:9001/api/v2")
-
-# 각 candidate 의 docId(ADSN-N) → 실제 subkey(ADSN_NNN) 매핑 작성
-# issue-batch-create 응답 순서는 요청 순서와 동일하다는 전제. 확인을 위해 key 로 subkey 조회.
-import urllib.request
-def fetch_subkey(k):
-    req = urllib.request.Request(
-        f"{gojira_api}/Issue",
-        headers={"XBody": json.dumps({"prjID": code, "infoType": ""}), "X-User-Id": user},
-    )
-    arr = json.loads(urllib.request.urlopen(req, timeout=10).read())
-    for it in arr:
-        if it.get("key") == k:
-            return it.get("subkey") or k
-    return k
-
-docid_to_subkey = {}
-idx = 0
-for c in d["candidates"]:
-    key = keys[idx]; idx += 1
-    docid_to_subkey[c["docId"]] = fetch_subkey(key)
-print("docid → subkey:", docid_to_subkey)
-
-def substitute_refs(text):
-    # ADSN-N (단독 단어 경계) → ADSN_NNN
-    for did, sub in docid_to_subkey.items():
-        text = re.sub(r"\b" + re.escape(did) + r"\b", sub, text)
-    return text
-
-# 후보 파일 각각 저장 (파일명 = subkey)
-for c in d["candidates"]:
-    docid = c["docId"]
-    subkey = docid_to_subkey[docid]
-    slug = slugify(c["name"])
-    path = f"architecture/architecture-style/{subkey}-{slug}.md"
-    body = d["document"]["candidateFiles"].get(docid, "")
-    body = substitute_refs(body)
-    p = subprocess.run(["bash", script, code, user, path], input=body, text=True, capture_output=True)
-    print(f"  {path}: {p.stdout.strip()}")
-
-# index 파일 — 본문 내 ADSN-N 참조도 subkey + 파일 링크도 재작성 필요
-# 링크 예: ./architecture-style/ADSN-01-... → ./architecture-style/ADSN_001-...
-index_body = d["document"]["index"]
-index_body = substitute_refs(index_body)
-# 후보 파일 링크가 ADSN-1 기준으로 생성됐다면 slug 포함 경로 치환
-for c in d["candidates"]:
-    docid = c["docId"]
-    subkey = docid_to_subkey[docid]
-    slug = slugify(c["name"])
-    # 가능한 기존 링크 패턴들을 subkey 기반으로 교체
-    old_prefix = f"architecture-style/{docid}-"
-    new_prefix = f"architecture-style/{subkey}-"
-    index_body = index_body.replace(old_prefix, new_prefix)
-
-p = subprocess.run(["bash", script, code, user, "architecture/architecture-style.md"],
-                   input=index_body, text=True, capture_output=True)
-print(f"  architecture/architecture-style.md: {p.stdout.strip()}")
-PY
+# 후보 파일 일괄 저장
+for f in "$TMP_OUT"/architecture-style/*.md; do
+  rel="architecture/architecture-style/$(basename "$f")"
+  cat "$f" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "$rel"
+done
+echo "architecture-style.md + 후보 파일 저장 완료 (결정적 조립)"
 ```
+
+**FAST_PATH=true 면** Step 1~1.5 + 5.1/5.2 모두 스킵, Step 5.4 (chosenStyles PATCH) 도 스킵 (기존 archSettings 그대로) 한 후 위 명령만 실행 후 `exit 0`.
 
 ### 5.4 archSettings.chosenStyles 업데이트 (선정 조합 평탄화)
 
