@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -14,6 +16,23 @@ import (
 	"gojira-api/db"
 	"gojira-api/handlers"
 )
+
+const trashRetentionDays = 3
+
+// purgeOldTrashWorker — 1시간마다 issues_trash 의 _trashedAt 이 retention 초과한 항목 영구 삭제.
+func purgeOldTrashWorker() {
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cutoff := time.Now().Add(-time.Duration(trashRetentionDays) * 24 * time.Hour)
+		if n, err := db.PurgeOldTrash(ctx, cutoff); err != nil {
+			log.Printf("trash purge error: %v", err)
+		} else if n > 0 {
+			log.Printf("trash purge: %d 건 영구 삭제 (retention=%dd)", n, trashRetentionDays)
+		}
+		cancel()
+		time.Sleep(1 * time.Hour)
+	}
+}
 
 func caseInsensitiveRouting(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +57,9 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 
 func main() {
 	db.Init()
+
+	// Trash sweeper — 휴지통 (issues_trash) 의 retention 초과 항목 자동 영구 삭제
+	go purgeOldTrashWorker()
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
