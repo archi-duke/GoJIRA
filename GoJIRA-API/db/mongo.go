@@ -56,10 +56,47 @@ func Init() {
 	log.Println("MongoDB connected:", config.MongoURI)
 }
 
-func Issues() *mongo.Collection   { return database.Collection("issues") }
-func Projects() *mongo.Collection { return database.Collection("projects") }
-func Comments() *mongo.Collection { return database.Collection("comments") }
-func Accounts() *mongo.Collection { return database.Collection("accounts") }
+func Issues() *mongo.Collection      { return database.Collection("issues") }
+func IssuesTrash() *mongo.Collection { return database.Collection("issues_trash") }
+func Projects() *mongo.Collection    { return database.Collection("projects") }
+func Comments() *mongo.Collection    { return database.Collection("comments") }
+func Accounts() *mongo.Collection    { return database.Collection("accounts") }
+
+// MoveIssueToTrash — issues 컬렉션 doc 을 issues_trash 로 이동 (휴지통).
+// _trashedAt / _trashedBy / _yamlContent 추가. 원본 이슈는 issues 에서 삭제.
+// 자동 정리는 PurgeOldTrash 가 _trashedAt 기준 3일 경과 시 처리.
+// 이슈가 없으면 no-op (DELETE 멱등성 보장).
+func MoveIssueToTrash(ctx context.Context, key, user, yamlContent string) error {
+	doc, err := FindIssueByKey(ctx, key)
+	if err == mongo.ErrNoDocuments {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if doc == nil {
+		return nil
+	}
+	delete(doc, "_id")
+	doc["_trashedAt"] = time.Now()
+	doc["_trashedBy"] = user
+	if yamlContent != "" {
+		doc["_yamlContent"] = yamlContent
+	}
+	if _, err := IssuesTrash().InsertOne(ctx, doc); err != nil {
+		return err
+	}
+	return DeleteIssueByKey(ctx, key)
+}
+
+// PurgeOldTrash — _trashedAt 이 cutoff 이전인 휴지통 항목 영구 삭제.
+func PurgeOldTrash(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := IssuesTrash().DeleteMany(ctx, bson.M{"_trashedAt": bson.M{"$lt": cutoff}})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}
 
 // --- Issue CRUD ---
 
