@@ -160,6 +160,13 @@ ADSN 과 동일 필드 + `designLevel: Detailed`. 단, `dmodel`, `archdiagram`, 
 - 손상/유실 시 `git pull` 후 전체 리빌드 가능.
 - 쿼리/카운트 성능 보존 목적. 이슈 수 3000 이하는 메모리 인덱스만으로도 충분하지만 기존 코드 변경 최소화 위해 유지.
 
+### 7.1 보조 컬렉션 (PR #11)
+
+| 컬렉션 | 역할 | retention |
+|---|---|---|
+| `usecase_artifacts` | use-cases.md 의 보조 데이터 (domain / userStories / useCases / diagrams) 영속화. projectId unique | 영구 |
+| `issues_trash` | DELETE 시 soft delete 휴지통. `_trashedAt` / `_trashedBy` + 원본 이슈 필드 보존 | 3일 (자동 sweeper) |
+
 ## 8. TODO / 열린 이슈
 
 - `attachment` 필드는 base64 로 YAML 에 두기엔 부담. 별도 `data/attachments/` 디렉토리 + 참조로 분리 예정.

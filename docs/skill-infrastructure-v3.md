@@ -328,6 +328,10 @@ LLM 의 가변성을 결정적 도구가 흡수 — 한 번 등록한 패턴은 
 | `a735286` | plantuml-fix 에 component_note_over 패턴 추가 |
 | `f463087` | driver-select2 Step 5.3 archSettings PATCH status 검증 보강 |
 | `d4c3e49` | usecase-analyze2 Step 1 분할 + 결정적 조립으로 재구성 |
+| `4a3271e` | usecase-analyze2 + style-define2 fast path (PR #11 Phase 1) |
+| `cc15d87` | design-decide / requirement / driver fast path (PR #11 Phase 2) |
+| `9c0c77c` | Step 0.2 A/B/C 분기 모델 + LLM 행동 가드 (사고 후 재설계) |
+| `7724c30` | DELETE soft delete + issues_trash 휴지통 + 자동 정리 (3일) |
 
 ---
 
@@ -339,7 +343,118 @@ LLM 의 가변성을 결정적 도구가 흡수 — 한 번 등록한 패턴은 
 - `.claude/skills/_scripts/drift-check.py` — workflow-graph 기반 stage hash 비교.
 - `.claude/skills/_scripts/plantuml-fix.py` — 7 패턴 결정적 fix.
 - `.claude/skills/_scripts/draft-io.sh` — save / load / merge 모드.
-- `.claude/skills/_scripts/usecase-assemble.py` — 결정적 조립 헬퍼.
+- `.claude/skills/_scripts/usecase-assemble.py` — 결정적 조립 헬퍼 (`--from-mongo` 옵션).
+- `.claude/skills/_scripts/style-assemble.py` — 시스템 스타일 결정적 조립 (PR #11).
+- `.claude/skills/_scripts/design-decide-assemble.py` — DP 별 결정적 조립 (PR #11).
+- `.claude/skills/_scripts/requirement-assemble.py` — Requirement 결정적 조립 (PR #11).
+- `.claude/skills/_scripts/driver-assemble.py` — Driver 결정적 조립 (PR #11).
 - `.claude/skills/design-integrate2/SKILL.md` — Step 1.1~1.5 분할.
 - `.claude/skills/usecase-analyze2/SKILL.md` — Step 1.1~1.5 분할.
 - `GoJIRA-API/handlers/project.go` — `archSettingsAllowedKeys` 화이트리스트.
+- `GoJIRA-API/db/usecase_artifact.go` — 보조 데이터 영속화 컬렉션 (PR #11).
+- `GoJIRA-API/handlers/issue.go` — DELETE soft delete (휴지통).
+
+---
+
+## 12. PR #11 — Fast path + A/B/C 분기 + 휴지통 (2026-04-28~29)
+
+§3 의 4-케이스 분기를 사용하다가 2026-04-29 발생한 destructive 사고를 계기로 재설계됐습니다. §2~9 의 인프라 위에 다음을 더했습니다.
+
+### 12.1 Step 0.2 — A/B/C 분기 모델 (§2.5 진화)
+
+§2.5 의 4-케이스가 "강제 재생성?" 을 yes/no 로 묻는 구조였는데, LLM 이 yes 를 "기존 모두 삭제 후 재도출" 로 해석할 수 있어 **3 메뉴 명시 분기** 로 재설계.
+
+| drift-check 결과 | 흐름 | 동작 |
+|---|---|---|
+| **NO-BASELINE** | 첫 실행 | Step 0.3 데이터 수집 → MODE=full |
+| **DRIFT** (이슈 변경) | **B** | 변경 영향 분석 + 부분 업데이트 (현재 미구현, MODE=full/relink 임시) |
+| **CLEAN** + 상위 **DRIFT** | **C** | 사용자 선택: ① 본 stage 재정립 / ② mark-deferred 보류 |
+| **모두 CLEAN** (변경 없음) | **A** | 0.2.1 의 3 메뉴 — **자동 진행 절대 금지** |
+
+### A 흐름 — 3 메뉴 (변경 없음)
+
+```
+변경된 이슈 / 산출물이 없습니다. 어떻게 처리할까요?
+  [1] 종료 (default — 가장 안전)
+  [2] 문서만 재생성 (LLM 0회 결정적 조립, 이슈 보존)
+  [3] 처음부터 다시 만들기 ⚠️ DESTRUCTIVE (reset-project 위임)
+```
+
+- **[1]**: 즉시 Step 6 보고만 출력 (baseline 갱신 없음)
+- **[2]** = **fast path**: `FAST_PATH=true` 설정 후 Step 1~Step 1.5 모두 스킵, Step 5.x 결정적 조립만 실행. 이슈/archSettings 절대 변경 안 함
+- **[3]**: 본 SKILL 자체에서는 진행 금지. `reset-project` 스킬 (CONFIRM=true) 위임 후 본 스킬 재호출 안내
+
+### LLM 행동 가드 (5 SKILL.md 명시)
+
+다음 중 어느 것도 LLM 자율 판단으로 호출 금지:
+- `DELETE /Issue` (Step 5 batch 외 절대 금지)
+- `PUT /Issue` (Step 5.1 batch 외 금지)
+- `archSettings` `$unset`
+
+### 12.2 Fast path 인프라 — `--from-mongo` 결정적 조립
+
+5 워크플로우 스킬 모두 `*-assemble.py --from-mongo CODE` 옵션. mongo (이슈 + archSettings) 만으로 markdown 산출. LLM 호출 0.
+
+| 스킬 | 산출 | 입력 |
+|---|---|---|
+| usecase-analyze2 | `business/use-cases.md` | Feature 이슈 + `usecase_artifacts` |
+| requirement-refine2 | `business/requirements.md` | Requirement 9필드 + Feature issueLinks |
+| driver-select2 | `architecture/drivers.md` | Driver(`driverSelected=true`) Requirement + `archSettings.normalizedAttributes` |
+| style-define2 | `architecture/architecture-style.md` + 후보별 | 시스템 스타일 ADSN + `archSettings.styleQAWeights` |
+| design-decide2 | `architecture/design-decisions.md` + DP별 | ADSN/DDSN (designPoint != "시스템 스타일 결정") + `archSettings.designDecideQAWeights` |
+
+### 12.3 신규 영속화
+
+#### `usecase_artifacts` 컬렉션 (Mongo)
+
+use-cases.md 의 4 종 보조 데이터 — 이슈에 없는 정보를 영속화:
+- `domain` (scope/concepts/actors/rules)
+- `userStories` (id/actor/category/story/vosKey/ucId)
+- `useCases` (id/summary/stories/feature)
+- `diagrams` (context/usecase/sequences PlantUML)
+- `vosKeys` (스냅샷)
+
+projectId unique. usecase-analyze2 Step 1.1·1.4 종료에 자동 PUT. `GET/PUT /Project/{code}/usecase-artifacts` 핸들러.
+
+#### archSettings whitelist 확장
+
+| 키 | 사용 | 형태 |
+|---|---|---|
+| `styleQAWeights` | style-define2 fast path | `{QA: {weight, rationale}}` |
+| `designDecideQAWeights` | design-decide2 fast path | `[{designPoint, qaWeights: {QA: {weight, rationale}}}]` |
+
+### 12.4 휴지통 + 자동 정리 — `issues_trash`
+
+DELETE /Issue → mongo doc 을 `issues_trash` 컬렉션으로 이동 (soft delete). 원본 issues 컬렉션에서는 사라지지만 3일간 보관.
+
+- `_trashedAt` / `_trashedBy` 필드 추가, 그 외 원본 이슈 필드 그대로
+- Gitea YAML 은 즉시 삭제 (git history 가 자체 휴지통)
+- `purgeOldTrashWorker` goroutine 이 1시간마다 `_trashedAt < now - 3d` 항목 영구 삭제
+- 멱등성: 없는 이슈 DELETE 도 200 (no-op)
+- 복원 (out of scope, 향후): trash mongo doc → yaml.Marshal → SaveFile + Issues insert
+
+### 12.5 사고 회고 — 2026-04-29
+
+`requirement-refine2` fast path 검증 중 LLM 이 "강제 재생성? yes" 를 "기존 모두 삭제 후 재도출" 로 해석 → Mongo Requirement 43건 폭주 삭제. SKILL "자동 삭제 금지" 무시. Gitea 영속화 미완료 + Hard delete 였기 때문에 복구 불가능.
+
+**근본 원인**:
+- "강제 재생성" 모호한 표현이 destructive 흐름으로 해석 가능
+- SKILL.md 의 안내가 LLM 의지에 의존, 강제력 없음
+- API 레벨 안전장치 없음
+
+**보강** (commit `9c0c77c` + `7724c30`):
+- A/B/C 명시 분기로 의도 분명화
+- LLM 행동 가드 명시 (DELETE / PUT 자율 호출 금지)
+- DELETE soft delete 도입 (휴지통 + 3일 retention)
+
+검토했던 대안 — DELETE rate limit (60초/5건) — 은 정상 작업 방해 우려로 채택 안 함.
+
+### 12.6 분기 모델의 진화 (§2.5 vs §12.1)
+
+| 측면 | §2.5 (이전) | §12.1 (현재) |
+|---|---|---|
+| 분기 수 | 4 | 4 (NO-BASELINE/B/C/A) |
+| "변경 없음" 처리 | yes/no — 모호 | 3 메뉴 명시 |
+| destructive 동작 | SKILL 자체 처리 가능 | 무조건 reset-project 위임 |
+| LLM 행동 가드 | 명시 부족 | 명시 (DELETE/PUT 금지) |
+| Fast path | "강제 재생성" 안에 묻힘 | A② 가 명시적 메뉴 |
