@@ -59,36 +59,43 @@ export USER="batman"
 python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${USER}" check
 ```
 
-### 0.2 결과에 따른 분기
+### 0.2 drift-check 결과별 분기 (A/B/C 모델)
 
-| drift-check 결과 | 동작 |
-|---|---|
-| `design-decide` **NO-BASELINE** | 첫 실행 — Step 0.3 데이터 수집 후 본 작업 진행 |
-| `design-decide` **DRIFT** (이슈 변동 감지) | 본 작업 진행 |
-| `design-decide` **CLEAN** + 상위(`style`) **DRIFT** | 사용자에게 통지: "Style 이 변경됐습니다. design-decide 단계 재정립이 필요할 수 있어요. (a) 지금 진행 (b) `mark-deferred` 로 보류" — 답변 받고 진행/종료 결정 |
-| **모두 CLEAN** | 사용자에게 질문: "이슈 변동이 없습니다. 문서/다이어그램만 강제로 재생성할까요? (예: 템플릿 변경, PlantUML 마이그레이션 등)" — `no` 면 **즉시 종료**, `yes` 면 강제 재생성 모드로 진행 |
+| drift-check 결과 | 흐름 | 동작 |
+|---|---|---|
+| `design-decide` **NO-BASELINE** | 첫 실행 | Step 0.3 데이터 수집 → MODE=full |
+| `design-decide` **DRIFT** (이슈 변동 감지) | **B** | 본 단계 변경 영향 분석 + 부분 업데이트 (현재 미구현, MODE=full 로 임시 진행) |
+| `design-decide` **CLEAN** + 상위(`style`) **DRIFT** | **C** | 사용자 선택: ① 본 stage 재정립 / ② mark-deferred 보류 |
+| **모두 CLEAN** | **A** | 0.2.1 의 3 메뉴 — 절대 자동 진행 금지 |
 
-> **강제 재생성 모드 규칙**: drift CLEAN + 사용자 yes 케이스에서는 **이슈 생성/수정 도구 호출(`issue-batch-create.sh` 등) 을 모두 스킵** 하고 index/DP 파일 재생성만 수행. 본 스킬에서 이슈 변경이 있는 step (Step 5.1) 을 통째로 건너뛴다.
+### 0.2.1 변경 없음 처리 메뉴 (A 흐름)
 
-### 0.2.1 Fast path — 강제 재생성 + 기존 ADSN 존재 시 LLM 0회 재생성
+drift 모두 CLEAN 인 경우 **반드시 사용자에게 다음 3 옵션을 명시적으로 제시**. 추측 / 자동 선택 절대 금지.
 
-**강제 재생성 + 기존 설계 결정 ADSN/DDSN (designPoint != "시스템 스타일 결정") 이 존재** 하면 Step 1~Step 1.5 스킵 + Step 5.1/5.2 도 스킵하고 Step 5.3 만 결정적 조립.
-
-```bash
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
-EXISTING_DD=$(curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
-  | jq '[.[] | select((.issueType=="Architectural Design" or .issueType=="Detailed Design") and (.designPoint // "") != "시스템 스타일 결정" and (.designPoint // "") != "")] | length')
-echo "기존 설계 결정 ADSN/DDSN: ${EXISTING_DD}건"
+```
+변경된 이슈 / 산출물이 없습니다. 어떻게 처리할까요?
+  [1] 종료 (default — 가장 안전, 아무것도 안 함)
+  [2] 문서만 재생성 (이슈/archSettings 보존, LLM 0회 결정적 조립)
+  [3] 처음부터 다시 만들기 ⚠️ DESTRUCTIVE (설계 결정 ADSN 모두 삭제 후 LLM 재도출)
 ```
 
-| 조건 | 동작 |
-|---|---|
-| 강제 재생성 + `EXISTING_DD >= 1` | **fast path** — `FAST_PATH=true`, Step 1~1.5 스킵, Step 5.3 에서 `design-decide-assemble.py --from-mongo` |
-| 강제 재생성 + 0건 | 중단, full mode 권고 |
-| MODE=full | 기존 흐름 + Step 5 끝에 designDecideQAWeights archSettings PATCH |
+### 선택별 동작
 
-진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. 종료 결정이면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
+- **[1] 종료** — 즉시 Step 6 보고만 출력 (baseline 갱신 없음) → 종료
+- **[2] 문서만 재생성** — `FAST_PATH=true` 설정 후 Step 1~1.5 모두 스킵, Step 5.3 결정적 조립만. **이슈/archSettings 절대 변경 안 함**
+- **[3] 처음부터 다시** — ⚠️ **이 SKILL 자체에서는 진행 금지**. 사용자에게 안내:
+  > "destructive 작업입니다. 별도로 `reset-project` 스킬을 먼저 호출하시고 (CONFIRM=true 필요), 그 후 본 스킬을 다시 호출해주세요."
+
+### ⚠️ 절대 금지 (LLM 행동 가드)
+
+다음 중 어느 것도 LLM 자율 판단으로 호출 금지:
+- `DELETE /Issue` (ADSN/DDSN 삭제 — Step 5 batch 외 절대 금지)
+- `PUT /Issue` (이슈 수정 — Step 5.1 batch 외 금지)
+- `archSettings` `$unset`
+
+**FAST_PATH=true 진입 시**: 이슈/archSettings 변경 모두 금지. 오직 doc 재생성만. 위 호출이 필요해 보이면 즉시 SKILL 중단 + 사용자에게 보고.
+
+진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. [1] 종료면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
 
 ### 0.3 데이터 수집
 

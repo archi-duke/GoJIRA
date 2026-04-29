@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -19,6 +20,42 @@ import (
 
 // data/issues/<subkey>.yaml 경로 (Python issuestore._yaml_path 와 동일 규칙).
 var _subkeySafe = regexp.MustCompile(`[^A-Za-z0-9_\-]+`)
+
+// DELETE /Issue rate limit — 같은 user 가 60초 내 5건 이상 DELETE 시도 시 차단.
+// LLM 이 SKILL 의 "자동 삭제 금지" 를 무시하고 폭주시킨 사고 (2026-04-29) 의 안전장치.
+// bulk reset 은 ProjectResetHandler 가 deleteIssueInternal 직접 호출로 우회.
+var (
+	deleteRateMu      sync.Mutex
+	deleteHistory     = make(map[string][]time.Time)
+	deleteWindowSec   = 60
+	deleteMaxPerUser  = 5
+)
+
+// checkDeleteRateLimit — 허용 여부 + 최근 카운트. 거부 시 false.
+func checkDeleteRateLimit(user string) (bool, int) {
+	deleteRateMu.Lock()
+	defer deleteRateMu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-time.Duration(deleteWindowSec) * time.Second)
+
+	history := deleteHistory[user]
+	pruned := history[:0]
+	for _, t := range history {
+		if t.After(cutoff) {
+			pruned = append(pruned, t)
+		}
+	}
+
+	if len(pruned) >= deleteMaxPerUser {
+		deleteHistory[user] = pruned
+		return false, len(pruned)
+	}
+
+	pruned = append(pruned, now)
+	deleteHistory[user] = pruned
+	return true, len(pruned)
+}
 
 func issueYamlPath(subkey string) string {
 	safe := _subkeySafe.ReplaceAllString(subkey, "_")
@@ -296,6 +333,14 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Key == "" {
 		respondError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+
+	// Rate limit — LLM 이 SKILL "자동 삭제 금지" 를 무시하고 폭주하는 케이스 차단.
+	if allowed, count := checkDeleteRateLimit(user); !allowed {
+		log.Printf("DELETE rate limit blocked user=%s count=%d key=%s", user, count, req.Key)
+		respondError(w, http.StatusTooManyRequests,
+			fmt.Sprintf("DELETE rate limit: %d건/%d초 초과 (user=%s). bulk 작업은 reset-project 사용", count, deleteWindowSec, user))
 		return
 	}
 
