@@ -1,20 +1,5 @@
 # Use Cases
 
-<!--
-  이 템플릿은 usecase-analyze2 Step 1.5 의 결정적 조립이 채우는 기준 파일입니다.
-  marker (`<!-- INSERT <slot> HERE -->`) 는 _scripts/usecase-assemble.py 가 인식하는
-  치환 지점입니다. marker 위치/이름을 변경하면 조립 스크립트도 함께 수정해야 합니다.
-
-  지원 marker:
-    business_domain     — 1.x 도메인/Actor/규칙
-    user_stories_table  — 2.1 표
-    use_cases_table     — 3.1 표
-    context_diagram     — 4.1 PlantUML 블록
-    usecase_diagram     — 4.2 PlantUML 블록
-    features_section    — 5. Feature 상세 (Feature 별 시나리오 + Sequence Diagram)
-    coverage_matrix     — 6. VOS 커버리지 매트릭스
--->
-
 ## 1. Business Domain 분석
 
 <!-- INSERT business_domain HERE -->
