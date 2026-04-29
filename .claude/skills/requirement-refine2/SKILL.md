@@ -419,36 +419,22 @@ cat /tmp/req_link_result.json
 
 링크 실패는 **silent drop 금지** — 최종 보고에 누락 건수 명시.
 
-### 5.3 docId → subkey 치환
+### 5.3 (제거됨)
 
-생성 응답의 `subkey` 로 document 치환 (relink 모드는 docId 가 이미 subkey 형식이라 자연스럽게 no-op):
-- FR-N → FR_NNN
-- NFR-N → QA_NNN
-- CNST-N → CNST_NNN
+이전엔 docId → subkey 치환을 LLM 이 echo 한 `$DOCUMENT` 변수에 sed 로 적용했지만, 5.4 가 mongo 직접 fetch 로 변경되어 불필요해짐. mongo 의 이슈는 이미 실제 subkey 를 가짐.
 
-```bash
-DOCUMENT=$(echo "$DOCUMENT" | sed "s/\bFR-1\b/FR_001/g" | sed "s/\bNFR-1\b/QA_001/g" | sed "s/\bCNST-1\b/CNST_001/g")
-```
+### 5.4 requirements.md 저장 — 결정적 조립 (LLM 0회)
 
-### 5.4 requirements.md 저장
-
-**Fast path (`FAST_PATH=true`)**: Requirement 이슈 + Feature 이슈만으로 결정적 조립 (LLM 0회).
+**MODE=full / fast path 동일 흐름**: Step 5.1 직후 mongo 에 이슈가 모두 등록되어 있으므로 `requirement-assemble.py` 가 mongo 직접 fetch 해 markdown 산출. LLM 으로 `$DOCUMENT` 변수를 token 단위로 재출력하던 구간을 폐기 (~5분 → ~30초 절감).
 
 ```bash
-if [ "${FAST_PATH:-false}" = "true" ]; then
-  python3 "${PROJECT_ROOT}/.claude/skills/_scripts/requirement-assemble.py" \
-    --from-mongo "${CODE}" --user "${USER}" \
-    | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/requirements.md"
-  echo "fast path 저장 완료"
-  exit 0
-fi
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/requirement-assemble.py" \
+  --from-mongo "${CODE}" --user "${USER}" \
+  | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/requirements.md"
+echo "requirements.md 저장 완료 (결정적 조립)"
 ```
 
-**기존 흐름 (MODE=full)**:
-
-```bash
-echo "$DOCUMENT" | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/requirements.md"
-```
+**FAST_PATH=true 면** Step 1 + Step 5.1/5.2 모두 스킵하고 위 명령만 실행 후 `exit 0`.
 
 ---
 

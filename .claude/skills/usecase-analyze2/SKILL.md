@@ -617,19 +617,23 @@ cat /tmp/uc_link_result.json
 
 링크 실패는 **silent drop 금지** — 최종 보고에 누락 건수 명시.
 
-### 5.3 docId → subkey 치환
-- 각 생성된 Feature 의 `subkey` (UC_001, UC_002...) 를 document 본문의 docId 와 매핑
-- MODE=relink 는 docId 가 이미 기존 subkey 형식(UC_001) 이라 자연스럽게 no-op
+### 5.3 (제거됨)
 
-### 5.4 use-cases.md 저장
+이전엔 docId→subkey 치환을 LLM 이 markdown 본문에 적용했지만, 5.4 가 mongo 직접 fetch 로 변경되어 불필요. mongo Feature 이슈는 이미 실제 subkey 보유.
 
-draft 의 `document` 키 (Step 1.5 결정적 조립 결과) 를 그대로 doc-save.sh 에 흘려보낸다. doc-save.sh 가 plantuml-fix 결정적 자동 수정을 함께 적용한다.
+### 5.4 use-cases.md 저장 — 결정적 조립 (LLM 0회)
+
+**MODE=full / fast path 동일 흐름**: Step 5.1 직후 mongo Feature 이슈 + Step 1.1·1.4 에서 PUT 한 `usecase_artifacts` 가 갖춰져 있으므로 `usecase-assemble.py --from-mongo` 가 결정적 조립. doc-save.sh 가 plantuml-fix 결정적 자동 수정 적용.
 
 ```bash
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
-  | jq -r '.document // ""' \
+TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
+python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" \
+  --from-mongo "${CODE}" --user "${USER}" --template "$TEMPLATE" \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/use-cases.md"
+echo "use-cases.md 저장 완료 (결정적 조립)"
 ```
+
+**FAST_PATH=true 면** Step 1 + 5.1/5.2 모두 스킵하고 위 명령만 실행 후 `exit 0`.
 
 ---
 
