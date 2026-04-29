@@ -40,6 +40,16 @@ export CONFIRM="true"
 - 기본 동작은 dry-run. dry-run 결과를 보여주고, 사용자가 "확인/진행/yes" 등 명시 동의 후에만 두 번째 호출에서 `CONFIRM=true`
 - 서버측 일괄 삭제 엔드포인트(`POST /Project/{code}/reset`)를 사용하므로 클라이언트 bash 루프 없음 — sandbox 의 bulk-destructive 감지에 덜 민감
 
+### Soft delete 정책 (PR #11, 2026-04-29)
+
+이슈 삭제는 **휴지통 (issues_trash 컬렉션) 으로 soft delete** 됩니다:
+- Mongo 원본 이슈는 `issues_trash` 로 이동 (`_trashedAt` / `_trashedBy` 추가)
+- 3일 후 sweeper goroutine 이 자동 영구 삭제 (`purgeOldTrashWorker`)
+- Gitea YAML 은 즉시 git rm + commit (git history 가 자체 휴지통 역할)
+- **3일 내 복구 가능** — `issues_trash` mongo doc → yaml.Marshal + Issues insert (수동, 향후 endpoint)
+
+→ 사고 발생 시 즉시 sweeper 멈추고 trash 에서 회복 시도 가능.
+
 ## 1. 사전 체크
 
 ```bash
@@ -92,6 +102,12 @@ curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
 - `architecture/architecture-style.md`
 - `architecture/design-decisions.md`
 - `architecture/architecture-integrated.md`
+
+추가로 **하위 디렉토리의 후보별/뷰별 파일도 정리** (Step 4-3 에서 처리):
+- `architecture/architecture-style/<subkey>-*.md` — style-define2 후보별 ADSN 파일
+- `architecture/design-decisions/DP-NN-*.md` — design-decide2 DP별 파일
+- `architecture/architecture-integrated/{logical,process,deployment,development}.md` — design-integrate2 view별
+- `data/issues/*.yaml` — 이슈 yaml (서버측 reset 이 자기 과제 이슈만 삭제하므로 잔존 가능)
 
 ## 3. Dry-run 최종 보고 (confirm != true)
 
@@ -147,6 +163,38 @@ if [ "$CONFIRM" = "true" ] && [ "$RESET_DOCS" = "true" ]; then
 fi
 ```
 
+### 4-3. 하위 디렉토리 후보별/뷰별 파일 정리 (PR #11 보강)
+
+style-define2 / design-decide2 / design-integrate2 가 만드는 sub-directory 의 동적 파일들 정리. `GET /DocRepo/{code}/tree` 로 트리 listing 후 매칭 패턴을 일괄 DELETE.
+
+```bash
+if [ "$CONFIRM" = "true" ] && [ "$RESET_DOCS" = "true" ]; then
+  # 트리 조회 (docs/{user} 우선)
+  TREE=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/tree?ref=docs/${USER}" \
+    -H "X-User-Id: ${USER}")
+
+  # 정리 대상 디렉토리 패턴
+  PATTERNS=(
+    "architecture/architecture-style/"
+    "architecture/design-decisions/"
+    "architecture/architecture-integrated/"
+  )
+
+  for prefix in "${PATTERNS[@]}"; do
+    # tree 응답에서 해당 prefix 의 파일 path 추출 + DELETE
+    paths=$(echo "$TREE" | jq -r --arg p "$prefix" '[.[] | select(.path | startswith($p)) | .path] | .[]')
+    for p in $paths; do
+      curl -s -X DELETE "${PLATFORM_API}/DocRepo/${CODE}/file" \
+        -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+        -d "$(jq -n --arg p "$p" --arg m "[reset] $p" '{path:$p, message:$m}')" \
+        -o /dev/null -w "DELETE $p -> %{http_code}\n"
+    done
+  done
+fi
+```
+
+서버측 `POST /Project/{code}/reset` 의 issue 정리는 자기 과제 이슈 (key prefix=CODE) 만 처리하므로, 다른 user 의 worktree 에 잔존한 yaml 은 소거 안 됨 — 알려진 한계 (issue YAML 영속화가 user 별 worktree 라 cross-user 정리 미지원).
+
 ## 5. 최종 보고
 
 - **dry-run**: 이슈 수 / archSettings 존재 여부 / 덮어쓸 파일 목록 + `CONFIRM=true` 재호출 안내
@@ -160,3 +208,5 @@ fi
 - 서버측 `POST /Project/{code}/reset` 이 없는 옛 버전 GoJIRA-API 에서는 404 반환 → 최신 빌드로 업그레이드 필요
 - 템플릿 8개는 `.claude/skills/reset-project/templates/` 하위에 있으며 Agent-Service `reset_project._TEMPLATES` 와 동일하게 유지
 - 문서 PUT 응답 content 는 Platform-API 가 서버측에서 base64 처리 — 호출은 plain UTF-8
+- **Soft delete 인지** (PR #11): 이슈는 `issues_trash` 컬렉션으로 이동, 3일 후 자동 영구 삭제. 사고 시 3일 내 복구 시도 가능
+- **Cross-user yaml 한계**: 다른 user 의 worktree 에 잔존한 issue yaml 은 본 스킬로 정리 안 됨 — 별도 manual cleanup 필요 (직접 worktree rm) 또는 archive-project 로 통째 삭제
