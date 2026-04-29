@@ -87,6 +87,9 @@ func LinkCreateHandler(w http.ResponseWriter, r *http.Request) {
 		"type":         bson.M{"name": "Contains(WBSGantt)"},
 		"outwardIssue": bson.M{"key": req.OutwardKey},
 	}
+	if req.Source != "" {
+		inwardLink["_addedBy"] = req.Source
+	}
 	if err := db.AddIssueLink(ctx, req.InwardKey, inwardLink); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -97,6 +100,9 @@ func LinkCreateHandler(w http.ResponseWriter, r *http.Request) {
 		"id":          linkID,
 		"type":        bson.M{"name": "Contains(WBSGantt)"},
 		"inwardIssue": bson.M{"key": req.InwardKey},
+	}
+	if req.Source != "" {
+		outwardLink["_addedBy"] = req.Source
 	}
 	if err := db.AddIssueLink(ctx, req.OutwardKey, outwardLink); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())

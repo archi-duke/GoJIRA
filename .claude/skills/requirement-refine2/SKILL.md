@@ -412,7 +412,7 @@ cat > /tmp/req_links.json <<'JSON'
 ]
 JSON
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" < /tmp/req_links.json \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "requirement-refine2" < /tmp/req_links.json \
   > /tmp/req_link_result.json
 cat /tmp/req_link_result.json
 ```

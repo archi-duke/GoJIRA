@@ -45,6 +45,9 @@ type LinkCreateRequest struct {
 	InwardKey  string `json:"inwardKey"`
 	OutwardKey string `json:"outwardKey"`
 	LinkType   string `json:"linkType,omitempty"`
+	// Source — 호출 SKILL 이름 (예: "requirement-refine2"). drift-check 가 이 필드 있는 link 를
+	// "정상 워크플로우 자동 생성" 으로 판단해 hash 에서 제외. 사용자 수작업 link 는 source 비어있음.
+	Source string `json:"source,omitempty"`
 }
 
 type LinkDeleteRequest struct {
