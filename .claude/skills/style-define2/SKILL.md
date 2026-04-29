@@ -560,7 +560,7 @@ open("/tmp/style_links.json","w").write(json.dumps(links, ensure_ascii=False))
 print(f"{len(links)}건 링크 예정")
 PY
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" < /tmp/style_links.json \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "style-define2" < /tmp/style_links.json \
   > /tmp/style_link_result.json
 cat /tmp/style_link_result.json
 ```

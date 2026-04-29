@@ -610,7 +610,7 @@ cat > /tmp/uc_links.json <<'JSON'
 ]
 JSON
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" < /tmp/uc_links.json \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "usecase-analyze2" < /tmp/uc_links.json \
   > /tmp/uc_link_result.json
 cat /tmp/uc_link_result.json
 ```

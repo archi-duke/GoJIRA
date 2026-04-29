@@ -2,10 +2,14 @@
 # issue-batch-link.sh — 이슈 링크를 순차 생성한다.
 #
 # 사용법:
-#   bash issue-batch-link.sh <CODE> <USER> < links.json
+#   bash issue-batch-link.sh <CODE> <USER> [SOURCE] < links.json
 #
 # 입력(stdin): JSON array
 #   [{"inwardKey":"GOJIRA3-1","outwardKey":"GOJIRA3-10","linkType":"Contains(WBSGantt)"}, ...]
+#
+# SOURCE (선택): 호출 SKILL 이름 (예: "requirement-refine2"). 전달 시 link 에 _addedBy 메타
+#   부착되어 drift-check 가 "정상 워크플로우 자동 생성" 으로 분류 → hash 에서 제외.
+#   미전달/빈 값이면 메타 없음 = 사용자 수작업 link 와 동일 처리.
 #
 # 출력(stdout): JSON
 #   {"total":N,"created":K,"failed":F,"errors":[...]}
@@ -15,6 +19,7 @@ set -euo pipefail
 
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
+SOURCE="${3:-}"
 GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
 
 INPUT=$(cat)
@@ -30,8 +35,12 @@ for i in $(seq 0 $((COUNT - 1))); do
   OW=$(jq -r '.outwardKey' <<< "$ITEM")
   LT=$(jq -r '.linkType // "Contains(WBSGantt)"' <<< "$ITEM")
 
-  BODY=$(jq -n --arg p "$CODE" --arg iw "$IW" --arg ow "$OW" --arg lt "$LT" --arg u "$USER" \
-    '{prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u}')
+  BODY=$(jq -n --arg p "$CODE" --arg iw "$IW" --arg ow "$OW" --arg lt "$LT" --arg u "$USER" --arg src "$SOURCE" \
+    'if $src == "" then
+       {prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u}
+     else
+       {prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u, source:$src}
+     end')
 
   STATUS=""
   for attempt in 1 2 3; do

@@ -101,12 +101,31 @@ def matches_filter_not(issue: dict, filt: dict | None) -> bool:
     return True
 
 
+# 정상 워크플로우 SKILL 들이 자동 추가하는 link 의 _addedBy 값 화이트리스트.
+# 이 값들이 link 에 박혀있으면 hash 에서 제외 (false positive 차단).
+# 사용자 수작업 link 는 _addedBy 없음 → 그대로 hash 에 포함되어 drift 감지.
+_KNOWN_WORKFLOW_SOURCES = {
+    "vos-collect2",
+    "usecase-analyze2",
+    "requirement-refine2",
+    "driver-select2",
+    "style-define2",
+    "design-decide2",
+    "design-integrate2",
+    "satam-analyze2",
+}
+
+
 def normalize_links(links):
     if not isinstance(links, list):
         return []
     out = []
     for link in links:
         if not isinstance(link, dict):
+            continue
+        # 정상 워크플로우 SKILL 자동 생성 link 는 hash 에서 제외 (false positive 차단)
+        added_by = link.get("_addedBy")
+        if added_by and added_by in _KNOWN_WORKFLOW_SOURCES:
             continue
         out.append(
             {
