@@ -92,15 +92,64 @@ bash 입장에선 단순 echo 지만, **LLM 입장에선 변수 내용을 output
 
 ---
 
-## 3. 다른 스킬 측정 (TBD)
+## 3. driver-select2 — 두 번째 측정 (2026-04-29, ac188ce 이후)
 
-각 스킬도 같은 패턴으로 측정 예정:
+### 3.1 입력 / 산출 / 적용 commit
+
+- 입력: TEST 프로젝트 Requirement 41 (FR 25 / NFR 8 / CNST 4) + Feature 13 + drivers.md 템플릿
+- 산출: Driver 선정 (Requirement 22건 PUT — driverSelected/qad/qai/qas 필드 추가) + ASR 라벨 + drivers.md + archSettings.normalizedAttributes/priorityWeight
+- self-loop: 미상 (validate 1회 호출만 보임 — pass 추정)
+- 전체 시간: **약 7분 30초** (11:54:41 ~ 12:01:48)
+
+> **🆕 commit `ac188ce` 첫 적용 측정**: 5 워크플로우 스킬의 Step 5.x doc 저장을 LLM `$DOCUMENT` echo 에서 `*-assemble.py --from-mongo` 결정적 조립으로 통합한 버전. requirement-refine2 (§2) 는 이 이전 버전이라 Step 5.3+5.4 가 5분 9초 걸렸으나, driver-select2 는 같은 단계가 **9초**로 단축됨. **Phase 3 절감 효과의 첫 실측**.
+
+### 3.2 단계별 시간 분포
+
+| 단계 | 시각 (KST) | 시간 | 비율 | 동작 |
+|---|---|---|---|---|
+| Step 0 | 11:54:41 ~ 11:55:40 | ~1분 | 13% | drift-check + GET Project + GET Issue + 카탈로그 읽기 |
+| **Step 1** | **11:55:40 ~ 11:59:18** | **3분 38초** | **48%** | LLM 으로 Driver 후보 검토 + 카테고리 + qad/qai + 정규화 속성 |
+| Step 2 (validate) | 11:59:18 | <1초 | — | `validate-drivers.py` 1회 (pass 추정) |
+| Step 5.1 (Requirement PUT) | 12:00:07 ~ 12:00:50 | ~43초 | 9% | PUT × 22 (driverSelected + qad/qai/qas/sensitivity) |
+| Step 5.2 (ASR 라벨) | 12:00:50 ~ 12:01:19 | ~29초 | 6% | labels 갱신 PUT |
+| Step 5.3 (archSettings) | 12:01:19 ~ 12:01:39 | ~20초 | 4% | normalizedAttributes / priorityWeight PATCH |
+| **Step 5.4 (drivers.md 저장)** | **12:01:39 ~ 12:01:48** | **~9초** | **2%** | **driver-assemble.py --from-mongo + doc-save** ← 결정적 조립 효과 |
+| Step 6 (baseline) | 12:01:48 | <1초 | — | drift-check set-baseline |
+
+(11:59:18 ~ 12:00:07 의 49초 공백 = LLM Step 5 진입 준비 또는 잔여 generation)
+
+### 3.3 핵심 발견 — 결정적 조립의 효과 직접 측정
+
+**requirement-refine2 (16분, ac188ce 이전)** 의 Step 5.3+5.4 가 5분 9초 (32%) 였던 것 대비:
+- driver-select2 (7분 30초, ac188ce 이후) 의 Step 5.4 = **9초 (2%)**
+- markdown 분량 차이 (requirements.md ~25KB vs drivers.md ~10KB) 로 일부 보정해도 절감 명확
+- LLM `$DOCUMENT` echo 폐기 효과가 정량 확인됨
+
+requirement 의 5분 9초가 만약 결정적 조립이었다면:
+- requirements.md 25KB / 12K 토큰 / 50 토큰/초 ≈ **240초 → 30초 미만**으로 축소 가능 (예상)
+
+### 3.4 단계별 비중 비교 — requirement vs driver
+
+| 분류 | requirement (full, 16분) | driver (full + 결정적 조립, 7.5분) |
+|---|---|---|
+| Step 0 | 4% | 13% |
+| Step 1 (LLM 도출) | 22% | **48%** ← 분량 작아도 dominant |
+| Step 2+3 (critique) | 30% | <1% (1 iter pass 추정) |
+| Step 5.x (이슈 변경) | 13% | 19% |
+| **Step 5.4 (doc 저장)** | **32%** | **2%** ← 결정적 조립 |
+| Step 6 | 1% | <1% |
+
+→ critique 비중이 0 인 스킬에서는 **Step 1 LLM 도출이 최대 비중**.
+
+---
+
+## 4. 다른 스킬 측정 (TBD)
 
 | 스킬 | 측정 상태 | 예상 큰 비중 단계 |
 |---|---|---|
 | usecase-analyze2 | 부분 측정됨 (어제) | Step 1.4 (PlantUML) — GLM 스톨 단골 |
-| requirement-refine2 | ✓ 본 문서 §2 | critique + DOCUMENT echo |
-| driver-select2 | TBD | Step 1 (Driver 선정 + 정규화 속성) |
+| requirement-refine2 | ✓ §2 (ac188ce 이전) | critique + DOCUMENT echo |
+| driver-select2 | ✓ §3 (ac188ce 이후) | Step 1 LLM 도출 |
 | style-define2 | TBD | Step 1.5 (PlantUML 후보별) |
 | design-decide2 | TBD | Step 1 (DP × 후보 본문) + Step 1.5 (PlantUML × 후보) |
 | design-integrate2 | 이미 결정적 (4ed3ea3) | LLM 4 view × 짧음, 통합 결정적 |
@@ -141,9 +190,9 @@ requirement-refine2 측정으로부터 도출한 가설:
 
 ### 5.2 후속 개선 우선순위
 
-가장 큰 비중 (DOCUMENT echo) → 가장 작은 비중 (Step 6) 순:
+§2 (requirement, ac188ce 이전) 단계별 비중 기준:
 
-1. **DOCUMENT echo (32%)** — fast path (PR #11) 로 해결 ✓
+1. **DOCUMENT echo (32%)** — ✅ **commit `ac188ce` 로 해결됨** (driver-select2 §3 에서 9초로 실측 확인)
 2. **critique (30%)** — 첫 generation 의 critical 률 낮추기 / critical 자동 수정. 별도 PR
 3. **Step 1 LLM 도출 (22%)** — full mode 본질적 활동. 단축 어려움. (단 SKILL prompt 최적화로 토큰 약간 절감 가능)
 4. Step 5.2 링크 (12%) — POST 1건당 ~300ms × 52 = 16초인데 LLM 사이사이 generation 이 끼어 2분. LLM 출력 최소화로 단축 가능
