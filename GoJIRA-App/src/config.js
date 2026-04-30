@@ -6,6 +6,8 @@ const config = {
   // Agent Service (Python, 스트리밍)
   AGENT_API: process.env.REACT_APP_AGENT_API || 'http://localhost:9002/api/v2',
   PLANTUML_SERVER: process.env.REACT_APP_PLANTUML_SERVER || 'http://localhost:8080/svg/',
+  // pumlex (plantumlEx) 서버 — 인라인 메타 편집 + /render-with-layout
+  PUMLEX_SERVER: process.env.REACT_APP_PUMLEX_SERVER || 'http://localhost:3030',
   SSO_URL: process.env.REACT_APP_SSO_URL || 'https://sso.example.com',
   USE_SSO: false,
   DEV_USER: 'batman',

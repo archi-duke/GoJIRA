@@ -28,6 +28,33 @@
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
+    <!--
+      pex-core (pumlex 프로젝트) — geom/meta/inline 공용 모듈.
+      UMD 패턴이라 webpack import 보다 plain script 로 로드해 window.{PexGeom,PexMeta,PexInline} 노출.
+      DocEditor.js 의 PexBlock 컴포넌트가 window.PexInline.activate(...) 호출.
+      CRA/webpack 환경에서 module/exports/require 가 leak 될 경우 UMD 가 Node 분기로
+      빠져 require('./pex-geom') 에서 throw 되므로, 로드 직전 가리고 직후 복구한다.
+      (pumlex vendor 파일 자체는 수정하지 않는다.)
+    -->
+    <script>
+      window.__pexSaved = {
+        module: window.module,
+        exports: window.exports,
+        require: window.require,
+      };
+      window.module = undefined;
+      window.exports = undefined;
+      window.require = undefined;
+    </script>
+    <script src="%PUBLIC_URL%/pex-core/geom.js"></script>
+    <script src="%PUBLIC_URL%/pex-core/meta.js"></script>
+    <script src="%PUBLIC_URL%/pex-core/inline.js"></script>
+    <script>
+      window.module = window.__pexSaved.module;
+      window.exports = window.__pexSaved.exports;
+      window.require = window.__pexSaved.require;
+      delete window.__pexSaved;
+    </script>
     <div id="root"></div>
     <!--
       This HTML file is a template.

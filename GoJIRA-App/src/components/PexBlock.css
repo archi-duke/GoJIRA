@@ -1,0 +1,92 @@
+/* PexBlock — pumlex 인라인 편집 PlantUML 블록 (pex-vscode preview.css 패턴 이식) */
+
+.pumlex-block {
+  position: relative;
+  margin: 12px 0;
+  padding: 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.pumlex-block:hover {
+  border-color: #d0d7de;
+}
+.pumlex-block.pumlex-editing {
+  border-color: #2563eb;
+}
+.pumlex-block svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+.pumlex-block.pumlex-loading svg {
+  opacity: 0.6;
+}
+.pumlex-block .pumlex-loading-text {
+  color: #666;
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+}
+.pumlex-block .pumlex-error {
+  padding: 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  color: #b91c1c;
+  font-size: 12px;
+}
+.pumlex-block .pumlex-error-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.pumlex-block .pumlex-error-msg {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: #7f1d1d;
+}
+
+.pumlex-block .pumlex-btn {
+  position: absolute;
+  top: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-family: -apple-system, system-ui, sans-serif;
+  background: lightgray;
+  color: #000;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-block;
+  z-index: 5;
+  user-select: none;
+}
+.pumlex-block .pumlex-btn:hover {
+  filter: brightness(0.95);
+}
+
+/* 편집 버튼 — view 모드에서 hover 로 노출, 편집 중엔 숨김 */
+.pumlex-block .pumlex-edit-btn {
+  right: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.pumlex-block:hover .pumlex-edit-btn,
+.pumlex-block:focus-within .pumlex-edit-btn {
+  opacity: 1;
+}
+.pumlex-block.pumlex-editing .pumlex-edit-btn {
+  display: none;
+}
+
+/* 적용 버튼 — 편집 중 노출, primary */
+.pumlex-block .pumlex-commit-btn {
+  right: 76px;
+  background: #2563eb;
+  color: #fff;
+}
+
+/* 취소 버튼 */
+.pumlex-block .pumlex-cancel-btn {
+  right: 6px;
+}

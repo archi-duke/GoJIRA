@@ -1,14 +1,42 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
 import MermaidBlock from './MermaidBlock';
-import PlantUMLBlock from './PlantUMLBlock';
+import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import './DocEditor.css';
+
+/**
+ * markdown 안에서 본문이 originalSource 와 일치하는 첫 ```plantuml/```puml fence 의
+ * 본문을 newBody 로 교체. plantumlCounterRef + idx 매핑은 ReactMarkdown 의
+ * components.code 호출 타이밍과 어긋나는 케이스가 있어, fence 본문 자체를 식별자로
+ * 사용한다 (PexBlock 의 source prop 이 그대로 전달되므로 신뢰 가능).
+ */
+function replacePlantumlFenceBySource(md, originalSource, newBody) {
+  const lines = (md || '').split('\n');
+  const fenceOpen = /^[ \t]*```\s*(plantuml|puml)\b/i;
+  const fenceClose = /^[ \t]*```\s*$/;
+  let openLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (openLine === -1) {
+      if (fenceOpen.test(lines[i])) openLine = i;
+    } else if (fenceClose.test(lines[i])) {
+      const body = lines.slice(openLine + 1, i).join('\n');
+      if (body === originalSource) {
+        const before = lines.slice(0, openLine + 1);
+        const after = lines.slice(i);
+        const bodyLines = (newBody || '').split('\n');
+        return [...before, ...bodyLines, ...after].join('\n');
+      }
+      openLine = -1;
+    }
+  }
+  return md; // 없으면 원본 반환
+}
 
 const API = config.PLATFORM_API + '/DocRepo';
 const PLATFORM_API = config.PLATFORM_API;
@@ -812,6 +840,12 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
 
   const modified = content !== original;
   const currentTree = activeTab === 'main' ? mainTree : (userTree || mainTree);
+
+  // PexBlock 의 ✓ 적용 콜백 — markdown 내 N번째 plantuml fence 본문을 newSource 로 replace.
+  // setContent → ReactMarkdown 자동 재렌더 → modified = true → 사용자가 저장 버튼 누르면 영속화.
+  function handlePlantumlCommit(originalSource, newSource) {
+    setContent((prev) => replacePlantumlFenceBySource(prev, originalSource, newSource));
+  }
   const baseItems = (currentTree?.tree || []).filter(i => i.type !== 'tree');
   // workspace 탭에서 main에만 있는 파일도 표시 (gray italic)
   let items;
@@ -1069,8 +1103,16 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                             if (lang === 'mermaid') {
                               return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
                             }
-                            if (lang === 'plantuml') {
-                              return <PlantUMLBlock code={String(children).replace(/\n$/, '')} />;
+                            if (lang === 'plantuml' || lang === 'puml') {
+                              const src = String(children).replace(/\n$/, '');
+                              // editMode (textarea) 일 땐 인라인 편집 비활성 — markdown 텍스트가 진실
+                              return (
+                                <PexBlock
+                                  source={src}
+                                  onCommit={editMode ? undefined : handlePlantumlCommit}
+                                  readOnly={editMode}
+                                />
+                              );
                             }
                             return <code className={className} {...props}>{children}</code>;
                           },
@@ -1079,7 +1121,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                             const arr = React.Children.toArray(children);
                             const only = arr.length === 1 ? arr[0] : null;
                             const cls = only?.props?.className || '';
-                            if (cls.includes('language-mermaid') || cls.includes('language-plantuml')) {
+                            if (cls.includes('language-mermaid') || cls.includes('language-plantuml') || cls.includes('language-puml')) {
                               return <>{children}</>;
                             }
                             return <pre {...props}>{children}</pre>;
