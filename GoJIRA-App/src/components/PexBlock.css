@@ -65,15 +65,9 @@
   filter: brightness(0.95);
 }
 
-/* 편집 버튼 — view 모드에서 hover 로 노출, 편집 중엔 숨김 */
+/* 편집 버튼 — 편집 가능(readOnly=false) 일 때 항상 노출, 편집 중엔 숨김 */
 .pumlex-block .pumlex-edit-btn {
   right: 6px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.pumlex-block:hover .pumlex-edit-btn,
-.pumlex-block:focus-within .pumlex-edit-btn {
-  opacity: 1;
 }
 .pumlex-block.pumlex-editing .pumlex-edit-btn {
   display: none;

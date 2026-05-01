@@ -843,8 +843,29 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
 
   // PexBlock 의 ✓ 적용 콜백 — markdown 내 N번째 plantuml fence 본문을 newSource 로 replace.
   // setContent → ReactMarkdown 자동 재렌더 → modified = true → 사용자가 저장 버튼 누르면 영속화.
-  function handlePlantumlCommit(originalSource, newSource) {
-    setContent((prev) => replacePlantumlFenceBySource(prev, originalSource, newSource));
+  // PexBlock 의 ✓ 적용 — markdown 의 해당 fence 본문을 newSource (메타 포함) 로 교체.
+  // 사용자 시나리오: 편집모드 ON → 다이어그램 편집 → ✓ 적용 시 디스크에도 자동 저장
+  // (textarea 모드의 handleSave 와 달리 modalConfirm 안 띄움 — 인라인 편집은 즉각 반영).
+  async function handlePlantumlCommit(originalSource, newSource) {
+    const next = replacePlantumlFenceBySource(content, originalSource, newSource);
+    if (next === content) return;
+    setContent(next);
+    try {
+      const res = await fetch(`${API}/${projectCode}/file`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+        body: JSON.stringify({ path: selectedFile, content: next, message: `${selectedFile} 다이어그램 편집` }),
+      });
+      if (res.ok) {
+        setOriginal(next);
+        refreshDocState();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        modalAlert(err.error || '다이어그램 자동 저장 실패');
+      }
+    } catch (e) {
+      modalAlert('다이어그램 자동 저장 오류: ' + e.message);
+    }
   }
   const baseItems = (currentTree?.tree || []).filter(i => i.type !== 'tree');
   // workspace 탭에서 main에만 있는 파일도 표시 (gray italic)
@@ -1105,12 +1126,14 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                             }
                             if (lang === 'plantuml' || lang === 'puml') {
                               const src = String(children).replace(/\n$/, '');
-                              // editMode (textarea) 일 땐 인라인 편집 비활성 — markdown 텍스트가 진실
+                              // 편집모드 ON (globalEditMode) + textarea 가 아닌 preview 일 때만 인라인 편집 활성.
+                              // editMode (textarea) 에선 markdown 텍스트가 진실이므로 인라인 편집 비활성.
+                              const inlineEditable = globalEditMode && !editMode;
                               return (
                                 <PexBlock
                                   source={src}
-                                  onCommit={editMode ? undefined : handlePlantumlCommit}
-                                  readOnly={editMode}
+                                  onCommit={inlineEditable ? handlePlantumlCommit : undefined}
+                                  readOnly={!inlineEditable}
                                 />
                               );
                             }
