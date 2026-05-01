@@ -1,7 +1,7 @@
 # GoJIRA 애플리케이션 설계서
 
 > GoJIRA-App (React SPA, :3001) — Module Federation Remote
-> 최종 갱신: 2026-04-10
+> 최종 갱신: 2026-05-01
 
 ---
 
@@ -343,6 +343,34 @@ architecture/
 **Diff 모드:** Semantic / Unified / Summary (DiffAnalysis 컴포넌트)
 
 **SSE 구독:** `EventSource` → `PLATFORM_API/Notice/stream` → `doc_update` 이벤트로 main 변경 시 트리 실시간 갱신
+
+#### 3.7.1 다이어그램 렌더링과 인라인 편집 (pumlex 통합)
+
+ReactMarkdown 의 `components.code` 후크로 fenced code block 의 언어별 렌더러를 분기한다.
+
+| 언어 | 컴포넌트 | 비고 |
+|------|----------|------|
+| `mermaid` | `MermaidBlock` | 클라이언트 mermaid 렌더 |
+| `plantuml` / `puml` | `PexBlock` | pumlex 서버 (`PUMLEX_SERVER`, 기본 `:3030`) `/render-with-layout` SVG + 인라인 편집 |
+
+**PexBlock 동작:**
+
+- 마운트 시 `/render-with-layout` 으로 fence 본문을 POST → 응답 SVG 를 `useEffect` + ref 로 직접 inject (React 의 `dangerouslySetInnerHTML` 은 매 재렌더에서 setInnerHTML 을 다시 호출해 PexInline 이 단 listener 가 사라지므로 회피)
+- 인라인 편집 활성 조건: `globalEditMode && !editMode` (편집모드 ON + textarea 가 아닌 preview)
+- ✎ 편집 → `window.PexInline.activate(host, { source, onSourceChange })` → entity drag / edge 곡선화 / 핸들 오버레이
+- ✓ 적용 → `pendingSrcRef` 의 메타 포함 source (PexMeta 가 `' @startmeta`/`' @endmeta` 코멘트 블록으로 fence 끝에 embed) 를 `onCommit(originalSource, newSource)` 으로 host 에 통보
+- ✗ 취소 → 세션 deactivate 후 markdown 변경 없이 종료
+
+**호스트 (DocEditor) 처리:**
+
+- `replacePlantumlFenceBySource(md, originalSource, newBody)` — markdown 내에서 본문이 `originalSource` 와 일치하는 첫 plantuml/puml fence 의 본문을 `newBody` 로 교체. fence 식별을 idx 카운터가 아닌 본문 자체로 수행 — ReactMarkdown 의 `components.code` 호출 타이밍과 idx 매핑이 어긋나는 케이스 회피
+- `setContent(next)` 후 즉시 `PUT /DocRepo/{code}/file` 호출 (modalConfirm 없이 자동 저장) — 인라인 편집은 즉각 디스크 반영 워크플로우
+
+**pex-core 로딩 (마이크로프론트엔드 호환):**
+
+- `public/pex-core/{geom,meta,inline}.js` — pumlex 의 `docs/pex-core/*.js` UMD 빌드를 vendor (수정 없음)
+- `src/utils/pexLoader.js` — 동적 `<script>` inject. 컨테이너 (:3000) 에서 띄울 때 GoJIRA-App 자기 origin (`:3001`) 으로 cross-origin fetch. UMD 의 `module`/`exports`/`require` 분기가 webpack 환경에서 Node 분기로 빠지지 않도록 inject 직전·직후로 임시 가림
+- 멱등 + Promise memoize — 여러 PexBlock 이 동시에 호출해도 1회 fetch
 
 ### 3.8 AgentChat.js (AI 에이전트 채팅)
 
