@@ -3,6 +3,11 @@ import config from '../config';
 import { loadPexCore } from '../utils/pexLoader';
 import './PexBlock.css';
 
+// source → 렌더된 SVG 캐시. 부모(ReactMarkdown components) 가 매 렌더마다 code 콜백을
+// 새 함수로 만들어 PexBlock 인스턴스가 언마운트/재마운트되어도, 같은 source 면 즉시 SVG 를
+// 표시해서 loading 텍스트로 인한 높이 깜빡임을 막는다.
+const svgCache = new Map();
+
 /**
  * PexBlock — pumlex 인라인 편집 PlantUML 블록.
  *
@@ -22,8 +27,9 @@ import './PexBlock.css';
  *  - readOnly   : true 면 편집 버튼 표시 안 함 (textarea 모드 등)
  */
 export default function PexBlock({ source, onCommit, readOnly }) {
-  const [svg, setSvg] = useState('');
-  const [loading, setLoading] = useState(true);
+  // 초기 state 를 캐시로 시드 — 같은 source 로 재마운트되면 loading=true 상태를 거치지 않음
+  const [svg, setSvg] = useState(() => svgCache.get(source) || '');
+  const [loading, setLoading] = useState(() => !svgCache.has(source));
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
 
@@ -56,6 +62,13 @@ export default function PexBlock({ source, onCommit, readOnly }) {
       setLoading(false);
       return undefined;
     }
+    // 캐시 hit 면 fetch 건너뜀 (이미 초기 state 에서 시드된 상태)
+    if (svgCache.has(source)) {
+      setSvg(svgCache.get(source));
+      setLoading(false);
+      setError(null);
+      return undefined;
+    }
     setLoading(true);
     setError(null);
     fetch(`${config.PUMLEX_SERVER}/render-with-layout`, {
@@ -69,6 +82,7 @@ export default function PexBlock({ source, onCommit, readOnly }) {
       })
       .then((text) => {
         if (cancelled) return;
+        svgCache.set(source, text);
         setSvg(text);
         setLoading(false);
       })
