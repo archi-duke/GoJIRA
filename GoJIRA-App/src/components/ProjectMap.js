@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import './ProjectMap.css';
 import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
@@ -725,6 +725,18 @@ function RangeSlider({ viewRange, onChange }) {
 
 // --- Project Row ---
 function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, onContextMenu, onProjectClick, alert }) {
+  // 비례폰트라 length*charPx 추정이 부정확 — 실제 렌더된 텍스트 폭을 SVG getBBox 로 측정
+  const textRef = useRef(null);
+  const [measuredTextW, setMeasuredTextW] = useState(null);
+  useLayoutEffect(() => {
+    if (textRef.current) {
+      try {
+        const b = textRef.current.getBBox();
+        if (b && b.width > 0 && b.width !== measuredTextW) setMeasuredTextW(b.width);
+      } catch { /* SVG not mounted */ }
+    }
+  });
+
   const schedules = project.schedules || [];
   const allMilestones = schedules
     .map((s) => {
@@ -792,7 +804,8 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
   const cls = isCompleted ? 'completed' : isOverdue ? 'overdue' : 'active';
   const hasAlert = alert && alert.branchDiff;
   const hasPR = alert && alert.hasOpenPR;
-  const alertColor = hasPR ? '#27ae60' : hasAlert ? 'tomato' : null;
+  // 알람: "확인할 변경 있음" 의 주의(caution) 톤 — 위험(red) 아닌 앰버 계열
+  const alertColor = hasPR ? '#27ae60' : hasAlert ? '#e67e22' : null;
 
   return (
     <g
@@ -852,6 +865,7 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
             y={y - MILESTONE_R - 4}
             textAnchor="middle"
             className="pm-ms-label"
+            style={alertColor ? { fill: alertColor } : undefined}
           >
             {m.name}
           </text>
@@ -861,33 +875,51 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
 
       {/* Project name (rendered last = on top) with white background + alert icon */}
       {visibleMilestones.length > 0 && (() => {
-        const nameW = (project.name || '').length * 8 + 8;
-        const iconW = alertColor ? 20 : 0;
-        // 첫 가시 마일스톤 좌측에 붙이되, 흰 rect 가 좌측 경계를 넘으면 안쪽으로 클램프.
+        // 1차 렌더는 추정값으로 위치 잡고, useLayoutEffect 로 측정한 후 2차 렌더에서 정확한 폭 사용
+        const fallbackTextW = (project.name || '').length * 7;
+        const textW = measuredTextW != null ? measuredTextW : fallbackTextW;
+        const iconWidth = 16;
+        const iconGap = 5; // 아이콘 우측 끝과 과제명 첫 글자 사이
+        const iconLeftPad = 2; // 흰 rect 좌측 ↔ 아이콘 좌측 여백
+        const rectRightPad = 2; // 텍스트 우측 ↔ 흰 rect 우측 여백
+        const hasIcon = !!alertColor;
+        const blockW = (hasIcon ? iconLeftPad + iconWidth + iconGap : 0) + textW + rectRightPad;
         const desired = firstVisibleX - MILESTONE_R - 10;
-        const minNameX = nameW + iconW;
-        const nameX = Math.max(desired, minNameX);
+        const nameX = Math.max(desired, blockW - rectRightPad);
+        const blockLeft = nameX - (blockW - rectRightPad);
+        const iconX = blockLeft + iconLeftPad;
         return (
           <>
             <rect
-              x={nameX - nameW - iconW}
+              x={blockLeft}
               y={y - 9}
-              width={nameW + iconW}
+              width={blockW}
               height={18}
               fill="#fff"
               rx={2}
               style={{ cursor: 'pointer' }}
               onClick={() => onProjectClick && onProjectClick(project)}
             />
-            {alertColor && (
-              <image
-                href={hasPR ? '/icons/alert-pr.svg' : '/icons/alert-diff.svg'}
-                x={nameX - nameW - iconW + 2}
-                y={y - 9}
-                width="16" height="16"
-              />
+            {hasIcon && (
+              <>
+                <rect
+                  x={iconX - 3}
+                  y={y - 9 - 3}
+                  width={iconWidth + 6}
+                  height={iconWidth + 6}
+                  fill="#fff"
+                  rx={2}
+                />
+                <image
+                  href={hasPR ? '/icons/alert-pr.svg' : '/icons/alert-diff.svg'}
+                  x={iconX}
+                  y={y - 9}
+                  width="16" height="16"
+                />
+              </>
             )}
             <text
+              ref={textRef}
               x={nameX}
               y={y + 4}
               textAnchor="end"
