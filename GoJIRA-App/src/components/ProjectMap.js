@@ -328,29 +328,39 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
 
   const { start: rangeStart, end: rangeEnd } = viewRange;
 
-  // Build month list for current view range
-  const monthList = [];
+  // Build month list for the user-selected view range
+  const baseMonthList = [];
   const cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
   while (cur < rangeEnd) {
     const monthStart = new Date(cur);
     const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     const days = daysBetween(monthStart, monthEnd);
-    monthList.push({ year: cur.getFullYear(), month: cur.getMonth() + 1, days });
+    baseMonthList.push({ year: cur.getFullYear(), month: cur.getMonth() + 1, days });
     cur.setMonth(cur.getMonth() + 1);
   }
 
-  // Calculate left padding first: ensure project names are not clipped
-  // Estimate max project name width (~7px per char) + margin
-  let leftPadding = 0;
+  // 가장 긴 프로젝트명 흰 rect 가 첫 마일스톤 좌측에 붙도록, 그만큼 viewRange 이전의
+  // 월을 prepend 해 헤더/그리드를 자연스럽게 좌측까지 이어붙인다 (기존 빈 leftPadding 영역 제거).
+  let nameOverlayWidth = 0;
   sortedProjects.forEach((p) => {
-    const nameWidth = (p.name || '').length * 7 + 16;
-    if (nameWidth > leftPadding) leftPadding = nameWidth;
+    const w = (p.name || '').length * 7 + 16;
+    if (w > nameOverlayWidth) nameOverlayWidth = w;
   });
+  const firstPassEvenWidth = baseMonthList.length > 0 ? graphWidth / baseMonthList.length : MIN_MONTH_WIDTH;
+  const extraMonths = firstPassEvenWidth > 0 ? Math.ceil(nameOverlayWidth / firstPassEvenWidth) : 0;
+  const prepended = [];
+  for (let i = extraMonths; i > 0; i--) {
+    const d = addMonths(new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1), -i);
+    const days = daysBetween(
+      new Date(d.getFullYear(), d.getMonth(), 1),
+      new Date(d.getFullYear(), d.getMonth() + 1, 1)
+    );
+    prepended.push({ year: d.getFullYear(), month: d.getMonth() + 1, days });
+  }
+  const monthList = [...prepended, ...baseMonthList];
 
   const monthCount = monthList.length;
-  // Calculate month width from available space (graphWidth minus leftPadding)
-  const availableWidth = graphWidth - leftPadding;
-  const evenWidth = availableWidth / monthCount;
+  const evenWidth = monthCount > 0 ? graphWidth / monthCount : MIN_MONTH_WIDTH;
   const months = monthList.map((m) => ({
     ...m,
     label: `${m.year}.${String(m.month).padStart(2, '0')}`,
@@ -369,13 +379,17 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
     }
   }
 
-  // Assign x positions with left padding
-  let accX = leftPadding;
+  // Assign x positions starting at 0 (prepended months absorb what used to be leftPadding)
+  let accX = 0;
   for (const m of months) {
     m.x = accX;
     accX += m.width;
   }
   const totalWidth = accX;
+
+  // 가시 타임라인 시작/끝 — overflow 판정 기준은 prepend 포함 확장 범위를 사용
+  const visibleStart = months.length > 0 ? toMonthDate(months[0].label) : rangeStart;
+  const visibleEnd = rangeEnd;
   const totalHeight = sortedProjects.length * ROW_HEIGHT;
 
   function dateToX(date) {
@@ -565,8 +579,8 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
                     rowIdx={rowIdx}
                     dateToX={dateToX}
                     totalWidth={totalWidth}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
+                    rangeStart={visibleStart}
+                    rangeEnd={visibleEnd}
                     isCompleted={isCompleted}
                     isOverdue={isOverdue}
                     onContextMenu={handleContextMenu}
@@ -761,9 +775,14 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
     );
   }
 
-  // Visible milestones (clipped by SVG clipPath, but we render all)
   const firstX = allMilestones[0].x;
   const lastX = allMilestones[allMilestones.length - 1].x;
+
+  // 가시 영역 [0, totalWidth] 안에 들어오는 마일스톤만 line/이름 앵커로 사용
+  // → 음수 firstX 에서 끌려오는 "허공의 라인" 제거.
+  const visibleMilestones = allMilestones.filter((m) => m.x >= 0 && m.x <= totalWidth);
+  const firstVisibleX = visibleMilestones.length > 0 ? visibleMilestones[0].x : firstX;
+  const lastVisibleX = visibleMilestones.length > 0 ? visibleMilestones[visibleMilestones.length - 1].x : lastX;
 
   // Left overflow indicator
   const hasLeftOverflow = firstDate < rangeStart;
@@ -790,8 +809,17 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
         fill="transparent"
       />
 
-      {/* Connecting line */}
-      <line x1={firstX} y1={y} x2={lastX} y2={y} className="pm-line" style={alertColor ? { stroke: alertColor, strokeWidth: 3 } : undefined} />
+      {/* Connecting line — 가시 마일스톤 사이만 */}
+      {visibleMilestones.length >= 1 && (
+        <line
+          x1={firstVisibleX}
+          y1={y}
+          x2={lastVisibleX}
+          y2={y}
+          className="pm-line"
+          style={alertColor ? { stroke: alertColor, strokeWidth: 3 } : undefined}
+        />
+      )}
 
       {/* Left overflow triangle */}
       {hasLeftOverflow && (
@@ -832,10 +860,13 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
       })}
 
       {/* Project name (rendered last = on top) with white background + alert icon */}
-      {(() => {
-        const nameX = firstX - MILESTONE_R - 10;
+      {visibleMilestones.length > 0 && (() => {
         const nameW = (project.name || '').length * 8 + 8;
         const iconW = alertColor ? 20 : 0;
+        // 첫 가시 마일스톤 좌측에 붙이되, 흰 rect 가 좌측 경계를 넘으면 안쪽으로 클램프.
+        const desired = firstVisibleX - MILESTONE_R - 10;
+        const minNameX = nameW + iconW;
+        const nameX = Math.max(desired, minNameX);
         return (
           <>
             <rect
