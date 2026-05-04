@@ -12,14 +12,18 @@ import (
 type LLMConfig struct {
 	Endpoint    string            `json:"endpoint"`
 	Model       string            `json:"model"`
+	APIKey		string			  `json:"apiKey"` 
 	MaxTokens   int               `json:"maxTokens"`
 	Temperature float64           `json:"temperature"`
+	Stream		bool			  `json:"stream"` 
 	Headers     map[string]string `json:"headers"`
 	AuthType    string            `json:"authType"` // "bearer" | "header" | "none"
 	AuthHeader  string            `json:"authHeader"` // authType이 "header"일 때 사용할 헤더 이름
 	ResponseFormat struct {
 		ChoicesPath string `json:"choicesPath"`
 		ContentPath string `json:"contentPath"`
+		StreamPrefix string `json:"streamPrefix"`
+		StreamDone string `json:"streamDone"`
 	} `json:"responseFormat"`
 }
 
@@ -31,11 +35,14 @@ func init() {
 		Model:       "gpt-4o-mini",
 		MaxTokens:   500,
 		Temperature: 0.3,
+		Stream : false,
 		Headers:     map[string]string{"Content-Type": "application/json"},
 		AuthType:    "bearer",
 	}
 	LLM.ResponseFormat.ChoicesPath = "choices"
 	LLM.ResponseFormat.ContentPath = "message.content"
+	LLM.ResponseFormat.StreamPrefix = "data: "
+	LLM.ResponseFormat.StreamDone = "[DONE]"
 }
 
 // LoadLLMConfig llm.json 파일에서 LLM 설정을 로드
