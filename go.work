@@ -1,0 +1,9 @@
+go 1.26.1
+
+use (
+	./GoJIRA-API
+	./Platform-API
+	./gojira-shared
+)
+
+replace gojira.local/shared v0.0.0 => ./gojira-shared
