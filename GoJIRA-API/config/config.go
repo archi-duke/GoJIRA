@@ -22,7 +22,15 @@ var (
 func init() {
 	loadEnvFile(".env")
 
-	OpenAIAPIKey = envOrDefault("OPENAI_API_KEY", "")
+	// OPENAI_API_KEY: ENC: prefix 면 복호화, 평문이면 그대로
+	rawKey := envOrDefault("OPENAI_API_KEY", "")
+	if val, err := Decrypt(rawKey); err == nil {
+		OpenAIAPIKey = val
+		os.Setenv("OPENAI_API_KEY", val) // os.Getenv 직접 호출하는 다른 핸들러를 위해 평문으로 재설정
+	} else {
+		log.Printf("OPENAI_API_KEY 복호화 실패: %v", err)
+		OpenAIAPIKey = rawKey
+	}
 	LoadLLMConfig()
 
 	raw := envOrDefault("GOJIRA_JIRA_USER", "")
