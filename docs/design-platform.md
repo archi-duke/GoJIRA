@@ -859,11 +859,54 @@ Agent-Service의 `/chat/stream`은 별도의 SSE 스트림이다.
 
 ### 9.3 암호화
 
+#### 9.3.1 보호 대상
+
 | 대상 | 방식 |
 |------|------|
-| JIRA 계정 (ID/PW) | AES 암호화 (`config/crypto.go`) |
-| SMTP 비밀번호 | AES 암호화 |
+| JIRA 계정 (ID/PW) | AES-256-GCM, ENC: prefix 형태 |
+| SMTP 비밀번호 | AES-256-GCM, ENC: prefix 형태 |
+| OpenAI API 키 (`OPENAI_API_KEY`) | AES-256-GCM, ENC: prefix 형태 |
 | Webhook 시그니처 | HMAC-SHA256 검증 |
+
+`.env` 파일은 모두 `.gitignore` 처리되어 있고, 위 시크릿들은 `ENC:base64` 형태로 저장된다. 평문이 들어 있어도 그대로 통과시켜 점진 도입을 가능하게 한다 (역호환).
+
+#### 9.3.2 암호화 단일 소스
+
+`gojira-shared/secret/crypto.go` 가 모든 서비스의 단일 암복호화 구현이다. Go workspace (`go.work`) 로 구성되며, 각 서비스의 `config/crypto.go` 는 9 라인 thin wrapper 로 호출만 위임한다.
+
+```
+GoJIRA/
+├── go.work                        # use 3 modules + replace 명시
+├── gojira-shared/
+│   ├── go.mod                     # module gojira.local/shared
+│   └── secret/crypto.go           # 단일 Encrypt/Decrypt 구현
+├── GoJIRA-API/config/crypto.go    # → gojira-shared/secret 위임
+└── Platform-API/config/crypto.go  # → gojira-shared/secret 위임
+```
+
+- 호출자는 기존처럼 `config.Encrypt` / `config.Decrypt` 사용 — 인터페이스 무변경
+- 보안 코드 drift 위험 제거 (이전엔 byte-identical 복제본 두 개)
+
+#### 9.3.3 마스터 키 (`GOJIRA_ENC_KEY`)
+
+`GOJIRA_ENC_KEY` 환경변수가 마스터 키. 미설정 시 코드 내 default 사용 (`gojira-shared/secret/crypto.go`).
+
+- 매 호출 시 `os.Getenv` 로 읽어 캐시하지 않음 → `.env` 로딩 후에도 정상 반영
+- 머신/환경별로 별도 키를 권장 (default 키는 코드에 노출되어 있어 약함)
+- `GoJIRA-API/cmd/encrypt/main.go` 가 평문을 ENC 형식으로 변환하는 일회용 유틸 (재사용 가능)
+
+#### 9.3.4 init 흐름
+
+```go
+// 양 서비스 config.go init() 패턴
+loadEnvFile(".env")
+raw := os.Getenv("OPENAI_API_KEY")
+if val, err := Decrypt(raw); err == nil {
+    os.Setenv("OPENAI_API_KEY", val) // 직접 os.Getenv 호출 핸들러 보호
+}
+```
+
+`os.Setenv` 로 평문을 다시 환경에 주입해 `translateRepoName` 등 직접 `os.Getenv` 를 호출하는 핸들러도 ENC 도입 영향 없이 동작한다.
 
 ### 9.4 Soft Delete
 
@@ -1048,7 +1091,9 @@ Agent-Service의 `/chat/stream`은 별도의 SSE 스트림이다.
 | PLATFORM_WEBHOOK_URL | - | Webhook 수신 URL |
 | PLATFORM_WEBHOOK_SECRET | gojira-webhook-secret | Webhook 시크릿 |
 | PLATFORM_EDIT_SESSION_TTL | 30 | 편집 세션 TTL (분) |
-| SMTP_HOST/PORT/USER/PASS/FROM | - | 이메일 설정 |
+| SMTP_HOST/PORT/USER/PASS/FROM | - | 이메일 설정 (PASS 는 암호화) |
+| OPENAI_API_KEY | - | LLM API 키 (암호화, `translateRepoName` 등 사용) |
+| GOJIRA_ENC_KEY | (코드 내 default) | 시크릿 마스터 키 — 양 서비스 공통 (§9.3.3) |
 
 ### GoJIRA-API
 
@@ -1062,7 +1107,8 @@ Agent-Service의 `/chat/stream`은 별도의 SSE 스트림이다.
 | GOJIRA_JIRA_PASS | - | JIRA 비밀번호 (암호화) |
 | GOJIRA_MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
 | GOJIRA_MONGO_DB | gojira | DB 이름 |
-| OPENAI_API_KEY | - | LLM API 키 |
+| OPENAI_API_KEY | - | LLM API 키 (암호화, `summarizePRContent` 등 사용) |
+| GOJIRA_ENC_KEY | (코드 내 default) | 시크릿 마스터 키 — Platform-API 와 공통 (§9.3.3) |
 | GOJIRA_AGENT_PROXY | - | Agent-Service 프록시 URL |
 
 ### Agent-Service
