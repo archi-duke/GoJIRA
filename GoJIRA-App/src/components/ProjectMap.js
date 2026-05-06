@@ -70,6 +70,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
   const [alerts, setAlerts] = useState({}); // jiraCode → { issueUpdated, branchDiff, hasOpenPR }
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, project }
   const [dialog, setDialog] = useState(null);   // { project, mode: 'detail'|'edit' }
+  const [saving, setSaving] = useState(null);   // null | { title, sub } — 저장 진행 인디케이터
   const [sortKey, setSortKey] = useState(() => sessionStorage.getItem('gojira_pm_sortKey') || 'startDate');
   const [sortAsc, setSortAsc] = useState(() => sessionStorage.getItem('gojira_pm_sortAsc') !== 'false');
   useEffect(() => { sessionStorage.setItem('gojira_pm_sortKey', sortKey); }, [sortKey]);
@@ -224,19 +225,32 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
     }
   }
 
-  function handleDialogSave(updated) {
-    // New project (POST) vs existing (PUT)
+  async function handleDialogSave(updated) {
+    // New project (POST) vs existing (PUT) — 새 과제는 LLM repo 이름 번역 + Gitea repo 생성까지 수행되어 수 초 걸린다.
     const isNew = !projects.some((p) => getJiraCode(p) === getJiraCode(updated));
-    fetch(`${API_BASE}/Project`, {
-      method: isNew ? 'POST' : 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
-    })
-      .then(() => fetch(`${API_BASE}/Project`, { headers: { XBody: JSON.stringify({}) } }))
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) setProjects(data.filter((p) => p.status !== 'Deleted'));
+    setSaving({
+      title: isNew ? '과제 생성 중...' : '과제 정보 저장 중...',
+      sub: isNew ? '설계문서 저장소 자동 생성을 포함해 수 초 걸릴 수 있습니다.' : '',
+    });
+    try {
+      const res = await fetch(`${API_BASE}/Project`, {
+        method: isNew ? 'POST' : 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        await modalAlert((isNew ? '과제 생성 실패' : '과제 저장 실패') + ': ' + (err.error || res.statusText));
+        return;
+      }
+      // 성공 — 목록 재조회
+      const list = await fetch(`${API_BASE}/Project`, { headers: { XBody: JSON.stringify({}) } }).then((r) => r.json());
+      if (Array.isArray(list)) setProjects(list.filter((p) => p.status !== 'Deleted'));
+    } catch (e) {
+      await modalAlert((isNew ? '과제 생성 오류: ' : '과제 저장 오류: ') + (e.message || e));
+    } finally {
+      setSaving(null);
+    }
   }
 
   useEffect(() => {
@@ -613,6 +627,17 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
           onClose={() => setDialog(null)}
           onSave={handleDialogSave}
         />
+      )}
+
+      {/* 과제 생성/수정 진행 인디케이터 */}
+      {saving && (
+        <div className="pm-saving-overlay">
+          <div className="pm-saving-box">
+            <div className="pm-saving-spinner" />
+            <div className="pm-saving-title">{saving.title}</div>
+            {saving.sub && <div className="pm-saving-sub">{saving.sub}</div>}
+          </div>
+        </div>
       )}
 
     </div>
