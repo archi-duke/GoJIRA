@@ -82,10 +82,12 @@ graph TB
     PA --> PAPI
     GA --> GAPI
     GAPI -- "리버스 프록시<br/>/Agent/*" --> AGENT
+    GAPI -- "/LLM/call (게이트웨이)" --> PAPI
     PAPI --> MONGO
     GAPI --> MONGO
     AGENT --> MONGO
     PAPI --> GITEA
+    PAPI --> LLM
     GAPI --> JIRA
     AGENT --> GAPI
     AGENT --> PAPI
@@ -94,15 +96,22 @@ graph TB
     GITEA -- "Webhook" --> PAPI
 ```
 
+> **LLM 호출 책임**: Platform-API 가 단일 게이트웨이로 OPENAI_API_KEY / 모델 / 엔드포인트를 관리한다.
+> GoJIRA-API 는 키 없이 `POST /api/v2/LLM/call` 만 호출한다.
+> Agent-Service 는 별도 운영 정책상 자체 LLM 클라이언트 사용 (Python 런타임).
+
 ### 2.2 서비스 간 통신
 
 | 경로 | 프로토콜 | 설명 |
 |------|----------|------|
 | GoJIRA-App -> GoJIRA-API | HTTP REST | 이슈/프로젝트 CRUD |
+| GoJIRA-API -> Platform-API (`/LLM/call`) | HTTP REST | LLM 게이트웨이 (PR 요약 등) |
+| GoJIRA-API -> Platform-API (`/DocRepo/...`) | HTTP REST | repo 생성·조회·편집 |
 | GoJIRA-API -> Agent-Service | HTTP 리버스 프록시 | `GOJIRA_AGENT_PROXY` 환경변수로 제어 |
 | Agent-Service -> GoJIRA-API | HTTP REST | 스킬 실행 시 데이터 조회/변경 |
 | Agent-Service -> Platform-API | HTTP REST | 문서/계정 정보 조회 |
 | Platform-API -> Gitea | REST API (v1) | 문서 CRUD, PR, 브랜치 관리 |
+| Platform-API -> LLM | OpenAI 호환 API | 게이트웨이 호출 (`config.LLM` 기반) |
 | Gitea -> Platform-API | Webhook (POST) | push/PR/review 이벤트 수신 |
 | GoJIRA-API -> JIRA DC | REST API (v2) | 이슈 동기화 |
 | Platform-API -> Client | SSE / WebSocket | 실시간 알림 브로드캐스트 |
@@ -145,6 +154,8 @@ graph TB
     {code}/edit/pr                 # 편집 -> PR 생성
     {code}/edit/heartbeat          # 세션 유지 (TTL 갱신)
   Git/users                        # Gitea 사용자 목록
+  LLM/call                         # LLM 게이트웨이 (다른 서비스가 호출)
+  Project/{code}/archive           # 프로젝트 아카이브 (zip 백업 + 정리)
 ```
 
 ### 3.2 인증 설계
@@ -747,15 +758,75 @@ sequenceDiagram
 
 ### 7.3 LLM 연동
 
-| 설정 | 설명 |
-|------|------|
-| endpoint | OpenAI 호환 API (교체 가능) |
-| model | 기본 gpt-4o (llm.json으로 설정) |
-| auth_type | bearer / header / none |
-| max_tokens | 기본 500 (도구 호출 시 2000) |
+#### 7.3.1 단일 게이트웨이
 
-`llm.json` 설정 파일로 엔드포인트와 모델을 런타임에 교체할 수 있다.  
-탐색 순서: `GOJIRA_LLM_CONFIG` -> `./llm.json` -> `../GoJIRA-API/config/llm.json`
+LLM 호출은 **Platform-API 가 단독으로 관리**한다. 키·모델·엔드포인트 정책의 회전·교체가 한 곳에서만 일어나도록 게이트웨이 패턴을 채택했다.
+
+```
+[GoJIRA-API]                     [Platform-API]                       [OpenAI / 사내 프록시]
+ callPlatform("/LLM/call")  ───►  POST /api/v2/LLM/call  ───►  llm.Call(config.LLM, msgs, opts)
+                                  - llm.json 기반                     ─► chat/completions
+                                  - OPENAI_API_KEY 보유
+```
+
+| 항목 | 위치 |
+|------|------|
+| 라이브러리 코드 | `Platform-API/llm/{config.go, client.go}` |
+| 게이트웨이 endpoint | `POST /api/v2/LLM/call` (`Platform-API/handlers/llm.go`) |
+| 설정 파일 | `Platform-API/config/llm.json` |
+| OPENAI_API_KEY | Platform-API 의 `.env` 만 (ENC: 형태) |
+| 호출 사이트 | Platform 내부: `translateRepoName` (in-process) <br/> 외부: GoJIRA-API `summarizePRContent` (HTTP) |
+
+#### 7.3.2 llm.json 스키마 + 탐색 순서
+
+| 필드 | 설명 |
+|------|------|
+| endpoint | OpenAI 호환 API (사내 프록시 등 교체 가능) |
+| model | 기본 `gpt-4o` |
+| authType | `bearer` / `header` / `none` |
+| maxTokens, temperature | 기본 호출 파라미터 (호출별 Options 로 override 가능) |
+| responseFormat.choicesPath/contentPath | 응답 파싱 경로 |
+
+탐색 순서 (`Platform-API/config/llm.go LoadLLMConfig`):
+1. `PLATFORM_LLM_CONFIG` 환경변수 경로
+2. 소스 파일 디렉토리 기준 `Platform-API/config/llm.json` (개발 환경)
+3. cwd 기준 `config/llm.json`, `llm.json`
+
+#### 7.3.3 fail-fast 정책
+
+LLM 호출이 실패하면 **폴백 없이 작업 자체를 실패 처리** 한다. 폴백 동작이 silent 한 잘못된 결과를 만드는 것을 방지하기 위함.
+
+| 호출 사이트 | 실패 시 동작 |
+|---|---|
+| `translateRepoName` (Platform 내부) | `(string, error)` 반환 → DocRepoCreateHandler 가 502 |
+| `summarizePRContent` (GoJIRA-API) | `(title, body, err)` 반환 → docgen 핸들러가 502 |
+| `ensureDocRepo` (GoJIRA-API) | `error` 반환 → Project 핸들러가 502 |
+
+원인 체인이 응답 본문에 그대로 포함되어 호출자가 진단 가능:
+```
+"DocRepo 생성 실패: repo 이름 LLM 번역 실패: LLM 호출 실패: API 오류 (401): ..."
+```
+
+#### 7.3.4 프로젝트 생성 흐름 — repo 성공 후에만 doc 생성
+
+```
+[Browser POST /Project] ──► [GoJIRA-API ProjectCreateHandler]
+                                │
+                                │ ① POST /DocRepo/{code} {projectName}
+                                ▼
+                            [Platform-API DocRepoCreateHandler]
+                                │ ② translateRepoName (LLM)  ─ 실패 → 502 종료
+                                │ ③ github.CreateRepo (Gitea) ─ 실패 → 502 종료
+                                │ ④ 초기 파일 + branch protection
+                                │ ⑤ response { repoName, repoOwner, repoUrl }
+                                ▼
+                            [GoJIRA-API]
+                                │ ⑥ documents 필드 채워서 UpsertProject (Mongo)
+                                ▼
+                            [Browser 200 OK]
+```
+
+이전엔 doc 가 먼저 만들어진 뒤 repo 생성이 실패하면 "doc 만 있고 repo 없는" 절반 상태가 남았다. 새 흐름은 repo 가 모두 성공한 다음에야 doc 을 생성하므로 절반 상태가 발생하지 않는다.
 
 ---
 
@@ -1092,7 +1163,8 @@ if val, err := Decrypt(raw); err == nil {
 | PLATFORM_WEBHOOK_SECRET | gojira-webhook-secret | Webhook 시크릿 |
 | PLATFORM_EDIT_SESSION_TTL | 30 | 편집 세션 TTL (분) |
 | SMTP_HOST/PORT/USER/PASS/FROM | - | 이메일 설정 (PASS 는 암호화) |
-| OPENAI_API_KEY | - | LLM API 키 (암호화, `translateRepoName` 등 사용) |
+| OPENAI_API_KEY | - | LLM API 키 (암호화, **단일 보유** — §7.3) |
+| PLATFORM_LLM_CONFIG | - | llm.json 경로 override (미설정 시 `Platform-API/config/llm.json`) |
 | GOJIRA_ENC_KEY | (코드 내 default) | 시크릿 마스터 키 — 양 서비스 공통 (§9.3.3) |
 
 ### GoJIRA-API
@@ -1107,9 +1179,10 @@ if val, err := Decrypt(raw); err == nil {
 | GOJIRA_JIRA_PASS | - | JIRA 비밀번호 (암호화) |
 | GOJIRA_MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
 | GOJIRA_MONGO_DB | gojira | DB 이름 |
-| OPENAI_API_KEY | - | LLM API 키 (암호화, `summarizePRContent` 등 사용) |
 | GOJIRA_ENC_KEY | (코드 내 default) | 시크릿 마스터 키 — Platform-API 와 공통 (§9.3.3) |
 | GOJIRA_AGENT_PROXY | - | Agent-Service 프록시 URL |
+
+> GoJIRA-API 는 LLM 키를 보유하지 않는다. PR 요약 등 LLM 작업은 Platform-API `/LLM/call` 게이트웨이로 위임 (§7.3).
 
 ### Agent-Service
 
