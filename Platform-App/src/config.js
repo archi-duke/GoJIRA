@@ -6,9 +6,9 @@ const config = {
   // Agent Service (Python, 스트리밍)
   AGENT_API: process.env.REACT_APP_AGENT_API || 'http://localhost:9002/api/v2',
   // SSO 설정
-  SSO_URL: process.env.REACT_APP_SSO_URL || 'https://sso.example.com',
+  SSO_URL: process.env.REACT_APP_SSO_URL || 'https://10.227.37.90:443',
   USE_SSO: false,
-  DEV_USER: 'batman',
+  DEV_USER: 'duke.kimm',
 };
 
 export default config;

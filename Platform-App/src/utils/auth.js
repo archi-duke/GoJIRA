@@ -12,7 +12,7 @@ function getCookie(name) {
  * @returns {string|null} 인증된 사용자 ID, 리다이렉트 시 null
  */
 export function getAuthUser() {
-  const uinfo = getCookie('ADSSO_USER');
+  const uinfo = getCookie('ADSSO_UID');
 
   if (!config.USE_SSO) {
     // dev 모드: 쿠키에 저장된 사용자 우선, 없으면 DEV_USER

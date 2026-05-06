@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Config 는 llm.json 의 스키마와 동일하다. 미설정 필드는 zero value (호출자가 default 처리).
@@ -18,6 +19,7 @@ type Config struct {
 	MaxTokens      int               `json:"maxTokens"`
 	Temperature    float64           `json:"temperature"`
 	Stream         bool              `json:"stream"`
+	SystemPrompt   string             `json:"systemPrompt"`
 	Headers        map[string]string `json:"headers"`
 	AuthType       string            `json:"authType"`   // "bearer" | "header" | "none"
 	AuthHeader     string            `json:"authHeader"` // authType 이 "header" 일 때
@@ -75,5 +77,37 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Headers == nil {
 		cfg.Headers = map[string]string{"Content-Type": "application/json"}
 	}
+	// llm.json 에 박힌 ${VAR} 패턴을 환경변수 값으로 치환.
+	// 예: "X-Dep-Ticket": "${PLATFORM_LLM_TICKET}" → 실제 토큰 값.
+	// 시크릿(인증 토큰 등) 을 git tracked 파일에서 분리하기 위함.
+	cfg.APIKey = expandEnv(cfg.APIKey)
+	for k, v := range cfg.Headers {
+		cfg.Headers[k] = expandEnv(v)
+	}
+	cfg.SystemPrompt = expandEnv(cfg.SystemPrompt)
 	return cfg, nil
+}
+
+// expandEnv 는 "${VAR}" 패턴을 환경변수로 치환한다 (os.Expand 와 동일하지만 $VAR 형식은 무시).
+// 미정의 환경변수는 빈 문자열로 대체.
+func expandEnv(s string) string {
+	if !strings.Contains(s, "${") {
+		return s
+	}
+	out := s
+	for {
+		start := strings.Index(out, "${")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(out[start:], "}")
+		if end < 0 {
+			break
+		}
+		end += start
+		varName := out[start+2 : end]
+		val := os.Getenv(varName)
+		out = out[:start] + val + out[end+1:]
+	}
+	return out
 }

@@ -8,9 +8,9 @@ const config = {
   PLANTUML_SERVER: process.env.REACT_APP_PLANTUML_SERVER || 'http://localhost:8080/svg/',
   // pumlex (plantumlEx) 서버 — 인라인 메타 편집 + /render-with-layout
   PUMLEX_SERVER: process.env.REACT_APP_PUMLEX_SERVER || 'http://localhost:3030',
-  SSO_URL: process.env.REACT_APP_SSO_URL || 'https://sso.example.com',
+  SSO_URL: process.env.REACT_APP_SSO_URL || 'https://10.227.37.90:443',
   USE_SSO: false,
-  DEV_USER: 'batman',
+  DEV_USER: 'duke.kimm',
 };
 
 export default config;

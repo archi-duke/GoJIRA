@@ -16,7 +16,7 @@ export function getAuthUser() {
     return config.DEV_USER;
   }
 
-  const uinfo = getCookie('ADSSO_USER');
+  const uinfo = getCookie('ADSSO_UID');
   if (!uinfo) {
     window.location.href = `${config.SSO_URL}/Account/ADFSLogin?client=${window.location.origin}`;
     return null;

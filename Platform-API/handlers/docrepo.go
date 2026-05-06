@@ -2053,44 +2053,91 @@ func translateRepoName(ctx context.Context, name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("프로젝트명이 비어 있어 LLM 호출 불가")
 	}
-	if os.Getenv("OPENAI_API_KEY") == "" && config.LLM.AuthType != "none" {
-		return "", fmt.Errorf("OPENAI_API_KEY 미설정")
-	}
 
-	messages := []llm.Message{
-		{
-			Role:    "system",
-			Content: "Convert the user's project title (often Korean or non-English) into a short English slug suitable for a GitHub repository name. Output rules: lowercase, alphanumeric and hyphens only, 1-3 words, max 30 characters, preserve meaning. Output ONLY the slug, no explanation, no quotes.",
-		},
-		{Role: "user", Content: name},
-	}
-	temp := 0.0
-	opts := &llm.Options{
-		MaxTokens:   20,
-		Temperature: &temp,
-		Timeout:     10 * time.Second,
-		Ctx:         ctx,
-	}
+systemPrompt := config.LLM.SystemPrompt
+if systemPrompt == "" {
+	systemPrompt = "Convert Korean project titles to English GitHub repo slugs. Rules: lowercase, alphanumeric/hyphens only, 2-4 words. Examples: 'SW 설계 개발'→'sw-design-development', '자동화 테스트'→'automation-test'. Output ONLY JSON: {\"result\":\"slug\",\"status\":\"ok\"}."
+}
+messages := []llm.Message{
+	{Role: "system", Content: systemPrompt},
+	{Role: "user", Content: name},
+}
+temp := 0.0
+maxTokens := config.LLM.MaxTokens
+if maxTokens <= 0 {
+	maxTokens = 500
+}
+log.Printf("translateRepoName: LLM config maxTokens=%d, using %d", config.LLM.MaxTokens, maxTokens)
+opts := &llm.Options{
+	MaxTokens:   maxTokens,
+	Temperature: &temp,
+	Timeout:     10 * time.Second,
+	Ctx:         ctx,
+}
 
-	text, err := llm.Call(config.LLM, messages, opts)
-	if err != nil {
-		return "", fmt.Errorf("LLM 호출 실패: %w", err)
-	}
-	slug := slugifyRepoName(text)
-	if slug == "" {
-		return "", fmt.Errorf("LLM 응답에서 유효한 slug 추출 실패 (raw=%q)", text)
-	}
+text, err := llm.Call(config.LLM, messages, opts)
+log.Printf("translateRepoName: LLM response raw=[%s], err=%v", text, err)
+if err != nil {
+	return "", fmt.Errorf("LLM 호출 실패: %w", err)
+}
+
+// JSON 응답 파싱: {"result":"sw-design-development", "status":"ok"}
+var jsonResp struct {
+	Result string `json:"result"`
+	Status string `json:"status"`
+}
+if err := json.Unmarshal([]byte(text), &jsonResp); err == nil && jsonResp.Result != "" {
+	slug := slugifyRepoName(jsonResp.Result)
+	log.Printf("translateRepoName: '%s' -> '%s' (via JSON)", name, slug)
 	return slug, nil
 }
 
+// Fallback: 일반 텍스트 응답
+slug := slugifyRepoName(text)
+log.Printf("translateRepoName: '%s' -> '%s' (fallback)", name, slug)
+if slug == "" {
+	return "", fmt.Errorf("LLM 응답에서 유효한 slug 추출 실패 (raw=%q)", text)
+}
+return slug, nil
+}
+
 // slugifyRepoName: 과제명을 GitHub repo 이름으로 변환.
-// 영문 알파벳/숫자만 보존, 그 외(공백·한국어 등) 는 모두 '-' 로 치환.
+// 영문 알파벳/숫자만 보존, 그 외 (공백·한국어 등) 는 모두 '-' 로 치환.
+// 각 단어는 최대 4 자까지 제한 (긴 단어 축소).
 // 연속 '-' 압축 + 앞뒤 '-' 제거 + 소문자.
-// 예: "Test Prj" → "test-prj", "GoJIRA Sample 2" → "gojira-sample-2",
-// 한국어만 있어 결과가 빈 문자열이면 호출자가 fallback (project code) 처리.
+// 예: "Test Prj" → "test-prj", "GoJIRA Sample 2" → "goji-samp-2",
+// "security-enhancement" → "secu-enha", "클라우드마이그레이션" → "clou-migr"
 func slugifyRepoName(name string) string {
+	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return r == '-' || r == ' '
+	})
+
+var result []string
+for _, word := range words {
+	// 영문/숫자만 추출
+	var clean strings.Builder
+	for _, r := range word {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			clean.WriteRune(r)
+		}
+	}
+	cleaned := clean.String()
+	if cleaned == "" {
+		continue
+	}
+	// 4 자까지 제한
+	if len(cleaned) > 4 {
+		cleaned = cleaned[:4]
+	}
+	result = append(result, cleaned)
+}
+
+	slug := strings.Join(result, "-")
+	// 최소 2 단어 이상 유지 (1 단어면 원래 이름 사용)
+	if len(result) == 1 && len(strings.Join(result, "-")) < 4 {
+	// 너무 짧으면 원래 로직 사용
 	var b strings.Builder
-	prevDash := true // 앞부분 '-' 방지
+	prevDash := true
 	for _, r := range strings.ToLower(name) {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
@@ -2103,5 +2150,7 @@ func slugifyRepoName(name string) string {
 			}
 		}
 	}
-	return strings.TrimRight(b.String(), "-")
+	slug = strings.TrimRight(b.String(), "-")
+	}
+	return slug
 }

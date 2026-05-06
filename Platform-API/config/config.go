@@ -62,11 +62,17 @@ func init() {
 		SMTPPass = raw
 	}
 
-	// OPENAI_API_KEY: ENC: prefix 면 복호화 후 환경변수에 평문으로 재설정
-	// (gojira-shared/llm 이 os.Getenv 직접 호출하므로 평문으로 풀어둠)
-	rawAPIKey := envOrDefault("OPENAI_API_KEY", "")
-	if val, err := Decrypt(rawAPIKey); err == nil {
-		os.Setenv("OPENAI_API_KEY", val)
+	// LLM 관련 시크릿 복호화: ENC: prefix 가 있으면 복호화 후 환경에 평문으로 재설정.
+	// llm.json 의 ${VAR} 치환은 LoadLLMConfig 시점에 os.Getenv 로 읽으므로,
+	// 그 전에 평문이 환경에 들어가 있어야 한다.
+	for _, key := range []string{"OPENAI_API_KEY", "PLATFORM_LLM_TICKET"} {
+		raw := envOrDefault(key, "")
+		if raw == "" {
+			continue
+		}
+		if val, err := Decrypt(raw); err == nil && val != raw {
+			os.Setenv(key, val)
+		}
 	}
 
 	// LLM 설정 로드 (llm.json 기반 — translateRepoName 등이 사용)

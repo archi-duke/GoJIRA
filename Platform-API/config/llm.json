@@ -1,14 +1,28 @@
 {
-  "endpoint": "https://api.openai.com/v1/chat/completions",
-  "model": "gpt-4o",
+  "endpoint": "http://apigw.samsungds.net:8000/gpt-oss/1/gpt-oss-120b/v1/chat/completions",
+  "model": "openai/gpt-oss-120b",
+  "apiKey": "${PLATFORM_LLM_TICKET}",
   "maxTokens": 500,
-  "temperature": 0.3,
+  "temperature": 0,
+  "stream": false,
+  "systemPrompt": "Convert Korean project names to English GitHub repo slugs. Rules: 1) lowercase, 2) hyphens only, 3) 2-4 words, 4) each word max 15 chars (truncate longer), 5) total slug max 50 chars. Output ONLY JSON: {\"result\":\"the-slug\",\"status\":\"ok\"}. Example: 'SW 설계 개발' → {\"result\":\"sw-design-development\",\"status\":\"ok\"}, '보안강화프로젝트' → {\"result\":\"security-enhancement-project\",\"status\":\"ok\"}",
   "headers": {
+    "X-Dep-Ticket": "${PLATFORM_LLM_TICKET}",
+    "Send-System-Name": "ai4se",
+    "User-Id": "${PLATFORM_LLM_USER_ID}",
+    "User-Type": "AD_ID",
+    "Chat-Id": "00000000-0000-0000-0000-000000000000",
+    "Accept": "application/json",
     "Content-Type": "application/json"
   },
-  "authType": "bearer",
+  "authType": "header",
+  "authHeader": "X-Dep-Ticket",
+  "extraBody": {},
+  "extraHeaders": {},
   "responseFormat": {
     "choicesPath": "choices",
-    "contentPath": "message.content"
+    "contentPath": "message.content",
+    "streamPrefix": "data: ",
+    "streamDone": "[DONE]"
   }
 }
