@@ -278,6 +278,22 @@ func GetRepo(owner, repo string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// RepoExists 는 owner/repo 가 Gitea/GitHub 에 존재하는지 확인한다.
+// 200 → true, 404 → false, 그 외 (네트워크 오류 등) → error 반환.
+func RepoExists(owner, repo string) (bool, error) {
+	_, status, err := doRequest("GET", "/repos/"+owner+"/"+repo, nil)
+	if err != nil {
+		return false, err
+	}
+	if status == 200 {
+		return true, nil
+	}
+	if status == 404 {
+		return false, nil
+	}
+	return false, fmt.Errorf("repo 존재 확인 실패 (status=%d)", status)
+}
+
 // ListOrgRepos 조직 또는 사용자의 repo 목록 조회
 func ListOrgRepos() ([]map[string]interface{}, error) {
 	path := "/user/repos?per_page=100&sort=updated"

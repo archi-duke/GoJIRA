@@ -96,7 +96,14 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadGateway, "repo 이름 LLM 번역 실패: "+err.Error())
 			return
 		}
-		req.RepoName = slug
+		// 중복 회피: 같은 slug 의 repo 가 이미 있으면 -2, -3, ... 접미사로 회피.
+		// owner 결정은 CreateRepo 호출 후에야 가능하지만, 검사용으로 GitHubOrg 우선 사용.
+		uniqueSlug, suffixErr := uniqueRepoSlug(slug)
+		if suffixErr != nil {
+			respondError(w, http.StatusBadGateway, "고유 repo 이름 생성 실패: "+suffixErr.Error())
+			return
+		}
+		req.RepoName = uniqueSlug
 	}
 	if req.Description == "" && projectName != "" {
 		req.Description = fmt.Sprintf("%s의 설계 문서", projectName)
@@ -2101,56 +2108,60 @@ if slug == "" {
 return slug, nil
 }
 
-// slugifyRepoName: 과제명을 GitHub repo 이름으로 변환.
-// 영문 알파벳/숫자만 보존, 그 외 (공백·한국어 등) 는 모두 '-' 로 치환.
-// 각 단어는 최대 4 자까지 제한 (긴 단어 축소).
-// 연속 '-' 압축 + 앞뒤 '-' 제거 + 소문자.
-// 예: "Test Prj" → "test-prj", "GoJIRA Sample 2" → "goji-samp-2",
-// "security-enhancement" → "secu-enha", "클라우드마이그레이션" → "clou-migr"
-func slugifyRepoName(name string) string {
-	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
-		return r == '-' || r == ' '
-	})
-
-var result []string
-for _, word := range words {
-	// 영문/숫자만 추출
-	var clean strings.Builder
-	for _, r := range word {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			clean.WriteRune(r)
+// uniqueRepoSlug 는 base slug 가 이미 존재하면 "-N" 접미사를 붙여 고유한 이름을 찾는다.
+//
+// 시도 순서: base, base-2, base-3, ... 최대 99 까지.
+// 검사 owner 는 config.GitHubOrg (있으면) 우선. RepoExists 가 일시 오류를 반환하면
+// 그 자리에서 중단해 호출자에게 에러 노출 (잘못된 이름으로 진행 방지).
+func uniqueRepoSlug(base string) (string, error) {
+	if base == "" {
+		return "", fmt.Errorf("base slug 가 비어 있음")
+	}
+	owner := config.GitHubOrg
+	candidate := base
+	for i := 0; i < 100; i++ {
+		exists, err := github.RepoExists(owner, candidate)
+		if err != nil {
+			return "", err
 		}
+		if !exists {
+			return candidate, nil
+		}
+		candidate = fmt.Sprintf("%s-%d", base, i+2)
 	}
-	cleaned := clean.String()
-	if cleaned == "" {
-		continue
-	}
-	// 4 자까지 제한
-	if len(cleaned) > 4 {
-		cleaned = cleaned[:4]
-	}
-	result = append(result, cleaned)
+	return "", fmt.Errorf("고유 이름 탐색 실패 (base=%q, 100 회 시도 후 포기)", base)
 }
 
-	slug := strings.Join(result, "-")
-	// 최소 2 단어 이상 유지 (1 단어면 원래 이름 사용)
-	if len(result) == 1 && len(strings.Join(result, "-")) < 4 {
-	// 너무 짧으면 원래 로직 사용
-	var b strings.Builder
-	prevDash := true
-	for _, r := range strings.ToLower(name) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prevDash = false
-		default:
-			if !prevDash {
-				b.WriteRune('-')
-				prevDash = true
+// slugifyRepoName: GitHub repo 이름으로 변환.
+//
+// 입력은 LLM 의 영문 slug 응답 또는 한국어 원문 모두 가능.
+//   1) 공백·하이픈 기준으로 단어 분리
+//   2) 각 단어에서 영문 소문자/숫자만 보존
+//   3) 빈 단어 제거 후 '-' 로 join
+//
+// 길이 제한 없음 (Gitea/GitHub 의 100자 한도까지 허용).
+// 한국어만 있어 결과가 빈 문자열이면 호출자가 에러 처리.
+//
+// 예: "Test Prj" → "test-prj"
+//
+//   "GoJIRA Sample 2" → "gojira-sample-2"
+//   "security-enhancement" → "security-enhancement"
+//   "클라우드마이그레이션" → ""
+func slugifyRepoName(name string) string {
+	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return r == '-' || r == ' ' || r == '_'
+	})
+	var result []string
+	for _, word := range words {
+		var clean strings.Builder
+		for _, r := range word {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				clean.WriteRune(r)
 			}
 		}
+		if cleaned := clean.String(); cleaned != "" {
+			result = append(result, cleaned)
+		}
 	}
-	slug = strings.TrimRight(b.String(), "-")
-	}
-	return slug
+	return strings.Join(result, "-")
 }
