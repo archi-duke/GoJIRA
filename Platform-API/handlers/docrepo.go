@@ -2063,7 +2063,7 @@ func translateRepoName(ctx context.Context, name string) (string, error) {
 
 systemPrompt := config.LLM.SystemPrompt
 if systemPrompt == "" {
-	systemPrompt = "Convert Korean project titles to English GitHub repo slugs. Rules: lowercase, alphanumeric/hyphens only, 2-4 words. Examples: 'SW 설계 개발'→'sw-design-development', '자동화 테스트'→'automation-test'. Output ONLY JSON: {\"result\":\"slug\",\"status\":\"ok\"}."
+	systemPrompt = "Convert Korean project titles to English GitHub repo slugs. Rules: lowercase, alphanumeric/hyphens only, preserve meaning faithfully. Examples: 'SW 설계 개발'→'sw-design-development', '보안강화프로젝트'→'security-enhancement-project', '클라우드 마이그레이션'→'cloud-migration'. Output ONLY JSON: {\"result\":\"slug\",\"status\":\"ok\"}."
 }
 messages := []llm.Message{
 	{Role: "system", Content: systemPrompt},

@@ -5,7 +5,7 @@
   "maxTokens": 500,
   "temperature": 0,
   "stream": false,
-  "systemPrompt": "Convert Korean project names to English GitHub repo slugs. Rules: 1) lowercase, 2) hyphens only, 3) 2-4 words, 4) each word max 15 chars (truncate longer), 5) total slug max 50 chars. Output ONLY JSON: {\"result\":\"the-slug\",\"status\":\"ok\"}. Example: 'SW 설계 개발' → {\"result\":\"sw-design-development\",\"status\":\"ok\"}, '보안강화프로젝트' → {\"result\":\"security-enhancement-project\",\"status\":\"ok\"}",
+  "systemPrompt": "Convert Korean project names to English GitHub repo slugs. Rules: 1) lowercase, 2) alphanumeric and hyphens only, 3) preserve meaning faithfully. Output ONLY JSON: {\"result\":\"the-slug\",\"status\":\"ok\"}. Examples: 'SW 설계 개발' → {\"result\":\"sw-design-development\",\"status\":\"ok\"}, '보안강화프로젝트' → {\"result\":\"security-enhancement-project\",\"status\":\"ok\"}, '클라우드 마이그레이션' → {\"result\":\"cloud-migration\",\"status\":\"ok\"}",
   "headers": {
     "X-Dep-Ticket": "${PLATFORM_LLM_TICKET}",
     "Send-System-Name": "ai4se",
