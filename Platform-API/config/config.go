@@ -63,11 +63,14 @@ func init() {
 	}
 
 	// OPENAI_API_KEY: ENC: prefix 면 복호화 후 환경변수에 평문으로 재설정
-	// (translateRepoName 등이 os.Getenv 직접 호출하므로 평문으로 풀어둠)
+	// (gojira-shared/llm 이 os.Getenv 직접 호출하므로 평문으로 풀어둠)
 	rawAPIKey := envOrDefault("OPENAI_API_KEY", "")
 	if val, err := Decrypt(rawAPIKey); err == nil {
 		os.Setenv("OPENAI_API_KEY", val)
 	}
+
+	// LLM 설정 로드 (llm.json 기반 — translateRepoName 등이 사용)
+	LoadLLMConfig()
 
 	// GitHubURL → GitHubAPI 변환
 	base := strings.TrimRight(GitHubURL, "/")

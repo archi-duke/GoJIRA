@@ -1,26 +1,19 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"net/http"
 	"strings"
 
 	"gojira-api/config"
 )
 
-// summarizePRContent LLM을 사용하여 파일 내용을 요약해 PR 제목/본문 생성
-func summarizePRContent(projectName, projectCode string, files map[string]string) (title, body string) {
-	fallbackTitle := fmt.Sprintf("[%s] 설계문서 갱신", projectCode)
-	fallbackBody := fmt.Sprintf("프로젝트 %s의 설계문서를 갱신합니다.", projectName)
-
-	if config.OpenAIAPIKey == "" {
-		return fallbackTitle, fallbackBody
-	}
-
+// summarizePRContent LLM 을 사용해 파일 내용을 요약 → PR 제목/본문 생성.
+// 실제 LLM 호출은 Platform-API /LLM/call 게이트웨이로 위임 — GoJIRA-API 는 키나
+// 모델 정보를 보유하지 않는다.
+//
+// 실패 시 error 반환. 호출자는 폴백하지 않고 작업 실패로 처리해야 한다.
+func summarizePRContent(projectName, projectCode string, files map[string]string) (title, body string, err error) {
 	// 파일 내용 준비 (너무 길면 truncate)
 	var content string
 	for path, text := range files {
@@ -40,7 +33,6 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 		"Content":     content,
 	})
 	if prompt == "" {
-		// 프롬프트 파일 로드 실패 시 인라인 폴백
 		prompt = fmt.Sprintf(`다음은 프로젝트 "%s" (%s)의 설계문서 파일들입니다.
 이 내용을 바탕으로 GitHub PR 제목과 본문을 한국어로 작성해주세요.
 규칙:
@@ -53,8 +45,7 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 
 	text, err := callLLM(prompt)
 	if err != nil {
-		log.Printf("LLM 호출 실패: %v", err)
-		return fallbackTitle, fallbackBody
+		return "", "", fmt.Errorf("LLM PR 요약 호출 실패: %w", err)
 	}
 
 	var parsed struct {
@@ -62,77 +53,31 @@ func summarizePRContent(projectName, projectCode string, files map[string]string
 		Body  string `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		log.Printf("LLM 응답 JSON 파싱 실패: %v, text: %s", err, text)
-		return fallbackTitle, fallbackBody
+		return "", "", fmt.Errorf("LLM 응답 JSON 파싱 실패: %w (text=%s)", err, text)
 	}
-
-	if parsed.Title == "" {
-		parsed.Title = fallbackTitle
+	if parsed.Title == "" || parsed.Body == "" {
+		return "", "", fmt.Errorf("LLM 응답에 title/body 누락 (text=%s)", text)
 	}
-	if parsed.Body == "" {
-		parsed.Body = fallbackBody
-	}
-	return parsed.Title, parsed.Body
+	return parsed.Title, parsed.Body, nil
 }
 
-// callLLM 설정 파일 기반 LLM API 호출
+// callLLM 은 Platform-API /LLM/call 로 단일 prompt 를 보내고 응답 텍스트를 받아 후처리한다.
+// (```json ... ``` fence 제거)
 func callLLM(prompt string) (string, error) {
-	cfg := config.LLM
-
-	payload := map[string]interface{}{
-		"model": cfg.Model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens":  cfg.MaxTokens,
-		"temperature": cfg.Temperature,
+	payload := map[string]interface{}{"prompt": prompt}
+	res, sc := callPlatform("POST", "/LLM/call", payload)
+	if sc >= 400 || res == nil {
+		return "", fmt.Errorf("Platform LLM 호출 실패 (status=%d)", sc)
 	}
-
-	b, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", cfg.Endpoint, bytes.NewReader(b))
-	if err != nil {
-		return "", fmt.Errorf("요청 생성 실패: %w", err)
+	resMap, ok := res.(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("Platform LLM 응답 형식 오류")
 	}
-
-	// 설정 파일의 헤더 적용
-	for k, v := range cfg.Headers {
-		req.Header.Set(k, v)
+	if errStr, _ := resMap["error"].(string); errStr != "" {
+		return "", fmt.Errorf("Platform LLM 오류: %s", errStr)
 	}
-
-	// 인증 처리
-	switch cfg.AuthType {
-	case "bearer":
-		req.Header.Set("Authorization", "Bearer "+config.OpenAIAPIKey)
-	case "header":
-		if cfg.AuthHeader != "" {
-			req.Header.Set(cfg.AuthHeader, config.OpenAIAPIKey)
-		}
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("API 호출 실패: %w", err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("API 오류 (%d): %s", resp.StatusCode, string(data))
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil || len(result.Choices) == 0 {
-		return "", fmt.Errorf("응답 파싱 실패: %s", string(data))
-	}
-
-	text := strings.TrimSpace(result.Choices[0].Message.Content)
-	// GPT가 ```json ... ``` 코드블록으로 감쌀 경우 제거
+	text, _ := resMap["text"].(string)
+	text = strings.TrimSpace(text)
 	if strings.HasPrefix(text, "```") {
 		if i := strings.Index(text, "\n"); i != -1 {
 			text = text[i+1:]

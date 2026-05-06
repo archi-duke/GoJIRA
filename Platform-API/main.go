@@ -124,6 +124,9 @@ func main() {
 		// Project archive (zip 백업 + 모든 자원 정리)
 		r.Post("/Project/{code}/archive", handlers.ProjectArchiveHandler)
 
+		// LLM gateway — Platform-API 가 키/모델/엔드포인트를 단독 관리, 다른 서비스는 HTTP 호출
+		r.Post("/LLM/call", handlers.LLMCallHandler)
+
 		// DocRepo — 문서 이력관리 (projectCode 기반)
 		r.Route("/DocRepo", func(r chi.Router) {
 			r.Get("/", handlers.DocRepoListHandler)

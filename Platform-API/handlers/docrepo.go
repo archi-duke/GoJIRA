@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
@@ -19,10 +18,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
-
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/github"
+	"platform-api/llm"
 )
 
 // repo별 init-files 동시 실행 방지 뮤텍스
@@ -59,39 +58,48 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	prj, err := db.FindProjectByCode(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, "프로젝트를 찾을 수 없습니다")
-		return
-	}
+	// stateless 모드 지원: doc 가 아직 없을 수도 있음 (프로젝트 생성 흐름에서
+	// repo 를 먼저 만들고 doc 을 나중에 생성하기 위해).
+	//   - doc 있음: 기존 패턴 (skip 또는 UpdateProjectDocRepo 갱신)
+	//   - doc 없음: request body 의 projectName 사용, DB 갱신 없이 결과만 반환
+	prj, _ := db.FindProjectByCode(ctx, code) // not found 도 OK
+	hasDoc := prj != nil
 
-	// 이미 repo가 있으면 skip
-	docs := db.BsonGetDoc(prj, "documents")
-	if db.BsonGetStr(docs, "repoName") != "" {
-		respondJSON(w, http.StatusOK, docs)
-		return
+	if hasDoc {
+		docs := db.BsonGetDoc(prj, "documents")
+		if db.BsonGetStr(docs, "repoName") != "" {
+			respondJSON(w, http.StatusOK, docs)
+			return
+		}
 	}
 
 	var req struct {
+		ProjectName string `json:"projectName"` // doc 없을 때 LLM 호출 / Description 에 사용
 		RepoName    string `json:"repoName"`
 		Description string `json:"description"`
 	}
 	decodeJSON(r, &req)
 
+	// projectName 결정: 명시 입력 > doc 의 name > 빈값
+	projectName := req.ProjectName
+	if projectName == "" && hasDoc {
+		projectName, _ = prj["name"].(string)
+	}
+
 	if req.RepoName == "" {
-		name, _ := prj["name"].(string)
-		slug := translateRepoName(ctx, name)
-		if slug == "" {
-			slug = slugifyRepoName(name)
+		if projectName == "" {
+			respondError(w, http.StatusBadRequest, "projectName 또는 repoName 필요")
+			return
 		}
-		if slug == "" {
-			slug = strings.ToLower(code)
+		slug, err := translateRepoName(ctx, projectName)
+		if err != nil {
+			respondError(w, http.StatusBadGateway, "repo 이름 LLM 번역 실패: "+err.Error())
+			return
 		}
 		req.RepoName = slug
 	}
-	if req.Description == "" {
-		name, _ := prj["name"].(string)
-		req.Description = fmt.Sprintf("%s의 설계 문서", name)
+	if req.Description == "" && projectName != "" {
+		req.Description = fmt.Sprintf("%s의 설계 문서", projectName)
 	}
 
 	ghRepo, err := github.CreateRepo(req.RepoName, req.Description, true)
@@ -108,7 +116,11 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	repoURL, _ := ghRepo["html_url"].(string)
 
-	db.UpdateProjectDocRepo(ctx, code, req.RepoName, owner, repoURL)
+	// doc 가 이미 있을 때만 documents 필드 갱신.
+	// 없으면 호출자(GoJIRA-API)가 응답을 받아 doc 만들 때 documents 필드를 직접 채운다.
+	if hasDoc {
+		db.UpdateProjectDocRepo(ctx, code, req.RepoName, owner, repoURL)
+	}
 
 	// 조직 Members 팀에 repo 추가 (멤버가 접근 가능하도록)
 	if err := github.AddRepoToOrgTeam(req.RepoName); err != nil {
@@ -155,10 +167,12 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Branch protection: 모든 리뷰 완료 전 머지 불가
-	auditors := toStringSlice(prj["auditors"])
-	reviewCount := len(auditors)
-	if reviewCount == 0 {
-		reviewCount = 1
+	reviewCount := 1
+	if hasDoc {
+		auditors := toStringSlice(prj["auditors"])
+		if len(auditors) > 0 {
+			reviewCount = len(auditors)
+		}
 	}
 	if err := github.SetBranchProtection(owner, req.RepoName, "main", reviewCount); err != nil {
 		log.Printf("branch protection 설정 실패 (나중에 재시도 가능): %v", err)
@@ -2026,63 +2040,47 @@ func toStringSlice(v interface{}) []string {
 	return nil
 }
 
-// translateRepoName: 과제명을 OpenAI gpt-4o-mini 로 영문 slug 로 번역.
-// OPENAI_API_KEY 환경변수 미설정 / 호출 실패 / 비정상 응답 시 빈 문자열 반환.
-// 호출자가 빈 문자열이면 slugifyRepoName fallback 사용.
-// 결정적 출력을 위해 temperature=0. 응답을 한 번 더 slugifyRepoName 으로 sanitize.
-func translateRepoName(ctx context.Context, name string) string {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" || strings.TrimSpace(name) == "" {
-		return ""
+// translateRepoName: 과제명을 LLM 으로 영문 slug 로 번역.
+// llm.json (config.LLM) 기반 호출 — 모델/엔드포인트는 설정에서 결정.
+// 호출 자체에 특화된 옵션(max_tokens=20, temperature=0)은 Options 로 override.
+//
+// 실패 시 error 반환. 호출자는 폴백하지 않고 작업 실패로 처리해야 한다.
+// LLM 응답은 한 번 더 slugifyRepoName 으로 sanitize 해 영문/숫자/하이픈만 보존.
+func translateRepoName(ctx context.Context, name string) (string, error) {
+	if config.LLM == nil {
+		return "", fmt.Errorf("LLM 설정 미로드")
 	}
-	body := map[string]interface{}{
-		"model":       "gpt-4o-mini",
-		"temperature": 0,
-		"max_tokens":  20,
-		"messages": []map[string]string{
-			{
-				"role": "system",
-				"content": "Convert the user's project title (often Korean or non-English) into a short English slug suitable for a GitHub repository name. Output rules: lowercase, alphanumeric and hyphens only, 1-3 words, max 30 characters, preserve meaning. Output ONLY the slug, no explanation, no quotes.",
-			},
-			{"role": "user", "content": name},
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("프로젝트명이 비어 있어 LLM 호출 불가")
+	}
+	if os.Getenv("OPENAI_API_KEY") == "" && config.LLM.AuthType != "none" {
+		return "", fmt.Errorf("OPENAI_API_KEY 미설정")
+	}
+
+	messages := []llm.Message{
+		{
+			Role:    "system",
+			Content: "Convert the user's project title (often Korean or non-English) into a short English slug suitable for a GitHub repository name. Output rules: lowercase, alphanumeric and hyphens only, 1-3 words, max 30 characters, preserve meaning. Output ONLY the slug, no explanation, no quotes.",
 		},
+		{Role: "user", Content: name},
 	}
-	raw, err := json.Marshal(body)
+	temp := 0.0
+	opts := &llm.Options{
+		MaxTokens:   20,
+		Temperature: &temp,
+		Timeout:     10 * time.Second,
+		Ctx:         ctx,
+	}
+
+	text, err := llm.Call(config.LLM, messages, opts)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("LLM 호출 실패: %w", err)
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(raw))
-	if err != nil {
-		return ""
+	slug := slugifyRepoName(text)
+	if slug == "" {
+		return "", fmt.Errorf("LLM 응답에서 유효한 slug 추출 실패 (raw=%q)", text)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Printf("translateRepoName: openai 호출 실패: %v", err)
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("translateRepoName: openai status %d", resp.StatusCode)
-		return ""
-	}
-	var data struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return ""
-	}
-	if len(data.Choices) == 0 {
-		return ""
-	}
-	return slugifyRepoName(data.Choices[0].Message.Content)
+	return slug, nil
 }
 
 // slugifyRepoName: 과제명을 GitHub repo 이름으로 변환.

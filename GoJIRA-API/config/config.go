@@ -8,30 +8,20 @@ import (
 )
 
 var (
-	ServerPort     = envOrDefault("GOJIRA_SERVER_PORT", ":9001")
-	PlatformAPI    = envOrDefault("GOJIRA_PLATFORM_API", "http://localhost:9000/api/v2")
-	JiraMockURL    = envOrDefault("GOJIRA_JIRA_URL", "http://localhost:8000")
-	JiraAPIBase    = envOrDefault("GOJIRA_JIRA_API_BASE", "/rest/api/2")
-	JiraUser       string
-	JiraPass       string
-	MongoURI       = envOrDefault("GOJIRA_MONGO_URI", "mongodb://localhost:27017")
-	MongoDB        = envOrDefault("GOJIRA_MONGO_DB", "gojira")
-	OpenAIAPIKey   = envOrDefault("OPENAI_API_KEY", "")
+	ServerPort  = envOrDefault("GOJIRA_SERVER_PORT", ":9001")
+	PlatformAPI = envOrDefault("GOJIRA_PLATFORM_API", "http://localhost:9000/api/v2")
+	JiraMockURL = envOrDefault("GOJIRA_JIRA_URL", "http://localhost:8000")
+	JiraAPIBase = envOrDefault("GOJIRA_JIRA_API_BASE", "/rest/api/2")
+	JiraUser    string
+	JiraPass    string
+	MongoURI    = envOrDefault("GOJIRA_MONGO_URI", "mongodb://localhost:27017")
+	MongoDB     = envOrDefault("GOJIRA_MONGO_DB", "gojira")
 )
 
 func init() {
 	loadEnvFile(".env")
 
-	// OPENAI_API_KEY: ENC: prefix 면 복호화, 평문이면 그대로
-	rawKey := envOrDefault("OPENAI_API_KEY", "")
-	if val, err := Decrypt(rawKey); err == nil {
-		OpenAIAPIKey = val
-		os.Setenv("OPENAI_API_KEY", val) // os.Getenv 직접 호출하는 다른 핸들러를 위해 평문으로 재설정
-	} else {
-		log.Printf("OPENAI_API_KEY 복호화 실패: %v", err)
-		OpenAIAPIKey = rawKey
-	}
-	LoadLLMConfig()
+	// LLM 호출은 Platform-API /LLM/call 게이트웨이로 위임 — GoJIRA-API 는 OpenAI 키 미보유.
 
 	raw := envOrDefault("GOJIRA_JIRA_USER", "")
 	if val, err := Decrypt(raw); err == nil {

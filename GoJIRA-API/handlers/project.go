@@ -45,19 +45,42 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	// 1) Platform-API 에 repo 먼저 생성 — LLM 번역 + Gitea repo + 초기파일 + 브랜치 보호.
+	//    실패 시 doc 자체를 만들지 않고 502 반환 → 절반만 만들어진 상태 방지.
+	repoRes, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", code),
+		map[string]string{"projectName": req.Name})
+	if sc >= 400 {
+		errMsg := fmt.Sprintf("DocRepo 생성 실패 (status=%d)", sc)
+		if m, ok := repoRes.(map[string]interface{}); ok {
+			if e, ok := m["error"].(string); ok && e != "" {
+				errMsg = e
+			}
+		}
+		respondError(w, http.StatusBadGateway, errMsg)
+		return
+	}
+	repoMap, ok := repoRes.(map[string]interface{})
+	if !ok {
+		respondError(w, http.StatusBadGateway, "DocRepo 응답 형식 오류")
+		return
+	}
+
+	// 2) repo 정보가 채워진 doc 으로 Mongo 생성 — repo 가 성공한 후에만 doc 이 생긴다.
 	doc := buildProjectDoc(req)
 	doc["createdAt"] = time.Now()
-
+	doc["documents"] = bson.M{
+		"defaultBranch": "main",
+		"repoName":      repoMap["repoName"],
+		"repoOwner":     repoMap["repoOwner"],
+		"repoUrl":       repoMap["repoUrl"],
+	}
 	if err := db.UpsertProject(ctx, code, doc); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	// 설계문서 저장소 자동 생성
-	ensureDocRepo(code, req.Name)
 
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)
@@ -118,8 +141,11 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	} else {
-		// 설계문서 저장소 자동 생성 (없으면)
-		ensureDocRepo(code, req.Name)
+		// 설계문서 저장소 자동 생성 (없으면) — 실패 시 502 로 에러 명시
+		if err := ensureDocRepo(code, req.Name); err != nil {
+			respondError(w, http.StatusBadGateway, "DocRepo 생성 실패: "+err.Error())
+			return
+		}
 	}
 
 	projects, _ := db.FindAllProjects(ctx, nil)
@@ -416,24 +442,32 @@ func getDocRepoName(prj bson.M) string {
 	return bsonGetStr(bsonGetDoc(prj, "documents"), "repoName")
 }
 
-// ensureDocRepo 프로젝트에 repo가 없으면 Platform-API로 자동 생성
-func ensureDocRepo(jiraCode, projectName string) {
+// ensureDocRepo 프로젝트에 repo가 없으면 Platform-API로 자동 생성.
+// LLM 기반 repo 이름 번역이 실패하면 error 를 반환하고, 호출자가 작업 실패로 처리한다.
+// (이미 repo 가 있거나 프로젝트 doc 가 없으면 nil — no-op)
+func ensureDocRepo(jiraCode, projectName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	prj := db.FindProjectByCode(ctx, jiraCode)
 	if prj == nil {
-		return
+		return nil // 프로젝트 자체가 없으면 조용히 종료
 	}
-
 	if getDocRepoName(prj) != "" {
-		return
+		return nil // 이미 repo 있음
 	}
 
 	log.Printf("ensureDocRepo: creating repo for %s", jiraCode)
-	_, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", jiraCode), nil)
+	res, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", jiraCode), nil)
 	if sc >= 400 {
-		log.Printf("ensureDocRepo: 실패 for %s (status=%d)", jiraCode, sc)
+		errMsg := fmt.Sprintf("Platform-API DocRepo 생성 실패 (status=%d)", sc)
+		if m, ok := res.(map[string]interface{}); ok {
+			if e, ok := m["error"].(string); ok && e != "" {
+				errMsg = e
+			}
+		}
+		log.Printf("ensureDocRepo: 실패 for %s — %s", jiraCode, errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
-	// 초기 파일은 Platform-API의 DocRepoCreateHandler에서 브랜치 보호 전에 생성됨
+	return nil
 }

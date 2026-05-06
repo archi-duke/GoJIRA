@@ -151,8 +151,13 @@ func DocGenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	branchName := fmt.Sprintf("docs/%s", userId)
 
-	// LLM 기반 커밋 메시지 생성
-	commitMsg, _ := summarizePRContent(projectName, req.PrjID, files)
+	// LLM 기반 커밋 메시지 생성 — 실패 시 작업 자체를 실패 처리
+	commitMsg, _, err := summarizePRContent(projectName, req.PrjID, files)
+	if err != nil {
+		log.Printf("docgen: summarizePRContent 실패: %v", err)
+		respondError(w, http.StatusBadGateway, "LLM PR 요약 실패: "+err.Error())
+		return
+	}
 
 	publishResult, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/git/publish", req.PrjID),
 		map[string]interface{}{
