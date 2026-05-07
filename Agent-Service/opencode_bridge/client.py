@@ -1,21 +1,20 @@
 """OpenCode 서버 HTTP/SSE 클라이언트."""
 
-import os
 import json
 import base64
 from typing import AsyncIterator, Optional
 
 import httpx
 
+from config import settings
+
 
 def _creds() -> tuple[str, str]:
-    user = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
-    pw = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
-    return user, pw
+    return settings.opencode_username, settings.opencode_password
 
 
 def _base_url() -> str:
-    return os.environ.get("OPENCODE_BASE_URL", "http://127.0.0.1:4096")
+    return settings.opencode_url
 
 
 def _auth_header() -> dict[str, str]:
