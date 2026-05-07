@@ -194,24 +194,58 @@ async def chat_stream(
 
 @router.post("/session/{session_id}/terminal")
 async def open_terminal(session_id: str):
-    """macOS Terminal.app 에서 해당 세션의 OpenCode attach 실행."""
+    """OS 별 터미널에서 해당 세션의 OpenCode attach 실행.
+
+    - macOS  : Terminal.app + bash 스크립트
+    - Windows: PowerShell 새 콘솔 창
+    - 기타   : 미지원 (사용자가 직접 명령 실행 — 응답에 command 포함)
+    """
+    import sys
+    import subprocess
+
     doc = agent_sessions().find_one({"_id": session_id}) or {}
     oc_sid = doc.get("openCodeSessionId")
     if not oc_sid:
         return {"ok": False, "reason": "openCodeSessionId 없음"}
     base_url = oc._base_url()
-    cmd = f'opencode attach {base_url} -s {oc_sid}'
-    import subprocess, tempfile, os
-    sh = tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False, prefix='gojira-term-')
-    sh.write(f'#!/bin/bash\n')
-    sh.write(f'echo -e "\\033[1;36m[GoJIRA] OpenCode 세션 연결 — Ctrl+C 로 안전하게 종료\\033[0m\\n"\n')
-    sh.write(f'{cmd}\n')
-    sh.write(f'echo -e "\\n\\033[1;33m세션 연결 종료. 창을 닫아도 안전합니다.\\033[0m"\n')
-    sh.write(f'sleep 2; exit\n')
-    sh.close()
-    os.chmod(sh.name, 0o755)
-    subprocess.Popen(["open", "-a", "Terminal", sh.name])
-    return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid}
+    cmd = f"opencode attach {base_url} -s {oc_sid}"
+
+    if sys.platform == "darwin":
+        import tempfile, os
+        sh = tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False, prefix="gojira-term-")
+        sh.write("#!/bin/bash\n")
+        sh.write('echo -e "\\033[1;36m[GoJIRA] OpenCode 세션 연결 — Ctrl+C 로 안전하게 종료\\033[0m\\n"\n')
+        sh.write(f"{cmd}\n")
+        sh.write('echo -e "\\n\\033[1;33m세션 연결 종료. 창을 닫아도 안전합니다.\\033[0m"\n')
+        sh.write("sleep 2; exit\n")
+        sh.close()
+        os.chmod(sh.name, 0o755)
+        subprocess.Popen(["open", "-a", "Terminal", sh.name])
+        return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid, "platform": "darwin"}
+
+    if sys.platform == "win32":
+        # PowerShell 새 콘솔 창 (-NoExit 로 명령 종료 후에도 창 유지)
+        ps_cmd = (
+            'Write-Host "[GoJIRA] OpenCode 세션 연결 - Ctrl+C 로 안전하게 종료" -ForegroundColor Cyan; '
+            'Write-Host ""; '
+            f"{cmd}; "
+            'Write-Host ""; '
+            'Write-Host "세션 연결 종료. 창을 닫아도 안전합니다." -ForegroundColor Yellow'
+        )
+        subprocess.Popen(
+            ["powershell", "-NoExit", "-Command", ps_cmd],
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+        return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid, "platform": "win32"}
+
+    # Linux 등 — 자동 실행 미지원, 사용자가 직접 실행할 수 있도록 명령만 반환
+    return {
+        "ok": False,
+        "reason": f"자동 터미널 실행 미지원 OS: {sys.platform} — 아래 command 를 직접 실행해주세요",
+        "command": cmd,
+        "openCodeSessionId": oc_sid,
+        "platform": sys.platform,
+    }
 
 
 @router.delete("/session/{session_id}")
