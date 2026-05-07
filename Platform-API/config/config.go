@@ -2,30 +2,38 @@ package config
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// 모든 설정은 .env (또는 환경변수) 에서 읽는다. 환경별로 달라야 하는 필수 항목은
+// default 가 없어 미설정 시 startup 에서 즉시 실패한다 (fail-fast). 임의의
+// localhost fallback 이 silent 동작하는 것을 방지한다.
 var (
-	ServerPort  = envOrDefault("PLATFORM_SERVER_PORT", ":9000")
-	MongoURI    = envOrDefault("PLATFORM_MONGO_URI", "mongodb://localhost:27017")
-	MongoDB     = envOrDefault("PLATFORM_MONGO_DB", "gojira")
-	GitHubToken = envOrDefault("PLATFORM_GITHUB_TOKEN", "")
-	GitHubOrg   = envOrDefault("PLATFORM_GITHUB_ORG", "")
-	GitHubURL   = envOrDefault("GITHUB_URL", "https://github.com/")
-	GitHubAPI      string
-	RepoBaseDir    = envOrDefault("PLATFORM_REPO_DIR", "./repos")
-	WebhookURL     = envOrDefault("PLATFORM_WEBHOOK_URL", "")
-	WebhookSecret  = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
-	GoJiraAPI      = envOrDefault("PLATFORM_GOJIRA_API", "http://localhost:9001/api/v2")
+	// 필수 — 환경별로 다른 값 필요
+	MongoURI    string
+	GitHubToken string
+	GitHubOrg   string
+	GitHubURL   string
+	GoJiraAPI   string
 
-	SMTPHost = envOrDefault("SMTP_HOST", "")
-	SMTPPort = envOrDefault("SMTP_PORT", "587")
-	SMTPUser = envOrDefault("SMTP_USER", "")
+	// 선택 — 서비스 내부 컨벤션
+	ServerPort    string
+	MongoDB       string
+	RepoBaseDir   string
+	WebhookURL    string
+	WebhookSecret string
+	GitHubAPI     string
+
+	// SMTP — 메일 기능 미사용 시 비어있어도 무방
+	SMTPHost string
+	SMTPPort string
+	SMTPUser string
 	SMTPPass string
-	SMTPFrom = envOrDefault("SMTP_FROM", "")
+	SMTPFrom string
 
 	// 편집 세션 TTL (기본 30분)
 	EditSessionTTL time.Duration
@@ -34,17 +42,19 @@ var (
 func init() {
 	loadEnvFile(".env")
 
-	// .env 로드 후 변수 재설정
+	// 필수 항목 — 미설정 시 log.Fatal
+	MongoURI = requireEnv("PLATFORM_MONGO_URI")
+	GitHubToken = requireEnv("PLATFORM_GITHUB_TOKEN")
+	GitHubOrg = requireEnv("PLATFORM_GITHUB_ORG")
+	GitHubURL = requireEnv("GITHUB_URL")
+	GoJiraAPI = requireEnv("PLATFORM_GOJIRA_API")
+
+	// 선택 항목 — default 허용
 	ServerPort = envOrDefault("PLATFORM_SERVER_PORT", ":9000")
-	MongoURI = envOrDefault("PLATFORM_MONGO_URI", "mongodb://localhost:27017")
 	MongoDB = envOrDefault("PLATFORM_MONGO_DB", "gojira")
-	GitHubToken = envOrDefault("PLATFORM_GITHUB_TOKEN", "")
-	GitHubOrg = envOrDefault("PLATFORM_GITHUB_ORG", "")
-	GitHubURL = envOrDefault("GITHUB_URL", "https://github.com/")
 	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 	WebhookURL = envOrDefault("PLATFORM_WEBHOOK_URL", "")
 	WebhookSecret = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
-	GoJiraAPI = envOrDefault("PLATFORM_GOJIRA_API", "http://localhost:9001/api/v2")
 	SMTPHost = envOrDefault("SMTP_HOST", "")
 	SMTPPort = envOrDefault("SMTP_PORT", "587")
 	SMTPUser = envOrDefault("SMTP_USER", "")
@@ -86,6 +96,16 @@ func init() {
 		// Gitea, Forgejo 등 self-hosted Git 플랫폼
 		GitHubAPI = base + "/api/v1"
 	}
+}
+
+// requireEnv 는 필수 환경변수를 읽는다. 미설정 시 log.Fatal 로 즉시 종료해
+// silent fallback 동작을 차단한다.
+func requireEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("[config] 필수 환경변수 미설정: %s — .env 또는 시스템 환경에 명시 필요", key)
+	}
+	return v
 }
 
 func envOrDefault(key, fallback string) string {
