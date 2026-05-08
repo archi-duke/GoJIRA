@@ -77,11 +77,9 @@ async def chat_send(
         },
     )
 
-    # 이전 턴 이벤트 버퍼 초기화 (중복 방지)
-    eb.clear(gojira_sid)
-
-    # 턴 경계에서 구독자 리셋 (이전 턴 구독자가 stale 인 경우 대비)
-    await eb.reset_subscriber(oc_sid, gojira_sid)
+    # persistent subscriber: 이미 살아있으면 그대로, 없으면 시작.
+    # 버퍼는 비우지 않음 — 프론트의 lastEventId 기반 재연결 호환성 + turn 사이 이벤트 보존.
+    await eb.ensure_subscriber(oc_sid, gojira_sid)
 
     # 메시지 전송
     await oc.send_message_async(oc_sid, req.message)
@@ -118,7 +116,7 @@ async def session_events(
 
     async def sse_stream():
         # 서버 측 IDLE 타임아웃 없음 — 에이전트가 얼마나 오래 걸려도 대기.
-        # 종료 판정은 클라이언트가 /session/{id}/state 폴링으로 수행.
+        # done 이벤트로 stream 끝나지 않음 — turn 사이 TUI 입력이나 후속 chat-send 이벤트를 끊김 없이 전달.
         # 클라이언트가 브라우저 탭 닫으면 EventSource 가 자연 종료되어 이 루프도 cancel 된다.
         cursor = last_event_id
         last_keepalive = asyncio.get_event_loop().time()
@@ -130,8 +128,6 @@ async def session_events(
                 for evt in events:
                     cursor = evt["id"]
                     yield f"id: {evt['id']}\nevent: {evt['type']}\ndata: {evt['data']}\n\n"
-                    if evt["type"] == "done":
-                        return
             else:
                 now = asyncio.get_event_loop().time()
                 if now - last_keepalive > 3.0:

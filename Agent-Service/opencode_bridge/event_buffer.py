@@ -117,72 +117,86 @@ async def reset_subscriber(oc_session_id: str, gojira_session_id: str):
 
 
 async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
-    """OpenCode /event SSE를 구독하고 event_buffer에 누적."""
+    """OpenCode /event SSE를 구독하고 event_buffer 에 누적.
+
+    persistent: turn (done) 끝나도 종료하지 않고 다음 turn 진입을 대기.
+    OpenCode TUI 입력이나 후속 chat-send 의 이벤트를 끊김 없이 받아내기 위함.
+    cancel/exception 시에만 종료.
+    """
     from . import client as oc
     from .translator import translate
 
-    # 이 턴의 시작 event ID 기록 (이전 턴 이벤트 제외용)
-    turn_start_id = get_latest_id(gojira_session_id)
+    log.info(f"백그라운드 구독 시작: {gojira_session_id} → {oc_session_id[:16]}")
 
-    # 재접속 대응: 현재 OpenCode 세션에 진행 중(finish=None)인 assistant 메시지가 있으면 그 id 로 초기화.
-    # 동시에 해당 메시지의 기존 parts 에서 partID→type 매핑을 수집해 translator 에 전달
-    # (재시작 subscriber 가 message.part.updated 를 놓쳐 delta 를 text 로 오분류하는 문제 방지).
-    initial_msg_id = None
-    initial_part_types: dict = {}
     try:
-        msgs = await oc.get_session_messages(oc_session_id)
-        for m in reversed(msgs):
-            info = m.get("info", {}) if isinstance(m, dict) else {}
-            if info.get("role") == "assistant" and info.get("finish") in (None, ""):
-                initial_msg_id = info.get("id")
-                for p in (m.get("parts") or []):
-                    pid = p.get("id")
-                    ptype = p.get("type")
-                    if pid and ptype:
-                        initial_part_types[pid] = ptype
-                break
-    except Exception:
-        pass
-
-    saved = False
-    log.info(f"백그라운드 구독 시작-loop: {gojira_session_id} initial_msg={initial_msg_id} initial_parts={len(initial_part_types)}")
-    evt_counts: dict[str, int] = {}
-    started_at = time.time()
-    try:
+        # /event SSE 연결은 세션 전체 수명 동안 유지 (translate 호출 사이 stream 상태 보존)
         events_iter = oc.stream_events(oc_session_id)
-        async for sse_str in translate(events_iter, gojira_session_id, initial_msg_id, initial_part_types):
-            if sse_str.startswith(":"):
-                continue
-            # SSE 문자열에서 event type과 data 추출
-            evt_type = None
-            evt_data = "{}"
-            for line in sse_str.split("\n"):
-                if line.startswith("event: "):
-                    evt_type = line[7:]
-                elif line.startswith("data: "):
-                    evt_data = line[6:]
-            if evt_type:
+
+        while True:  # turn loop — done 마다 새 translate() 진입
+            turn_start_id = get_latest_id(gojira_session_id)
+
+            # 진행 중 assistant 가 있으면 그 id 로 초기화 (재시작 시 part 분류 보장)
+            initial_msg_id = None
+            initial_part_types: dict = {}
+            try:
+                msgs = await oc.get_session_messages(oc_session_id)
+                for m in reversed(msgs):
+                    info = m.get("info", {}) if isinstance(m, dict) else {}
+                    if info.get("role") == "assistant" and info.get("finish") in (None, ""):
+                        initial_msg_id = info.get("id")
+                        for p in (m.get("parts") or []):
+                            pid = p.get("id")
+                            ptype = p.get("type")
+                            if pid and ptype:
+                                initial_part_types[pid] = ptype
+                        break
+            except Exception:
+                pass
+
+            log.info(f"턴 시작: {gojira_session_id} initial_msg={initial_msg_id} initial_parts={len(initial_part_types)}")
+            saved = False
+            evt_counts: dict[str, int] = {}
+            started_at = time.time()
+
+            async for sse_str in translate(events_iter, gojira_session_id, initial_msg_id, initial_part_types):
+                if sse_str.startswith(":"):
+                    continue
+                evt_type = None
+                evt_data = "{}"
+                for line in sse_str.split("\n"):
+                    if line.startswith("event: "):
+                        evt_type = line[7:]
+                    elif line.startswith("data: "):
+                        evt_data = line[6:]
+                if not evt_type:
+                    continue
+                # done 은 _save_to_mongo 를 먼저 끝낸 뒤에 push — 프론트의 loadSession 이 stale Mongo 를 읽는 race 방지
+                if evt_type == "done":
+                    log.info(f"턴 완료 (done): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
+                    await _save_to_mongo(gojira_session_id, evt_data, turn_start_id)
+                    push(gojira_session_id, evt_type, evt_data)
+                    evt_counts[evt_type] = evt_counts.get(evt_type, 0) + 1
+                    saved = True
+                    break
                 push(gojira_session_id, evt_type, evt_data)
                 evt_counts[evt_type] = evt_counts.get(evt_type, 0) + 1
-            if evt_type == "done":
-                log.info(f"백그라운드 구독 완료 (done): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
-                # Mongo에 이번 턴의 process + assistant만 저장
-                await _save_to_mongo(gojira_session_id, evt_data, turn_start_id)
-                saved = True
-                break
+
+            # done 못 받고 translate() 가 빠져나온 케이스 (이론상 거의 없음)
+            if not saved:
+                log.warning(f"턴 비정상 종료 (done 미수신): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
+                try:
+                    await _save_to_mongo(gojira_session_id, "{}", turn_start_id)
+                except Exception as se:
+                    log.warning(f"부분 저장 실패: {gojira_session_id} — {se}")
+
+            # 다음 turn 대기 (events_iter 는 그대로 유지 — TUI / chat-send 이벤트가 들어오면 translate 가 다시 진입)
+            log.info(f"다음 턴 대기: {gojira_session_id}")
+
     except asyncio.CancelledError:
-        log.info(f"백그라운드 구독 취소: {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
+        log.info(f"백그라운드 구독 취소: {gojira_session_id}")
     except Exception as e:
-        log.warning(f"백그라운드 구독 오류: {gojira_session_id} — {e} counts={evt_counts}")
+        log.warning(f"백그라운드 구독 오류: {gojira_session_id} — {e}")
     finally:
-        # done 미수신으로 종료된 경우에도 버퍼에 쌓인 process 이벤트를 Mongo 에 반영.
-        # 그렇지 않으면 세션 이력에 user 질문만 남아 세션 제목이 '질문 내용' 만 표시되는 문제 발생.
-        if not saved:
-            log.warning(f"백그라운드 구독 종료 (done 미수신): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
-            try:
-                await _save_to_mongo(gojira_session_id, "{}", turn_start_id)
-            except Exception as se:
-                log.warning(f"구독 종료 시점 부분 저장 실패: {gojira_session_id} — {se}")
         _subscriber_tasks.pop(gojira_session_id, None)
 
 
