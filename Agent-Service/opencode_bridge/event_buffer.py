@@ -5,12 +5,10 @@ OpenCode /event SSE를 상시 구독하여 세션별로 이벤트를 버퍼링.
 """
 
 import asyncio
-import json
 import logging
 import time
 import threading
 from collections import defaultdict
-from typing import Optional
 
 log = logging.getLogger("agent.event_buffer")
 
@@ -89,77 +87,6 @@ def cleanup_expired():
 # ── 백그라운드 구독자 ──
 
 _subscriber_tasks: dict[str, asyncio.Task] = {}
-_watchdog_tasks: dict[str, asyncio.Task] = {}
-
-
-def _start_watchdog(oc_session_id: str, gojira_session_id: str):
-    key = gojira_session_id
-    wt = _watchdog_tasks.get(key)
-    if wt and not wt.done():
-        return
-    wt = asyncio.create_task(_watchdog_loop(oc_session_id, gojira_session_id))
-    _watchdog_tasks[key] = wt
-
-
-async def _watchdog_loop(oc_session_id: str, gojira_session_id: str):
-    """주기적으로 OpenCode 세션 상태를 확인하여
-    - finish 이 설정됐으면 synthetic done 발행 후 구독자 종료
-    - finish=None 인데 이벤트가 IDLE_REFRESH_SEC 이상 stale 이면 /event 스트림 hung 으로 간주, 구독자 강제 리셋
-    """
-    from . import client as oc
-    CHECK_INTERVAL = 1.0
-    IDLE_REFRESH_SEC = 10.0  # 이벤트 없이 이 시간 지나면 subscriber 리셋
-    last_id = get_latest_id(gojira_session_id)
-    idle_since = time.time()
-    try:
-        while True:
-            await asyncio.sleep(CHECK_INTERVAL)
-            sub = _subscriber_tasks.get(gojira_session_id)
-            if not sub or sub.done():
-                return
-            current_id = get_latest_id(gojira_session_id)
-            if current_id != last_id:
-                last_id = current_id
-                idle_since = time.time()
-                continue
-            idle_elapsed = time.time() - idle_since
-            # idle — OpenCode 세션 상태 확인
-            try:
-                msgs = await oc.get_session_messages(oc_session_id)
-            except Exception as e:
-                log.warning(f"watchdog oc 조회 실패 {gojira_session_id}: {e}")
-                continue
-            finished = False
-            for m in reversed(msgs):
-                info = m.get("info", {}) if isinstance(m, dict) else {}
-                if info.get("role") == "assistant":
-                    fin = info.get("finish")
-                    if fin and str(fin).strip():
-                        finished = True
-                    break
-            if finished:
-                log.info(f"watchdog: OpenCode finish 감지 — synthetic done 발행 {gojira_session_id}")
-                push(gojira_session_id, "done", '{"reply":"","actions":[]}')
-                if sub and not sub.done():
-                    sub.cancel()
-                return
-            # finish=None 인데 이벤트 IDLE_REFRESH_SEC 이상 멎어있으면 /event 스트림이 hung 이라고 보고 subscriber 강제 리셋
-            if idle_elapsed >= IDLE_REFRESH_SEC:
-                log.warning(f"watchdog: subscriber idle {idle_elapsed:.1f}s (finish=None) — 강제 리셋 {gojira_session_id}")
-                # 현재 태스크가 구독자 task 라서 cancel 만 걸고 탈출. reset 은 다음 /events 재접속 시 ensure_subscriber 가 처리
-                # 대신 여기서 직접 새 구독자 task 생성
-                try:
-                    sub.cancel()
-                except Exception:
-                    pass
-                _subscriber_tasks.pop(gojira_session_id, None)
-                new_task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
-                _subscriber_tasks[gojira_session_id] = new_task
-                # 새 구독자에 watchdog 도 다시 붙여야 하므로 — 이 watchdog 은 여기서 종료하고 새로 시작
-                _start_watchdog(oc_session_id, gojira_session_id)
-                return
-    except asyncio.CancelledError:
-        return
 
 
 async def ensure_subscriber(oc_session_id: str, gojira_session_id: str):
@@ -167,11 +94,9 @@ async def ensure_subscriber(oc_session_id: str, gojira_session_id: str):
     key = gojira_session_id
     task = _subscriber_tasks.get(key)
     if task and not task.done():
-        _start_watchdog(oc_session_id, gojira_session_id)
         return
     task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
     _subscriber_tasks[key] = task
-    _start_watchdog(oc_session_id, gojira_session_id)
     log.info(f"백그라운드 구독 시작: {gojira_session_id} → {oc_session_id[:16]}")
 
 
@@ -185,14 +110,9 @@ async def reset_subscriber(oc_session_id: str, gojira_session_id: str):
             await task
         except (asyncio.CancelledError, Exception):
             pass
-    wt = _watchdog_tasks.get(key)
-    if wt and not wt.done():
-        wt.cancel()
     _subscriber_tasks.pop(key, None)
-    _watchdog_tasks.pop(key, None)
     task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
     _subscriber_tasks[key] = task
-    _start_watchdog(oc_session_id, gojira_session_id)
     log.info(f"백그라운드 구독 리셋: {gojira_session_id} → {oc_session_id[:16]}")
 
 
@@ -278,10 +198,15 @@ async def _save_to_mongo(gojira_session_id: str, done_data_json: str = "{}", aft
         return
 
     saved_ids = set()
+    # 채팅창에서 직접 push 한 user 메시지(content 기반 dedup 용) 누적 카운트
+    pending_user_contents: dict[str, int] = {}
     for m in doc.get("messages") or []:
         mid = m.get("ocMessageId")
         if mid:
             saved_ids.add(mid)
+        elif m.get("role") == "user" and m.get("content"):
+            c = m["content"]
+            pending_user_contents[c] = pending_user_contents.get(c, 0) + 1
 
     try:
         oc_messages = await oc_client.get_session_messages(oc_sid)
@@ -299,24 +224,44 @@ async def _save_to_mongo(gojira_session_id: str, done_data_json: str = "{}", aft
                 pass
         return datetime.now(timezone.utc)
 
+    def _user_text(m: dict) -> str:
+        return "".join(
+            (p.get("text") or "")
+            for p in (m.get("parts") or [])
+            if p.get("type") == "text"
+        )
+
     now = datetime.now(timezone.utc)
     msgs_to_push = []
     for m in oc_messages:
         if not isinstance(m, dict):
             continue
         info = m.get("info") or {}
-        if info.get("role") != "assistant":
-            continue
+        role = info.get("role")
         mid = info.get("id")
         if not mid or mid in saved_ids:
             continue
-        msgs_to_push.append({
-            "role": "assistant",
-            "ocMessageId": mid,
-            "info": info,
-            "parts": m.get("parts") or [],
-            "timestamp": _ts(info),
-        })
+
+        if role == "user":
+            text = _user_text(m)
+            # 이미 채팅창에서 push 된 동일 content 가 있으면 OC 측 저장은 건너뜀 (중복 방지)
+            if text and pending_user_contents.get(text, 0) > 0:
+                pending_user_contents[text] -= 1
+                continue
+            msgs_to_push.append({
+                "role": "user",
+                "ocMessageId": mid,
+                "content": text,
+                "timestamp": _ts(info),
+            })
+        elif role == "assistant":
+            msgs_to_push.append({
+                "role": "assistant",
+                "ocMessageId": mid,
+                "info": info,
+                "parts": m.get("parts") or [],
+                "timestamp": _ts(info),
+            })
 
     if msgs_to_push:
         agent_sessions().update_one(

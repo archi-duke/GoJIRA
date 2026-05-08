@@ -15,7 +15,7 @@ from typing import AsyncIterator, Optional
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
-# SSE keepalive 주석 — UI 에게 무시되지만 watchdog 타이머를 리셋시킨다.
+# SSE keepalive 주석 — UI 가 무시. 프록시/네트워크가 idle SSE 를 끊는 것을 방지.
 _KEEPALIVE = ": keepalive\n\n"
 
 
@@ -45,6 +45,7 @@ async def translate(
     assistant_msg_id: Optional[str] = initial_assistant_msg_id  # assistant message ID 추적
     finished_msg_ids: set[str] = set()  # 이미 완료된 assistant message ID (재전송 차단)
     user_msg_ids: set[str] = set()      # role=user 로 생성된 메시지 ID — part/delta 필터용
+    emitted_user_parts: set[str] = set()  # 이미 user_message 로 yield 한 user message text part id
     part_types: dict[str, str] = dict(initial_part_types or {})  # partID → part.type (reasoning/text 등) — delta 이벤트 분류용
     # session.idle 또는 finish=="stop" 일 때만 종료
     TERMINAL_FINISHES = {"stop", "end_turn", "length", "content-filter"}
@@ -122,8 +123,14 @@ async def translate(
         # 과거 완료된 메시지의 part 는 무시 (OpenCode 재전송)
         if msg_id and msg_id in finished_msg_ids:
             continue
-        # user message의 part 는 무시 (role=user 로 알려진 메시지 — assistant_msg_id 가 아직 None 이어도 걸러짐)
+        # user message의 part — text 이면 user_message 로 한 번 yield (TUI 입력 반영). 이후 assistant 흐름은 안 탐
         if msg_id and msg_id in user_msg_ids:
+            if ptype == "text":
+                pid = part.get("id")
+                full_text = part.get("text", "")
+                if pid and full_text and pid not in emitted_user_parts:
+                    emitted_user_parts.add(pid)
+                    yield _sse("user_message", {"messageId": msg_id, "partId": pid, "text": full_text})
             continue
         # 다른 assistant 메시지의 part 는 무시 (assistant_msg_id 가 세팅되어 있을 때만)
         if msg_id and assistant_msg_id and msg_id != assistant_msg_id:
