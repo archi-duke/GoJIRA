@@ -145,6 +145,9 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
         pass
 
     saved = False
+    log.info(f"백그라운드 구독 시작-loop: {gojira_session_id} initial_msg={initial_msg_id} initial_parts={len(initial_part_types)}")
+    evt_counts: dict[str, int] = {}
+    started_at = time.time()
     try:
         events_iter = oc.stream_events(oc_session_id)
         async for sse_str in translate(events_iter, gojira_session_id, initial_msg_id, initial_part_types):
@@ -160,20 +163,22 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
                     evt_data = line[6:]
             if evt_type:
                 push(gojira_session_id, evt_type, evt_data)
+                evt_counts[evt_type] = evt_counts.get(evt_type, 0) + 1
             if evt_type == "done":
-                log.info(f"백그라운드 구독 완료 (done): {gojira_session_id}")
+                log.info(f"백그라운드 구독 완료 (done): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
                 # Mongo에 이번 턴의 process + assistant만 저장
                 await _save_to_mongo(gojira_session_id, evt_data, turn_start_id)
                 saved = True
                 break
     except asyncio.CancelledError:
-        log.info(f"백그라운드 구독 취소: {gojira_session_id}")
+        log.info(f"백그라운드 구독 취소: {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
     except Exception as e:
-        log.warning(f"백그라운드 구독 오류: {gojira_session_id} — {e}")
+        log.warning(f"백그라운드 구독 오류: {gojira_session_id} — {e} counts={evt_counts}")
     finally:
         # done 미수신으로 종료된 경우에도 버퍼에 쌓인 process 이벤트를 Mongo 에 반영.
         # 그렇지 않으면 세션 이력에 user 질문만 남아 세션 제목이 '질문 내용' 만 표시되는 문제 발생.
         if not saved:
+            log.warning(f"백그라운드 구독 종료 (done 미수신): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
             try:
                 await _save_to_mongo(gojira_session_id, "{}", turn_start_id)
             except Exception as se:
