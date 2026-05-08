@@ -59,9 +59,16 @@ async def translate(
 
     async for evt in opencode_events:
         t = evt.get("type")
-        # 진단: 모든 이벤트 타입 카운트 + message.created/updated 만 INFO 로그
-        if t in ("message.created", "message.updated"):
-            log.info(f"[trans/{gojira_session_id[:8]}] evt type={t} keys={list(evt.get('properties', {}).keys())}")
+        # 진단: message.updated 의 role+id+finish 자세히 기록 (정확한 이벤트 흐름 추적용)
+        if t == "message.updated":
+            _info = evt.get("properties", {}).get("info", {})
+            log.info(f"[trans/{gojira_session_id[:8]}] message.updated role={_info.get('role')} mid={_info.get('id')} finish={_info.get('finish')}")
+        elif t == "message.part.updated":
+            _props = evt.get("properties", {})
+            _part = _props.get("part", {})
+            log.info(f"[trans/{gojira_session_id[:8]}] message.part.updated msg={_props.get('messageID')} ptype={_part.get('type')} pid={_part.get('id')}")
+        elif t and t not in ("message.part.delta",):
+            log.info(f"[trans/{gojira_session_id[:8]}] evt type={t}")
 
         if t == "message.part.delta":
             # OpenCode 가 part 내용을 char/토큰 단위로 흘려보내는 이벤트.
@@ -98,32 +105,31 @@ async def translate(
                 fin = info.get("finish")
                 msg_id = info.get("id")
                 role = info.get("role")
-                log.debug(f"[trans/{gojira_session_id[:8]}] message.updated role={role} mid={msg_id} fin={fin} cur_assistant={assistant_msg_id}")
+                # OpenCode 는 message.created 를 emit 하지 않고 message.updated 로 통합 신호.
+                # 따라서 여기서 user/assistant 등록을 함께 처리한다.
+                if msg_id and role == "user":
+                    if msg_id not in user_msg_ids:
+                        user_msg_ids.add(msg_id)
+                elif msg_id and role == "assistant":
+                    if msg_id != assistant_msg_id and msg_id not in finished_msg_ids:
+                        # 새 assistant 시작 — assistant_msg_id 갱신 + thinking 1회
+                        assistant_msg_id = msg_id
+                        yield _sse("thinking", {"turn": turn, "message": "응답 생성 중..."})
+
                 if role == "assistant" and fin in TERMINAL_FINISHES:
-                    # 현재 턴의 assistant가 완료된 경우만 done 처리
+                    # 현재 turn 의 assistant 완료
                     if msg_id and msg_id == assistant_msg_id:
                         reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
                         log.info(f"[trans/{gojira_session_id[:8]}] done yield: mid={msg_id} fin={fin}")
                         yield _sse("done", {"reply": reply, "actions": actions})
                         return
                     if msg_id and msg_id not in finished_msg_ids:
-                        # message.created 를 놓친 (subscriber 가 OpenCode 의 첫 이벤트 emit 후 연결된)
-                        # 새 assistant 의 종료 이벤트. 현재 turn 의 done 으로 받아들이고, 실제 응답
-                        # 내용은 _save_to_mongo + loadSession 으로 복구.
+                        # 위 등록 분기에서 assistant_msg_id 가 이미 갱신됐어야 정상.
+                        # 그래도 안전망: 알려지지 않은 mid 의 terminal finish 면 done 으로 수용.
                         finished_msg_ids.add(msg_id)
-                        log.info(f"[trans/{gojira_session_id[:8]}] message.created 누락된 assistant 의 finish={fin} — done 으로 수용 (mid={msg_id})")
+                        log.info(f"[trans/{gojira_session_id[:8]}] 미등록 assistant 의 finish={fin} — done 으로 수용 (mid={msg_id})")
                         yield _sse("done", {"reply": "", "actions": actions})
                         return
-            elif t == "message.created":
-                info = evt.get("properties", {}).get("info", {})
-                role = info.get("role")
-                mid = info.get("id") or evt.get("properties", {}).get("id")
-                log.info(f"[trans/{gojira_session_id[:8]}] message.created role={role} mid={mid}")
-                if role == "user" and mid:
-                    user_msg_ids.add(mid)
-                elif role == "assistant":
-                    assistant_msg_id = mid
-                    yield _sse("thinking", {"turn": turn, "message": "응답 생성 중..."})
             # raw 이벤트가 계속 오고 있으면 keepalive 전송 (3초 간격)
             now = time.monotonic()
             if now - last_keepalive > 3.0:
