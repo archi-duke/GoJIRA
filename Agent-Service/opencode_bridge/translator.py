@@ -66,7 +66,7 @@ async def translate(
         elif t == "message.part.updated":
             _props = evt.get("properties", {})
             _part = _props.get("part", {})
-            log.info(f"[trans/{gojira_session_id[:8]}] message.part.updated msg={_props.get('messageID')} ptype={_part.get('type')} pid={_part.get('id')}")
+            log.info(f"[trans/{gojira_session_id[:8]}] message.part.updated props_keys={list(_props.keys())} part_keys={list(_part.keys())} ptype={_part.get('type')}")
         elif t and t not in ("message.part.delta",):
             log.info(f"[trans/{gojira_session_id[:8]}] evt type={t}")
 
@@ -74,8 +74,10 @@ async def translate(
             # OpenCode 가 part 내용을 char/토큰 단위로 흘려보내는 이벤트.
             # delta.field 는 어느 필드의 변경인지만 나타내므로, part 의 실제 타입은 part_types 에서 조회.
             props = evt.get("properties", {})
-            msg_id = props.get("messageID")
-            part_id = props.get("partID")
+            # OpenCode 의 part.delta 도 part 객체 안에 messageID/partID 가 있음 (part.updated 와 동일).
+            _delta_part = props.get("part") or {}
+            msg_id = props.get("messageID") or _delta_part.get("messageID")
+            part_id = props.get("partID") or _delta_part.get("id")
             delta = props.get("delta", "")
             if msg_id and msg_id in finished_msg_ids:
                 continue
@@ -139,7 +141,8 @@ async def translate(
 
         part = evt.get("properties", {}).get("part", {})
         ptype = part.get("type")
-        msg_id = evt.get("properties", {}).get("messageID")
+        # messageID 는 part 객체 안에 있다 (properties.messageID 아님)
+        msg_id = part.get("messageID") or evt.get("properties", {}).get("messageID")
 
         # 과거 완료된 메시지의 part 는 무시 (OpenCode 재전송)
         if msg_id and msg_id in finished_msg_ids:
