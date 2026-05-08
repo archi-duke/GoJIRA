@@ -111,6 +111,23 @@ function contentToSegments(content) {
 }
 
 // OpenCode 원본 parts → segments 변환. 저장 포맷이 OpenCode native 로 바뀌면서 추가.
+// _streaming 메시지의 마지막 segment 종류로 인디케이터 라벨 결정.
+// 모델이 지금 무엇을 하고 있는지 정확히 알리려는 목적.
+function pendingLabel(segments) {
+  const segs = segments || [];
+  if (segs.length === 0) return '생각하는 중...';
+  const last = segs[segs.length - 1];
+  if (!last) return '추론 중...';
+  if (last.type === 'thinking') return '추론 중...';
+  if (last.type === 'response') return '응답 작성 중...';
+  if (last.type === 'action') {
+    if (last.status === 'running') return `도구 사용 중: ${last.tool || '?'}`;
+    // 도구 완료/에러 직후라면 다음 단계로 넘어가는 중 — 일반 추론 라벨
+    return '추론 중...';
+  }
+  return '추론 중...';
+}
+
 function partsToSegments(parts) {
   let segs = [];
   let inThinking = false;
@@ -177,9 +194,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
   const inputRef = useRef(null);
   const abortRef = useRef(null);
   const [showThinking, setShowThinking] = useState(true);
-  // 폴링 기반 대기 상태 (서버 타임아웃 제거 후 UI 가 관리)
+  // permission ask 표시용. 정체(stuck) 표시는 사용자에게 부정확한 신호를 주므로 제거.
   const [permissionPending, setPermissionPending] = useState(false);
-  const [stuckSince, setStuckSince] = useState(0);  // 정체 시작 시각(ms) — 0 이면 정체 아님
 
   async function handleCancel() {
     if (abortRef.current) {
@@ -188,7 +204,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     // stale _streaming 플래그 클리어 — 다음 턴이 이 메시지에 흘러들지 않게
     setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
     setPermissionPending(false);
-    setStuckSince(0);
     if (sessionId) {
       try {
         await fetch(`${STREAM_API}/Agent/session/${sessionId}/cancel`, {
@@ -455,6 +470,18 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         case 'content':
           handleContent(data.text);
           break;
+        case 'user_message': {
+          // OpenCode 가 emit 한 user 메시지 (TUI 입력 또는 채팅 발송 echo)
+          // 채팅창 발송 분과 dedup: 최근 5개 user 메시지에 동일 content 가 있으면 skip
+          const text = data.text || '';
+          if (!text) break;
+          setMessages(prev => {
+            const recentUser = prev.slice(-5).filter(m => m.role === 'user');
+            if (recentUser.some(m => (m.content || '') === text)) return prev;
+            return [...prev, { role: 'user', content: text }];
+          });
+          break;
+        }
         case 'done':
           if (pendingContent) {
             appendSegments([{ type: inThinking ? 'thinking' : 'response', text: pendingContent }]);
@@ -475,7 +502,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       // 이벤트-침묵 + 상태 폴링 (서버 타임아웃 없음) + SSE 끊김 자동 재연결 + done 시 세션 재로드
       const SILENCE_MS = 10_000;
       const POLL_INTERVAL_MS = 1_000;
-      const STUCK_THRESHOLD_MS = 30_000;
       let silenceTimer = null;
       let pollTimer = null;
       let lastEventAt = Date.now();
@@ -483,7 +509,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
       let finished = false;
       let es = null;
 
-      const evtTypes = ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error'];
+      const evtTypes = ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error','user_message'];
 
       function openEventSource() {
         const evtUrl = `${STREAM_API}/Agent/session/${sid}/events` + (lastEventId ? `?lastEventId=${lastEventId}` : '');
@@ -504,7 +530,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         if (es) { try { es.close(); } catch(_){} }
         setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
         setPermissionPending(false);
-        setStuckSince(0);
         // done 확정 시 Mongo 최신 상태로 대화창 재구성 — SSE 누락 이벤트 복구
         if (local === 'poll-stop' || local === 'done-event' || local === 'es-closed') {
           try { await loadSession(sid); } catch(_){}
@@ -533,19 +558,8 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             finish('poll-stop'); return;
           }
           setPermissionPending(!!s.hasPermissionPending);
-          if (s.hasPermissionPending) {
-            setStuckSince(0);
-            maybeReconnect();
-            return;
-          }
-          // in-progress: SSE 끊겼으면 재연결, 장기 정체면 힌트
+          // in-progress: SSE 끊겼으면 재연결만 시도. 정체 힌트는 부정확하므로 사용 안 함.
           maybeReconnect();
-          const stuckFor = s.lastActivityAt ? (Date.now() - s.lastActivityAt) : 0;
-          if (stuckFor > STUCK_THRESHOLD_MS) {
-            setStuckSince(prev => prev || Date.now());
-          } else {
-            setStuckSince(0);
-          }
         } catch {}
       }
 
@@ -571,7 +585,6 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         armSilenceTimer();
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         setPermissionPending(false);
-        setStuckSince(0);
         try { handleEvt(e.type, JSON.parse(e.data)); } catch {}
         if (e.type === 'done') finish('done-event');
       }
@@ -908,7 +921,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
                     {msg._streaming && (
                       <div className="ac-seg-pending">
                         <span className="ac-dot" /><span className="ac-dot" /><span className="ac-dot" />
-                        <span className="ac-seg-pending-label">추론 중...</span>
+                        <span className="ac-seg-pending-label">{pendingLabel(msg.segments)}</span>
                       </div>
                     )}
                     {msg.actions && msg.actions.length > 0 && (
@@ -938,20 +951,18 @@ export default function AgentChat({ user, authority, context, onClose, standalon
               )}
               <div ref={messagesEndRef} />
             </div>
-            {(permissionPending || stuckSince > 0) && (
+            {permissionPending && (
               <div style={{
-                padding: '8px 12px', fontSize: 13, background: permissionPending ? '#fff7d6' : '#f3f4f6',
+                padding: '8px 12px', fontSize: 13, background: '#fff7d6',
                 borderTop: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: 12,
               }}>
                 <span style={{ flex: 1, color: '#374151' }}>
-                  {permissionPending
-                    ? '⏸ OpenCode 가 권한 요청을 대기 중입니다. 터미널에서 `opencode attach` 로 승인하거나 아래 버튼으로 중단하세요.'
-                    : `⏳ ${Math.floor((Date.now() - stuckSince) / 1000)}초째 응답이 없습니다. 계속 기다리거나 완료 처리 가능합니다.`}
+                  ⏸ OpenCode 가 권한 요청을 대기 중입니다. 터미널에서 `opencode attach` 로 승인하거나 아래 버튼으로 중단하세요.
                 </span>
                 <button
                   onClick={handleCancel}
-                  style={{ padding: '4px 10px', border: '1px solid #d1d5db', background: 'lightgray', color: '#000', cursor: 'pointer', fontSize: 12 }}
-                >완료 처리</button>
+                  style={{ padding: '4px 10px', background: 'lightgray', color: '#000', cursor: 'pointer', fontSize: 12 }}
+                >중단</button>
               </div>
             )}
             <div className="ac-input-resize"
