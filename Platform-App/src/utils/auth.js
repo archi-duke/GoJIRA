@@ -15,7 +15,7 @@ export function getAuthUser() {
   const uinfo = getCookie('ADSSO_UID');
 
   if (!config.USE_SSO) {
-    // dev 모드: 쿠키에 저장된 사용자 우선, 없으면 DEV_USER
+    // dev 모드: 쿠키에 저장된 사용자 우선, 없으면 DEV_USER 
     return uinfo || config.DEV_USER;
   }
 
