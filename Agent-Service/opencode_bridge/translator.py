@@ -8,8 +8,11 @@ OpenCode /event 포맷:
 """
 
 import json
+import logging
 import time
 from typing import AsyncIterator, Optional
+
+log = logging.getLogger("agent.translator")
 
 
 def _sse(event: str, data: dict) -> str:
@@ -91,19 +94,24 @@ async def translate(
                 info = evt.get("properties", {}).get("info", {})
                 fin = info.get("finish")
                 msg_id = info.get("id")
-                if info.get("role") == "assistant" and fin in TERMINAL_FINISHES:
+                role = info.get("role")
+                log.debug(f"[trans/{gojira_session_id[:8]}] message.updated role={role} mid={msg_id} fin={fin} cur_assistant={assistant_msg_id}")
+                if role == "assistant" and fin in TERMINAL_FINISHES:
                     # 현재 턴의 assistant가 완료된 경우만 done 처리
                     if msg_id and msg_id == assistant_msg_id:
                         reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
+                        log.info(f"[trans/{gojira_session_id[:8]}] done yield: mid={msg_id} fin={fin}")
                         yield _sse("done", {"reply": reply, "actions": actions})
                         return
                     # 과거 턴의 완료 이벤트는 무시 목록에 추가
                     if msg_id:
                         finished_msg_ids.add(msg_id)
+                        log.info(f"[trans/{gojira_session_id[:8]}] terminal-finish 가 cur_assistant 와 불일치 — finished_msg_ids 추가: {msg_id}")
             elif t == "message.created":
                 info = evt.get("properties", {}).get("info", {})
                 role = info.get("role")
                 mid = info.get("id") or evt.get("properties", {}).get("id")
+                log.info(f"[trans/{gojira_session_id[:8]}] message.created role={role} mid={mid}")
                 if role == "user" and mid:
                     user_msg_ids.add(mid)
                 elif role == "assistant":
