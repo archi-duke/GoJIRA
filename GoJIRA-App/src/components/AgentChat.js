@@ -231,8 +231,9 @@ export default function AgentChat({ user, authority, context, onClose, standalon
     messagesEndRef.current?.scrollIntoView({ behavior: loading ? 'auto' : 'smooth' });
   }, [messages, loading]);
 
-  const loadSession = useCallback(async (sid) => {
+  const loadSession = useCallback(async (sid, options) => {
     if (!sid) return;
+    const preserveOnShrink = !!(options && options.preserveOnShrink);
     try {
       const res = await fetch(`${STREAM_API}/Agent/session/${sid}`, {
         headers: { 'X-User-Id': user || '' },
@@ -264,7 +265,17 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             msgs.push({ role: m.role, content: m.content });
           }
         }
-        setMessages(msgs);
+        // 가드 (preserveOnShrink): Mongo 가 아직 동기화 안 된 상태에서 화면을 통째 비우는 사고 방지.
+        // finish('poll-stop') 등 스트리밍 직후 reload 에서만 사용. 세션 전환은 가드 없이 그대로.
+        if (preserveOnShrink) {
+          setMessages(prev => {
+            if (msgs.length === 0 && prev.length > 0) return prev;
+            if (msgs.length < prev.length) return prev;
+            return msgs;
+          });
+        } else {
+          setMessages(msgs);
+        }
         setSessionId(sid);
         sessionStorage.setItem('agent_sessionId', sid);
       } else {
@@ -532,7 +543,7 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         setPermissionPending(false);
         // done 확정 시 Mongo 최신 상태로 대화창 재구성 — SSE 누락 이벤트 복구
         if (local === 'poll-stop' || local === 'done-event' || local === 'es-closed') {
-          try { await loadSession(sid); } catch(_){}
+          try { await loadSession(sid, { preserveOnShrink: true }); } catch(_){}
         }
         setLoading(false);
         resolve();
@@ -685,7 +696,12 @@ export default function AgentChat({ user, authority, context, onClose, standalon
             msgs.push({ role: m.role, content: m.content });
           }
         }
-        setMessages(msgs);
+        // loadSession 과 동일한 가드: Mongo 가 stale 일 때 화면 통째 비우는 사고 방지
+        setMessages(prev => {
+          if (msgs.length === 0 && prev.length > 0) return prev;
+          if (msgs.length < prev.length) return prev;
+          return msgs;
+        });
         // 턴 진행 중 판정: Mongo 의 마지막 원본 메시지가 user 면 아직 assistant 가 저장 안 됨 = 진행 중
         const lastRaw = raw[raw.length - 1];
         inProgress = !!(lastRaw && lastRaw.role === 'user');
