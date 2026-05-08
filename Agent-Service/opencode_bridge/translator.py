@@ -59,6 +59,9 @@ async def translate(
 
     async for evt in opencode_events:
         t = evt.get("type")
+        # 진단: 모든 이벤트 타입 카운트 + message.created/updated 만 INFO 로그
+        if t in ("message.created", "message.updated"):
+            log.info(f"[trans/{gojira_session_id[:8]}] evt type={t} keys={list(evt.get('properties', {}).keys())}")
 
         if t == "message.part.delta":
             # OpenCode 가 part 내용을 char/토큰 단위로 흘려보내는 이벤트.
@@ -103,10 +106,14 @@ async def translate(
                         log.info(f"[trans/{gojira_session_id[:8]}] done yield: mid={msg_id} fin={fin}")
                         yield _sse("done", {"reply": reply, "actions": actions})
                         return
-                    # 과거 턴의 완료 이벤트는 무시 목록에 추가
-                    if msg_id:
+                    if msg_id and msg_id not in finished_msg_ids:
+                        # message.created 를 놓친 (subscriber 가 OpenCode 의 첫 이벤트 emit 후 연결된)
+                        # 새 assistant 의 종료 이벤트. 현재 turn 의 done 으로 받아들이고, 실제 응답
+                        # 내용은 _save_to_mongo + loadSession 으로 복구.
                         finished_msg_ids.add(msg_id)
-                        log.info(f"[trans/{gojira_session_id[:8]}] terminal-finish 가 cur_assistant 와 불일치 — finished_msg_ids 추가: {msg_id}")
+                        log.info(f"[trans/{gojira_session_id[:8]}] message.created 누락된 assistant 의 finish={fin} — done 으로 수용 (mid={msg_id})")
+                        yield _sse("done", {"reply": "", "actions": actions})
+                        return
             elif t == "message.created":
                 info = evt.get("properties", {}).get("info", {})
                 role = info.get("role")
