@@ -510,14 +510,16 @@ export default function AgentChat({ user, authority, context, onClose, standalon
 
     setLoading(true);
     return new Promise((resolve) => {
-      // 이벤트-침묵 + 상태 폴링 (서버 타임아웃 없음) + SSE 끊김 자동 재연결 + done 시 세션 재로드
+      // 이벤트-침묵 + 상태 폴링 (서버 타임아웃 없음) + SSE 끊김 자동 재연결.
+      // ES 는 done 후에도 살아남아 turn 사이 TUI 입력/후속 이벤트 수신.
       const SILENCE_MS = 10_000;
       const POLL_INTERVAL_MS = 1_000;
       let silenceTimer = null;
       let pollTimer = null;
       let lastEventAt = Date.now();
       let lastEventId = 0;         // id: 헤더로 받은 마지막 이벤트 ID — 재연결용
-      let finished = false;
+      let promiseResolved = false; // Promise 한 번만 resolve (첫 turn done)
+      let turnInProgress = true;   // 현재 turn 활성 — polling/silence timer 게이팅용
       let es = null;
 
       const evtTypes = ['session','thinking','reasoning','tool_call','tool_result','content','progress','done','error','user_message'];
@@ -528,29 +530,36 @@ export default function AgentChat({ user, authority, context, onClose, standalon
         evtTypes.forEach(t => source.addEventListener(t, onEvent));
         source.onerror = () => {
           // CLOSED 상태는 재연결 실패. 폴링이 in-progress 판정하면 수동 재연결로 이어진다.
-          // 여기서 곧바로 finish 하지 않음 (서버가 아직 진행 중일 수 있음).
         };
         return source;
       }
 
-      async function finish(local) {
-        if (finished) return;
-        finished = true;
+      async function endTurn(local) {
+        // 한 turn 완료 — 매 turn 의 끝마다 호출 가능 (idempotent).
+        // ES 는 유지. Promise 는 첫 호출에만 resolve.
+        if (!turnInProgress) return;
+        turnInProgress = false;
         if (silenceTimer) clearTimeout(silenceTimer);
-        if (pollTimer) clearInterval(pollTimer);
-        if (es) { try { es.close(); } catch(_){} }
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         setMessages(prev => prev.map(m => m._streaming ? { ...m, _streaming: false } : m));
         setPermissionPending(false);
-        // done 확정 시 Mongo 최신 상태로 대화창 재구성 — SSE 누락 이벤트 복구
         if (local === 'poll-stop' || local === 'done-event' || local === 'es-closed') {
           try { await loadSession(sid, { preserveOnShrink: true }); } catch(_){}
         }
         setLoading(false);
-        resolve();
+        if (!promiseResolved) {
+          promiseResolved = true;
+          resolve();
+        }
+      }
+
+      function fullClose(local) {
+        // 명시적 close (cancel / 다음 chat-send 직전 / 언마운트). ES 까지 닫음.
+        endTurn(local || 'abort');
+        if (es) { try { es.close(); } catch(_){} es = null; }
       }
 
       function maybeReconnect() {
-        if (finished) return;
         if (!es || es.readyState === 2 /* CLOSED */) {
           try { if (es) es.close(); } catch(_){}
           es = openEventSource();
@@ -564,28 +573,29 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           });
           if (!r.ok) return;
           const s = await r.json();
-          if (!s.active) { finish('inactive'); return; }
+          if (!s.active) { endTurn('inactive'); return; }
           if (s.finish && ['stop','end_turn','length','content-filter'].includes(s.finish)) {
-            finish('poll-stop'); return;
+            endTurn('poll-stop'); return;
           }
           setPermissionPending(!!s.hasPermissionPending);
-          // in-progress: SSE 끊겼으면 재연결만 시도. 정체 힌트는 부정확하므로 사용 안 함.
           maybeReconnect();
         } catch {}
       }
 
       function startPolling() {
-        if (pollTimer || finished) return;
+        if (pollTimer || !turnInProgress) return;
         pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
         pollOnce();
       }
 
       function armSilenceTimer() {
         if (silenceTimer) clearTimeout(silenceTimer);
+        // turn 사이 (idle) 에는 silence timer 안 켬 — 폴링이 이전 turn 의 finish=stop 보고 오발하는 걸 방지
+        if (!turnInProgress) return;
         silenceTimer = setTimeout(startPolling, SILENCE_MS);
       }
 
-      abortRef.current = { abort: () => finish('abort') };
+      abortRef.current = { abort: () => fullClose('abort') };
 
       function onEvent(e) {
         lastEventAt = Date.now();
@@ -593,11 +603,16 @@ export default function AgentChat({ user, authority, context, onClose, standalon
           const n = parseInt(e.lastEventId, 10);
           if (!isNaN(n)) lastEventId = n;
         }
+        // user_message: TUI 입력 또는 새 turn 의 시작. 새 turn 으로 진입 표시.
+        if (e.type === 'user_message') {
+          turnInProgress = true;
+          setLoading(true);
+        }
         armSilenceTimer();
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         setPermissionPending(false);
         try { handleEvt(e.type, JSON.parse(e.data)); } catch {}
-        if (e.type === 'done') finish('done-event');
+        if (e.type === 'done') endTurn('done-event');
       }
 
       es = openEventSource();
