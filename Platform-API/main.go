@@ -169,7 +169,12 @@ func main() {
 		// DocLink — 향후 구현
 	})
 
-	fmt.Printf("Platform API server starting on %s\n", config.ServerPort)
-	fmt.Printf("MongoDB: %s/%s\n", config.MongoURI, config.MongoDB)
+	fmt.Printf("─── Platform-API ───────────────────────\n")
+	fmt.Printf("LISTEN          : %s\n", config.ServerPort)
+	fmt.Printf("MongoDB         : %s/%s\n", config.MongoURI, config.MongoDB)
+	fmt.Printf("Gitea (GitHub)  : %s\n", config.GitHubURL)
+	fmt.Printf("GoJIRA-API peer : %s\n", config.GoJiraAPI)
+	fmt.Printf("Ports overview  : docs/ports.md\n")
+	fmt.Printf("─────────────────────────────────────────\n")
 	log.Fatal(http.ListenAndServe(config.ServerPort, r))
 }

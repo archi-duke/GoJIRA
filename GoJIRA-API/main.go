@@ -128,8 +128,12 @@ func main() {
 		r.Get("/Project/alerts", handlers.ProjectAlertsHandler)
 	})
 
-	fmt.Printf("GoJIRA API server starting on %s\n", config.ServerPort)
-	fmt.Printf("MongoDB: %s/%s\n", config.MongoURI, config.MongoDB)
-	fmt.Printf("JIRA Mock: %s\n", config.JiraMockURL)
+	fmt.Printf("─── GoJIRA-API ─────────────────────────\n")
+	fmt.Printf("LISTEN            : %s\n", config.ServerPort)
+	fmt.Printf("MongoDB           : %s/%s\n", config.MongoURI, config.MongoDB)
+	fmt.Printf("JIRA Mock         : %s\n", config.JiraMockURL)
+	fmt.Printf("Platform-API peer : %s\n", config.PlatformAPI)
+	fmt.Printf("Ports overview    : docs/ports.md\n")
+	fmt.Printf("─────────────────────────────────────────\n")
 	log.Fatal(http.ListenAndServe(config.ServerPort, r))
 }

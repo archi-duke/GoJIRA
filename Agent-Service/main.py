@@ -38,7 +38,14 @@ app.include_router(agent_router)
 
 @app.on_event("startup")
 async def startup():
-    log.info("Agent Service 시작 (port=%d, mode=opencode_bridge)", settings.agent_service_port)
+    log.info("─── Agent-Service ──────────────────────")
+    log.info("LISTEN            : %d (mode=opencode_bridge)", settings.agent_service_port)
+    log.info("MongoDB           : %s/%s", settings.mongo_uri, settings.mongo_db)
+    log.info("OpenCode peer     : %s", settings.opencode_url)
+    log.info("GoJIRA-API peer   : %s", settings.gojira_api_url)
+    log.info("Platform-API peer : %s", settings.platform_api_url)
+    log.info("Ports overview    : docs/ports.md")
+    log.info("─────────────────────────────────────────")
     ensure_indexes()
 
 
