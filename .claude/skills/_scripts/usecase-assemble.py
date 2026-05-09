@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -137,6 +138,31 @@ def build_use_cases_table(use_cases: list, features: list) -> str:
     return "\n".join(rows)
 
 
+def _seq_lookup(sequences: dict, doc_id: str, idx_1based: int):
+    """sequences 사전에서 doc_id 로 sequence 본문을 찾되, 형식이 다른 경우도 fallback.
+
+    배경: --from-mongo 모드는 features 의 docId 를 mongo subkey (예: UC_001) 로 채우지만,
+    sequences 는 draft 단계 키 (예: UC-1) 로 저장되어 있어 정확 매칭이 실패한다.
+    여러 키 변형을 차례로 시도해 누락 방지.
+    """
+    if not sequences:
+        return None
+    if doc_id in sequences:
+        return sequences[doc_id]
+    # UC_001 → UC-1 변환
+    m = re.match(r"^([A-Za-z]+)[_-](\d+)$", str(doc_id))
+    if m:
+        prefix, num = m.group(1), int(m.group(2))
+        for cand in (f"{prefix}-{num}", f"{prefix}_{num:03d}", f"{prefix}_{num}", f"{prefix}-{num:03d}"):
+            if cand in sequences:
+                return sequences[cand]
+    # 위치 기반 fallback (1-based) — 형식 변환도 안 통할 때 features 순서대로 매칭
+    keys = list(sequences.keys())
+    if 0 < idx_1based <= len(keys):
+        return sequences[keys[idx_1based - 1]]
+    return None
+
+
 def build_features_section(features: list, sequences: dict) -> str:
     if not features:
         return "_(Feature 미도출)_"
@@ -173,7 +199,7 @@ def build_features_section(features: list, sequences: dict) -> str:
         lines.append("")
         lines.append("#### Sequence Diagram")
         lines.append("")
-        seq = sequences.get(doc_id) if sequences else None
+        seq = _seq_lookup(sequences, doc_id, idx)
         if seq and seq.strip():
             lines.append("```plantuml")
             lines.append(seq.strip())

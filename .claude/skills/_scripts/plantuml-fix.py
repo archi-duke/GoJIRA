@@ -53,10 +53,26 @@ def detect_kind(body: str) -> str:
     외부 사용자로 등장) 을 sequence 로 오인하면 자동 declare 가 위험하므로
     `package` / `node` / `[Component]` / `database` 가 있으면 component 로 분류.
     """
+    # 0. 메시지 화살표 ("A -> B: text") 가 2개 이상이면 sequence 로 확정.
+    # database/rectangle 같은 component 키워드를 sequence 안에서 아이콘으로 쓰는
+    # 케이스 (legit) 가 있어서, component 신호만 보면 sequence 가 잘못 분류되고
+    # fix_component_note_over 가 정상 sequence 의 `note over` 까지 floating note 로
+    # 바꿔버리는 회귀 발생. 메시지 화살표 다수 + actor/participant 존재 = sequence.
+    seq_arrows = re.findall(
+        r"^\s*[\w\"][\w\".]*\s*(?:-->>|->>|-->|->|<<--|<--)\s*[\w\"][\w\".]*\s*:",
+        body, re.MULTILINE,
+    )
+    has_actor_or_part = bool(re.search(r"^\s*(?:actor|participant)\s", body, re.MULTILINE))
+    if has_actor_or_part and len(seq_arrows) >= 2:
+        return "sequence"
+
     # 1. component/deployment 신호 (actor 보다 우선).
     # cloud 는 sequence 안에서도 잘못 등장하므로 단독 신호로 사용 안 함.
+    # rectangle 은 context/component 다이어그램에서 actor 와 함께 흔히 등장 — 누락 시
+    # sequence 로 오분류되어 fix_sequence_undefined_participant 가 잘못된 participant
+    # 를 자동 declare 하는 회귀 발생 (rectangle alias 와 충돌해 렌더 실패).
     if re.search(
-        r"^\s*(?:package|node|component|database|frame|artifact)\s+\"",
+        r"^\s*(?:package|node|component|database|frame|artifact|rectangle)\s+\"",
         body, re.MULTILINE,
     ) or re.search(r"^\s*\[[^]]+\]\s+as\s+", body, re.MULTILINE):
         return "component"
@@ -146,8 +162,15 @@ def fix_sequence_cloud_keyword(body: str) -> tuple[str, int]:
 
 
 _DECL_KEYWORDS = (
+    # sequence 선언
     "actor", "participant", "boundary", "control", "entity",
     "database", "collections", "queue",
+    # component/deployment 선언 — sequence 다이어그램 안에 함께 등장하는 경우
+    # (예: Context 가 sequence 로 오분류된 경우) 이미 선언된 alias 를 다시
+    # participant 로 자동 declare 하지 않도록 인식.
+    "rectangle", "package", "node", "component", "frame", "artifact",
+    # use case 선언 — Use Case Diagram 이 sequence 로 오분류되는 경우 대비
+    "usecase",
 )
 
 
@@ -157,9 +180,11 @@ def fix_sequence_undefined_participant(body: str) -> tuple[str, int]:
     @startuml 직후에 `participant <name>` 추가. quote 라벨 없이 식별자 그대로.
     """
     # 1. 이미 선언된 alias 수집
+    # `actor "label" as X` (quoted), `actor label as X` (unquoted, 한글 라벨 포함),
+    # `actor X` 단순 선언 모두 커버.
     declared: set[str] = set()
     decl_with_label = re.compile(
-        rf"^\s*(?:{'|'.join(_DECL_KEYWORDS)})\s+\"[^\"]+\"\s+as\s+([A-Za-z_][\w]*)",
+        rf"^\s*(?:{'|'.join(_DECL_KEYWORDS)})\s+(?:\"[^\"]+\"|\S+)\s+as\s+([A-Za-z_][\w]*)",
         re.MULTILINE,
     )
     decl_simple = re.compile(
