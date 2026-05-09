@@ -22,6 +22,29 @@ from pathlib import Path
 
 PLANTUML_BLOCK_RE = re.compile(r"```plantuml\n(.*?)\n```", re.DOTALL)
 
+# 이중 fence: ```plantuml\n```plantuml\n ... \n```\n``` — LLM 이 코드 블록을 두번 감싸는 실수
+DOUBLE_FENCE_RE = re.compile(
+    r"```plantuml\s*\n```plantuml\s*\n(.*?)\n```\s*\n\s*```",
+    re.DOTALL,
+)
+
+
+def fix_double_plantuml_fence(text: str) -> tuple[str, int]:
+    """``\\`plantuml`` 블록이 다시 ``\\`plantuml`` 안에 들어가 있는 패턴을 평탄화.
+
+    LLM 이 가끔 PlantUML 코드 블록을 마크다운 코드 블록 안에 한 번 더 감싸서
+    렌더가 실패하는 케이스 (외부 + 내부 두 쌍의 fence). 외부 fence 한 쌍을 제거.
+    중첩이 3중 이상이어도 반복 적용으로 모두 풀린다.
+    """
+    total = 0
+    while True:
+        new, n = DOUBLE_FENCE_RE.subn("```plantuml\n\\1\n```", text)
+        if not n:
+            break
+        text = new
+        total += n
+    return text, total
+
 
 def detect_kind(body: str) -> str:
     """다이어그램 종류 식별. component/deployment 신호를 sequence 보다 우선.
@@ -228,6 +251,10 @@ def fix_file(path: Path, check: bool = False) -> dict[str, int]:
     text = path.read_text(encoding="utf-8")
     total: dict[str, int] = {}
 
+    # 1단계: 이중 fence 평탄화 — 블록 단위 수정 전에 외부 fence 정리해야 본문이 정확히 잡힘
+    text, n_double = fix_double_plantuml_fence(text)
+    total["double_fence"] = n_double
+
     def repl(m: re.Match) -> str:
         body = m.group(1)
         new_body, counts = fix_block(body)
@@ -237,7 +264,8 @@ def fix_file(path: Path, check: bool = False) -> dict[str, int]:
 
     new_text = PLANTUML_BLOCK_RE.sub(repl, text)
 
-    if new_text == text:
+    original = path.read_text(encoding="utf-8")
+    if new_text == original:
         return total
 
     if not check:
