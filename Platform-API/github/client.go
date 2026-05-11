@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -890,8 +891,16 @@ func setBranchProtectionGitea(owner, repo, branch string, requiredReviewers int)
 	return nil
 }
 
-// FixReviewState Gitea DB에서 리뷰 type을 직접 업데이트 (Gitea 1.25 API 버그 우회)
-// event: "APPROVE" → type=1, "REQUEST_CHANGES" → type=2
+// FixReviewState Gitea DB에서 리뷰 type을 직접 업데이트 (Gitea 1.25 API 버그 우회).
+// event: "APPROVE" → type=1, "REQUEST_CHANGES" → type=2.
+//
+// 환경 의존성 (사내 환경에서는 동작 불가):
+//   - docker 가 호스트 PATH 에 있어야 함
+//   - Gitea 가 'gojira-gitea' 라는 docker 컨테이너로 실행 중이어야 함 (env GITEA_CONTAINER 로 override)
+//   - sqlite 백엔드여야 함 (MySQL/Postgres 사용 시 동작 안 함)
+//
+// 사내망 (Gitea 별도 서버 직접 설치, docker 미사용) 에서는 자동 skip — silent return nil.
+// 명시적 비활성화는 GOJIRA_FIX_REVIEW=0. 결과: PR 리뷰 의 official 플래그가 안 붙음 — 운영자 수동 처리.
 func FixReviewState(reviewID int, event string) error {
 	typeVal := 0
 	switch event {
@@ -902,7 +911,19 @@ func FixReviewState(reviewID int, event string) error {
 	default:
 		return nil
 	}
-	cmd := exec.Command("docker", "exec", "gojira-gitea", "sqlite3", "/data/gitea/gitea.db",
+	// 명시적 비활성화
+	if os.Getenv("GOJIRA_FIX_REVIEW") == "0" {
+		return nil
+	}
+	// docker 명령 자체가 PATH 에 없으면 silent skip — 사내 / Docker 미사용 환경
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil
+	}
+	container := os.Getenv("GITEA_CONTAINER")
+	if container == "" {
+		container = "gojira-gitea"
+	}
+	cmd := exec.Command("docker", "exec", container, "sqlite3", "/data/gitea/gitea.db",
 		fmt.Sprintf("UPDATE review SET type=%d, official=1 WHERE id=%d;", typeVal, reviewID))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fix review state failed: %v (%s)", err, string(out))
