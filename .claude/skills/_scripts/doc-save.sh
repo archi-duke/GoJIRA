@@ -60,7 +60,34 @@ for attempt in 1 2 3 4 5; do
 done
 
 if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
-  jq -n --arg path "$DOCPATH" --arg status "$STATUS" '{ok:true, path:$path, status:$status}'
+  # .md 파일 post-save sanity 검사 — assemble/templating 단계 회귀를 빠르게 노출.
+  # DOC_POST_VALIDATE=0 으로 비활성화 가능. 실패해도 PUT 자체는 성공이므로 경고만.
+  WARNINGS_JSON="[]"
+  if [[ "${DOC_POST_VALIDATE:-1}" == "1" && "$DOCPATH" == *.md ]]; then
+    WARNS=()
+    START_COUNT=$(printf '%s' "$CONTENT" | grep -c '@startuml' || true)
+    END_COUNT=$(printf '%s' "$CONTENT" | grep -c '@enduml' || true)
+    if [[ "$START_COUNT" != "$END_COUNT" ]]; then
+      WARNS+=("plantuml_pair_mismatch: @startuml=$START_COUNT @enduml=$END_COUNT")
+    fi
+    OPEN_FENCE=$(printf '%s' "$CONTENT" | grep -c '^\x60\x60\x60plantuml' || true)
+    if [[ "$OPEN_FENCE" -gt "$START_COUNT" ]]; then
+      WARNS+=("plantuml_fence_extra: fence_open=$OPEN_FENCE startuml=$START_COUNT")
+    fi
+    PLACEHOLDER=$(printf '%s' "$CONTENT" | grep -c '미작성 — critical' || true)
+    if [[ "$PLACEHOLDER" -gt 0 ]]; then
+      WARNS+=("placeholder_remaining: '미작성 — critical' x$PLACEHOLDER — assemble 회귀 가능성")
+    fi
+    if [[ ${#WARNS[@]} -gt 0 ]]; then
+      printf '[doc-save] post-save warnings for %s:\n' "$DOCPATH" >&2
+      for w in "${WARNS[@]}"; do
+        printf '  - %s\n' "$w" >&2
+      done
+      WARNINGS_JSON=$(printf '%s\n' "${WARNS[@]}" | jq -R . | jq -s .)
+    fi
+  fi
+  jq -n --arg path "$DOCPATH" --arg status "$STATUS" --argjson warnings "$WARNINGS_JSON" \
+    '{ok:true, path:$path, status:$status, warnings:$warnings}'
 else
   jq -n --arg path "$DOCPATH" --arg status "$STATUS" --arg error "$RESP" '{ok:false, path:$path, status:$status, error:$error}'
 fi
