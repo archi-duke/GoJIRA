@@ -1,10 +1,10 @@
 package config
 
 import (
-	"bufio"
 	"log"
 	"os"
-	"strings"
+
+	"gojira.local/shared/envload"
 )
 
 // 모든 설정은 .env (또는 환경변수) 에서 읽는다. 환경별로 달라야 하는 필수 항목은
@@ -26,7 +26,8 @@ var (
 )
 
 func init() {
-	loadEnvFile(".env")
+	// .env 탐색 순서: GOJIRA_ENV_FILE → cwd/.env → <binary dir>/.env → <binary dir>/../.env
+	envload.Load("GOJIRA_ENV_FILE")
 
 	// 필수 항목 — 미설정 시 log.Fatal
 	MongoURI = requireEnv("GOJIRA_MONGO_URI")
@@ -72,28 +73,4 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
-// loadEnvFile reads a .env file and sets environment variables (does not override existing).
-func loadEnvFile(path string) {
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-		if os.Getenv(key) == "" {
-			os.Setenv(key, val)
-		}
-	}
-}
+// loadEnvFile 은 gojira-shared/envload 로 이관됨. 본 함수는 제거.
