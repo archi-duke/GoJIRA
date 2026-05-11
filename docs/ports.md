@@ -3,6 +3,15 @@
 > 본 시스템에서 사용하는 모든 포트의 단일 출처.
 > 각 서비스는 startup 시 자기 포트 + 의존 peer 포트를 로그로 출력한다.
 
+## 환경별 호스팅 위치
+
+| 환경 | MongoDB / Gitea | OpenCode | Backend / Frontend |
+|---|---|---|---|
+| **로컬 개발 (Mac)** | Docker — 같은 호스트 | 같은 호스트 | 같은 호스트 |
+| **사내망 (Windows + WSL)** | **별도 사내 서버** | **WSL 안 (사용자 PC)** | WSL 안 (사용자 PC) — 가정, 추후 확정 |
+
+사내망에서는 MongoDB / Gitea 의 호스트명이 `localhost` 가 아니므로 환경변수 (`*_URL`) 에 실제 사내 호스트를 명시한다. cross-service `_URL` 변수 표는 본 문서 아래 참조.
+
 ## 전체 포트 표
 
 | 포트 | 컴포넌트 | 종류 | 책임 |
@@ -10,13 +19,13 @@
 | 3000 | Platform-App | Frontend (React) | 계정/공지/문서 SPA |
 | 3001 | GoJIRA-App | Frontend (React) | 이슈/프로젝트 SPA, 채팅 |
 | 3030 | Pumlex | 외부 (Docker) | PlantUML 인라인 편집 + `/render-with-layout` |
-| 3300 | Gitea | 외부 (Docker) | Git 서버 (호스트 3300 → 컨테이너 3000) |
-| 4096 | OpenCode | 사용자 PC 로컬 | LLM 호출 게이트웨이 (채팅/스킬) |
+| 3300 | Gitea | 외부 인프라 (사내망: 별도 서버 / 로컬: Docker) | Git 서버 (호스트 3300 → 컨테이너 3000) |
+| 4096 | OpenCode | 로컬: 사용자 PC / 사내망: WSL 안 | LLM 호출 게이트웨이 (채팅/스킬) |
 | 8000 | JIRA Mock | 외부 | JIRA Datacenter 에뮬레이터 |
 | 9000 | Platform-API | Backend (Go) | 계정/문서/Webhook/LLM 게이트웨이 |
 | 9001 | GoJIRA-API | Backend (Go) | 이슈/프로젝트/Agent 프록시 |
 | 9002 | Agent-Service | Backend (Python) | OpenCode 브리지 (SSE 번역) |
-| 27017 | MongoDB | DB | 공용 DB (`gojira` database) |
+| 27017 | MongoDB | DB (사내망: 별도 서버 / 로컬: Docker) | 공용 DB (`gojira` database) |
 
 ## 서비스별 의존 매트릭스
 
