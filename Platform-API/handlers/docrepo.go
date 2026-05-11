@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1981,24 +1982,24 @@ func DocRepoOpenFolderHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "작업공간 폴더가 없습니다. Pull을 먼저 실행하세요.")
 		return
 	}
+	// OS 별 폴더 탐색기. 기존엔 /usr/bin/open / /mnt/c/... 같은 경로 존재 여부로
+	// 분기해 네이티브 Windows 에서 셋 다 없어 xdg-open 으로 떨어져 실행 실패하던
+	// 회귀를 runtime.GOOS 직접 판별로 해소.
 	var cmd string
-	switch {
-	case fileExists("/usr/bin/open"):
+	switch runtime.GOOS {
+	case "darwin":
 		cmd = "open"
-	case fileExists("/usr/bin/explorer.exe") || fileExists("/mnt/c/Windows/explorer.exe"):
+	case "windows":
 		cmd = "explorer.exe"
-	default:
+	default: // linux / wsl — xdg-open 표준 (WSL 은 wslu 의 wslview 가 hijack)
 		cmd = "xdg-open"
 	}
 	go func() {
-		exec.Command(cmd, wtDir).Run()
+		if err := exec.Command(cmd, wtDir).Run(); err != nil {
+			log.Printf("open folder failed: cmd=%s path=%s err=%v", cmd, wtDir, err)
+		}
 	}()
 	respondJSON(w, http.StatusOK, map[string]string{"path": wtDir, "cmd": cmd})
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 func hasRef(refs []string, name string) bool {
