@@ -46,7 +46,9 @@ REM ── [1/6] OpenCode in WSL (port 4096) ──
 call :isPortInUse 4096
 if errorlevel 1 (
     echo [1/6] Starting OpenCode in WSL ^(port 4096^)...
-    start "OpenCode Server" wsl bash -lc "opencode serve --port 4096 --hostname 0.0.0.0"
+    REM bash -ilc : interactive login shell — .bashrc 의 PATH export 가 적용되어
+    REM ~/.opencode/bin/opencode 를 찾을 수 있음. -lc 만 쓰면 .bashrc 미source.
+    start "OpenCode Server" wsl bash -ilc "opencode serve --port 4096 --hostname 0.0.0.0"
     timeout /t 5 /nobreak >nul
 ) else (
     echo [1/6] OpenCode already running on port 4096, skipping.
