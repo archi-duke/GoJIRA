@@ -59,16 +59,17 @@ async def translate(
 
     async for evt in opencode_events:
         t = evt.get("type")
-        # 진단: message.updated 의 role+id+finish 자세히 기록 (정확한 이벤트 흐름 추적용)
-        if t == "message.updated":
-            _info = evt.get("properties", {}).get("info", {})
-            log.info(f"[trans/{gojira_session_id[:8]}] message.updated role={_info.get('role')} mid={_info.get('id')} finish={_info.get('finish')}")
-        elif t == "message.part.updated":
-            _props = evt.get("properties", {})
-            _part = _props.get("part", {})
-            log.info(f"[trans/{gojira_session_id[:8]}] message.part.updated props_keys={list(_props.keys())} part_keys={list(_part.keys())} ptype={_part.get('type')}")
-        elif t and t not in ("message.part.delta",):
-            log.info(f"[trans/{gojira_session_id[:8]}] evt type={t}")
+        # 진단 로그 — 운영 안정 후 DEBUG 격하. 재발 시 logger level 만 낮추면 다시 노출.
+        if log.isEnabledFor(logging.DEBUG):
+            if t == "message.updated":
+                _info = evt.get("properties", {}).get("info", {})
+                log.debug(f"[trans/{gojira_session_id[:8]}] message.updated role={_info.get('role')} mid={_info.get('id')} finish={_info.get('finish')}")
+            elif t == "message.part.updated":
+                _props = evt.get("properties", {})
+                _part = _props.get("part", {})
+                log.debug(f"[trans/{gojira_session_id[:8]}] message.part.updated props_keys={list(_props.keys())} part_keys={list(_part.keys())} ptype={_part.get('type')}")
+            elif t and t not in ("message.part.delta",):
+                log.debug(f"[trans/{gojira_session_id[:8]}] evt type={t}")
 
         if t == "message.part.delta":
             # OpenCode 가 part 내용을 char/토큰 단위로 흘려보내는 이벤트.
@@ -122,7 +123,7 @@ async def translate(
                     # 현재 turn 의 assistant 완료
                     if msg_id and msg_id == assistant_msg_id:
                         reply = "".join(final_text_by_part[pid] for pid in text_part_order).strip()
-                        log.info(f"[trans/{gojira_session_id[:8]}] done yield: mid={msg_id} fin={fin}")
+                        log.debug(f"[trans/{gojira_session_id[:8]}] done yield: mid={msg_id} fin={fin}")
                         yield _sse("done", {"reply": reply, "actions": actions})
                         return
                     if msg_id and msg_id not in finished_msg_ids:
