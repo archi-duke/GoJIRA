@@ -42,34 +42,69 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
-echo [1/6] Starting OpenCode in WSL (port 4096)...
-start "OpenCode Server" wsl bash -lc "opencode serve --port 4096 --hostname 0.0.0.0"
-timeout /t 5 /nobreak >nul
+REM ── [1/6] OpenCode in WSL (port 4096) ──
+call :isPortInUse 4096
+if errorlevel 1 (
+    echo [1/6] Starting OpenCode in WSL ^(port 4096^)...
+    start "OpenCode Server" wsl bash -lc "opencode serve --port 4096 --hostname 0.0.0.0"
+    timeout /t 5 /nobreak >nul
+) else (
+    echo [1/6] OpenCode already running on port 4096, skipping.
+)
 
-echo [2/6] Starting Platform-API (port 9000)...
-start "Platform-API" /D "%CD%\Platform-API" cmd /k platform-api.exe
-timeout /t 3 /nobreak >nul
+REM ── [2/6] Platform-API (port 9000) ──
+call :isPortInUse 9000
+if errorlevel 1 (
+    echo [2/6] Starting Platform-API ^(port 9000^)...
+    start "Platform-API" /D "%CD%\Platform-API" cmd /k platform-api.exe
+    timeout /t 3 /nobreak >nul
+) else (
+    echo [2/6] Platform-API already running on port 9000, skipping.
+)
 
-echo [3/6] Starting GoJIRA-API (port 9001)...
-start "GoJIRA-API" /D "%CD%\GoJIRA-API" cmd /k gojira-api.exe
-timeout /t 3 /nobreak >nul
+REM ── [3/6] GoJIRA-API (port 9001) ──
+call :isPortInUse 9001
+if errorlevel 1 (
+    echo [3/6] Starting GoJIRA-API ^(port 9001^)...
+    start "GoJIRA-API" /D "%CD%\GoJIRA-API" cmd /k gojira-api.exe
+    timeout /t 3 /nobreak >nul
+) else (
+    echo [3/6] GoJIRA-API already running on port 9001, skipping.
+)
 
-echo [4/6] Starting Agent-Service (port 9002)...
-start "Agent-Service" /D "%CD%\Agent-Service" cmd /k "venv\Scripts\activate && python main.py"
-timeout /t 2 /nobreak >nul
+REM ── [4/6] Agent-Service (port 9002) ──
+call :isPortInUse 9002
+if errorlevel 1 (
+    echo [4/6] Starting Agent-Service ^(port 9002^)...
+    start "Agent-Service" /D "%CD%\Agent-Service" cmd /k "venv\Scripts\activate && python main.py"
+    timeout /t 2 /nobreak >nul
+) else (
+    echo [4/6] Agent-Service already running on port 9002, skipping.
+)
 
-echo [5/6] Starting Platform-App (port 3000)...
-echo        Initial webpack compile may take 30s-2min...
-start "Platform-App" /D "%CD%\Platform-App" cmd /k "set BROWSER=none && npm start"
-timeout /t 3 /nobreak >nul
+REM ── [5/6] Platform-App (port 3000) ──
+call :isPortInUse 3000
+if errorlevel 1 (
+    echo [5/6] Starting Platform-App ^(port 3000^)... initial webpack compile may take 30s-2min
+    start "Platform-App" /D "%CD%\Platform-App" cmd /k "set BROWSER=none && npm start"
+    timeout /t 3 /nobreak >nul
+) else (
+    echo [5/6] Platform-App already running on port 3000, skipping.
+)
 
-echo [6/6] Starting GoJIRA-App (port 3001)...
-start "GoJIRA-App" /D "%CD%\GoJIRA-App" cmd /k "set BROWSER=none && npm start"
-timeout /t 2 /nobreak >nul
+REM ── [6/6] GoJIRA-App (port 3001) ──
+call :isPortInUse 3001
+if errorlevel 1 (
+    echo [6/6] Starting GoJIRA-App ^(port 3001^)...
+    start "GoJIRA-App" /D "%CD%\GoJIRA-App" cmd /k "set BROWSER=none && npm start"
+    timeout /t 2 /nobreak >nul
+) else (
+    echo [6/6] GoJIRA-App already running on port 3001, skipping.
+)
 
 echo.
 echo ============================================
-echo   All services launched in separate windows
+echo   Launch sequence finished
 echo ============================================
 echo.
 echo   [Backend]
@@ -86,8 +121,12 @@ echo   [External infra]
 echo   - MongoDB : 10.227.37.89:44330
 echo   - Gitea   : 10.227.37.92:44350
 echo.
-echo Frontend takes 30s-2min for first compile. Watch each window.
-echo Open browser at http://localhost:3000 after both apps compile.
-echo.
 echo To stop all: run stop-all.bat
 pause
+exit /b 0
+
+REM ── Helper: port LISTENING check ──
+REM   Returns errorlevel 0 if port in use, 1 if free.
+:isPortInUse
+netstat -aon | findstr LISTENING | findstr ":%~1 " >nul 2>&1
+exit /b %errorlevel%
