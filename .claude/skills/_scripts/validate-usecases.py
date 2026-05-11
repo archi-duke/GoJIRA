@@ -454,9 +454,19 @@ def validate_final(payload: dict) -> dict:
         critical.append({"type": "missing_sequence_diagram", "docId": "(global)",
                          "detail": "Sequence Diagram (PlantUML participant) 누락"})
 
-    if features and seq_count > 0 and seq_count < len(features):
-        suggestions.append({"type": "sequence_diagram_count_low", "docId": "(global)",
-                            "detail": f"Feature {len(features)}개인데 sequence 블록은 {seq_count}개"})
+    # Feature 1개당 sequence 1개 1:1 매칭. 부족하면 critical 격상.
+    # (이전엔 suggestions 였으나 assemble.py 의 sequence key 매칭 회귀 같은 사고가
+    # final stage 통과해버리는 위험이 있어 critical 로 변경.)
+    if features and seq_count < len(features):
+        critical.append({"type": "sequence_diagram_count_low", "docId": "(global)",
+                         "detail": f"Feature {len(features)}개인데 sequence 블록은 {seq_count}개 — 부족분 {len(features) - seq_count}건"})
+
+    # assemble.py 가 sequence 매칭 실패 시 본문에 박는 placeholder 직접 탐지.
+    # 이 문자열이 보이면 doc 조립 자체에 회귀가 있다는 강한 신호.
+    placeholder_count = doc.count("Sequence Diagram 미작성")
+    if placeholder_count > 0:
+        critical.append({"type": "sequence_placeholder_remaining", "docId": "(global)",
+                         "detail": f"'Sequence Diagram 미작성' placeholder 가 {placeholder_count}건 남음 — assemble 단계 회귀 가능성"})
 
     for b in blocks:
         if pu.detect_kind(b) == "sequence" and PARTICIPANT_BAD_NAME_RE.search(b):
