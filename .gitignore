@@ -5,6 +5,7 @@ GoJIRA-App/build/
 # Go binary
 GoJIRA-API/gojira-api
 GoJIRA-API/server
+Platform-API/platform-api
 
 # Env
 .env
@@ -38,6 +39,8 @@ Platform-App/build/
 node_modules/
 repos/
 screenshot*.png
+# Ad-hoc 작업 캡처 (e1.png, e2.png 등 1글자 + 숫자 패턴)
+[a-z][0-9]*.png
 scripts/
 !Agent-Service/scripts/
 package.json
