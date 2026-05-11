@@ -546,48 +546,71 @@ sequenceDiagram
 
 ## 6. Agent 채팅 설계
 
-### 6.1 SSE 스트리밍 시퀀스
+> **2026-05 갱신** — Agent-Service 가 자체 ReACT 를 돌리지 않고 OpenCode 서버(`:4096`, 사용자 PC 로컬) 가 LLM 호출·ReACT·스킬 디스패치를 담당. Agent-Service 는 세션 매핑 + SSE 번역 어댑터. 상세는 [docs/design-agent.md](./design-agent.md), [docs/design-platform.md §5](./design-platform.md).
+
+### 6.1 SSE 스트리밍 시퀀스 (OpenCode bridge)
 
 ```mermaid
 sequenceDiagram
     participant User as 사용자
-    participant AC as AgentChat
-    participant Agent as AGENT_API<br/>(:9002)
-    participant Main as 메인 앱<br/>(BroadcastChannel)
+    participant AC as AgentChat (SPA)
+    participant Agent as Agent-Service<br/>(:9002)
+    participant OC as OpenCode 서버<br/>(:4096, 사용자 PC)
+    participant LLM as Platform-API<br/>/LLM/call
 
-    User->>AC: 메시지 입력
-    AC->>Agent: POST /Agent/chat/stream<br/>{sessionId, message, context}
+    User->>AC: 메시지 입력 + 로컬 user 버블 즉시 append
+    AC->>Agent: POST /Agent/chat/send {sessionId, message}
+    Agent->>OC: /session/{id}/prompt_async
+    Agent->>Agent: ensure_subscriber (persistent — turn 사이도 alive)
+
+    AC->>Agent: GET /session/{id}/events (EventSource)
+    Note over OC,LLM: OpenCode 가 ReACT 루프 + 스킬 디스패치<br/>LLM 호출은 Platform-API 게이트웨이를 통해서만
+    OC->>LLM: POST /LLM/call (사내/외부 모델)
+    LLM-->>OC: 응답
+    OC-->>Agent: /event SSE (message.updated / message.part.updated / .delta)
+    Agent->>Agent: translator → UI 포맷 변환 + event_buffer push
 
     rect rgb(240, 248, 255)
-        Note over Agent,AC: SSE 스트리밍 응답
-        Agent-->>AC: event: session<br/>{sessionId}
-        Agent-->>AC: event: thinking
-        Agent-->>AC: event: reasoning<br/>{content}
-        Agent-->>AC: event: tool_call<br/>{tool, params}
-        Agent-->>AC: event: tool_result<br/>{tool, status, summary, duration_ms}
-        Agent-->>AC: event: content<br/>{text} (점진적 누적)
-        Agent-->>AC: event: done<br/>{reply, actions}
+        Note over Agent,AC: SSE 변환 이벤트 (lastEventId 기반 재연결 지원)
+        Agent-->>AC: event: session {sessionId}
+        Agent-->>AC: event: thinking (assistant 시작)
+        Agent-->>AC: event: reasoning {content}
+        Agent-->>AC: event: tool_call {tool, params}
+        Agent-->>AC: event: tool_result {status, summary, detail}
+        Agent-->>AC: event: content {text} (델타 누적)
+        Agent-->>AC: event: user_message {text} (TUI 입력 또는 echo)
+        Agent-->>AC: event: done (turn 종료, ES 는 유지)
     end
 
-    AC->>AC: 메시지 렌더링<br/>(Markdown)
+    Note over AC: ES 는 turn 종료 후에도 유지 — turn 사이 TUI 입력 즉시 수신.<br/>endTurn() 은 Promise resolve + UI cleanup, fullClose() 는 ES 까지 닫음.
 
-    opt tool_result에 _action: navigate 포함
-        AC->>Main: BroadcastChannel (same-origin)<br/>+ window.opener.postMessage (cross-origin)<br/>{projectCode, projectName, page}
-        Main->>Main: 페이지 전환
+    opt SSE 침묵 (10s+ 무이벤트)
+        AC->>Agent: GET /session/{id}/state (폴링)
+        Agent-->>AC: {finish, active, hasPermissionPending, lastActivityAt}
     end
 
-    opt 스트리밍 실패 시
-        AC->>Agent: POST /Agent/chat (폴백)<br/>비스트리밍 응답
+    opt assistant 응답에 _action: navigate 포함
+        AC->>AC: BroadcastChannel (same-origin) + window.opener.postMessage (cross-origin)
     end
 ```
 
-### 6.2 메시지 타입
+### 6.2 채팅 라이프사이클 핵심
+
+| 메커니즘 | 동작 |
+|---|---|
+| **persistent EventSource** | done 으로 ES 닫지 않음. 다음 chat-send 또는 명시적 cancel 까지 alive — TUI 입력을 채팅창에 즉시 반영하기 위함 |
+| **endTurn vs fullClose** | endTurn: Promise resolve + loading=false + `_streaming` 플래그 해제. ES 유지. fullClose: endTurn + es.close — abort/unmount 에만 호출 |
+| **loadSession preserveOnShrink** | finish 시점 Mongo 가 stale 이면 화면을 통째로 비우는 사고 방지 — 빈/축소 결과면 setMessages skip |
+| **TUI 입력 (user_message)** | OpenCode TUI 에서 직접 입력한 메시지를 translator 가 `user_message` 이벤트로 yield. UI 가 user 버블로 append (chat-send echo 와 content 기반 dedup) |
+| **단계별 인디케이터** | `_streaming` 메시지의 마지막 segment 종류로 라벨 결정 — `생각하는 중 / 추론 중 / 도구 사용 중: {skill} / 응답 작성 중` |
+
+### 6.3 메시지 타입
 
 | role | 설명 |
 |------|------|
-| `user` | 사용자 입력 |
-| `process` | 작업 과정 (steps 배열, Master 전용 상세 뷰) |
-| `assistant` | AI 응답 (Markdown 렌더링) |
+| `user` | 사용자 입력 (chat 발송 + TUI 입력 echo 둘 다) |
+| `assistant` | AI 응답 (Mongo 에는 OpenCode 의 info+parts 원본 그대로 저장, 렌더는 클라이언트 partsToSegments) |
+| `process` (레거시) | 옛 ReACT 시절 작업 과정 — 호환용 표시만 유지 |
 
 ### 6.3 크로스 윈도우 통신
 

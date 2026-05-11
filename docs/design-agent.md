@@ -237,6 +237,42 @@ Mongo `agent_sessions` 컬렉션에 `{gojiraSessionId, openCodeSessionId, userId
 - 어댑터가 `/prompt_async` 호출 시 parts 에 `user=batman` 컨텍스트 prefix 포함
 - 스킬 본문은 `$USER` 또는 인자 `$2` 로 수신 → 기존 방식 유지
 
+### 6.5 채팅 라이프사이클 안정화 (2026-05)
+
+사내망 / 긴 reasoning 환경에서 메시지가 사라지거나 TUI 입력이 채팅창에 보이지 않는 회귀가 누적 보고됨. 다음 변경으로 안정화.
+
+| 변경 | 위치 | 효과 |
+|---|---|---|
+| **watchdog 제거** | `opencode_bridge/event_buffer.py` | 10s idle 임계로 subscriber 강제 reset 하던 로직 폐기. 정상 추론 중인데 끊긴 것으로 오판해 메시지가 사라지던 회귀 차단 |
+| **persistent subscriber** | 동 `_subscribe_loop` | turn loop 도입 — done 후 종료하지 않고 다음 turn 대기. OpenCode `/event` SSE 연결 유지로 TUI 입력 + 후속 chat-send 이벤트 끊김 없이 수신 |
+| **done save → push 순서** | 동 | `_save_to_mongo` 를 push 보다 먼저 await — 프론트의 loadSession 이 stale Mongo 를 읽어 화면 통째로 비우는 race 차단 |
+| **sse_stream 무한 흐름** | `opencode_bridge/router.py` | done 이벤트로 stream return 하지 않음 — 같은 ES 로 turn 사이 이벤트 전달 |
+| **endTurn / fullClose 분리** | `GoJIRA-App AgentChat.js` | endTurn: Promise resolve + UI cleanup, ES 유지. fullClose: ES 까지 닫음 (cancel/unmount 만) |
+| **loadSession preserveOnShrink** | 동 | finish 시점 Mongo 가 stale 이면 화면 통째로 덮어쓰지 않음 — 빈/축소 결과면 setMessages skip |
+| **단계별 인디케이터 라벨** | 동 `pendingLabel()` | _streaming 메시지의 마지막 segment 종류로 동적 라벨 — 생각/추론/도구 사용/응답 작성 단계별 표시 |
+| **TUI user_message yield** | `opencode_bridge/translator.py` | OpenCode 가 `message.created` 를 emit 안 하고 `message.updated` 만 사용. `message.updated` 핸들러에서 role/msg_id 등록. user 의 part.updated 도착 시 `user_message` SSE yield. messageID 는 `properties.part.messageID` 안에 위치 (top-level 아님). 미등록 assistant 의 terminal-finish 는 done 으로 수용하는 안전망 포함 |
+| **TUI 입력 영속화** | 동 `_save_to_mongo` | user role 메시지도 Mongo 에 저장 — content 기반 dedup 으로 채팅 발송분과 OC echo 의 중복 방지 |
+
+### 6.6 PlantUML 결정적 보정 (2026-05)
+
+워크플로우 스킬이 산출하는 마크다운의 PlantUML 블록은 `_scripts/doc-save.sh` 가 자동으로 `plantuml-fix.py` 를 호출해 6+ 패턴을 결정적으로 보정 (LLM 호출 0회 / ~30ms). 주요 보정 / 회귀 차단:
+
+- 이중 fence (` ```plantuml ` 안에 `\`\`\`plantuml` 가 또 들어간 케이스) 평탄화
+- detect_kind 정밀도 — 메시지 화살표 ≥2 + actor/participant 면 sequence 확정 (database 같은 component 키워드를 sequence 안에서 아이콘으로 쓰는 경우 component 로 오분류 차단)
+- `rectangle` 도 component 신호로 인식 (Context 다이어그램 오분류 차단)
+- `_DECL_KEYWORDS` 확장 (rectangle/package/node/component/frame/artifact/usecase) — alias 가 미정의로 잡혀 중복 participant 추가되던 회귀 차단
+- decl_with_label regex 가 unquoted 라벨도 인식 — `actor 엔지니어 as User` 같은 한글 라벨 + alias 패턴
+
+### 6.7 doc-save post-save sanity
+
+`doc-save.sh` 가 PUT 200 후 저장된 마크다운에 대해 가벼운 sanity 검사:
+
+- `@startuml` / `@enduml` 개수 불일치
+- ` ```plantuml ` 코드펜스 수가 `@startuml` 보다 많음
+- "미작성 — critical" placeholder 잔여 (assemble 단계 회귀 신호)
+
+검사 실패는 stderr 경고 + 응답 JSON `warnings` 로 노출. PUT 자체는 성공 (호출자가 결정).
+
 ---
 
 ## 7. 워크플로우 상태 관리 (State Machine)

@@ -295,10 +295,12 @@ Agent-Service의 LLM 오케스트레이션 스킬(`vos_collect`, `usecase_analyz
 
 이전 설계에는 두 개 메커니즘만 있었다:
 
-- **Scratchpad (턴 내부)**: 한 턴 내 ReACT 추론에서 Thought/Action/Observation 누적. 턴 경계를 넘으면 휘발.
-- **Option C 자동 위임 (backward)**: 하위 스킬이 선행 산출 부족을 발견하면 상위 스킬을 직접 호출. 예: `requirement_refine` → `usecase_analyze` → `vos_collect`.
+- **Scratchpad (턴 내부)**: 한 턴 내 ReACT 추론에서 Thought/Action/Observation 누적. 턴 경계를 넘으면 휘발. *(현재는 OpenCode 서버가 ReACT 루프를 담당하므로 GoJIRA 측 별도 구현 없음 — OpenCode 의 세션 message history 가 동일 역할.)*
+- **Option C 자동 위임 (backward)**: 하위 스킬이 선행 산출 부족을 발견하면 상위 스킬을 직접 호출. 예: `requirement_refine` → `usecase_analyze` → `vos_collect`. *(SKILL.md 안에 자연어로 명시되고 OpenCode 가 디스패치. 옛 Python executor 의 `prerequisitesRan` 자동 전파 로직은 폐기.)*
 
 이 두 가지만으로는 **"이미 완료된 단계를 반복 호출"** 오류를 막지 못했다. 예: `vos_collect` 성공 후 사용자가 "계속" 이라고 하면, LLM 은 직전 메시지 맥락만 보고 다시 `vos_collect` 를 호출하는 사례 발생.
+
+> **2026-05 갱신** — 이 두 메커니즘은 OpenCode bridge 전환 이후 *책임 위치만* 옮겨졌고 (Agent-Service Python executor → OpenCode + SKILL.md 자연어), 본 절의 forward/backward 보완 관계는 그대로 유효. 추가로 `drift-check` (각 stage 의 입력 hash baseline) 가 "이미 완료된 단계 재호출" 의 결정적 차단 레이어로 작동 — `_scripts/drift-check.py` 가 NO-BASELINE/CLEAN/DRIFT 판정으로 사용자에게 옵션 메뉴를 명시 제시. 자세한 인프라는 [docs/skill-infrastructure-v3.md](./skill-infrastructure-v3.md) 참조.
 
 ### 10.2 채택 — 워크플로우 상태 주입 (Belief State)
 

@@ -12,7 +12,7 @@ GoJIRA는 JIRA Datacenter 호환 프로젝트 관리 플랫폼으로, AI 기반 
 |--------|------|------|------|
 | Platform-API | Go | :9000 | 인증, 계정, 조직, 문서저장소, WebSocket |
 | GoJIRA-API | Go | :9001 | 이슈 CRUD, JIRA DC 동기화, Agent 라우팅 |
-| Agent Service | Python | :9002 | ReACT 오케스트레이터, Skill 실행, SSE 스트리밍 |
+| Agent Service | Python | :9002 | OpenCode bridge 어댑터 (세션 매핑 + SSE 번역). LLM 호출·ReACT·스킬 디스패치는 OpenCode(:4096) 가 담당 |
 | Platform-App | React | :3000 | 프론트엔드 (ProjectMap, IssueList, DocEditor 등) |
 | GoJIRA-App | React | - | GoJIRA 전용 UI 컴포넌트 |
 
@@ -81,10 +81,17 @@ gantt
     BroadcastChannel + ui_navigate       :done, p46d, 2026-04, 2026-04
     19개 Skill 완성 (vos/projdesc 추가)   :done, p46e, 2026-04, 2026-04
 
-    section Agent Phase 5 - 확장 (미착수)
-    외부 MCP 서버 연동                   :p5a, 2026-05, 2026-06
-    Skill 핫 리로드                      :p5b, 2026-05, 2026-06
-    문서 생성 Skill                       :p5c, 2026-06, 2026-07
+    section Agent Phase 5 - OpenCode 전환 (완료)
+    Agent-Service ReACT 폐기 + OpenCode bridge 단일 모드 :done, p5a, 2026-04, 2026-04
+    워크플로우 5 스킬 v2 + critique loop  :done, p5b, 2026-04, 2026-04
+    drift-check + 결정적 조립 + plantuml-fix :done, p5c, 2026-04, 2026-05
+    채팅 라이프사이클 안정화 (persistent SSE + TUI input + endTurn 분리) :done, p5d, 2026-05, 2026-05
+    LLM 게이트웨이 단일화 (Platform-API /LLM/call + ENC: 시크릿) :done, p5e, 2026-04, 2026-05
+
+    section Agent Phase 6 - 확장 (미착수)
+    외부 MCP 서버 연동                   :p6a, 2026-06, 2026-07
+    Skill 핫 리로드                      :p6b, 2026-06, 2026-07
+    doc → 이슈 양방향 sync               :p6c, 2026-06, 2026-08
 
     section Agent 고도화 (미착수)
     Python 오케스트레이터 상태 머신       :p6a, 2026-06, 2026-08

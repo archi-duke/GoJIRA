@@ -154,7 +154,10 @@ graph TB
     {code}/edit/pr                 # 편집 -> PR 생성
     {code}/edit/heartbeat          # 세션 유지 (TTL 갱신)
   Git/users                        # Gitea 사용자 목록
-  LLM/call                         # LLM 게이트웨이 (다른 서비스가 호출)
+  LLM/call                         # LLM 게이트웨이 — Platform-API 가 단독으로 키/모델/엔드포인트 보유.
+                                   # GoJIRA-API/Agent-Service 는 키 없이 이 엔드포인트만 호출.
+                                   # llm.json 의 active 모델 + ${VAR} 치환 + ENC: 시크릿 복호화 (메모리만).
+                                   # 사내 LLM(gpt-oss + X-Dep-Ticket) / OpenAI 호환 동시 지원, _disabled_* 로 비활성 설정 보존.
   Project/{code}/archive           # 프로젝트 아카이브 (zip 백업 + 정리)
 ```
 
@@ -328,121 +331,88 @@ VOS (Value Objective Stream)
 
 ## 5. Agent-Service 설계
 
-> Python 3.9+, FastAPI, 포트 :9002
+> Python 3.9+, FastAPI, 포트 `:9002` — **OpenCode bridge 단일 모드**.
+> 본 절은 Platform-API 관점의 요약. 상세는 [docs/design-agent.md](./design-agent.md) 가 권위 문서.
 
-### 5.1 라우트 구조
+### 5.1 역할 — OpenCode 슬림 어댑터
+
+이전엔 Agent-Service 가 자체 ReACT 2-pass 루프를 돌렸으나, 단일 LLM 벤더 종속 회피 + 모델 교체 가능성 + 사내 정책 대응을 위해 OpenCode 서버(`:4096`, 사용자 PC 로컬) 가 LLM 호출·ReACT·스킬 디스패치를 담당하도록 전환됨. Agent-Service 는 다음만 수행:
+
+- 세션 매핑 — Mongo `agent_sessions` 의 `gojiraSessionId ↔ openCodeSessionId`
+- 메시지 전달 — `POST /Agent/chat/send` → OpenCode `POST /session/{id}/prompt_async`
+- SSE 이벤트 번역 — OpenCode `/event` SSE → UI 가 기대하는 포맷 (`session/thinking/reasoning/tool_call/tool_result/content/user_message/done/error`)
+- 세션 영속화 — 매 턴 done 직후 OpenCode 의 message info+parts 를 Mongo 에 그대로 push (history 복원용)
+- TUI 입력 반영 — OpenCode TUI 에서 사용자가 직접 입력한 메시지도 채팅창에 user 버블로 표시 (translator 의 `user_message` SSE 이벤트)
+
+### 5.2 라우트 구조
 
 ```
 /api/v2/Agent/
-  POST   chat               # 동기 채팅 (ReACT 루프)
-  POST   chat/stream         # SSE 스트리밍 채팅 (2-pass ReACT)
-  POST   assist              # 페이지별 보조 기능
-  GET    tools               # 사용 가능한 도구 목록
-  GET    sessions            # 세션 목록 (최근 50개)
-  GET    session/{id}        # 세션 상세
-/health                      # 헬스체크
+  POST   chat/send                  # 메시지 전달 + 백그라운드 subscriber 시작
+  POST   chat/stream                # 레거시 — chat/send + events 조합
+  GET    session/{id}/events        # SSE 스트림 (event_buffer 에서 읽기, lastEventId 재연결 지원)
+  GET    session/{id}/state         # 폴링용 경량 상태 (finish/active/hasPermissionPending/lastActivityAt)
+  GET    session/{id}               # Mongo 영속 메시지 조회 (loadSession)
+  POST   session/{id}/cancel        # 진행 중 abort
+  GET    sessions                   # 세션 목록 (최근 50개, title 추출)
+  DELETE session/{id}, sessions     # 세션 삭제
+  POST   session/{id}/terminal      # OpenCode TUI 열기 헬퍼
+/health                             # 헬스체크
 ```
 
-### 5.2 ReACT 2-pass 아키텍처
+### 5.3 채팅 SSE 라이프사이클
 
 ```mermaid
 sequenceDiagram
-    participant Client as 프론트엔드
-    participant Agent as Agent-Service
-    participant LLM as LLM API
-    participant Skill as 스킬 실행기
+    participant UI as AgentChat (SPA)
+    participant AS as Agent-Service
+    participant Buf as event_buffer (메모리)
+    participant Sub as _subscribe_loop
+    participant OC as OpenCode 서버
+    participant LLM as LLM 게이트웨이 (Platform-API)
 
-    Client->>Agent: POST /chat/stream (SSE)
-    Agent-->>Client: event: session (세션 ID)
+    UI->>AS: POST /Agent/chat/send {message}
+    AS->>Sub: ensure_subscriber(persistent)
+    AS->>OC: /session/{id}/prompt_async
+    OC-->>Sub: /event SSE 스트림 (메시지 단위)
+    Sub->>Sub: translate → push(event_type, data)
+    Sub->>Buf: append (in-memory, lastEventId 채번)
 
-    loop 최대 10턴
-        Agent-->>Client: event: thinking
-        Agent->>LLM: Pass 1: tool_choice=none (추론만)
-        LLM-->>Agent: 사고 과정 텍스트
-        Agent-->>Client: event: reasoning (사고 과정)
-
-        Agent->>LLM: Pass 2: tool_choice=auto (도구 호출)
-        LLM-->>Agent: tool_calls 또는 최종 답변
-
-        alt 도구 호출 있음
-            loop 각 tool_call
-                Agent-->>Client: event: tool_call (도구명, 파라미터)
-                Agent->>Skill: execute_skill(name, args)
-                Skill-->>Agent: 실행 결과
-                Agent-->>Client: event: tool_result (결과 요약)
-            end
-        else 최종 답변
-            Agent-->>Client: event: content (텍스트 청크)
-            Agent-->>Client: event: done (전체 응답)
-        end
+    UI->>AS: GET /session/{id}/events
+    loop ES 유지 (turn 종료 후에도)
+        Buf-->>UI: SSE replay since lastEventId
     end
+
+    OC->>LLM: POST /api/v2/LLM/call (사내/외부 모델)
+    LLM-->>OC: 응답
+    OC-->>Sub: message.updated finish=stop
+    Sub->>AS: _save_to_mongo (info + parts 그대로)
+    Sub->>Buf: push("done", ...)
+    Buf-->>UI: event: done
+
+    Note over UI,OC: TUI 에서 사용자가 직접 입력해도 동일 subscriber 가 user_message 이벤트 yield → UI 는 user 버블로 표시
 ```
 
-### 5.3 의도 분류
+### 5.4 핵심 컴포넌트
 
-| 분류 | 조건 | 실행 방식 |
-|------|------|-----------|
-| simple | 단일 질문, 단순 조회 | ReACT 단일 루프 (`agent_loop`) |
-| complex | 복합 키워드 + 연결어 ("분석하고 작성해줘") | Stage Machine 오케스트레이션 |
+| 컴포넌트 | 파일 | 책임 |
+|---|---|---|
+| `event_buffer._subscribe_loop` | `opencode_bridge/event_buffer.py` | OpenCode `/event` SSE 를 persistent 하게 구독 — turn 종료 후에도 다음 입력 대기. done 마다 `_save_to_mongo` |
+| `translator.translate` | `opencode_bridge/translator.py` | OpenCode 이벤트(`message.updated` / `message.part.updated` / `message.part.delta`) 를 UI 포맷으로 변환. messageID 는 `part.messageID` 에 있음. 미등록 assistant 의 terminal-finish 는 done 으로 수용하는 안전망 포함 |
+| `event_buffer._save_to_mongo` | 동 | OpenCode message info + parts 를 Mongo `agent_sessions.messages` 로 push. user/assistant 모두 저장, ocMessageId / content 기반 dedup. 단, done 이벤트는 save 이후 buf push → 프론트 loadSession 이 stale Mongo 를 읽는 race 차단 |
+| `router.sse_stream` | `opencode_bridge/router.py` | event_buffer 를 polling 해서 lastEventId 이후 이벤트 yield. done 으로 stream 종료하지 않음 — turn 사이 TUI 이벤트도 같은 ES 로 전달 |
+| `router.get_session_state` | 동 | 경량 상태 조회 — finish/active/hasPermissionPending/lastActivityAt/assistantMsgId. UI 가 SSE 침묵 시 폴백으로 사용 |
 
-**Stage Machine 흐름:** PLANNING -> RESEARCHING -> EXECUTING -> VALIDATING -> COMPLETED  
-실패 시 ReACT 루프로 자동 fallback한다.
+### 5.5 스킬 디스패치
 
-### 5.4 스킬 시스템
+스킬은 `.claude/skills/<name>/SKILL.md` 단일 파일에 bash/curl 인라인. OpenCode 가 기동 시 자동 scan 해 SKILL description 매칭으로 디스패치. 자세한 워크플로우 정책은 [docs/design-workflow.md](./design-workflow.md), 스킬 인프라(drift-check, 결정적 조립, plantuml-fix 등)는 [docs/skill-infrastructure-v3.md](./skill-infrastructure-v3.md) 참조.
 
-스킬은 `SKILL.md` 파일로 선언적으로 정의되며, Go/Python 양쪽에서 로드한다.
+### 5.6 세션 영속화
 
-| 스킬 | 설명 |
-|------|------|
-| project_query | 프로젝트 목록 조회 |
-| issue_query | 이슈 조회 (타입/프로젝트 필터) |
-| issue_create_vos / _feature / _requirement / _design | 타입별 이슈 생성 (subkey 자동 부여) |
-| issue_update | 이슈 수정 |
-| issue_delete | 이슈 삭제 |
-| issue_link | 이슈 관계 설정 (JIRA DC v2 표준 포맷) |
-| issue_analyze | 이슈 관계 분석 (contain 체인 검증) |
-| satam_analyze | SATAM 매트릭스 분석 |
-| schedule_analyze | 일정 분석 |
-| doc_list | 문서 목록 조회 |
-| doc_summarize | 문서 요약 (LLM 기반) |
-| doc_diff | 문서 변경 비교 |
-| doc_history | 커밋 이력 조회 |
-| pr_list / pr_create | PR 조회/생성 |
-| ui_navigate | UI 네비게이션 |
-| projdesc_interview | project-description.md 인터뷰 (멀티턴 질문/답변 수집) |
-| projdesc_generate | 인터뷰 답변 또는 기존 본문에서 project-description.md 생성·자동 저장 |
-| vos_collect | project-description.md → VOS 이슈 자동 수집 |
-| usecase_analyze | VOS+description → Use Case/Feature 도출, business/use-cases.md 작성, VOS-Feature contains 연결 |
-| requirement_refine | Feature/use-cases → FR/QA/CNST 도출, business/requirements.md 작성, Feature-Requirement contains 연결 |
-| reset_project | (개발용) 프로젝트 이슈+문서 초기화 |
-
-**워크플로우 자동 위임 구조** (각 스킬이 부족한 선행 조건을 직접 호출):
-- `requirement_refine`: Feature 없으면 → `usecase_analyze` 직접 호출
-- `usecase_analyze`: VOS 없으면 → `vos_collect` 직접 호출
-- `vos_collect`: project-description 없으면 → `suggestSkill: projdesc_interview` 반환 (멀티턴이라 자동 위임 불가, LLM이 처리)
-- 결과의 `prerequisitesRan` 필드에 자동 실행된 선행 단계 누적 기록
-
-**로딩 순서:**
-1. `GOJIRA_SKILLS_DIR` 환경변수
-2. 상위 디렉토리의 `GoJIRA-API/skills/` 탐색
-3. 각 `SKILL.md`에서 name, description, parameters 파싱
-
-### 5.5 세션 관리
-
-- MongoDB `agent_sessions` 컬렉션에 저장
-- 최근 **20개** 메시지만 LLM 컨텍스트에 포함 (토큰 관리)
-- 세션별 context 객체로 프로젝트 코드 등 메타데이터 유지
-
-### 5.6 진행 스트리밍 (core/progress.py)
-
-- `contextvars` 기반 async 큐. 스트리밍 라우터가 `bind_queue()`로 큐를 바인딩한 뒤 `execute_skill()` 호출 → 스킬 내부에서 `await emit_progress(stage, message, **extra)` 호출이 SSE `progress` 이벤트로 즉시 채팅에 노출
-- 큐 미주입(REST/배치 호출) 시 no-op → 스킬은 호출 컨텍스트에 무관하게 동일하게 동작
-- `streaming.py`가 `execute_skill`을 task로 띄우고 `asyncio.wait`로 큐를 폴링하여 메시지 수신 즉시 yield (위임된 sub-skill의 emit도 그대로 흐름)
-
-### 5.7 인터뷰 가드 (LLM 응답 강제)
-
-- `streaming.py`가 Pass 1 추론 결과를 검사하여 사용자에게 질문하는 형태(`?` + 질문 마커: "여쭤볼게요"/"알려주세요"/"진행할까요" 등)면 **Pass 2 도구 호출 단계를 건너뛰고** 추론 내용을 그대로 응답으로 종료
-- 목적: LLM이 사용자에게 질문한 직후 같은 턴에 임의 답변(`"없음"` 등)으로 `projdesc_generate`를 호출하던 문제 차단
+- Mongo `agent_sessions` 컬렉션 — `{_id: gojiraSessionId, openCodeSessionId, userId, messages, createdAt, updatedAt}`
+- messages 구조: `[{role:"user", content, timestamp, ocMessageId?}, {role:"assistant", ocMessageId, info, parts, timestamp}, ...]`
+- 채팅창 발송분(user) 과 OC echo 의 dedup 은 content 기반 (`pending_user_contents` 카운트)
+- loadSession 은 user 발송분과 assistant 영속분을 그대로 그려주므로 UI 측 history 와 1:1 매칭
 
 ---
 
