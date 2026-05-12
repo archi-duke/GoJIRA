@@ -53,6 +53,12 @@ def detect_kind(body: str) -> str:
     외부 사용자로 등장) 을 sequence 로 오인하면 자동 declare 가 위험하므로
     `package` / `node` / `[Component]` / `database` 가 있으면 component 로 분류.
     """
+    # 0-pre. deployment 전용 키워드 (`node "..."` / `artifact "..."`) 는 sequence 에
+    # 절대 안 나옴 — 있으면 component(deployment) 로 확정. 메시지 화살표 휴리스틱보다 우선.
+    # (cloud 는 sequence 안에 LLM 이 잘못 쓰는 케이스가 있어 단독 신호로 안 씀.)
+    if re.search(r"^\s*(?:node|artifact)\s+\"", body, re.MULTILINE):
+        return "component"
+
     # 0. 메시지 화살표 ("A -> B: text") 가 2개 이상이면 sequence 로 확정.
     # database/rectangle 같은 component 키워드를 sequence 안에서 아이콘으로 쓰는
     # 케이스 (legit) 가 있어서, component 신호만 보면 sequence 가 잘못 분류되고
