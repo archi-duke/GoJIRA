@@ -375,7 +375,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
       return;
     }
     const msg = tmpl.replace('{name}', project.name).replace('{code}', projectCode);
-    const url = `http://localhost:3001/?mode=agent&autoMessage=${encodeURIComponent(msg)}&project=${encodeURIComponent(projectCode)}&newSession=1`;
+    const url = `/?mode=agent&autoMessage=${encodeURIComponent(msg)}&project=${encodeURIComponent(projectCode)}&newSession=1`;
     window.open(url, 'gojira-agent', 'width=480,height=720');
   }
 

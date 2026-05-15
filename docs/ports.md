@@ -8,7 +8,10 @@
 | 환경 | MongoDB / Gitea | OpenCode | Backend / Frontend |
 |---|---|---|---|
 | **로컬 개발 (Mac)** | Docker — 같은 호스트 | 같은 호스트 | 같은 호스트 |
+| **Mac + Parallels Ubuntu 게스트** | Mac (host IP, 예: `10.211.55.2`) | Mac (host IP, 예: `10.211.55.2`) | 게스트 안 |
 | **사내망 (Windows + WSL)** | **별도 사내 서버** | **WSL 안 (사용자 PC)** | WSL 안 (사용자 PC) — 가정, 추후 확정 |
+
+OpenCode 는 어디서든 띄울 수 있다 (단일 호스트 / 게스트→호스트 / 별도 서버 / 사내 폐쇄망 컨테이너). Agent-Service 가 `OPENCODE_SERVER_URL` 환경변수로 위치를 지정한다. 외부 노출 시 `opencode serve --hostname 0.0.0.0 --port 4096` 으로 띄워야 LAN/게스트에서 도달 가능.
 
 사내망에서는 MongoDB / Gitea 의 호스트명이 `localhost` 가 아니므로 환경변수 (`*_URL`) 에 실제 사내 호스트를 명시한다. cross-service `_URL` 변수 표는 본 문서 아래 참조.
 
