@@ -5,6 +5,8 @@ const config = {
   GOJIRA_API: process.env.REACT_APP_GOJIRA_API || 'http://localhost:9001/api/v2',
   // Agent Service (Python, 스트리밍)
   AGENT_API: process.env.REACT_APP_AGENT_API || 'http://localhost:9002/api/v2',
+  // GoJIRA-App base URL — Module Federation remote 와 채팅 popup 용. 빌드 시점에 inline 됨
+  GOJIRA_APP: process.env.REACT_APP_GOJIRA_APP_REMOTE || 'http://localhost:3001',
   // SSO 설정
   SSO_URL: process.env.REACT_APP_SSO_URL || 'https://10.227.37.90:443',
   USE_SSO: false,

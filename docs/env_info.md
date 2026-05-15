@@ -145,7 +145,7 @@ pydantic-settings 가 cwd `.env` + OS 환경변수 모두 읽음. 필수 4개 �
 | GOJIRA_MONGO_URI | 필수 | `config.py:15` | Mongo 연결 |
 | GOJIRA_API_URL | 필수 | `config.py:16` | GoJIRA-API peer (`/api/v2` 포함) |
 | GOJIRA_PLATFORM_API | 필수 | `config.py:17` | Platform-API peer (`/api/v2` 포함) |
-| OPENCODE_SERVER_URL | 필수 | `config.py:18` | OpenCode `serve` URL (`http://127.0.0.1:4096` 권장 — IPv4 명시) |
+| OPENCODE_SERVER_URL | 필수 | `config.py:18` | OpenCode `serve` URL. 호스팅 위치별로 다름 — 단일 호스트: `http://localhost:4096` / 게스트 VM ↔ 호스트의 OpenCode: `http://<host-ip>:4096` (Parallels 공유망 Mac = `10.211.55.2`) / 별도 서버 또는 폐쇄망 컨테이너: `http://<opencode-host>:4096`. OpenCode 는 cwd 의 `opencode.json` 을 읽으므로 **반드시 repo 디렉토리에서** `opencode serve --hostname 0.0.0.0 --port 4096` 으로 실행 (외부 노출 시 `--hostname 0.0.0.0` 필수) |
 | AGENT_SERVICE_PORT | 선택 | `config.py:21` | 기본 9002 |
 | GOJIRA_MONGO_DB | 선택 | `config.py:22` | 기본 `gojira` |
 | OPENCODE_SERVER_USERNAME | 선택 | `config.py:23` | OpenCode Basic Auth user. 기본 `opencode` |

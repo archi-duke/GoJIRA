@@ -422,7 +422,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
       const left = window.screenX - chatW - 10;
       const top = window.screenY;
       chatWinRef.current = window.open(
-        `http://localhost:3001/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(autoMsg)}`,
+        `/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(autoMsg)}`,
         'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
       );
       return;
@@ -457,7 +457,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
           const left = window.screenX - chatW - 10;
           const top = window.screenY;
           chatWinRef.current = window.open(
-            `http://localhost:3001/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
+            `/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
             'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
           );
         }
@@ -486,7 +486,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
               const left = window.screenX - chatW - 10;
               const top = window.screenY;
               chatWinRef.current = window.open(
-                `http://localhost:3001/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
+                `/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
                 'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
               );
             }
