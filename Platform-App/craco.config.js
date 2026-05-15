@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { ModuleFederationPlugin } = require('webpack').container;
 
 module.exports = {
@@ -7,7 +8,7 @@ module.exports = {
         new ModuleFederationPlugin({
           name: 'platformApp',
           remotes: {
-            gojiraApp: 'gojiraApp@http://localhost:3001/remoteEntry.js',
+            gojiraApp: `gojiraApp@${process.env.REACT_APP_GOJIRA_APP_REMOTE || 'http://localhost:3001'}/remoteEntry.js`,
           },
           shared: {
             react: { singleton: true, requiredVersion: '^19.2.4' },
