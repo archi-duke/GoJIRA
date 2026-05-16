@@ -45,6 +45,7 @@ func main() {
 	db.InitNoticeIndexes()
 	db.InitDocRepoIndexes()
 	db.InitEditSessionIndexes()
+	db.InitOpencodeInstanceIndexes()
 	db.InitNotificationIndexes()
 	db.SeedAccountData()
 

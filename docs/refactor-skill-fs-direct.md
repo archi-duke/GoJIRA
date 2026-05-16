@@ -248,6 +248,18 @@ UI (DocEditor) ──HTTP──> Platform-API ──┘ (UI 흐름은 그대로)
 
 ## 7. Scale-out 설계 — OpenCode 인스턴스 운영
 
+> **상태 (2026-05-16)**: 단계 A (7.2 / 7.3 / 7.4 / 7.8) 완료. 단계 B (7.5 Agent-Service 라우팅 전환 / 7.6 헬스체크) 보류.
+>
+> 단계 A 산출물:
+> - `Platform-API/db/opencode_instance.go` — `opencodeInstances` 컬렉션 + 인덱스(`userId` unique / `status+lastHeartbeat`) + Upsert/Find/Delete/NextOpencodePort 헬퍼
+> - `Platform-API/main.go` — `InitOpencodeInstanceIndexes` 호출 추가 (재빌드 후 로그에서 `opencodeInstance indexes initialized` 확인)
+> - `deploy/systemd/opencode@.service` + `deploy/systemd/opencode-user.env.example`
+> - `deploy/scripts/gojira-user-add.sh` / `gojira-user-remove.sh` (mongosh 경유, root 권한 가정)
+> - `deploy/scripts/dev-opencode-register.sh` + `start-all.bat` 의 OpenCode 등록 한 줄 (개발 환경에서도 동일 컬렉션에 1건 동기화)
+> - `deploy/DEPLOY.md` ⑦-1 절 신설 (운영자용 설치 절차)
+>
+> 단계 B 에서 할 일: Agent-Service 의 `_base_url()` 가 `OPENCODE_URL` env 대신 `FindActiveOpencodeInstance(userId)` 결과를 사용하도록 전환. 헬스체크 모듈 추가 (5분 cron 또는 Platform-API goroutine). 자세한 설계는 § 7.5 / 7.6 그대로.
+
 ### 7.1 핵심 원칙
 
 - 사용자당 OpenCode 인스턴스 1개 (Q6) — 세션/메모리/포트 격리

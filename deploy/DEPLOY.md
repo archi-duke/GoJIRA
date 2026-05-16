@@ -256,6 +256,66 @@ http://${GOJIRA_APP_SERVER}:${GOJIRA_APP_PORT}       # GoJIRA-App (이슈/프로
 
 ---
 
+## ⑦-1. (선택) 사용자별 OpenCode 인스턴스 등록
+
+> 단계 A 구현 완료, 단계 B (Agent-Service 라우팅 전환) 활성화 시 실제 사용됨. 지금 등록해두어도 무해.
+
+### 사전 준비
+
+```bash
+# 1) opencode 바이너리를 시스템 경로에 배치 (운영자 책임)
+sudo install -m 755 /path/to/opencode /usr/local/bin/opencode
+opencode --version
+
+# 2) mongosh CLI 설치 (등록 스크립트가 사용)
+sudo apt install -y mongodb-mongosh
+
+# 3) systemd template unit 설치
+sudo install -m 644 deploy/systemd/opencode@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# 4) 환경파일 디렉토리
+sudo install -d -m 755 /etc/gojira
+```
+
+### 사용자 추가
+
+```bash
+sudo ./deploy/scripts/gojira-user-add.sh batman
+# → /etc/gojira/opencode-batman.env 생성 (포트는 Mongo 의 최대값+1, 비어있으면 4096)
+# → Mongo opencodeInstances 에 {userId, host, port, status:'active'} upsert
+# → systemctl enable --now opencode@batman.service
+#
+# 옵션:
+#   --no-start          systemctl 호출 생략 (env + Mongo 등록만)
+#   GOJIRA_NODE_HOST=…  노드 분산 시 호스트 주소 명시 (default localhost)
+#   OPENCODE_BIN=…      opencode 바이너리 경로 override (default /usr/local/bin/opencode)
+```
+
+상태 확인:
+
+```bash
+systemctl status opencode@batman.service
+journalctl -u opencode@batman.service -f
+mongosh "${MONGO_URI}" --eval "db.getSiblingDB('gojira').opencodeInstances.find().pretty()"
+```
+
+### 사용자 제거
+
+```bash
+sudo ./deploy/scripts/gojira-user-remove.sh batman
+# → systemctl disable --now / env 파일 삭제 / Mongo 레코드 삭제
+# → worktree (${GOJIRA_REPOS_DIR}/.../worktrees/batman) 는 보존 — 명시적으로 삭제하려면 별도 절차
+```
+
+### 미적용 항목 (단계 B 에서)
+
+- Agent-Service 가 `OPENCODE_URL` env 가 아니라 `opencodeInstances` 컬렉션을 조회해 라우팅하도록 전환
+- 헬스체크 (cron 또는 Platform-API 의 백그라운드 goroutine) — status=down 자동 표시
+- 자세한 설계: `docs/refactor-skill-fs-direct.md` § 7
+
+---
+
 ## ⑧ 운영
 
 ### 일상 작업
