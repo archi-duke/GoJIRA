@@ -36,6 +36,9 @@ services:
       dockerfile: deploy/images/platform-api/Dockerfile
     image: gojira/platform-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    # 호스트 사용자 권한으로 실행 — ${GOJIRA_REPOS_DIR} bind mount fs 권한 일치.
+    # 향후 OpenCode 스킬이 같은 디렉토리를 직접 read/write 할 때도 권한 충돌 없음.
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT:-9000}}:9000"
     environment:
@@ -56,7 +59,9 @@ services:
       PLATFORM_LLM_TICKET: "${PLATFORM_LLM_TICKET:-}"
       PLATFORM_LLM_USER_ID: "${PLATFORM_LLM_USER_ID:-}"
     volumes:
-      - platform-repos:/data/repos
+      # 호스트 bind mount — Platform-API 와 (향후) OpenCode 가 같은 fs 공유.
+      # ${GOJIRA_REPOS_DIR} 는 호스트 측 절대/상대 경로 (compose 가 .env 에서 해석).
+      - ${GOJIRA_REPOS_DIR:-../repos}:/data/repos
       # 사내 LLM swap 위해 llm.json 외부 주입 (없으면 이미지에 내장된 default 사용)
       - ./config/llm.json:/app/config/llm.json:ro
 
@@ -135,5 +140,5 @@ services:
     ports:
       - "${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT:-3001}}:3001"
 
-volumes:
-  platform-repos:
+# named volume 은 더 이상 사용하지 않음 — ${GOJIRA_REPOS_DIR} 호스트 bind mount 로 전환.
+# 기존 platform-repos volume 데이터가 있다면 호스트 디렉토리로 미리 이전 후 `docker volume rm deploy_platform-repos`.

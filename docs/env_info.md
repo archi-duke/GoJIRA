@@ -34,7 +34,7 @@
 | PLATFORM_GITHUB_ORG | 필수 | `config/config.go:50` | Gitea organization 이름 (예: `gojira`) |
 | GITHUB_URL | 필수 | `config/config.go:51` | Gitea/GitHub base URL. 끝에 `/` 포함 |
 | GOJIRA_API_URL | 필수 | `config/config.go:52` | GoJIRA-API peer URL |
-| PLATFORM_REPO_DIR | 선택 | `config/config.go:57` | 기본 `./repos`. 로컬 git 워크트리 디렉토리 |
+| PLATFORM_REPO_DIR | 선택 | `config/config.go:57` | 기본 `./repos`. 컨테이너 내부의 bare clone + worktree 경로. deploy 환경에선 `deploy/images/platform-api/Dockerfile` 이 `/data/repos` 로 고정 — 호스트 측에서는 `GOJIRA_REPOS_DIR` 가 그 마운트의 호스트 경로 (§ 8.5 참조) |
 | SMTP_HOST/PORT/USER/PASS/FROM | 선택 | `config/config.go:60-70` | 메일 발송 사용 시. `SMTP_PASS` 는 `ENC:` 형식 |
 | OPENAI_API_KEY | 선택 | `config/config.go:80`, `llm/client.go:43` | `llm.json` 의 `${OPENAI_API_KEY}` 치환 — 활성 LLM 이 OpenAI 일 때만 필요. `ENC:` 형식 |
 | PLATFORM_LLM_TICKET | 선택 | `config/config.go:80` | 사내 LLM (Code Mate 등) `X-Dep-Ticket`. `ENC:` 형식. `_disabled_Internal` 사용 시 필수 |
@@ -254,6 +254,18 @@ GoJIRA 워크플로우 에이전트 정의 (시스템 프롬프트 + tools). 8KB
 | Gitea host | `10.227.37.92:44350` | Docker 또는 native install — 둘 다 OK. `FixReviewState` 는 docker 미발견 시 자동 skip |
 | Gitea org | `gojira` (또는 환경별) | Platform-API `.env` 의 `PLATFORM_GITHUB_ORG` 와 일치 필요 |
 | Gitea PAT | 토큰 | scope: `repo` + `admin:org` (org webhook 등록용) |
+
+## 8.5 폐쇄망 배포 특화 (`deploy/.env`)
+
+`deploy/docker-compose.yml` 만 읽는 변수들. 컨테이너 내부 서비스 코드는 안 본다. 자세한 셋업은 [deploy/DEPLOY.md](../deploy/DEPLOY.md) 참조.
+
+| 키 | 종류 | 사용 위치 | 설명 |
+|---|---|---|---|
+| GOJIRA_REPOS_DIR | 필수(권장) | `docker-compose.yml` volumes | 호스트 측 bare clone + worktree 디렉토리. 컨테이너의 `/data/repos` 로 bind mount. 폐쇄망은 절대경로 권장 (예: `/var/lib/gojira/repos`). 호스트에 미리 mkdir + `chown ${UID}:${GID}` 필요 |
+| UID / GID | 필수(권장) | `docker-compose.yml` `user:` | Platform-API 컨테이너 실행 user. 호스트 `id -u` / `id -g` 값. bind mount 권한 일치 목적. 미설정 시 fallback `1000:1000` |
+| GOJIRA_REPOS_DIR 와 OpenCode 의 약속 | (Phase 1+) | 향후 스킬이 fs 직접 access | OpenCode 측 스킬이 같은 디렉토리를 직접 read/write 할 때 (`docs/refactor-skill-fs-direct.md` 참조) 같은 환경변수 이름으로 공유 — 호스트 한 곳에서 관리 |
+
+> **컨테이너 내부 변수와의 관계**: `PLATFORM_REPO_DIR` 은 컨테이너 내부 fs 경로 (Dockerfile 의 `ENV PLATFORM_REPO_DIR=/data/repos` 로 고정). `GOJIRA_REPOS_DIR` 는 그 마운트의 **호스트 측** 경로. 한 마운트의 양 끝이라 둘 다 노출하지 않고 호스트 측만 `.env` 에서 관리.
 
 ## 9. 시크릿 마스터 키 (`GOJIRA_ENC_KEY`)
 

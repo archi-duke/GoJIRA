@@ -443,6 +443,73 @@ func DocRepoInitFilesHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GET /DocRepo/{code}/worktree-info — fs 직접 read 하는 스킬용 메타정보.
+// EditSession lock 잡지 않음 (read 전용). worktree 만 보장.
+// 응답: { owner, repo, branch, worktreeRelPath }
+// 호스트 측 절대경로 = ${GOJIRA_REPOS_DIR}/${worktreeRelPath}
+func DocRepoWorktreeInfoHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	userId := r.Header.Get("X-User-Id")
+	if userId == "" {
+		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if _, _, err := github.EnsureWorktree(owner, name, userId); err != nil {
+		respondError(w, http.StatusInternalServerError, "worktree 생성 실패: "+err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"owner":           owner,
+		"repo":            name,
+		"branch":          "docs/" + userId,
+		"worktreeRelPath": fmt.Sprintf("%s/%s.worktrees/%s", owner, name, userId),
+	})
+}
+
+// POST /DocRepo/{code}/notify-change — 스킬이 fs 직접 write 한 뒤 SSE broadcast 트리거.
+// body: {path, op?: "save" | "delete"}  (op 기본 "save")
+// UI DocEditor 가 변경 사실을 즉시 인지하도록 user_doc_update event 발사.
+func DocRepoNotifyChangeHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	userID := r.Header.Get("X-User-Id")
+	if userID == "" {
+		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+		Op   string `json:"op"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if body.Path == "" {
+		respondError(w, http.StatusBadRequest, "path 필요")
+		return
+	}
+	if body.Op == "" {
+		body.Op = "save"
+	}
+	BroadcastDocEvent(map[string]interface{}{
+		"type":        "user_doc_update",
+		"projectCode": code,
+		"user":        userID,
+		"path":        body.Path,
+		"branch":      "docs/" + userID,
+		"op":          body.Op,
+		"source":      "skill",
+	})
+	respondJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+}
+
 // POST /DocRepo/{code}/ensure-branch — 사용자 브랜치 없으면 main에서 자동 생성
 func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
@@ -1628,21 +1695,34 @@ func DocRepoEditStartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// holderKind — 기본 "ui" (backward compat). body 또는 query 로 "skill" 지정 가능.
+	holderKind := r.URL.Query().Get("holderKind")
+	if holderKind == "" && r.ContentLength > 0 {
+		var b struct {
+			HolderKind string `json:"holderKind"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		holderKind = b.HolderKind
+	}
+	if holderKind == "" {
+		holderKind = "ui"
+	}
+
 	// 만료된 세션 정리
 	db.ExpireStaleSessions(ctx, config.EditSessionTTL)
 
 	// 세션 lock 획득 시도
-	acquired, existingUser, err := db.AcquireEditSession(ctx, code, userID)
+	acquired, existingHolderKind, err := db.AcquireEditSession(ctx, code, userID, holderKind)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "세션 lock 획득 실패: "+err.Error())
 		return
 	}
 	if !acquired {
 		respondJSON(w, http.StatusConflict, map[string]interface{}{
-			"locked":       true,
-			"lockedBy":     existingUser,
-			"readOnly":     true,
-			"message":      fmt.Sprintf("다른 사용자(%s)가 편집 중입니다. 읽기 전용으로 열립니다.", existingUser),
+			"locked":     true,
+			"holderKind": existingHolderKind,
+			"readOnly":   true,
+			"message":    fmt.Sprintf("같은 사용자가 다른 도구(%s)로 편집 중입니다. 먼저 종료해 주세요.", existingHolderKind),
 		})
 		return
 	}
@@ -1659,6 +1739,10 @@ func DocRepoEditStartHandler(w http.ResponseWriter, r *http.Request) {
 		"userId":   userID,
 		"locked":   false,
 		"readOnly": false,
+		// owner/repo 는 fs 직접 access 하는 스킬이 worktree 절대경로 조합에 사용.
+		// 호스트 경로 = ${GOJIRA_REPOS_DIR}/<owner>/<repo>.worktrees/<userId>
+		"owner": owner,
+		"repo":  name,
 	})
 }
 

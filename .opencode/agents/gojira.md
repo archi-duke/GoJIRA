@@ -52,9 +52,17 @@ bash 실행 시 항상 맨 앞에 export 한다:
 export PROJECT_ROOT="/Users/dukekimm/Works/GoJIRA"
 export PLATFORM_API="http://localhost:9000/api/v2"
 export GOJIRA_API="http://localhost:9001/api/v2"
+# (Phase 1+) 스킬이 fs 직접 read/write 시 사용 — Platform-API 와 같은 디렉토리 공유.
+# Phase 0 시점엔 약속만 명문화. worktree 경로 컨벤션은 아래 참조.
+export GOJIRA_REPOS_DIR="${GOJIRA_REPOS_DIR:-${PROJECT_ROOT}/repos}"
 ```
 - 모든 쓰기 호출에 `X-User-Id: ${USER}` 헤더 필수
 - 스크립트 경로는 `${PROJECT_ROOT}/.claude/skills/_scripts/` 를 사용
+- worktree 경로 컨벤션 (스킬 fs 직접 접근):
+  - `${GOJIRA_REPOS_DIR}/<gitea-org>/<repo-name>.git/` — bare clone (Platform-API 관리, 스킬은 read 만)
+  - `${GOJIRA_REPOS_DIR}/<gitea-org>/<repo-name>.worktrees/${USER}/` — 사용자별 worktree (스킬 fs read/write 대상)
+  - 자세한 설계: `docs/refactor-skill-fs-direct.md` § 3.2
+- **세션 lock**: write 계열 스킬 (`doc-save.sh`) 은 holderKind="skill" 로 EditSession lock 을 잡는다. 같은 사용자가 UI 로 동시 편집 중이면 도구가 충돌 메시지를 반환하므로 그대로 사용자에게 보고하고 멈춰라. 작업 종료 시 반드시 `bash _scripts/_edit-release.sh ${CODE} ${USER}` 를 호출해 UI 사용을 풀어 주어야 한다 (호출 안 하면 30분 TTL 후 자동 해제).
 
 ## 🚨 스킬 우선 원칙
 

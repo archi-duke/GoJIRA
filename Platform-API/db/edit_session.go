@@ -63,13 +63,30 @@ func FindActiveSessionByUser(ctx context.Context, projectCode, userID string) (b
 	return result, nil
 }
 
-// AcquireEditSession 편집 세션 lock 획득 시도
-// 같은 사용자의 중복 세션만 방지 (다른 사용자는 독립 브랜치로 동시 작업 가능)
-func AcquireEditSession(ctx context.Context, projectCode, userID string) (acquired bool, existingUser string, err error) {
-	// 동일 사용자의 기존 활성 세션 확인
-	existing, err := FindActiveSessionByUser(ctx, projectCode, userID)
-	if err == nil && existing != nil {
-		// 동일 사용자 — 하트비트 갱신
+// AcquireEditSession 편집 세션 lock 획득 시도.
+//
+// 같은 user 의 active 세션 정책:
+//   - 같은 holderKind (예: ui ↔ ui, skill ↔ skill) : heartbeat 갱신 후 성공 (reentry 허용)
+//   - 다른 holderKind (예: ui ↔ skill)              : 거부 + 기존 holder 정보 반환
+//
+// 다른 user 는 worktree 가 .worktrees/<userId>/ 로 분리되어 race 가 없으므로 신경 쓰지 않는다.
+//
+// holderKind 는 "ui" 또는 "skill". 빈 문자열은 backward compat 으로 "ui" 취급.
+func AcquireEditSession(ctx context.Context, projectCode, userID, holderKind string) (acquired bool, existingHolderKind string, err error) {
+	if holderKind == "" {
+		holderKind = "ui"
+	}
+
+	existing, ferr := FindActiveSessionByUser(ctx, projectCode, userID)
+	if ferr == nil && existing != nil {
+		existingHK, _ := existing["holderKind"].(string)
+		if existingHK == "" {
+			existingHK = "ui" // 마이그레이션 기본값 — 기존 세션은 ui 로 간주
+		}
+		if existingHK != holderKind {
+			return false, existingHK, nil
+		}
+		// 같은 holderKind 의 reentry — 하트비트 갱신
 		id := existing["_id"]
 		now := time.Now()
 		EditSessions().UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{
@@ -79,11 +96,11 @@ func AcquireEditSession(ctx context.Context, projectCode, userID string) (acquir
 		return true, "", nil
 	}
 
-	// 새 세션 생성
 	now := time.Now()
 	_, err = EditSessions().InsertOne(ctx, bson.M{
 		"projectCode":   projectCode,
 		"userId":        userID,
+		"holderKind":    holderKind,
 		"status":        "active",
 		"lastHeartbeat": now,
 		"createdAt":     now,

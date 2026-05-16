@@ -55,6 +55,8 @@ cp .env.example .env
 | Gitea | `GITEA_SERVER` | 사내 Gitea host:port |
 | | `PLATFORM_GITHUB_TOKEN` | Gitea PAT (scope: `repo` + `admin:org`) |
 | | `PLATFORM_GITHUB_ORG` | Gitea organization 이름 |
+| 호스트 파일시스템 | `GOJIRA_REPOS_DIR` | Platform-API 의 bare clone + worktree 저장 경로 (호스트 측). 폐쇄망은 절대경로 권장 — 예: `/var/lib/gojira/repos` |
+| | `UID` / `GID` | 컨테이너가 호스트 사용자 권한으로 실행되도록 매핑. 보통 `id -u` / `id -g` 값. bind mount fs 권한 일치 목적 |
 | OpenCode | `OPENCODE_SERVER` + `OPENCODE_PORT` | 사내 OpenCode serve host + port |
 | GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 6종 | 브라우저가 접근하는 host + port (Platform/GoJIRA/Agent API + Platform/GoJIRA App + PlantUML). React 빌드 시점에 inline! |
 | 컨테이너 노출 port<br>(선택) | `*_HOST_PORT` | nginx reverse proxy 환경에서 컨테이너 외부 노출 port 가 사용자 access port 와 다를 때만 |
@@ -161,6 +163,18 @@ docker images | grep -E "gojira|plantuml"   # 7개 확인
 
 ## ⑥ 폐쇄망 — 기동
 
+### 6-0. 호스트 측 repos 디렉토리 준비
+
+`.env` 의 `GOJIRA_REPOS_DIR` 경로를 호스트에 미리 만들고 `UID`/`GID` 사용자가 소유하도록 설정:
+
+```bash
+source .env
+mkdir -p ${GOJIRA_REPOS_DIR}
+sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}
+```
+
+> bind mount 는 호스트 권한이 그대로 컨테이너에 보임. 컨테이너 user (= `${UID}:${GID}`) 가 write 못 하면 Platform-API 의 `git clone` / worktree 생성이 실패한다.
+
 ### 6-1. `.env` 사후 점검
 
 외부망에서 채운 `.env` 값이 폐쇄망 환경과 일치하는지 확인:
@@ -264,18 +278,26 @@ http://${GOJIRA_APP_SERVER}:${GOJIRA_APP_PORT}       # GoJIRA-App (이슈/프로
 
 ### 백업 / 복구
 
+`GOJIRA_REPOS_DIR` 은 이제 호스트 디렉토리 (bind mount) 이므로 일반 tar 로 직접 백업:
+
 ```bash
-# Gitea 와 동기화되는 로컬 repo cache 백업
-docker run --rm \
-  -v deploy_platform-repos:/data \
-  -v "$PWD":/backup \
-  alpine tar czf /backup/repos-$(date +%F).tgz /data
+source .env
+tar czf repos-$(date +%F).tgz -C "$(dirname ${GOJIRA_REPOS_DIR})" "$(basename ${GOJIRA_REPOS_DIR})"
+```
+
+복구는 호스트에서 tar 풀기 + 권한 재설정:
+
+```bash
+tar xzf repos-YYYY-MM-DD.tgz -C "$(dirname ${GOJIRA_REPOS_DIR})"
+sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}
 ```
 
 ### 완전 제거
 
 ```bash
-docker compose down -v   # 컨테이너 + volume 모두 삭제 (platform-repos 도)
+docker compose down       # 컨테이너만 제거 (bind mount 호스트 디렉토리는 보존)
+# repos 도 같이 지우려면 명시적으로:
+# rm -rf ${GOJIRA_REPOS_DIR}
 ```
 
 ### 업데이트 (새 이미지 반입)
@@ -295,6 +317,8 @@ docker image prune                     # 옛 이미지 정리
 | 증상 | 원인 / 대처 |
 |---|---|
 | `docker compose up` 시 `WARN: required` 에러 | `.env` 누락 — `?required` 항목 확인 |
+| Platform-API 가 `permission denied` 로 worktree 생성 실패 | `GOJIRA_REPOS_DIR` 디렉토리 소유자가 `${UID}:${GID}` 와 다름. `sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}` |
+| Platform-API startup 시 `mkdir /data/repos: permission denied` | 위와 동일 — bind mount 호스트 디렉토리 권한 확인 |
 | 백엔드 startup 시 `MongoDB connect timeout` | `MONGODB_SERVER` / `MONGO_USER` / `MONGO_PASS` 확인. 비밀번호에 `@` / `:` / `/` 들어가면 URL encoding 필요 (`@` → `%40`) |
 | 브라우저 콘솔 `ERR_CONNECTION_REFUSED localhost` | `*_SERVER` / `*_PORT` 가 빌드 결과에 안 들어감 → `docker compose build platform-app gojira-app` |
 | Module Federation `remoteEntry.js` 실패 | `GOJIRA_APP_SERVER` + `GOJIRA_APP_PORT` 가 브라우저 접근 가능한 endpoint 인지 확인 |

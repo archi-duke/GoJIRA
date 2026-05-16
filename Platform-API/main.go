@@ -136,6 +136,8 @@ func main() {
 			r.Delete("/{code}/github", handlers.DocRepoGHDeleteHandler)
 			r.Post("/{code}/init-files", handlers.DocRepoInitFilesHandler)
 			r.Post("/{code}/ensure-branch", handlers.DocRepoEnsureBranchHandler)
+			r.Get("/{code}/worktree-info", handlers.DocRepoWorktreeInfoHandler)
+			r.Post("/{code}/notify-change", handlers.DocRepoNotifyChangeHandler)
 			r.Post("/{code}/sync-branch", handlers.DocRepoSyncBranchHandler)
 			r.Get("/{code}/tree", handlers.DocRepoTreeHandler)
 			r.Get("/{code}/file", handlers.DocRepoFileHandler)

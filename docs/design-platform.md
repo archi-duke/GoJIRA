@@ -2,7 +2,15 @@
 
 > 최종 갱신: 2026-04-10  
 > 버전: 1.0  
-> 상태: 확정
+> 상태: 확정 (단, 3.5 DocRepo / EditSession 은 리팩토링 진행 중 — 아래 참조)
+
+> **⚠ 리팩토링 진행 중 (2026-05)** — 사내 폐쇄망 배포 검토 과정에서 다음 변경이 결정되었습니다. 본 문서는 구현 완료 후 본문이 갱신됩니다.
+> - **단일 사본 공유 모델** — Platform-API `/data/repos` 볼륨이 호스트 bind mount 로 전환되어 OpenCode 와 같은 fs 공유 (3.5 DocRepo 영향)
+> - **EditSession 의미 확장** — 현재 "사용자별 세션 트래킹" 에서 진정한 lock 으로 확장. `holderKind: "ui" | "skill"`, `holderInfo` 추가. UI ↔ 스킬 동시 작업 시 acquire 거부 + 상황 보고 (3.5 편집 세션 영향)
+> - **file CRUD 핸들러 (`DocRepoFile*`) 유지** — UI 흐름 보존, 스킬만 fs 직접 접근으로 전환
+> - **docker-compose `user: "${UID}:${GID}"`** — 호스트 / 컨테이너 권한 정합
+>
+> 상세: [`docs/refactor-skill-fs-direct.md`](./refactor-skill-fs-direct.md)
 
 ---
 
