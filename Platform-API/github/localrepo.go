@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"platform-api/config"
 )
@@ -111,6 +112,8 @@ func EnsureWorktree(owner, repo, userID string) (string, string, error) {
 	// worktree가 이미 있으면 fetch만 하고 반환
 	if _, err := os.Stat(filepath.Join(wtDir, ".git")); err == nil {
 		gitCmd(wtDir, "fetch", "origin")
+		// 기존 worktree 에도 lock 디렉토리 git 추적 차단을 보정 (idempotent).
+		ensureWorktreeExclude(wtDir, ".gojira-locks/")
 		TouchWorkspace(owner, repo, userID)
 		return wtDir, branch, nil
 	}
@@ -143,6 +146,10 @@ func EnsureWorktree(owner, repo, userID string) (string, string, error) {
 	gitCmd(wtDir, "config", "user.name", userID)
 	gitCmd(wtDir, "config", "user.email", userID+"@gojira.local")
 
+	// flock lock 디렉토리(.gojira-locks/)를 git 추적에서 제외.
+	// 사용자 자신의 .gitignore 와 분리하기 위해 worktree 의 info/exclude 에 기록.
+	ensureWorktreeExclude(wtDir, ".gojira-locks/")
+
 	// 리모트에 이미 해당 브랜치가 있으면 pull
 	if _, err := gitCmd(wtDir, "pull", "origin", branch); err != nil {
 		// 리모트에 없으면 무시 (새 브랜치)
@@ -152,6 +159,42 @@ func EnsureWorktree(owner, repo, userID string) (string, string, error) {
 	log.Printf("worktree created: %s → %s (branch: %s)", owner+"/"+repo, wtDir, branch)
 	TouchWorkspace(owner, repo, userID)
 	return wtDir, branch, nil
+}
+
+// ensureWorktreeExclude worktree 에 적용할 untracked 패턴을 bare repo 의 info/exclude 에 추가(중복 시 건너뜀).
+//
+// git 은 worktree 의 GIT_DIR (`<bare>/worktrees/<user>/`) 의 info/exclude 를 읽지 않고
+// common dir (`<bare>/`) 의 info/exclude 만 읽는다. 따라서 `--git-common-dir` 로 경로를 잡는다.
+// 효과: 같은 bare repo 의 모든 worktree(=모든 사용자) 에 동일 패턴이 적용됨 — `.gojira-locks/` 같은
+// 일반 도구성 디렉토리에 적합.
+func ensureWorktreeExclude(wtDir, pattern string) {
+	gitDirOut, err := gitCmd(wtDir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return
+	}
+	gitDir := gitDirOut
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(wtDir, gitDir)
+	}
+	excludePath := filepath.Join(gitDir, "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0755); err != nil {
+		return
+	}
+	data, _ := os.ReadFile(excludePath)
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == pattern {
+			return
+		}
+	}
+	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+		f.WriteString("\n")
+	}
+	f.WriteString(pattern + "\n")
 }
 
 // RebaseResult rebase 결과
@@ -231,11 +274,35 @@ func WriteLocalFile(owner, repo, filePath, content string) error {
 	return fmt.Errorf("WriteLocalFile은 bare repo에서 사용 불가. WriteWorktreeFile을 사용하세요.")
 }
 
-// WriteWorktreeFile 사용자 worktree에 파일 쓰기
+// WriteWorktreeFile 사용자 worktree에 파일 쓰기.
+//
+// 동시성: ${WT}/.gojira-locks/<sanitized-path>.lock 위에서 flock(LOCK_EX) 으로
+// 같은 파일의 동시 write 를 직렬화. 스킬(doc-save.sh)도 같은 lock 파일을 사용하므로
+// UI ↔ 스킬, 스킬 ↔ 스킬 race 가 OS 레벨에서 차단된다.
 func WriteWorktreeFile(owner, repo, userID, filePath, content string) error {
 	dir := worktreeDir(owner, repo, userID)
 	fullPath := filepath.Join(dir, filePath)
-	os.MkdirAll(filepath.Dir(fullPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return err
+	}
+
+	locksDir := filepath.Join(dir, ".gojira-locks")
+	if err := os.MkdirAll(locksDir, 0755); err != nil {
+		return err
+	}
+	sanitized := strings.ReplaceAll(filePath, "/", "_")
+	lockPath := filepath.Join(locksDir, sanitized+".lock")
+
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return fmt.Errorf("open lock file: %w", err)
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("flock lock file: %w", err)
+	}
+	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+
 	TouchWorkspace(owner, repo, userID)
 	return os.WriteFile(fullPath, []byte(content), 0644)
 }

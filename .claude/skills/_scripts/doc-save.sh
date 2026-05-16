@@ -8,9 +8,15 @@
 # 흐름:
 #   1) EditSession lock acquire (holderKind=skill)  — UI 와 동시 편집 방지
 #   2) PlantUML 자동 수정 (md 파일, DOC_FIX=0 으로 비활성화)
-#   3) ${WT}/${PATH} 에 fs 직접 write (mkdir -p)
+#   3) ${WT}/${PATH} 에 fs 직접 write (mkdir -p, file-level flock 으로 직렬화)
 #   4) Platform-API notify-change 호출 — SSE broadcast 트리거 (UI DocEditor 갱신)
 #   5) post-save sanity 검사 (DOC_POST_VALIDATE=0 으로 비활성화)
+#
+# 동시성:
+#   - EditSession holderKind lock 은 UI ↔ 스킬 충돌만 막음 (Phase 2).
+#   - 같은 user + 같은 holderKind (예: OpenCode 세션 2개) 의 같은 파일 race 는
+#     ${WT}/.gojira-locks/<sanitized-path>.lock 위에서 flock 으로 직렬화 (Phase 3).
+#     Platform-API 의 WriteWorktreeFile 도 같은 lock 경로를 사용하므로 UI ↔ 스킬 사이도 같이 보호된다.
 #
 # lock 은 자동 release 하지 않음 — 작업 종료 시 _edit-release.sh 명시 호출 권장.
 # 같은 user 의 reentry 는 heartbeat 갱신이므로 매 save 마다 호출해도 부담 없음.
@@ -43,17 +49,23 @@ if [[ "${DOC_FIX:-1}" == "1" && "$DOCPATH" == *.md ]]; then
   rm -f "$TMPMD"
 fi
 
-# 3) fs write
+# 3) fs write (flock 으로 같은 파일 동시 write 직렬화)
 FILE="${WT}/${DOCPATH}"
 mkdir -p "$(dirname "$FILE")"
-printf '%s' "$CONTENT" > "$FILE"
 
-# 4) SSE broadcast 트리거
-NOTIFY_BODY=$(jq -n --arg p "$DOCPATH" '{path:$p, op:"save"}')
-curl -sS -X POST "${PLATFORM_API}/DocRepo/${CODE}/notify-change" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  --data-binary "$NOTIFY_BODY" >/dev/null || true   # broadcast 실패는 save 자체에 영향 없음
+LOCKS_DIR="${WT}/.gojira-locks"
+mkdir -p "$LOCKS_DIR"
+SANITIZED_PATH=$(printf '%s' "$DOCPATH" | tr '/' '_')
+LOCK_FILE="${LOCKS_DIR}/${SANITIZED_PATH}.lock"
+
+(
+  exec 9>"$LOCK_FILE"
+  flock -x 9
+  printf '%s' "$CONTENT" > "$FILE"
+)
+
+# 4) SSE broadcast 트리거 — 실패해도 save 자체에 영향 없음
+bash "${SCRIPT_DIR}/_notify-change.sh" "$CODE" "$USER" "$DOCPATH" save >/dev/null 2>&1 || true
 
 # 5) post-save sanity 검사
 WARNINGS_JSON="[]"

@@ -1,6 +1,6 @@
 # 리팩토링 계획 — OpenCode 스킬의 로컬 파일시스템 직접 접근
 
-> **상태**: 검토 대기 (사용자 결정 필요)
+> **상태**: Phase 0~5 완료 (2026-05-16). UI 측 변경 감지(hash 검증) 는 미적용 — Phase 3 참고.
 > **작성 맥락**: 사내 폐쇄망 배포 패키지 (`deploy/`) 정리 중, OpenCode 노드와 Gitea 노드 분리 가능성을 검토하다가 **현재 구현과 원래 설계 의도 사이의 큰 차이**를 발견하여 정리
 
 ---
@@ -164,18 +164,61 @@ UI (DocEditor) ──HTTP──> Platform-API ──┘ (UI 흐름은 그대로)
 - `.opencode/agents/gojira.md` — 세션 lock 룰 추가 (충돌 보고 + 작업 종료 시 release 호출)
 - 검증: doc-save → fs 파일 생성 (uid 1000) → notify-change 200. holderKind 충돌 양방향 모두 거부 동작 확인
 
-### Phase 3 — 동시성 / 정합성 보강
-- 스킬용 별도 worktree 분리 검토 (UI 와 충돌 회피)
-- inotify watch vs notify endpoint 방식 정형화
-- 스킬과 UI 가 같은 파일에 동시 write 시도 시 충돌 처리 정책
+### Phase 3 — 동시성 / 정합성 보강 ✅ 완료 (2026-05-16)
 
-### Phase 4 — Push / PR 흐름은 유지
-- 스킬은 push 직접 하지 않음 → `POST /DocRepo/{code}/git/publish` 호출 또는 사용자가 UI 에서 트리거
-- Gitea webhook → Platform-API 경로 유지
+**결정 표:**
 
-### Phase 5 — Platform-API file CRUD 핸들러 처리
-- UI 가 계속 사용하므로 **유지 권장** (지우지 않음)
-- 내부 구현은 동일 fs 를 보므로 자연스럽게 스킬 작업과 동기
+| 항목 | 결정 | 근거 |
+|------|------|------|
+| 스킬용 별도 worktree 분리 | **불필요** | 다른 user 간은 worktree 가 이미 `.worktrees/<userId>/` 로 분리됨. 같은 user 의 UI ↔ 스킬 race 는 Phase 2 의 holderKind lock 으로 해소 |
+| 변경 통지 방식 | **notify endpoint 확정** (inotify 반려) | (1) 명시적 호출이라 op 메타데이터 포함 가능 (save/delete), (2) bind mount 환경의 inotify 이벤트 신뢰성/디바운스 부담 회피, (3) 스킬은 fs write 의 유일한 비-UI 주체라 명시 호출 누락 위험 낮음 |
+| 같은 user + 같은 holderKind race | **flock(LOCK_EX) 직렬화** | EditSession lock 은 reentry 허용이라 같은 holderKind 의 동시 write 를 못 막음 (OpenCode 세션 2개, UI 탭 2개). file-level OS lock 으로 직렬화 |
+
+**구현:**
+
+- 신규 헬퍼: `_scripts/_notify-change.sh` — 다른 fs-write 스킬도 재사용 가능. doc-save.sh 에서 추출.
+- `_scripts/doc-save.sh` — write 구간을 `flock -x` 로 감쌈. Lock 파일은 `${WT}/.gojira-locks/<sanitize(path)>.lock` (slash → underscore).
+- `Platform-API/github/localrepo.go::WriteWorktreeFile` — 같은 lock 경로 위에 `syscall.Flock(LOCK_EX)`. UI ↔ 스킬, 스킬 ↔ 스킬 race 모두 차단.
+- `Platform-API/github/localrepo.go::EnsureWorktree` — worktree 생성 시 `.git/info/exclude` 에 `.gojira-locks/` 한 줄 자동 추가 (user 자신의 `.gitignore` 와 분리, 기존 worktree 는 재생성 또는 수동 추가 필요).
+
+**검증 (컨테이너 재빌드 + 통합 — 2026-05-16 추가):**
+
+- bash 측 flock 단독: 동시 doc-save (200 줄 패턴 A vs B) → 한 패턴만, partial-mix 없음.
+- 새 Platform-API 바이너리 (`syscall.Flock`) 로 재검증: 동일 결과. 두 호출 모두 200 OK, 컨테이너 내부 `.gojira-locks/business__p3-final.md.lock` 생성 확인.
+- `EnsureWorktree` 의 `.git/info/exclude` 자동 등록: 처음 시도에서 worktree-specific `.git/info/exclude` 에 썼더니 git 이 무시 (worktree 의 GIT_DIR != common dir) → `--git-common-dir` 로 수정. 재빌드 후 bare repo `<bare>.git/info/exclude` 에 `.gojira-locks/` 등록 확인, worktree `git status` 에서 lock 디렉토리가 untracked 에서 빠짐.
+- 기존 worktree 보정: early-return 분기에도 `ensureWorktreeExclude` 호출 추가 (idempotent) — 다음 `edit/start` 호출 때 자동 적용됨.
+
+**미적용 (다음 단계로 보류):**
+
+- UI 측 변경 감지 (read 시점 hash → save 시점 비교) : 향후 UI 코드 작업 시 검토. 현재 cost > benefit (스킬은 lock 으로 차단, UI 동시 탭은 EditSession reentry 의 정책 결정 필요).
+
+### Phase 4 — Push / PR 흐름 유지 ✅ 완료 (2026-05-16)
+
+**결정:** Push / commit / PR 흐름은 변경 없음. 스킬은 fs write 만, 커밋·push 는 Platform-API 가 전담.
+
+**검증 (코드 인벤토리, 2026-05-16):**
+
+| 책임 | endpoint | 호출 주체 |
+|------|---------|---------|
+| 명시적 commit + push (사용자 일괄) | `POST /DocRepo/{code}/git/publish` (`DocRepoGitPublishHandler`) | UI |
+| 진행 중 commit (작업 단위) | `POST /DocRepo/{code}/edit/commit` (`DocRepoEditCommitHandler`) | UI |
+| Gitea webhook 수신 | `POST /webhook/github` (`GitHubWebhookHandler`) | Gitea → Platform-API |
+
+`grep -rn "git/publish\|push\|commit" .claude/skills/_scripts/*.sh` 결과: 스킬 측에 push/publish 호출 없음 (`issue-batch-create.sh` 의 매치는 주석 한 줄). → § 4 "스킬 push 금지" 약속이 그대로 지켜지고 있음.
+
+**근거 (왜 유지):**
+- Gitea 인증 토큰을 OpenCode 노드에 노출하지 않음 (이미 Platform-API 컨테이너만 보유).
+- PR 직전 한 번에 commit 하는 UI 흐름 (`git/publish`) 이 변경 단위를 사람이 검토하기 쉽게 함.
+- 스킬은 worktree 의 working tree 상태 (uncommitted) 만 다루고, 커밋 시점은 사용자가 결정.
+
+### Phase 5 — Platform-API file CRUD 핸들러 유지 ✅ 완료 (2026-05-16)
+
+**결정:** `DocRepoEditFileHandler` (GET) / `DocRepoEditSaveHandler` (PUT) / `DocRepoFile*` 핸들러 모두 유지. 삭제·축소 없음.
+
+**근거:**
+- UI(DocEditor) 가 계속 HTTP 로 read/write. 스킬만 fs 직접.
+- 두 경로가 같은 worktree fs 를 본다 → 같은 파일 변경이 양쪽에 즉시 반영.
+- 동시 write race 는 Phase 3 의 flock (`WriteWorktreeFile`) 으로 OS 레벨에서 직렬화 — UI 핸들러도 같은 lock 경로를 사용하므로 추가 작업 없음.
 
 ---
 
