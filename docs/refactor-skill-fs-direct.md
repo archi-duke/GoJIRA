@@ -1,7 +1,8 @@
 # 리팩토링 계획 — OpenCode 스킬의 로컬 파일시스템 직접 접근
 
-> **상태**: Phase 0~5 완료 (2026-05-16). UI 측 변경 감지(hash 검증) 는 미적용 — Phase 3 참고.
+> **상태**: Phase 0~5 + § 7 단계 A/B 완료. 후속 보강 § 8 추가 (2026-05-17).
 > **작성 맥락**: 사내 폐쇄망 배포 패키지 (`deploy/`) 정리 중, OpenCode 노드와 Gitea 노드 분리 가능성을 검토하다가 **현재 구현과 원래 설계 의도 사이의 큰 차이**를 발견하여 정리
+> **관련 문서**: `docs/deployment-topology.md` (운영/dev 토폴로지 + 사용자 등록 + TUI 흐름)
 
 ---
 
@@ -423,8 +424,66 @@ async def get_opencode_url(user_id: str) -> str:
 
 ---
 
-## 8. 참고
+## 8. 후속 보강 (2026-05-17 검증 세션)
 
+검증 진행 중 발견한 추가 이슈와 그 자리에서 적용한 fix.
+
+### 8.1 archive backup 디렉토리 fallback
+
+| 증상 | 원인 | Fix |
+|---|---|---|
+| `mkdir /.gojira-backups: permission denied` | 컨테이너의 `user: "${UID}:${GID}"` override 로 `/etc/passwd` 에 uid 없음 → `HOME=/` 로 떨어짐 | `Platform-API/handlers/archive.go::getBackupDir()` 도입. 우선순위 `GOJIRA_BACKUP_DIR` env > `$HOME/.gojira-backups` > `/tmp/.gojira-backups` |
+
+영구 보존 필요 시 docker-compose 에 `GOJIRA_BACKUP_DIR=/data/backups` + bind mount 추가 (운영 결정 사항).
+
+### 8.2 Worktree TTL 정책 보강 (B + C)
+
+| 항목 | 이전 | 이후 |
+|---|---|---|
+| Worktree TTL | `EditSessionTTL` 그대로 (30분) | **4시간** (`PLATFORM_WORKSPACE_TTL` 분 단위 override) |
+| Cleanup 함수 | `DiscardWorktree` (worktree + branch 삭제) | `RemoveWorktreeOnly` (branch 보존) |
+| 결과 | 작업 중 끊김 + unpushed commit 영구 손실 위험 | 점심/회의 동안 보존 + commit 영구 보존 |
+
+코드: `Platform-API/config/config.go` (WorkspaceTTL 신설), `Platform-API/github/workspace_ttl.go` (StartTTLWorker → config.WorkspaceTTL 사용, cleanup → RemoveWorktreeOnly).
+
+### 8.3 스킬 환경변수 default 갱신
+
+| 항목 | 이전 | 이후 |
+|---|---|---|
+| `.opencode/agents/gojira.md` | `localhost:9000/9001` + macOS PROJECT_ROOT | `10.211.55.3:44350/44360` (dev 한정) + 환경변수 우선 패턴 |
+| `_scripts/*.sh` (8개) | `localhost:9000/9001` | 동일하게 `10.211.55.3:44350/44360` |
+
+운영 환경에서는 `PLATFORM_API` / `GOJIRA_API` env 자체를 override. 컨벤션 표는 `docs/deployment-topology.md` § 3.
+
+### 8.4 TUI attach 흐름 단순화
+
+| 영역 | 이전 | 이후 |
+|---|---|---|
+| `Agent-Service` `open_terminal` | OS 분기 (Terminal.app/PowerShell/fallback) | command + baseUrl 반환만 |
+| `GoJIRA-App` AgentChat 의 "터미널 보기" | `await fetch(...)` 만 — 응답 무시 | 응답 수신 → alert + 클립보드 복사 |
+
+근거: Agent-Service 는 컨테이너 안 Linux 라 server-side GUI 띄우기 무의미. 브라우저는 native 터미널 자동 실행 권한 없음 → 클라이언트가 사용자에게 노출하고 사용자가 자기 PC 터미널에서 수동 실행.
+
+자세한 흐름: `docs/deployment-topology.md` § 5.
+
+### 8.5 dev 환경(Mac + Parallels) 한계 명시
+
+스킬의 fs 직접 access (Phase 1+) 가 동작하려면 OpenCode 와 docker volume 이 같은 fs 여야 함. 현재 dev 환경:
+- Mac (10.211.55.2) — OpenCode + 사용자 IDE
+- Parallels VM (10.211.55.3) — Docker compose / docker volume
+
+→ 두 fs 가 분리. Mac OpenCode 의 스킬 fs 직접 access 는 깨짐. UI(브라우저) 흐름은 Platform-API HTTP 경유라 정상.
+
+운영 환경 (사내 서버 1대 통합) 에서는 자동 해소. dev 한정 한계로 받아들임 (sshfs 등 셋업 보류).
+
+자세한 토폴로지: `docs/deployment-topology.md` § 2.
+
+---
+
+## 9. 참고
+
+- `docs/deployment-topology.md` — 운영 / dev 토폴로지, 단일 사본 / 분산 스킬 모델, 사용자 등록 / TUI attach 흐름 (이번 세션 정리)
+- `docs/ports.md` — 컨테이너 내부 + 호스트 매핑 포트 컨벤션
 - `docs/design-platform.md` — Platform-API DocRepo / EditSession / SSE 설계
 - `docs/design-agent.md` — OpenCode 에이전트 + 스킬 흐름
 - `deploy/` — 폐쇄망 배포 패키지 (이번 검토의 시발점)

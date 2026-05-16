@@ -30,6 +30,28 @@ OpenCode 는 어디서든 띄울 수 있다 (단일 호스트 / 게스트→호�
 | 9002 | Agent-Service | Backend (Python) | OpenCode 브리지 (SSE 번역) |
 | 27017 | MongoDB | DB (사내망: 별도 서버 / 로컬: Docker) | 공용 DB (`gojira` database) |
 
+> 위 표는 **컨테이너 내부 listen 포트**. Docker compose 배포 시 호스트 외부에는 아래의 매핑된 포트로 노출 — 사내 컨벤션이며 firewall/policy 등록 이력 때문에 변경 금지.
+
+### 사내 운영 호스트 매핑 (deploy/docker-compose.yml)
+
+| 컨테이너 포트 | 호스트 매핑 포트 | `.env` 변수 |
+|---|---|---|
+| 9000 | **44350** | `PLATFORM_API_PORT` (or `PLATFORM_API_HOST_PORT`) |
+| 9001 | **44360** | `GOJIRA_API_PORT` (or `GOJIRA_API_HOST_PORT`) |
+| 9002 | **44370** | `AGENT_API_PORT` (or `AGENT_API_HOST_PORT`) |
+| 3000 | 44300 | `PLATFORM_APP_PORT` (or `PLATFORM_APP_HOST_PORT`) |
+| 3001 | 44301 | `GOJIRA_APP_PORT` (or `GOJIRA_APP_HOST_PORT`) |
+| 8080 | 44351 | `PLANTUML_PORT` (or `PLANTUML_HOST_PORT`) |
+| 8000 | 8000 | `JIRA_API_HOST_PORT` |
+| 4096 | 4096 | OpenCode (host native, 컨테이너 외부) |
+
+스킬 / 외부 클라이언트가 사내 서버 호출 시 사용하는 URL 도 호스트 매핑 포트 기준:
+- `http://<gojira-host>:44350/api/v2` — Platform-API
+- `http://<gojira-host>:44360/api/v2` — GoJIRA-API
+- `http://<gojira-host>:44370/api/v2` — Agent-Service
+
+자세한 배포 토폴로지: `docs/deployment-topology.md`
+
 ## 서비스별 의존 매트릭스
 
 | 서비스 | LISTEN | 호출하는 곳 |
