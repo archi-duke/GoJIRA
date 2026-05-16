@@ -45,14 +45,19 @@ cp .env.example .env
 
 ### 2-1. 채워야 할 필수 값
 
-| 변수 | 출처 / 결정 주체 |
-|---|---|
-| `PLATFORM_MONGO_URI` / `GOJIRA_MONGO_URI` | 사내 MongoDB 운영팀 (host:port, 인증, authSource). `@` → `%40` URL encoding |
-| `GITHUB_URL` | 사내 Gitea base URL (끝에 `/` 포함) |
-| `PLATFORM_GITHUB_TOKEN` | Gitea Settings → Applications → PAT (scope: `repo` + `admin:org`) |
-| `PLATFORM_GITHUB_ORG` | Gitea organization 이름 |
-| `OPENCODE_SERVER_URL` | 사내 OpenCode serve 호스트 |
-| `REACT_APP_PLATFORM_API` 등 6종 | **사용자 브라우저가 접근하는 URL** — 사내 GoJIRA 서버의 외부 노출 host |
+**atomic 입력만 작성한다 — 조합된 URL (MONGO_URI / GOJIRA_API_URL / REACT_APP_* 등) 은 compose 가 자동 생성.**
+
+| 카테고리 | 변수 | 출처 / 결정 주체 |
+|---|---|---|
+| MongoDB | `MONGODB_SERVER` | 사내 MongoDB host:port (한 줄). 3 백엔드 공용 |
+| | `MONGO_USER` / `MONGO_PASS` | 인증. 특수문자 URL encoding (`@` → `%40`) 불요 — compose 가 raw 로 조합 후 코드가 처리 |
+| | `MONGO_AUTH_SOURCE` | default `admin` |
+| Gitea | `GITEA_SERVER` | 사내 Gitea host:port |
+| | `PLATFORM_GITHUB_TOKEN` | Gitea PAT (scope: `repo` + `admin:org`) |
+| | `PLATFORM_GITHUB_ORG` | Gitea organization 이름 |
+| OpenCode | `OPENCODE_SERVER` + `OPENCODE_PORT` | 사내 OpenCode serve host + port |
+| GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 6종 | 브라우저가 접근하는 host + port (Platform/GoJIRA/Agent API + Platform/GoJIRA App + PlantUML). React 빌드 시점에 inline! |
+| 컨테이너 노출 port<br>(선택) | `*_HOST_PORT` | nginx reverse proxy 환경에서 컨테이너 외부 노출 port 가 사용자 access port 와 다를 때만 |
 
 ### 2-2. 선택 값
 

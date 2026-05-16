@@ -45,11 +45,11 @@ func init() {
 	envload.Load("PLATFORM_ENV_FILE")
 
 	// 필수 항목 — 미설정 시 log.Fatal
-	MongoURI = requireEnv("PLATFORM_MONGO_URI")
+	MongoURI = requireEnv("MONGO_URI")
 	GitHubToken = requireEnv("PLATFORM_GITHUB_TOKEN")
 	GitHubOrg = requireEnv("PLATFORM_GITHUB_ORG")
 	GitHubURL = requireEnv("GITHUB_URL")
-	GoJiraAPI = requireEnv("PLATFORM_GOJIRA_API")
+	GoJiraAPI = requireEnv("GOJIRA_API_URL")
 
 	// 선택 항목 — default 허용
 	ServerPort = envOrDefault("PLATFORM_SERVER_PORT", ":9000")

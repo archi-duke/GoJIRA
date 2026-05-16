@@ -1123,7 +1123,7 @@ if val, err := Decrypt(raw); err == nil {
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | PLATFORM_SERVER_PORT | :9000 | 서버 포트 |
-| PLATFORM_MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
+| MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
 | PLATFORM_MONGO_DB | gojira | DB 이름 |
 | PLATFORM_GITHUB_TOKEN | - | Gitea 관리자 토큰 |
 | PLATFORM_GITHUB_ORG | - | Gitea 조직명 |
@@ -1147,7 +1147,7 @@ if val, err := Decrypt(raw); err == nil {
 | GOJIRA_JIRA_API_BASE | /rest/api/2 | JIRA API 경로 |
 | GOJIRA_JIRA_USER | - | JIRA 계정 (암호화) |
 | GOJIRA_JIRA_PASS | - | JIRA 비밀번호 (암호화) |
-| GOJIRA_MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
+| MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
 | GOJIRA_MONGO_DB | gojira | DB 이름 |
 | GOJIRA_ENC_KEY | (코드 내 default) | 시크릿 마스터 키 — Platform-API 와 공통 (§9.3.3) |
 | GOJIRA_AGENT_PROXY | - | Agent-Service 프록시 URL |
@@ -1159,7 +1159,7 @@ if val, err := Decrypt(raw); err == nil {
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | AGENT_SERVICE_PORT | 9002 | 서버 포트 |
-| GOJIRA_MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
+| MONGO_URI | mongodb://localhost:27017 | MongoDB URI |
 | GOJIRA_MONGO_DB | gojira | DB 이름 |
 | GOJIRA_API_URL | http://localhost:9001/api/v2 | GoJIRA-API URL |
 | GOJIRA_PLATFORM_API | http://localhost:9000/api/v2 | Platform-API URL |

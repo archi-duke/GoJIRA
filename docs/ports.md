@@ -76,7 +76,7 @@ cross-service URL 변수 (필수, 환경별로 명시):
 | 변수 | 의미 |
 |---|---|
 | `GOJIRA_PLATFORM_API` | GoJIRA-API → Platform-API 베이스 URL |
-| `PLATFORM_GOJIRA_API` | Platform-API → GoJIRA-API 베이스 URL |
+| `GOJIRA_API_URL` | Platform-API → GoJIRA-API 베이스 URL |
 | `GOJIRA_API_URL` | Agent-Service → GoJIRA-API 베이스 URL |
 | `OPENCODE_SERVER_URL` | Agent-Service → OpenCode |
 | `GITHUB_URL` | Platform-API → Gitea / GitHub |

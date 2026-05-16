@@ -109,11 +109,11 @@ cd GoJIRA
 `Platform-API/.env.example` 참고. 사내 호스트로 채우기:
 
 ```ini
-PLATFORM_MONGO_URI=mongodb://<사내-mongo-호스트>:27017
+MONGO_URI=mongodb://<사내-mongo-호스트>:27017
 PLATFORM_GITHUB_TOKEN=ENC:<사내-gitea-pat>
 PLATFORM_GITHUB_ORG=<사내-gitea-org>
 GITHUB_URL=http://<사내-gitea-호스트>:3300/
-PLATFORM_GOJIRA_API=http://localhost:9001/api/v2
+GOJIRA_API_URL=http://localhost:9001/api/v2
 
 # 사내 LLM 게이트웨이 인증 (gpt-oss)
 PLATFORM_LLM_TICKET=ENC:<X-Dep-Ticket-base64>
@@ -134,7 +134,7 @@ go run ./cmd/encrypt "원본값" $env:GOJIRA_ENC_KEY
 ### 5.2 GoJIRA-API/.env
 
 ```ini
-GOJIRA_MONGO_URI=mongodb://<사내-mongo-호스트>:27017
+MONGO_URI=mongodb://<사내-mongo-호스트>:27017
 GOJIRA_PLATFORM_API=http://localhost:9000/api/v2
 GOJIRA_JIRA_URL=http://<사내-jira-호스트>:8000
 
@@ -146,7 +146,7 @@ GOJIRA_JIRA_URL=http://<사내-jira-호스트>:8000
 ### 5.3 Agent-Service/.env
 
 ```ini
-GOJIRA_MONGO_URI=mongodb://<사내-mongo-호스트>:27017
+MONGO_URI=mongodb://<사내-mongo-호스트>:27017
 GOJIRA_API_URL=http://localhost:9001/api/v2
 GOJIRA_PLATFORM_API=http://localhost:9000/api/v2
 
@@ -264,7 +264,7 @@ npm start     # :3001
 | GoJIRA-API | `[envload] loaded N entries from ...` + `MongoDB connected` |
 | Agent-Service | `LISTEN: 9002 (mode=opencode_bridge)` + `OpenCode peer: http://localhost:4096` |
 
-`.env` 못 읽으면 `[envload] .env not found — tried: [...]` 로 시도한 절대경로가 모두 로그에 노출됩니다. 그 후 필수 환경변수 누락이 `[config] 필수 환경변수 미설정: PLATFORM_MONGO_URI` 류로 fail-fast.
+`.env` 못 읽으면 `[envload] .env not found — tried: [...]` 로 시도한 절대경로가 모두 로그에 노출됩니다. 그 후 필수 환경변수 누락이 `[config] 필수 환경변수 미설정: MONGO_URI` 류로 fail-fast.
 
 ## 8. 브라우저 진입
 

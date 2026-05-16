@@ -22,14 +22,15 @@ deploy/
         └── nginx.conf
 ```
 
-## 한 곳에서 설정 관리
+## 한 곳에서 설정 관리 (atomic 입력)
 
-**모든 환경변수가 `deploy/.env` 한 파일에 모인다.**
+**모든 환경변수가 `deploy/.env` 한 파일에 모이고, atomic 값만 사용자가 입력한다.**
 
-- 런타임 환경변수 (`PLATFORM_MONGO_URI`, `OPENCODE_SERVER_URL`, 시크릿 등) → 컨테이너 environment 로 주입
-- 빌드 시점 환경변수 (`REACT_APP_*`) → `docker compose build` 시 build-arg 로 React 앱에 inline
-
-각 서비스의 개별 `.env` 파일은 **사용하지 않는다**. compose 가 `.env` 만 읽어서 분배.
+- 외부 인프라 (Mongo, Gitea) → `MONGODB_SERVER` / `GITEA_SERVER` 같은 `host:port` 한 줄
+- 나머지 서비스 (OpenCode, GoJIRA 6 서비스) → `*_SERVER` + `*_PORT` 두 줄 분리
+- 조합된 URL (`MONGO_URI`, `GOJIRA_API_URL`, `REACT_APP_*` 등) 은 **compose 가 자동 생성**
+- 사용자가 한 서버 / port 변경 시 한 줄만 수정 → 모든 사용처에 자동 반영
+- 각 서비스의 개별 `.env` 파일은 **사용하지 않는다**
 
 ## 외부망 빌드 → 폐쇄망 반입 흐름
 
@@ -38,10 +39,13 @@ deploy/
 ```bash
 cd deploy
 cp .env.example .env
-# .env 의 placeholder 를 사내 환경 값으로 채움
-#   - MONGO_URI / GITEA / OpenCode 의 사내 host
-#   - REACT_APP_* 의 사용자 접근 URL (브라우저가 호출하는 URL)
-#   - 시크릿 (ENC: 값 또는 평문 → cmd/encrypt 로 ENC 변환)
+# .env 의 atomic 입력 (host/port/user/pass/token) 만 사내 값으로 채움.
+# 조합된 URL (MONGO_URI / GOJIRA_API_URL / REACT_APP_*) 은 자동 생성.
+#   - MONGODB_SERVER, MONGO_USER, MONGO_PASS  (host:port 한 줄 + 인증)
+#   - GITEA_SERVER, PLATFORM_GITHUB_TOKEN, PLATFORM_GITHUB_ORG
+#   - OPENCODE_SERVER + OPENCODE_PORT
+#   - *_SERVER + *_PORT (사내 GoJIRA 서비스 6종 — 브라우저 access endpoint)
+#   - 시크릿 (선택): GOJIRA_ENC_KEY / OPENAI_API_KEY / SMTP_* / JIRA_USER 등
 
 # 베이스 이미지 미리 받기 (폐쇄망에선 pull 불가)
 docker pull plantuml/plantuml-server:jetty
@@ -120,7 +124,7 @@ curl -sS http://localhost:3001/                    # GoJIRA-App
 | 증상 | 원인 / 대처 |
 |---|---|
 | `docker compose up` 시 `required` 메시지 | `.env` 에 해당 변수 누락 — `?required` 마크된 항목 다시 확인 |
-| 백엔드 startup 시 `MongoDB connect: ...` | `PLATFORM_MONGO_URI` / `GOJIRA_MONGO_URI` 의 host/auth 확인. URL encoding (`@` → `%40`) |
+| 백엔드 startup 시 `MongoDB connect: ...` | `MONGO_URI` 의 host/auth 확인. URL encoding (`@` → `%40`) |
 | Frontend 가 `localhost:9000` 호출 | `REACT_APP_*` 값이 빌드에 inline 안 됨 → `docker compose build platform-app gojira-app` 재실행 |
 | Module Federation `remoteEntry.js` 실패 | `REACT_APP_GOJIRA_APP_REMOTE` 가 브라우저에서 접근 가능한 URL 인지 확인 |
 | Agent-Service `/Agent/chat` 시 OpenCode 401 | `OPENCODE_SERVER_PASSWORD` 가 OpenCode 측 설정과 일치하는지 |

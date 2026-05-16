@@ -1,14 +1,24 @@
 # GoJIRA 사내 폐쇄망 배포 docker-compose
 # ─────────────────────────────────────────────────────────────────────────────
 # - MongoDB / Gitea 는 사내 별도 인프라 사용 (이 compose 에 포함 안 함)
-# - 모든 환경변수는 deploy/.env 한 곳에서 관리
+# - 모든 환경변수는 deploy/.env 한 곳에서 atomic 입력 (host/port/user/pass)
+# - 조합된 URL (MONGO_URI / GOJIRA_API_URL / REACT_APP_* 등) 은 이 파일에서 만듦
 # - 빌드 context 는 레포 루트 (이 파일 기준 ..)
-# - 사용법: docs README.md 참조
 #
-# `${VAR:?...}` 형식은 .env 에 해당 변수가 비어있으면 compose 가 fail-fast 한다 (silent default 차단).
+# `${VAR:?...}` 형식은 .env 에 해당 변수가 비어있으면 compose 가 fail-fast.
+# `${A:-${B:-x}}` 형식은 A 미설정 시 B, B 도 미설정 시 default x.
 
 x-build-context: &build-context
   context: ..
+
+x-react-args: &react-args
+  REACT_APP_PLATFORM_API: "http://${PLATFORM_API_SERVER:?required}:${PLATFORM_API_PORT:?required}/api/v2"
+  REACT_APP_GOJIRA_API: "http://${GOJIRA_API_SERVER:?required}:${GOJIRA_API_PORT:?required}/api/v2"
+  REACT_APP_AGENT_API: "http://${AGENT_API_SERVER:?required}:${AGENT_API_PORT:?required}/api/v2"
+  REACT_APP_GOJIRA_APP_REMOTE: "http://${GOJIRA_APP_SERVER:?required}:${GOJIRA_APP_PORT:?required}"
+  REACT_APP_PLANTUML_SERVER: "http://${PLANTUML_SERVER:?required}:${PLANTUML_PORT:?required}/svg/"
+  REACT_APP_PUMLEX_SERVER: "${REACT_APP_PUMLEX_SERVER:-http://localhost:3030}"
+  REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
 
 services:
 
@@ -17,7 +27,7 @@ services:
     image: plantuml/plantuml-server:jetty
     restart: unless-stopped
     ports:
-      - "${PLANTUML_HOST_PORT:-8080}:8080"
+      - "${PLANTUML_HOST_PORT:-${PLANTUML_PORT:-8080}}:8080"
 
   # ── 백엔드: Platform-API ──────────────────────────────────────────────────
   platform-api:
@@ -27,13 +37,13 @@ services:
     image: gojira/platform-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${PLATFORM_API_HOST_PORT:-9000}:9000"
+      - "${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT:-9000}}:9000"
     environment:
-      PLATFORM_MONGO_URI: "${PLATFORM_MONGO_URI:?required}"
+      MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
       PLATFORM_GITHUB_TOKEN: "${PLATFORM_GITHUB_TOKEN:?required}"
       PLATFORM_GITHUB_ORG: "${PLATFORM_GITHUB_ORG:?required}"
-      GITHUB_URL: "${GITHUB_URL:?required}"
-      PLATFORM_GOJIRA_API: "${PLATFORM_GOJIRA_API:-http://gojira-api:9001/api/v2}"
+      GITHUB_URL: "http://${GITEA_SERVER:?required}/"
+      GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
       GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
       # SMTP (선택)
       SMTP_HOST: "${SMTP_HOST:-}"
@@ -58,11 +68,11 @@ services:
     image: gojira/gojira-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${GOJIRA_API_HOST_PORT:-9001}:9001"
+      - "${GOJIRA_API_HOST_PORT:-${GOJIRA_API_PORT:-9001}}:9001"
     environment:
-      GOJIRA_MONGO_URI: "${GOJIRA_MONGO_URI:?required}"
-      GOJIRA_PLATFORM_API: "${GOJIRA_PLATFORM_API:-http://platform-api:9000/api/v2}"
-      GOJIRA_JIRA_URL: "${GOJIRA_JIRA_URL:-http://jira-api:8000}"
+      MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
+      GOJIRA_PLATFORM_API: "http://platform-api:9000/api/v2"
+      GOJIRA_JIRA_URL: "http://jira-api:8000"
       GOJIRA_JIRA_USER: "${GOJIRA_JIRA_USER:-}"
       GOJIRA_JIRA_PASS: "${GOJIRA_JIRA_PASS:-}"
       GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
@@ -70,7 +80,6 @@ services:
       - platform-api
 
   # ── 백엔드: JIRA Mock ─────────────────────────────────────────────────────
-  # 실제 JIRA 를 사용한다면 이 서비스는 끄고 GOJIRA_JIRA_URL 만 실 JIRA 로 가리키도록.
   jira-api:
     build:
       <<: *build-context
@@ -88,12 +97,12 @@ services:
     image: gojira/agent-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${AGENT_SERVICE_HOST_PORT:-9002}:9002"
+      - "${AGENT_API_HOST_PORT:-${AGENT_API_PORT:-9002}}:9002"
     environment:
-      GOJIRA_MONGO_URI: "${GOJIRA_MONGO_URI:?required}"
-      GOJIRA_API_URL: "${GOJIRA_API_URL:-http://gojira-api:9001/api/v2}"
-      GOJIRA_PLATFORM_API: "${GOJIRA_PLATFORM_API:-http://platform-api:9000/api/v2}"
-      OPENCODE_SERVER_URL: "${OPENCODE_SERVER_URL:?required}"
+      MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
+      GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
+      GOJIRA_PLATFORM_API: "http://platform-api:9000/api/v2"
+      OPENCODE_SERVER_URL: "http://${OPENCODE_SERVER:?required}:${OPENCODE_PORT:?required}"
       OPENCODE_SERVER_USERNAME: "${OPENCODE_SERVER_USERNAME:-opencode}"
       OPENCODE_SERVER_PASSWORD: "${OPENCODE_SERVER_PASSWORD:-}"
     depends_on:
@@ -101,22 +110,18 @@ services:
       - platform-api
 
   # ── 프론트엔드: Platform-App ──────────────────────────────────────────────
-  # REACT_APP_* 는 빌드 시점에 inline 되므로 .env 의 값을 build-args 로 전달.
-  # 호스트가 바뀌면 재빌드 필요: `docker compose build platform-app`
+  # REACT_APP_* 는 빌드 시점에 inline 되므로 atomic 변수 (*_SERVER, *_PORT)
+  # 가 바뀌면 재빌드 필요: `docker compose build platform-app gojira-app`
   platform-app:
     build:
       <<: *build-context
       dockerfile: deploy/images/platform-app/Dockerfile
       args:
-        REACT_APP_PLATFORM_API: "${REACT_APP_PLATFORM_API:?required}"
-        REACT_APP_GOJIRA_API: "${REACT_APP_GOJIRA_API:?required}"
-        REACT_APP_AGENT_API: "${REACT_APP_AGENT_API:?required}"
-        REACT_APP_GOJIRA_APP_REMOTE: "${REACT_APP_GOJIRA_APP_REMOTE:?required}"
-        REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
+        <<: *react-args
     image: gojira/platform-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${PLATFORM_APP_HOST_PORT:-3000}:3000"
+      - "${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT:-3000}}:3000"
 
   # ── 프론트엔드: GoJIRA-App ────────────────────────────────────────────────
   gojira-app:
@@ -124,16 +129,11 @@ services:
       <<: *build-context
       dockerfile: deploy/images/gojira-app/Dockerfile
       args:
-        REACT_APP_PLATFORM_API: "${REACT_APP_PLATFORM_API:?required}"
-        REACT_APP_API_BASE: "${REACT_APP_API_BASE:?required}"
-        REACT_APP_AGENT_API: "${REACT_APP_AGENT_API:?required}"
-        REACT_APP_PLANTUML_SERVER: "${REACT_APP_PLANTUML_SERVER:?required}"
-        REACT_APP_PUMLEX_SERVER: "${REACT_APP_PUMLEX_SERVER:-http://localhost:3030}"
-        REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
+        <<: *react-args
     image: gojira/gojira-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "${GOJIRA_APP_HOST_PORT:-3001}:3001"
+      - "${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT:-3001}}:3001"
 
 volumes:
   platform-repos:

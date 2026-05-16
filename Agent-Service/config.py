@@ -12,7 +12,7 @@ from pydantic import Field
 
 class Settings(BaseSettings):
     # ── 필수 (default 없음 — 미설정 시 startup 실패) ─────────────────────────
-    mongo_uri: str = Field(validation_alias="GOJIRA_MONGO_URI")
+    mongo_uri: str = Field(validation_alias="MONGO_URI")
     gojira_api_url: str = Field(validation_alias="GOJIRA_API_URL")
     platform_api_url: str = Field(validation_alias="GOJIRA_PLATFORM_API")
     opencode_url: str = Field(validation_alias="OPENCODE_SERVER_URL")
