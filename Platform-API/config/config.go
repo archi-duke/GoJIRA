@@ -38,6 +38,9 @@ var (
 
 	// 편집 세션 TTL (기본 30분)
 	EditSessionTTL time.Duration
+	// Worktree TTL — fs cleanup 전용 (기본 4시간). EditSession TTL 과 분리.
+	// idle 사용자의 worktree 디스크 회수 주기. cleanup 은 branch 보존 (RemoveWorktreeOnly).
+	WorkspaceTTL time.Duration
 )
 
 func init() {
@@ -65,6 +68,11 @@ func init() {
 	// 편집 세션 TTL
 	ttlMin, _ := strconv.Atoi(envOrDefault("PLATFORM_EDIT_SESSION_TTL", "30"))
 	EditSessionTTL = time.Duration(ttlMin) * time.Minute
+
+	// Worktree TTL — 분 단위 입력, 기본 240분 (=4시간).
+	// EditSessionTTL 과 분리해서 운영자가 별도로 늘릴 수 있음.
+	wtTTLMin, _ := strconv.Atoi(envOrDefault("PLATFORM_WORKSPACE_TTL", "240"))
+	WorkspaceTTL = time.Duration(wtTTLMin) * time.Minute
 
 	// SMTP 비밀번호 복호화
 	raw := envOrDefault("SMTP_PASS", "")
