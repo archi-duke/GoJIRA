@@ -271,7 +271,14 @@ UI (DocEditor) ──HTTP──> Platform-API ──┘ (UI 흐름은 그대로)
 > 2. `opencodeInstances` 에 batman 등록 후 `GET /api/v2/Agent/health -H 'X-User-Id: batman'` → Mongo 라우팅, response.user=batman
 > 3. 미등록 alice 헤더 → fallback + WARNING 로그 ("opencodeInstances 미등록 user=alice")
 >
-> 단계 B 잔여 (7.6): Platform-API background goroutine 으로 `opencodeInstances` 의 active 항목에 주기적 `/global/health` ping → 실패 시 `status=down`. Agent-Service 가 status=down 으로 라우팅 시 fallback 또는 명시적 실패. URL 캐시 invalidate 와 연동.
+> 단계 B 7.6 (헬스체크) 완료 (2026-05-16).
+>
+> 산출물:
+> - `Platform-API/handlers/opencode_healthcheck.go` — `StartOpencodeHealthcheck` goroutine (5분 주기, /global/health ping, 3회 연속 실패 → `status=down`). `RunOpencodeHealthcheckHandler` 즉시 트리거 endpoint (`POST /admin/opencode-healthcheck`).
+> - `Platform-API/main.go` — goroutine 시작 + admin 라우트.
+> - `Agent-Service/opencode_bridge/client.py` — `_url_cache` 제거. 매 호출마다 `find_active_opencode_instance` 로 `status="active"` 확인 → status=down 즉시 fallback 으로 전환됨.
+>
+> 검증: alice 에 닿지 못하는 fake 인스턴스 등록 → admin trigger 3회 → `status=down` 마킹 (로그: "alice status=down 마킹 (3회 연속 실패)") → Agent-Service `/api/v2/Agent/health -H 'X-User-Id: alice'` 가 fallback URL 응답.
 
 ### 7.1 핵심 원칙
 

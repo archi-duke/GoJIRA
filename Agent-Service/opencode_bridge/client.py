@@ -23,45 +23,26 @@ def _creds() -> tuple[str, str]:
     return settings.opencode_username, settings.opencode_password
 
 
-# user_id → resolved URL 캐시 — Mongo round-trip 비용 절감.
-# 운영자가 사용자 등록/제거 후에는 Agent-Service 재시작 또는 캐시 invalidate 필요.
-# (단계 B 의 헬스체크 7.6 이 status=down 표시할 때 함께 invalidate 검토)
-_url_cache: dict[str, str] = {}
-
-
 def _resolve_url(user_id: str) -> str:
-    """user_id 의 활성 OpenCode 인스턴스 URL. 미등록 시 settings.opencode_url 로 fallback.
+    """user_id 의 활성 OpenCode 인스턴스 URL. 미등록 또는 status!=active 면 settings.opencode_url 로 fallback.
 
-    빈 user_id 는 fallback 만 반환 (시스템 호출 호환).
+    매 호출마다 Mongo 조회 — opencodeInstances 의 userId unique index 라 round-trip 부담은 낮고,
+    Platform-API 헬스체크가 status=down 마킹 시 즉시 반영된다. 캐시 없음.
     """
     if not user_id:
         return settings.opencode_url
-
-    cached = _url_cache.get(user_id)
-    if cached:
-        return cached
 
     inst = find_active_opencode_instance(user_id)
     if inst:
         host = inst.get("host") or "localhost"
         port = inst.get("port")
         if port:
-            url = f"http://{host}:{port}"
-            _url_cache[user_id] = url
-            return url
+            return f"http://{host}:{port}"
         log.warning("opencodeInstances 의 user=%s 항목에 port 누락 — fallback 사용", user_id)
     else:
-        log.warning("opencodeInstances 미등록 user=%s — settings.opencode_url 로 fallback", user_id)
+        log.warning("opencodeInstances 미등록/down user=%s — settings.opencode_url 로 fallback", user_id)
 
     return settings.opencode_url
-
-
-def invalidate_url_cache(user_id: Optional[str] = None) -> None:
-    """헬스체크가 status=down 으로 마킹했거나 사용자 등록이 갱신됐을 때 호출."""
-    if user_id is None:
-        _url_cache.clear()
-    else:
-        _url_cache.pop(user_id, None)
 
 
 def _base_url() -> str:
