@@ -258,7 +258,20 @@ UI (DocEditor) ──HTTP──> Platform-API ──┘ (UI 흐름은 그대로)
 > - `deploy/scripts/dev-opencode-register.sh` + `start-all.bat` 의 OpenCode 등록 한 줄 (개발 환경에서도 동일 컬렉션에 1건 동기화)
 > - `deploy/DEPLOY.md` ⑦-1 절 신설 (운영자용 설치 절차)
 >
-> 단계 B 에서 할 일: Agent-Service 의 `_base_url()` 가 `OPENCODE_URL` env 대신 `FindActiveOpencodeInstance(userId)` 결과를 사용하도록 전환. 헬스체크 모듈 추가 (5분 cron 또는 Platform-API goroutine). 자세한 설계는 § 7.5 / 7.6 그대로.
+> **2026-05-16 갱신**: 단계 B 의 7.5 (Agent-Service 라우팅 전환) 완료. 7.6 (헬스체크) 만 보류.
+>
+> 단계 B 7.5 산출물:
+> - `Agent-Service/core/database.py` — `opencode_instances()` 컬렉션 + `find_active_opencode_instance(user_id)` 헬퍼
+> - `Agent-Service/opencode_bridge/client.py` — `_resolve_url(user_id)` 신설. 모든 함수에 `user_id` 인자 추가. Mongo 미등록 사용자는 `settings.opencode_url` 로 자동 fallback + WARNING 로그. URL 캐시 (`_url_cache`) + `invalidate_url_cache()` 헬퍼 (7.6 활성화 시 status=down 표시와 연동 예정).
+> - `Agent-Service/opencode_bridge/event_buffer.py` — `ensure_subscriber/reset_subscriber/_subscribe_loop/_save_to_mongo` 시그니처에 `user_id` 추가. 백그라운드 task 가 시작 시 받은 user_id 로 라우팅.
+> - `Agent-Service/opencode_bridge/router.py` — `open_terminal/cancel_session/get_session/get_session_state/health` 핸들러에 `X-User-Id` 헤더 추가. 세션 doc 의 `userId` 가 헤더보다 우선 (다른 탭/세션 복원 호환).
+>
+> 검증 (컨테이너 재빌드 후):
+> 1. `GET /api/v2/Agent/health` (헤더 없음) → settings.opencode_url 사용, response.user=fallback
+> 2. `opencodeInstances` 에 batman 등록 후 `GET /api/v2/Agent/health -H 'X-User-Id: batman'` → Mongo 라우팅, response.user=batman
+> 3. 미등록 alice 헤더 → fallback + WARNING 로그 ("opencodeInstances 미등록 user=alice")
+>
+> 단계 B 잔여 (7.6): Platform-API background goroutine 으로 `opencodeInstances` 의 active 항목에 주기적 `/global/health` ping → 실패 시 `status=down`. Agent-Service 가 status=down 으로 라우팅 시 fallback 또는 명시적 실패. URL 캐시 invalidate 와 연동.
 
 ### 7.1 핵심 원칙
 

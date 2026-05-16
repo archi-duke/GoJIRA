@@ -89,18 +89,21 @@ def cleanup_expired():
 _subscriber_tasks: dict[str, asyncio.Task] = {}
 
 
-async def ensure_subscriber(oc_session_id: str, gojira_session_id: str):
-    """해당 세션의 백그라운드 구독자가 없으면 시작."""
+async def ensure_subscriber(oc_session_id: str, gojira_session_id: str, user_id: str = ""):
+    """해당 세션의 백그라운드 구독자가 없으면 시작.
+
+    user_id 는 OpenCode 인스턴스 라우팅용. 빈 문자열이면 client._resolve_url 이 fallback URL 사용.
+    """
     key = gojira_session_id
     task = _subscriber_tasks.get(key)
     if task and not task.done():
         return
-    task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
+    task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id, user_id))
     _subscriber_tasks[key] = task
-    log.info(f"백그라운드 구독 시작: {gojira_session_id} → {oc_session_id[:16]}")
+    log.info(f"백그라운드 구독 시작: {gojira_session_id} → {oc_session_id[:16]} user={user_id or '(fallback)'}")
 
 
-async def reset_subscriber(oc_session_id: str, gojira_session_id: str):
+async def reset_subscriber(oc_session_id: str, gojira_session_id: str, user_id: str = ""):
     """기존 구독자 취소 후 새로 시작. 턴 경계에서 깨끗한 재구독 보장."""
     key = gojira_session_id
     task = _subscriber_tasks.get(key)
@@ -111,12 +114,12 @@ async def reset_subscriber(oc_session_id: str, gojira_session_id: str):
         except (asyncio.CancelledError, Exception):
             pass
     _subscriber_tasks.pop(key, None)
-    task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id))
+    task = asyncio.create_task(_subscribe_loop(oc_session_id, gojira_session_id, user_id))
     _subscriber_tasks[key] = task
-    log.info(f"백그라운드 구독 리셋: {gojira_session_id} → {oc_session_id[:16]}")
+    log.info(f"백그라운드 구독 리셋: {gojira_session_id} → {oc_session_id[:16]} user={user_id or '(fallback)'}")
 
 
-async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
+async def _subscribe_loop(oc_session_id: str, gojira_session_id: str, user_id: str = ""):
     """OpenCode /event SSE를 구독하고 event_buffer 에 누적.
 
     persistent: turn (done) 끝나도 종료하지 않고 다음 turn 진입을 대기.
@@ -130,7 +133,7 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
 
     try:
         # /event SSE 연결은 세션 전체 수명 동안 유지 (translate 호출 사이 stream 상태 보존)
-        events_iter = oc.stream_events(oc_session_id)
+        events_iter = oc.stream_events(oc_session_id, user_id)
 
         while True:  # turn loop — done 마다 새 translate() 진입
             turn_start_id = get_latest_id(gojira_session_id)
@@ -139,7 +142,7 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
             initial_msg_id = None
             initial_part_types: dict = {}
             try:
-                msgs = await oc.get_session_messages(oc_session_id)
+                msgs = await oc.get_session_messages(oc_session_id, user_id)
                 for m in reversed(msgs):
                     info = m.get("info", {}) if isinstance(m, dict) else {}
                     if info.get("role") == "assistant" and info.get("finish") in (None, ""):
@@ -173,7 +176,7 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
                 # done 은 _save_to_mongo 를 먼저 끝낸 뒤에 push — 프론트의 loadSession 이 stale Mongo 를 읽는 race 방지
                 if evt_type == "done":
                     log.info(f"턴 완료 (done): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
-                    await _save_to_mongo(gojira_session_id, evt_data, turn_start_id)
+                    await _save_to_mongo(gojira_session_id, evt_data, turn_start_id, user_id)
                     push(gojira_session_id, evt_type, evt_data)
                     evt_counts[evt_type] = evt_counts.get(evt_type, 0) + 1
                     saved = True
@@ -185,7 +188,7 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
             if not saved:
                 log.warning(f"턴 비정상 종료 (done 미수신): {gojira_session_id} elapsed={time.time()-started_at:.1f}s counts={evt_counts}")
                 try:
-                    await _save_to_mongo(gojira_session_id, "{}", turn_start_id)
+                    await _save_to_mongo(gojira_session_id, "{}", turn_start_id, user_id)
                 except Exception as se:
                     log.warning(f"부분 저장 실패: {gojira_session_id} — {se}")
 
@@ -200,7 +203,7 @@ async def _subscribe_loop(oc_session_id: str, gojira_session_id: str):
         _subscriber_tasks.pop(gojira_session_id, None)
 
 
-async def _save_to_mongo(gojira_session_id: str, done_data_json: str = "{}", after_id: int = 0):
+async def _save_to_mongo(gojira_session_id: str, done_data_json: str = "{}", after_id: int = 0, user_id: str = ""):
     """OpenCode 가 관리하는 메시지(info + parts) 를 그대로 Mongo 에 저장.
 
     과거 방식(translator 가 조립한 process.steps)은 저장 시점 translator 버그가 영구 동결되는 문제가 있었다.
@@ -227,8 +230,12 @@ async def _save_to_mongo(gojira_session_id: str, done_data_json: str = "{}", aft
             c = m["content"]
             pending_user_contents[c] = pending_user_contents.get(c, 0) + 1
 
+    # user_id 누락 시 agent_sessions 에서 복구 — _save_to_mongo 가 단독 호출되는 경로 대응
+    if not user_id:
+        user_id = doc.get("userId", "") or ""
+
     try:
-        oc_messages = await oc_client.get_session_messages(oc_sid)
+        oc_messages = await oc_client.get_session_messages(oc_sid, user_id)
     except Exception as e:
         log.warning(f"save: OC 메시지 조회 실패 {gojira_session_id}: {e}")
         return
