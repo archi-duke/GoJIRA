@@ -9,13 +9,13 @@
 #   cat "$WT/business/project-description.md"
 #
 # 필수 환경변수:
-#   PLATFORM_API       — 예: http://localhost:9000/api/v2
+#   PLATFORM_API       — 예: http://10.211.55.3:44350/api/v2
 #   GOJIRA_REPOS_DIR   — 호스트 측 bare clone + worktree 루트 (Platform-API 와 공유)
 set -euo pipefail
 
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 GOJIRA_REPOS_DIR="${GOJIRA_REPOS_DIR:-${PROJECT_ROOT:-.}/repos}"
 
 RESP=$(curl -sS -w '\n%{http_code}' \

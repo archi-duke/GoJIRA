@@ -10,7 +10,7 @@ set -euo pipefail
 
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 
 curl -sS -X POST \
   -H "X-User-Id: ${USER}" \

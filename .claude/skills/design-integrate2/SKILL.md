@@ -36,8 +36,8 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 ```
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 - 임시 파일:
   - `/tmp/${CODE}-integrate-draft.json` — 메인 draft (views + entityDictionary + indexDocument)
   - `/tmp/${CODE}-arch-int-dict.json` — entity_dictionary 누적용 (Step 1.1~1.4)
@@ -101,8 +101,8 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 ### 0.3 데이터 수집
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 # ADSN/DDSN 이슈
 echo "=== ADSN/DDSN 설계 이슈 ==="

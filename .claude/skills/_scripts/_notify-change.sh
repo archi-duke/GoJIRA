@@ -16,7 +16,7 @@ USER="${2:?user required}"
 DOCPATH="${3:?document path required}"
 OP="${4:-save}"
 
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 
 BODY=$(jq -n --arg p "$DOCPATH" --arg o "$OP" '{path:$p, op:$o}')
 curl -sS -X POST "${PLATFORM_API}/DocRepo/${CODE}/notify-change" \

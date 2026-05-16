@@ -184,7 +184,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--from-mongo", dest="code", metavar="CODE", required=True)
     p.add_argument("--user", default=os.environ.get("USER", "system"))
-    p.add_argument("--api", default=os.environ.get("GOJIRA_API", "http://localhost:9001/api/v2"))
+    p.add_argument("--api", default=os.environ.get("GOJIRA_API", "http://10.211.55.3:44360/api/v2"))
     p.add_argument("--out", default=None, help="저장 경로. 미지정 시 stdout")
     args = p.parse_args()
 

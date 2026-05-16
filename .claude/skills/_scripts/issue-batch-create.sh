@@ -26,7 +26,7 @@ set -euo pipefail
 
 CODE="${1:?projectCode required}"
 USER="${2:?user knoxID required}"
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 INPUT=$(cat)
 COUNT=$(jq 'length' <<< "$INPUT")

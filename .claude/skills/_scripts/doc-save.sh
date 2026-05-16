@@ -27,7 +27,7 @@ USER="${2:?user required}"
 DOCPATH="${3:?document path required (e.g. business/use-cases.md)}"
 shift 3
 
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 본문 읽기

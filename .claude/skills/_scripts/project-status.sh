@@ -11,7 +11,7 @@ set -euo pipefail
 
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
