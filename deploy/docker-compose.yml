@@ -114,6 +114,22 @@ services:
       - gojira-api
       - platform-api
 
+  # ── 리버스 프록시: nginx ──────────────────────────────────────────────────
+  # sub_filter '10.211.55.3' '$host' 로 React 번들 내 하드코딩 IP 를 요청 Host 로 치환.
+  # 외부(116.33.255.33)에서도 재빌드 없이 접근 가능.
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "44300:44300"
+      - "44301:44301"
+      - "3030:3030"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/conf.d/gojira.conf:ro
+    depends_on:
+      - platform-app
+      - gojira-app
+
   # ── 프론트엔드: Platform-App ──────────────────────────────────────────────
   # REACT_APP_* 는 빌드 시점에 inline 되므로 atomic 변수 (*_SERVER, *_PORT)
   # 가 바뀌면 재빌드 필요: `docker compose build platform-app gojira-app`

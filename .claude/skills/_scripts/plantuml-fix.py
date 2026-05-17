@@ -6,6 +6,9 @@
   2. component/database 안 `state "..."` 키워드 → `[...]` 로 변환
   3. sequence 의 잘못된 참여자 키워드: `file` → `participant`
   (3-2) sequence 의 `cloud` 도 sequence 에서 표현 어색하지만 PlantUML 은 받아들이므로 미수정
+  4. `[컴포넌트명]` 안 raw newline → 공백 축약 (component)
+  5. 화살표 라벨 뒤 `(continuation)` 줄 병합 (component)
+  6. `[Name] { ... }` 중첩 문법 → `rectangle "Name" { ... }` 변환 (component)
 
 usage:
   plantuml-fix.py <file>...           # in-place 수정 (백업 .bak 자동 생성 안 함)
@@ -247,14 +250,73 @@ def fix_quoted_label_newline(body: str) -> tuple[str, int]:
     return "".join(out), count
 
 
+def fix_component_bracket_newline(body: str) -> tuple[str, int]:
+    """component 다이어그램에서 `[컴포넌트명]` 안의 raw newline 을 공백으로 축약.
+
+    LLM 이 `[Session Cleaner\\n(Scheduler)]` 처럼 대괄호 안에 줄바꿈을 넣는 케이스.
+    PlantUML 은 `[Name]` 을 한 줄로만 인식 — newline 포함 시 파싱 실패 (HTTP 500).
+    """
+    pattern = re.compile(r'\[([^\]]*(?:\n[^\]]*)+)\]')
+    count = 0
+
+    def repl(m: re.Match) -> str:
+        nonlocal count
+        inner = re.sub(r'\s*\n\s*', ' ', m.group(1)).strip()
+        count += 1
+        return f'[{inner}]'
+
+    new = pattern.sub(repl, body)
+    return new, count
+
+
+def fix_arrow_label_newline(body: str) -> tuple[str, int]:
+    """component 다이어그램에서 화살표 라벨 뒤 continuation 줄을 같은 줄로 병합.
+
+    `A --> B : label\\n(extra)` 처럼 라벨 직후 줄에 `(...)` 만 있는 케이스.
+    화살표 양끝은 `[name]` 또는 alias (예: `SC`, `WS`) 둘 다 허용.
+    다음 줄 전체가 `(text)` 형태일 때만 적용 (안전 휴리스틱) — 단순 텍스트
+    continuation 은 새 component/statement 와 구분이 어려워 보수적으로 패스.
+    """
+    lines = body.split('\n')
+    out: list[str] = []
+    count = 0
+    i = 0
+    endpoint = r'(?:\[[^\]]+\]|[A-Za-z_]\w*|"[^"]+")'
+    arrow_re = re.compile(rf'^\s*{endpoint}\s*[-<>.=]{{1,5}}\s*{endpoint}\s*:.+')
+    cont_re = re.compile(r'^\s*\([^)]+\)\s*$')
+    while i < len(lines):
+        if arrow_re.match(lines[i]) and i + 1 < len(lines) and cont_re.match(lines[i + 1]):
+            out.append(lines[i].rstrip() + ' ' + lines[i + 1].strip())
+            count += 1
+            i += 2
+        else:
+            out.append(lines[i])
+            i += 1
+    return '\n'.join(out), count
+
+
+def fix_component_nested_brackets(body: str) -> tuple[str, int]:
+    """component 다이어그램에서 `[Name] {` → `rectangle "Name" {` 로 변환.
+
+    `[Component]` 는 직접 중괄호 컨테이너를 가질 수 없는 PlantUML 문법 오류.
+    rectangle 은 component 다이어그램에서 컨테이너 역할 가능.
+    """
+    pattern = re.compile(r'^(\s*)\[([^\]]+)\]\s*\{', re.MULTILINE)
+    new, n = pattern.subn(r'\1rectangle "\2" {', body)
+    return new, n
+
+
 def fix_block(body: str) -> tuple[str, dict[str, int]]:
     """블록 한 개 수정. (수정본, 패턴별 적용 횟수) 반환."""
     counts: dict[str, int] = {}
 
-    # 1단계: 종류 무관 — quoted label 안 raw newline 우선 정리.
-    # detect_kind 가 multi-line label 때문에 오인할 수 있어 가장 먼저.
+    # 1단계: 종류 무관 — quoted/bracket 안의 raw newline 을 detect_kind 전에 정리.
+    # `[Foo\nBar]` 같은 multi-line bracket 이 남아 있으면 detect_kind 의
+    # `[name] as alias` 패턴이 newline 때문에 안 잡혀 component 로 분류 못 함.
     body, n0 = fix_quoted_label_newline(body)
     counts["quoted_label_newline"] = n0
+    body, n_br = fix_component_bracket_newline(body)
+    counts["component_bracket_newline"] = n_br
 
     kind = detect_kind(body)
 
@@ -273,6 +335,12 @@ def fix_block(body: str) -> tuple[str, dict[str, int]]:
         counts["component_state_keyword"] = n2
         body, n6 = fix_component_note_over(body)
         counts["component_note_over"] = n6
+        # 화살표 라벨 continuation 줄 병합 (`A --> B : label\n(extra)`)
+        body, n_arr = fix_arrow_label_newline(body)
+        counts["arrow_label_newline"] = n_arr
+        # `[Name] {` → `rectangle "Name" {` (component 컨테이너 문법 오류 수정)
+        body, n_nest = fix_component_nested_brackets(body)
+        counts["component_nested_brackets"] = n_nest
 
     return body, counts
 
