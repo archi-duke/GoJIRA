@@ -43,9 +43,12 @@ if errorlevel 1 (
 )
 
 REM ── [1/6] OpenCode in WSL (port 4096) ──
+REM 개발 환경 사용자명 — 폐쇄망의 사용자별 인스턴스 모델과 동일한 Mongo 라우팅 등록을 위한 키.
+REM 필요 시 셸에서 set GOJIRA_DEV_USER=alice 로 override 가능.
+if not defined GOJIRA_DEV_USER set GOJIRA_DEV_USER=batman
 call :isPortInUse 4096
 if errorlevel 1 (
-    echo [1/6] Starting OpenCode in WSL ^(port 4096^)...
+    echo [1/6] Starting OpenCode in WSL ^(port 4096, user=%GOJIRA_DEV_USER%^)...
     REM bash -ilc : interactive login shell — .bashrc 의 PATH export 가 적용되어
     REM ~/.opencode/bin/opencode 를 찾을 수 있음. -lc 만 쓰면 .bashrc 미source.
     start "OpenCode Server" wsl bash -ilc "opencode serve --port 4096 --hostname 0.0.0.0"
@@ -53,6 +56,9 @@ if errorlevel 1 (
 ) else (
     echo [1/6] OpenCode already running on port 4096, skipping.
 )
+REM Mongo opencodeInstances 등록 — 단계 B (Agent-Service 라우팅) 가 활성화되면 사용됨.
+REM mongosh 없거나 실패 시 조용히 건너뜀 — 개발 편의 우선.
+wsl bash -lc "bash deploy/scripts/dev-opencode-register.sh %GOJIRA_DEV_USER% 4096" >nul 2>&1
 
 REM ── [2/6] Platform-API (port 9000) ──
 call :isPortInUse 9000

@@ -1,0 +1,144 @@
+# GoJIRA 사내 폐쇄망 배포 docker-compose
+# ─────────────────────────────────────────────────────────────────────────────
+# - MongoDB / Gitea 는 사내 별도 인프라 사용 (이 compose 에 포함 안 함)
+# - 모든 환경변수는 deploy/.env 한 곳에서 atomic 입력 (host/port/user/pass)
+# - 조합된 URL (MONGO_URI / GOJIRA_API_URL / REACT_APP_* 등) 은 이 파일에서 만듦
+# - 빌드 context 는 레포 루트 (이 파일 기준 ..)
+#
+# `${VAR:?...}` 형식은 .env 에 해당 변수가 비어있으면 compose 가 fail-fast.
+# `${A:-${B:-x}}` 형식은 A 미설정 시 B, B 도 미설정 시 default x.
+
+x-build-context: &build-context
+  context: ..
+
+x-react-args: &react-args
+  REACT_APP_PLATFORM_API: "http://${PLATFORM_API_SERVER:?required}:${PLATFORM_API_PORT:?required}/api/v2"
+  REACT_APP_GOJIRA_API: "http://${GOJIRA_API_SERVER:?required}:${GOJIRA_API_PORT:?required}/api/v2"
+  REACT_APP_AGENT_API: "http://${AGENT_API_SERVER:?required}:${AGENT_API_PORT:?required}/api/v2"
+  REACT_APP_GOJIRA_APP_REMOTE: "http://${GOJIRA_APP_SERVER:?required}:${GOJIRA_APP_PORT:?required}"
+  REACT_APP_PLANTUML_SERVER: "http://${PLANTUML_SERVER:?required}:${PLANTUML_PORT:?required}/svg/"
+  REACT_APP_PUMLEX_SERVER: "${REACT_APP_PUMLEX_SERVER:-http://localhost:3030}"
+  REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
+
+services:
+
+  # ── 외부 도구: PlantUML 렌더링 서버 ───────────────────────────────────────
+  plantuml-server:
+    image: plantuml/plantuml-server:jetty
+    restart: unless-stopped
+    ports:
+      - "${PLANTUML_HOST_PORT:-${PLANTUML_PORT:-8080}}:8080"
+
+  # ── 백엔드: Platform-API ──────────────────────────────────────────────────
+  platform-api:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/platform-api/Dockerfile
+    image: gojira/platform-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # 호스트 사용자 권한으로 실행 — ${GOJIRA_REPOS_DIR} bind mount fs 권한 일치.
+    # 향후 OpenCode 스킬이 같은 디렉토리를 직접 read/write 할 때도 권한 충돌 없음.
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT:-9000}}:9000"
+    environment:
+      MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
+      PLATFORM_GITHUB_TOKEN: "${PLATFORM_GITHUB_TOKEN:?required}"
+      PLATFORM_GITHUB_ORG: "${PLATFORM_GITHUB_ORG:?required}"
+      GITHUB_URL: "http://${GITEA_SERVER:?required}/"
+      GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
+      GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
+      # SMTP (선택)
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      # LLM (선택 — llm.json 의 active provider 에 따라 사용됨)
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      PLATFORM_LLM_TICKET: "${PLATFORM_LLM_TICKET:-}"
+      PLATFORM_LLM_USER_ID: "${PLATFORM_LLM_USER_ID:-}"
+    volumes:
+      # 호스트 bind mount — Platform-API 와 (향후) OpenCode 가 같은 fs 공유.
+      # ${GOJIRA_REPOS_DIR} 는 호스트 측 절대/상대 경로 (compose 가 .env 에서 해석).
+      - ${GOJIRA_REPOS_DIR:-../repos}:/data/repos
+      # 사내 LLM swap 위해 llm.json 외부 주입 (없으면 이미지에 내장된 default 사용)
+      - ./config/llm.json:/app/config/llm.json:ro
+
+  # ── 백엔드: GoJIRA-API ────────────────────────────────────────────────────
+  gojira-api:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/gojira-api/Dockerfile
+    image: gojira/gojira-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${GOJIRA_API_HOST_PORT:-${GOJIRA_API_PORT:-9001}}:9001"
+    environment:
+      MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
+      GOJIRA_PLATFORM_API: "http://platform-api:9000/api/v2"
+      GOJIRA_JIRA_URL: "http://jira-api:8000"
+      GOJIRA_JIRA_USER: "${GOJIRA_JIRA_USER:-}"
+      GOJIRA_JIRA_PASS: "${GOJIRA_JIRA_PASS:-}"
+      GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
+    depends_on:
+      - platform-api
+
+  # ── 백엔드: JIRA Mock ─────────────────────────────────────────────────────
+  jira-api:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/jira-api/Dockerfile
+    image: gojira/jira-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${JIRA_API_HOST_PORT:-8000}:8000"
+
+  # ── 백엔드: Agent-Service ─────────────────────────────────────────────────
+  agent-service:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/agent-service/Dockerfile
+    image: gojira/agent-service:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${AGENT_API_HOST_PORT:-${AGENT_API_PORT:-9002}}:9002"
+    environment:
+      MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
+      GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
+      GOJIRA_PLATFORM_API: "http://platform-api:9000/api/v2"
+      OPENCODE_SERVER_URL: "http://${OPENCODE_SERVER:?required}:${OPENCODE_PORT:?required}"
+      OPENCODE_SERVER_USERNAME: "${OPENCODE_SERVER_USERNAME:-opencode}"
+      OPENCODE_SERVER_PASSWORD: "${OPENCODE_SERVER_PASSWORD:-}"
+    depends_on:
+      - gojira-api
+      - platform-api
+
+  # ── 프론트엔드: Platform-App ──────────────────────────────────────────────
+  # REACT_APP_* 는 빌드 시점에 inline 되므로 atomic 변수 (*_SERVER, *_PORT)
+  # 가 바뀌면 재빌드 필요: `docker compose build platform-app gojira-app`
+  platform-app:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/platform-app/Dockerfile
+      args:
+        <<: *react-args
+    image: gojira/platform-app:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT:-3000}}:3000"
+
+  # ── 프론트엔드: GoJIRA-App ────────────────────────────────────────────────
+  gojira-app:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/gojira-app/Dockerfile
+      args:
+        <<: *react-args
+    image: gojira/gojira-app:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT:-3001}}:3001"
+
+# named volume 은 더 이상 사용하지 않음 — ${GOJIRA_REPOS_DIR} 호스트 bind mount 로 전환.
+# 기존 platform-repos volume 데이터가 있다면 호스트 디렉토리로 미리 이전 후 `docker volume rm deploy_platform-repos`.

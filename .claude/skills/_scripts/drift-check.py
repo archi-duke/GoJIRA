@@ -12,7 +12,7 @@ usage:
   drift-check.py <CODE> <USER> resolve-deferred <stage>
 
 env:
-  GOJIRA_API   default http://localhost:9001/api/v2
+  GOJIRA_API   default http://10.211.55.3:44360/api/v2
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from pathlib import Path
 
 
 GRAPH_PATH = Path(__file__).resolve().parent / "workflow-graph.json"
-GOJIRA_API = os.environ.get("GOJIRA_API", "http://localhost:9001/api/v2")
+GOJIRA_API = os.environ.get("GOJIRA_API", "http://10.211.55.3:44360/api/v2")
 
 
 def http(method: str, url: str, headers=None, body=None):

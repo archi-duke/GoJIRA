@@ -7,14 +7,14 @@ allowed-tools: Bash
 NFR Requirement 와 Architectural Design 이슈의 risk/sensitivity/mitigation 필드를 에이전트가 직접 평가합니다.
 
 ## 환경 & 인자
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 - `CODE` — projectCode
 - `USER` — X-User-Id
 
 ```bash
 export CODE="GOJIRA3"
 export USER="batman"
-export GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 ```
 
 ## NFR + ADSN 조회

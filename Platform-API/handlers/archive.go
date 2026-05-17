@@ -25,9 +25,24 @@ import (
 // archive-project 스킬과 동등한 통합 흐름:
 //  1. mongo dump (GoJIRA-API GET /Project/{code}/dump)
 //  2. project.documents 의 bare repo 복사
-//  3. zip 묶기 → $HOME/.gojira-backups/{code}-{ts}.zip
+//  3. zip 묶기 → <getBackupDir()>/{code}-{ts}.zip
 //  4. Gitea/GitHub repo + 로컬 클론 삭제
 //  5. mongo hard delete (GoJIRA-API POST /Project/{code}/reset deleteProject=true)
+
+// getBackupDir 백업 zip 의 저장 디렉토리를 결정한다.
+// 우선순위: GOJIRA_BACKUP_DIR env > $HOME/.gojira-backups > /tmp/.gojira-backups (fallback).
+// 컨테이너에서 `user: "${UID}:${GID}"` override 시 /etc/passwd 에 uid 가 없어 HOME 이
+// "/" 로 떨어지는 케이스가 있어 fallback 이 필요하다.
+func getBackupDir() string {
+	if d := os.Getenv("GOJIRA_BACKUP_DIR"); d != "" {
+		return d
+	}
+	h := os.Getenv("HOME")
+	if h == "" || h == "/" {
+		return "/tmp/.gojira-backups"
+	}
+	return filepath.Join(h, ".gojira-backups")
+}
 //
 // Body: { confirm: bool }
 //   - confirm=false: dry-run. zip 만들기 전 영향 범위만 반환
@@ -83,9 +98,9 @@ func ProjectArchiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. zip 만들기 → $HOME/.gojira-backups
+	// 4. zip 만들기 → getBackupDir()
 	timestamp := time.Now().Format("20060102150405")
-	backupDir := filepath.Join(os.Getenv("HOME"), ".gojira-backups")
+	backupDir := getBackupDir()
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		respondError(w, http.StatusInternalServerError, "backup dir 생성 실패: "+err.Error())
 		return

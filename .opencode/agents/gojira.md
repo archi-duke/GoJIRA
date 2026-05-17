@@ -47,14 +47,34 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/project-status.sh" "${CODE}" "${US
 
 ## 환경변수 (절대 추측 금지)
 
-bash 실행 시 항상 맨 앞에 export 한다:
+bash 실행 시 항상 맨 앞에 export 한다. 환경에 이미 설정돼 있으면 보존되고, 없으면 default 사용:
 ```bash
-export PROJECT_ROOT="/Users/dukekimm/Works/GoJIRA"
-export PLATFORM_API="http://localhost:9000/api/v2"
-export GOJIRA_API="http://localhost:9001/api/v2"
+export PROJECT_ROOT="${PROJECT_ROOT:-/home/parallels/works/GoJIRA}"
+# 사내 컨벤션: platform-api=44350, gojira-api=44360 (호스트 매핑 포트, 고정).
+# 현재 dev 환경: Docker compose 가 Parallels VM(10.211.55.3) 에서 도는데, OpenCode 는
+# Mac 호스트(10.211.55.2) 에 있으므로 Mac 의 스킬이 VM 으로 호출하도록 default 를 잡음.
+# 운영 환경에서는 env 로 PLATFORM_API/GOJIRA_API 자체를 override.
+export PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+# 스킬이 fs 직접 read/write 시 사용 — Platform-API 와 같은 디렉토리 공유.
+# worktree 경로 컨벤션은 아래 참조.
+export GOJIRA_REPOS_DIR="${GOJIRA_REPOS_DIR:-${PROJECT_ROOT}/repos}"
 ```
+
+### ⛔ API URL 호출 규칙 — 엄격 준수 (위반 금지)
+
+- 모든 API 호출은 위에서 export 한 **`${PLATFORM_API}`** (= http://10.211.55.3:44350/api/v2) 또는 **`${GOJIRA_API}`** (= http://10.211.55.3:44360/api/v2) 만 사용.
+- 절대 curl 명령에 `http://localhost:...` / `http://127.0.0.1:...` / `http://0.0.0.0:...` 박지 마라. 항상 `${PLATFORM_API}/...` 또는 `${GOJIRA_API}/...` 형식.
+- 만약 curl 응답에 `Connection refused` 가 나오면, 먼저 `echo "PLATFORM_API=$PLATFORM_API"` 로 환경변수 값을 확인하고, 누락이면 위 export 블록을 다시 실행하라. **사용자에게 "서버를 시작하라" 고 안내하지 마라** — 서버는 이미 떠 있고 URL 만 틀린 것이다.
+- 위 규칙 위반은 오답이다.
 - 모든 쓰기 호출에 `X-User-Id: ${USER}` 헤더 필수
 - 스크립트 경로는 `${PROJECT_ROOT}/.claude/skills/_scripts/` 를 사용
+- worktree 경로 컨벤션 (스킬 fs 직접 접근):
+  - `${GOJIRA_REPOS_DIR}/<gitea-org>/<repo-name>.git/` — bare clone (Platform-API 관리, 스킬은 read 만)
+  - `${GOJIRA_REPOS_DIR}/<gitea-org>/<repo-name>.worktrees/${USER}/` — 사용자별 worktree (스킬 fs read/write 대상)
+  - 자세한 설계: `docs/refactor-skill-fs-direct.md` § 3.2
+- **세션 lock**: write 계열 스킬 (`doc-save.sh`) 은 holderKind="skill" 로 EditSession lock 을 잡는다. 같은 사용자가 UI 로 동시 편집 중이면 도구가 충돌 메시지를 반환하므로 그대로 사용자에게 보고하고 멈춰라. 작업 종료 시 반드시 `bash _scripts/_edit-release.sh ${CODE} ${USER}` 를 호출해 UI 사용을 풀어 주어야 한다 (호출 안 하면 30분 TTL 후 자동 해제).
+- **파일 락**: 같은 user 의 동시 write race 는 `${WT}/.gojira-locks/<path>.lock` 위의 flock 으로 OS 레벨 직렬화된다 (doc-save.sh + Platform-API 동일 lock 경로). 스킬이 의식할 필요는 없음 — 자동.
 
 ## 🚨 스킬 우선 원칙
 

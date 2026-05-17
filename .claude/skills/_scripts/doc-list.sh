@@ -1,23 +1,21 @@
 #!/usr/bin/env bash
-# doc-list.sh — 문서 파일 목록을 JSON 으로 출력한다.
+# doc-list.sh — worktree 의 문서 파일 목록을 JSON 으로 출력.
 #
 # 사용법:
-#   bash doc-list.sh <CODE> <USER> [REF]
+#   bash doc-list.sh <CODE> <USER>
 #
-# 예:
-#   bash doc-list.sh GOJIRA3 batman           # docs/batman 브랜치
-#   bash doc-list.sh GOJIRA3 batman main      # main 브랜치
+# 출력: [{path, size}, ...]   ← 기존 sha 필드는 더 이상 채우지 않음 (use git ls-tree if needed)
 #
-# 출력: [{path, type, size, sha}, ...]
+# 참고: worktree 는 docs/<USER> 브랜치 (origin/main 분기). main 의 파일도 그대로 보인다.
 set -euo pipefail
 
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
-REF="${3:-docs/${USER}}"
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
 
-curl -s "${PLATFORM_API}/DocRepo/${CODE}/tree?ref=$(printf %s "$REF" | jq -sRr @uri)" \
-  -H "X-User-Id: ${USER}" \
-  > /tmp/gojira_doctree.json
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WT=$(bash "${SCRIPT_DIR}/_worktree-ensure.sh" "$CODE" "$USER")
 
-jq '[.tree[] | select(.type=="blob") | {path, size, sha}]' /tmp/gojira_doctree.json
+# .git 자체 + .git/ 디렉토리 모두 제외. relative path 로 출력.
+cd "$WT"
+find . -type f -not -path './.git/*' -not -name '.git' -printf '%P\t%s\n' \
+  | jq -Rn '[inputs | split("\t") | {path: .[0], size: (.[1] | tonumber)}]'

@@ -8,7 +8,7 @@ disable-model-invocation: true
 GoJIRA 프로젝트에 새 **VOS** 이슈를 생성합니다. VOS 는 가공되지 않은 이해관계자의 목소리를 그대로 담는 이슈이며, 이후 Requirement(FR/NFR/CNST) 로 정제되어 Contains 관계로 연결됩니다. 쓰기 작업이므로 실행 전 사용자 확인이 필요합니다.
 
 ## 환경
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 - `X-User-Id` 헤더 필수 (누락 시 403)
 
 ## 인자 추출
@@ -47,7 +47,7 @@ curl -s "${GOJIRA_API}/Issue" \
 ## Step 1 — VOS 이슈 생성 (POST /Issue)
 
 ```bash
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
   -H "Content-Type: application/json" \

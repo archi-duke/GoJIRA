@@ -3,6 +3,14 @@
 > 본 문서는 GoJIRA 의 운영 배포 토폴로지, 컴포넌트 배치 원칙, 티어 간 네트워크 요구사항, scale-out 시 선행 작업을 정리합니다.
 > 사내망 Windows 환경 셋업 절차는 [docs/setup-windows.md](../setup-windows.md), 포트 매핑은 [docs/ports.md](../ports.md) 참조.
 
+> **⚠ 리팩토링 진행 중 (2026-05)** — 본 문서의 토폴로지 / 환경변수 일부가 변경 예정입니다. 본 문서는 구현 완료 후 본문이 갱신됩니다.
+> - **시나리오 A 채택** — OpenCode + Platform-API + worktree fs 모두 사내 서버 한 곳. 사용자는 자기 PC 에서 브라우저 + `opencode attach` (Q5)
+> - **OpenCode 사용자별 인스턴스** — systemd template unit (`opencode@<user>.service`) + Mongo 컬렉션 (`opencode_instances`) 으로 매핑. AI 서버 토폴로지 갱신 (Q6, Q8)
+> - **호스트 bind mount + 권한 정합** — `platform-repos` volume 을 호스트 디렉토리 (`${GOJIRA_REPOS_DIR}`) 로, `user: "${UID}:${GID}"` 적용 (Q1, Q4)
+> - **Agent-Service 라우팅 추상화** — 단일 `OPENCODE_SERVER_URL` 대신 `opencode_instances` 조회 → 노드 간 분산 시에도 코드 변경 없음
+>
+> 상세: [`docs/refactor-skill-fs-direct.md`](../refactor-skill-fs-direct.md)
+
 ## 1. 배치 원칙
 
 | 원칙 | 이유 |
@@ -93,7 +101,7 @@ PA --> LLM : /LLM/call 게이트웨이 (사내/외부 모델)
 ### 4.1 AI 서버 — Agent-Service/.env
 
 ```ini
-GOJIRA_MONGO_URI=mongodb://<infra-host>:<port>
+MONGO_URI=mongodb://<infra-host>:<port>
 GOJIRA_API_URL=http://<backend-host>:9001/api/v2
 GOJIRA_PLATFORM_API=http://<backend-host>:9000/api/v2
 OPENCODE_SERVER_URL=http://127.0.0.1:4096
@@ -113,11 +121,11 @@ GOJIRA_API=http://<backend-host>:9001/api/v2
 ### 4.2 백엔드 서버 — Platform-API/.env
 
 ```ini
-PLATFORM_MONGO_URI=mongodb://<infra-host>:<port>
+MONGO_URI=mongodb://<infra-host>:<port>
 PLATFORM_GITHUB_TOKEN=ENC:<gitea-PAT>
 PLATFORM_GITHUB_ORG=<gitea-org>
 GITHUB_URL=http://<gitea-host>:<port>/
-PLATFORM_GOJIRA_API=http://localhost:9001/api/v2
+GOJIRA_API_URL=http://localhost:9001/api/v2
 # 사내 LLM (llm.json 의 ${PLATFORM_LLM_TICKET} 치환)
 PLATFORM_LLM_TICKET=ENC:<X-Dep-Ticket>
 PLATFORM_LLM_USER_ID=<knox-id>
@@ -127,7 +135,7 @@ GOJIRA_ENC_KEY=<32바이트 hex/base64>   # ENC: 복호화 마스터 키
 ### 4.3 백엔드 서버 — GoJIRA-API/.env
 
 ```ini
-GOJIRA_MONGO_URI=mongodb://<infra-host>:<port>
+MONGO_URI=mongodb://<infra-host>:<port>
 GOJIRA_PLATFORM_API=http://localhost:9000/api/v2
 GOJIRA_JIRA_URL=http://<jira-host>:8000
 # JIRA 실제 연동 시:

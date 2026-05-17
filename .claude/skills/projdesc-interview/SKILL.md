@@ -6,7 +6,7 @@ allowed-tools: Bash, Read
 
 ## 환경
 
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
 - 저장 경로: `business/project-description.md`
 
 ## 인자 추출
@@ -31,7 +31,7 @@ export USER="batman"
 ## Step 0 — 기존 문서 확인
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 
 # docs/{user} 우선, fallback main (스크립트 자동 처리)
 DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md" 2>/dev/null || true)

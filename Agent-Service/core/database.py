@@ -53,6 +53,18 @@ def workflow_jobs() -> Collection:
     return get_db()["workflow_jobs"]
 
 
+def opencode_instances() -> Collection:
+    return get_db()["opencodeInstances"]
+
+
+def find_active_opencode_instance(user_id: str) -> Optional[dict]:
+    """사용자의 활성 OpenCode 인스턴스 1건. 없으면 None.
+    Platform-API 의 db.FindActiveOpencodeInstance 와 동일 의미."""
+    if not user_id:
+        return None
+    return opencode_instances().find_one({"userId": user_id, "status": "active"})
+
+
 def ensure_indexes():
     """TTL 인덱스 등 필수 인덱스 생성."""
     from pymongo import ASCENDING

@@ -7,7 +7,7 @@ allowed-tools: Bash
 Platform-API `GET /DocRepo/{code}/tree` 로 문서 파일 트리를 조회합니다.
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
 
 ## 인자
 - `CODE` — projectCode
@@ -18,7 +18,7 @@ Platform-API `GET /DocRepo/{code}/tree` 로 문서 파일 트리를 조회합니
 export CODE="GOJIRA3"
 export USER="batman"
 export REF="${REF:-main}"
-export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+export PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 ```
 
 ## 조회

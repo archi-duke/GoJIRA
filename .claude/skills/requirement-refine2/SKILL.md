@@ -38,8 +38,8 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 ```
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 - 임시 파일 위치: `/tmp/${CODE}-reqref-{draft|validated}.json`
 
 ## 인자 추출
@@ -113,8 +113,8 @@ drift 모두 CLEAN 인 경우 **반드시 사용자에게 다음 3 옵션을 명
 ### 0.3 데이터 수집
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 # project-description.md (docs/{user} 우선, fallback main — 스크립트 자동 처리)
 DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md" 2>/dev/null || true)

@@ -8,7 +8,10 @@
 | 환경 | MongoDB / Gitea | OpenCode | Backend / Frontend |
 |---|---|---|---|
 | **로컬 개발 (Mac)** | Docker — 같은 호스트 | 같은 호스트 | 같은 호스트 |
+| **Mac + Parallels Ubuntu 게스트** | Mac (host IP, 예: `10.211.55.2`) | Mac (host IP, 예: `10.211.55.2`) | 게스트 안 |
 | **사내망 (Windows + WSL)** | **별도 사내 서버** | **WSL 안 (사용자 PC)** | WSL 안 (사용자 PC) — 가정, 추후 확정 |
+
+OpenCode 는 어디서든 띄울 수 있다 (단일 호스트 / 게스트→호스트 / 별도 서버 / 사내 폐쇄망 컨테이너). Agent-Service 가 `OPENCODE_SERVER_URL` 환경변수로 위치를 지정한다. 외부 노출 시 `opencode serve --hostname 0.0.0.0 --port 4096` 으로 띄워야 LAN/게스트에서 도달 가능.
 
 사내망에서는 MongoDB / Gitea 의 호스트명이 `localhost` 가 아니므로 환경변수 (`*_URL`) 에 실제 사내 호스트를 명시한다. cross-service `_URL` 변수 표는 본 문서 아래 참조.
 
@@ -26,6 +29,28 @@
 | 9001 | GoJIRA-API | Backend (Go) | 이슈/프로젝트/Agent 프록시 |
 | 9002 | Agent-Service | Backend (Python) | OpenCode 브리지 (SSE 번역) |
 | 27017 | MongoDB | DB (사내망: 별도 서버 / 로컬: Docker) | 공용 DB (`gojira` database) |
+
+> 위 표는 **컨테이너 내부 listen 포트**. Docker compose 배포 시 호스트 외부에는 아래의 매핑된 포트로 노출 — 사내 컨벤션이며 firewall/policy 등록 이력 때문에 변경 금지.
+
+### 사내 운영 호스트 매핑 (deploy/docker-compose.yml)
+
+| 컨테이너 포트 | 호스트 매핑 포트 | `.env` 변수 |
+|---|---|---|
+| 9000 | **44350** | `PLATFORM_API_PORT` (or `PLATFORM_API_HOST_PORT`) |
+| 9001 | **44360** | `GOJIRA_API_PORT` (or `GOJIRA_API_HOST_PORT`) |
+| 9002 | **44370** | `AGENT_API_PORT` (or `AGENT_API_HOST_PORT`) |
+| 3000 | 44300 | `PLATFORM_APP_PORT` (or `PLATFORM_APP_HOST_PORT`) |
+| 3001 | 44301 | `GOJIRA_APP_PORT` (or `GOJIRA_APP_HOST_PORT`) |
+| 8080 | 44351 | `PLANTUML_PORT` (or `PLANTUML_HOST_PORT`) |
+| 8000 | 8000 | `JIRA_API_HOST_PORT` |
+| 4096 | 4096 | OpenCode (host native, 컨테이너 외부) |
+
+스킬 / 외부 클라이언트가 사내 서버 호출 시 사용하는 URL 도 호스트 매핑 포트 기준:
+- `http://<gojira-host>:44350/api/v2` — Platform-API
+- `http://<gojira-host>:44360/api/v2` — GoJIRA-API
+- `http://<gojira-host>:44370/api/v2` — Agent-Service
+
+자세한 배포 토폴로지: `docs/deployment-topology.md`
 
 ## 서비스별 의존 매트릭스
 
@@ -73,7 +98,7 @@ cross-service URL 변수 (필수, 환경별로 명시):
 | 변수 | 의미 |
 |---|---|
 | `GOJIRA_PLATFORM_API` | GoJIRA-API → Platform-API 베이스 URL |
-| `PLATFORM_GOJIRA_API` | Platform-API → GoJIRA-API 베이스 URL |
+| `GOJIRA_API_URL` | Platform-API → GoJIRA-API 베이스 URL |
 | `GOJIRA_API_URL` | Agent-Service → GoJIRA-API 베이스 URL |
 | `OPENCODE_SERVER_URL` | Agent-Service → OpenCode |
 | `GITHUB_URL` | Platform-API → Gitea / GitHub |

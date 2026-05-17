@@ -7,7 +7,7 @@ allowed-tools: Bash
 GoJIRA-API `/Project` 에서 프로젝트 목록을 조회합니다.
 
 ## 환경
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 
 ## 인자
 - `USER` — X-User-Id (필수)
@@ -16,7 +16,7 @@ GoJIRA-API `/Project` 에서 프로젝트 목록을 조회합니다.
 ```bash
 export USER="batman"
 export CODE=""
-export GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 ```
 
 ## 조회

@@ -172,7 +172,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           );
           if (ok) {
             window.open(
-              `http://localhost:3001/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(`${projectCode} 과제의 project-description.md를 작성해줘`)}`,
+              `${config.GOJIRA_APP}/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(`${projectCode} 과제의 project-description.md를 작성해줘`)}`,
               'gojira-agent', 'width=480,height=720'
             );
           }
