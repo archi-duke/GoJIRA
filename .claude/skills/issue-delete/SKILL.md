@@ -8,7 +8,7 @@ disable-model-invocation: true
 GoJIRA-API `DELETE /Issue` (body 에 prjID/key/user) 로 이슈를 삭제합니다. **파괴적 작업 — 실행 전 반드시 사용자 확인.**
 
 ## 환경
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 
 ## 인자
 - `CODE` — projectCode (필수)
@@ -19,7 +19,7 @@ GoJIRA-API `DELETE /Issue` (body 에 prjID/key/user) 로 이슈를 삭제합니�
 export CODE="GOJIRA3"
 export USER="batman"
 export KEY="GOJIRA3-30"
-export GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 ```
 
 ## 삭제

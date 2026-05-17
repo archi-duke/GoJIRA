@@ -8,7 +8,7 @@ disable-model-invocation: true
 Platform-API `POST /DocRepo/{code}/pr` 로 PR 을 생성합니다. 쓰기 작업 — 실행 전 사용자 확인.
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
 
 ## 인자
 - `CODE` — projectCode
@@ -21,7 +21,7 @@ export CODE="GOJIRA3"
 export USER="batman"
 export TITLE=""
 export BODY=""
-export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+export PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 [ -z "$TITLE" ] && TITLE="[${CODE}] 설계문서 배포 요청"
 ```
 

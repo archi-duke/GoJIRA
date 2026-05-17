@@ -84,9 +84,10 @@ func CleanExpiredWorkspaces(ttl time.Duration, checkSessionFn func(owner, repo, 
 			continue
 		}
 
-		log.Printf("TTL 만료 workspace 삭제: %s/%s user=%s (last access: %s)", owner, repo, userID, lastAccess.Format(time.RFC3339))
-		DiscardWorktree(owner, repo, userID)
-		removeWorkspaceAccess(owner, repo, userID)
+		// branch 는 보존 — unpushed commit 영구 손실 방지. worktree dir 만 제거하고
+		// 같은 사용자가 재접속하면 EnsureWorktree 가 같은 docs/<user> 브랜치를 다시 checkout.
+		log.Printf("TTL 만료 workspace 삭제 (branch 보존): %s/%s user=%s (last access: %s)", owner, repo, userID, lastAccess.Format(time.RFC3339))
+		RemoveWorktreeOnly(owner, repo, userID)
 		cleaned++
 	}
 
@@ -110,9 +111,11 @@ func splitKey(key string) []string {
 	return parts
 }
 
-// StartTTLWorker 백그라운드에서 만료된 workspace를 주기적으로 정리
+// StartTTLWorker 백그라운드에서 만료된 workspace를 주기적으로 정리.
+// TTL 은 config.WorkspaceTTL (default 4h) — EditSessionTTL 과 분리되어 worktree 만 영향.
+// cleanup 은 RemoveWorktreeOnly (branch 보존) — unpushed commit 영구 손실 방지.
 func StartTTLWorker(checkSessionFn func(owner, repo, userID string) bool) {
-	ttl := config.EditSessionTTL
+	ttl := config.WorkspaceTTL
 	interval := ttl / 2
 	if interval < time.Minute {
 		interval = time.Minute

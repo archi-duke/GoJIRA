@@ -351,7 +351,7 @@ def main() -> int:
     p.add_argument("--from-mongo", dest="code", metavar="CODE",
                    help="GoJIRA-API 에서 ADSN + archSettings fetch")
     p.add_argument("--user", default=os.environ.get("USER", "system"))
-    p.add_argument("--api", default=os.environ.get("GOJIRA_API", "http://localhost:9001/api/v2"))
+    p.add_argument("--api", default=os.environ.get("GOJIRA_API", "http://10.211.55.3:44360/api/v2"))
     p.add_argument("--out-dir", default=None,
                    help="저장 디렉토리 — index + per-candidate. 미지정 시 stdout (index 만)")
     args = p.parse_args()

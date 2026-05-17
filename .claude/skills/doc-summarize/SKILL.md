@@ -7,7 +7,7 @@ allowed-tools: Bash
 Platform-API `GET /DocRepo/{code}/file` 로 문서를 읽어 에이전트(LLM)가 직접 한국어 요약을 작성합니다.
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
 
 ## 인자
 - `CODE` — projectCode
@@ -20,7 +20,7 @@ export CODE="GOJIRA3"
 export USER="batman"
 export FILE="architecture/architecture-integrated.md"
 export REF="${REF:-main}"
-export PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+export PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 ```
 
 ## 문서 읽기

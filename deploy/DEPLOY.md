@@ -45,14 +45,21 @@ cp .env.example .env
 
 ### 2-1. 채워야 할 필수 값
 
-| 변수 | 출처 / 결정 주체 |
-|---|---|
-| `PLATFORM_MONGO_URI` / `GOJIRA_MONGO_URI` | 사내 MongoDB 운영팀 (host:port, 인증, authSource). `@` → `%40` URL encoding |
-| `GITHUB_URL` | 사내 Gitea base URL (끝에 `/` 포함) |
-| `PLATFORM_GITHUB_TOKEN` | Gitea Settings → Applications → PAT (scope: `repo` + `admin:org`) |
-| `PLATFORM_GITHUB_ORG` | Gitea organization 이름 |
-| `OPENCODE_SERVER_URL` | 사내 OpenCode serve 호스트 |
-| `REACT_APP_PLATFORM_API` 등 6종 | **사용자 브라우저가 접근하는 URL** — 사내 GoJIRA 서버의 외부 노출 host |
+**atomic 입력만 작성한다 — 조합된 URL (MONGO_URI / GOJIRA_API_URL / REACT_APP_* 등) 은 compose 가 자동 생성.**
+
+| 카테고리 | 변수 | 출처 / 결정 주체 |
+|---|---|---|
+| MongoDB | `MONGODB_SERVER` | 사내 MongoDB host:port (한 줄). 3 백엔드 공용 |
+| | `MONGO_USER` / `MONGO_PASS` | 인증. 특수문자 URL encoding (`@` → `%40`) 불요 — compose 가 raw 로 조합 후 코드가 처리 |
+| | `MONGO_AUTH_SOURCE` | default `admin` |
+| Gitea | `GITEA_SERVER` | 사내 Gitea host:port |
+| | `PLATFORM_GITHUB_TOKEN` | Gitea PAT (scope: `repo` + `admin:org`) |
+| | `PLATFORM_GITHUB_ORG` | Gitea organization 이름 |
+| 호스트 파일시스템 | `GOJIRA_REPOS_DIR` | Platform-API 의 bare clone + worktree 저장 경로 (호스트 측). 폐쇄망은 절대경로 권장 — 예: `/var/lib/gojira/repos` |
+| | `UID` / `GID` | 컨테이너가 호스트 사용자 권한으로 실행되도록 매핑. 보통 `id -u` / `id -g` 값. bind mount fs 권한 일치 목적 |
+| OpenCode | `OPENCODE_SERVER` + `OPENCODE_PORT` | 사내 OpenCode serve host + port |
+| GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 6종 | 브라우저가 접근하는 host + port (Platform/GoJIRA/Agent API + Platform/GoJIRA App + PlantUML). React 빌드 시점에 inline! |
+| 컨테이너 노출 port<br>(선택) | `*_HOST_PORT` | nginx reverse proxy 환경에서 컨테이너 외부 노출 port 가 사용자 access port 와 다를 때만 |
 
 ### 2-2. 선택 값
 
@@ -125,7 +132,7 @@ docker save \
 
 | 파일 | 비고 |
 |---|---|
-| `gojira-images.tar` | ~2GB |
+| `gojira-images.tar` | ~440MB (layer 공유로 압축됨, 원본 합계 ~1.9GB) |
 | `deploy/.env` | 시크릿 포함 — **보안 채널** |
 | `deploy/docker-compose.yml` | |
 | `deploy/config/llm.json` | volume mount 대상 |
@@ -156,15 +163,31 @@ docker images | grep -E "gojira|plantuml"   # 7개 확인
 
 ## ⑥ 폐쇄망 — 기동
 
+### 6-0. 호스트 측 repos 디렉토리 준비
+
+`.env` 의 `GOJIRA_REPOS_DIR` 경로를 호스트에 미리 만들고 `UID`/`GID` 사용자가 소유하도록 설정:
+
+```bash
+source .env
+mkdir -p ${GOJIRA_REPOS_DIR}
+sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}
+```
+
+> bind mount 는 호스트 권한이 그대로 컨테이너에 보임. 컨테이너 user (= `${UID}:${GID}`) 가 write 못 하면 Platform-API 의 `git clone` / worktree 생성이 실패한다.
+
 ### 6-1. `.env` 사후 점검
 
 외부망에서 채운 `.env` 값이 폐쇄망 환경과 일치하는지 확인:
 
 ```bash
-# 사내 인프라 도달 확인
-curl -sS "<mongo-host>:27017"     # 응답이 와야 함 (mongod 는 HTTP 응답은 이상해도 connection 성공이면 OK)
-curl -sS "${GITHUB_URL}"           # Gitea 응답
-curl -sS "${OPENCODE_SERVER_URL}/" # OpenCode 응답
+# compose 가 조합한 최종 URL 미리보기 (시크릿도 함께 출력되니 주의)
+docker compose config | grep -E "MONGO_URI|GITHUB_URL|OPENCODE_SERVER_URL|REACT_APP_" | sort -u
+
+# 사내 인프라 도달 확인 (.env 의 값으로 직접 호출)
+source .env
+nc -zv ${MONGODB_SERVER%%:*} ${MONGODB_SERVER##*:}      # Mongo TCP 도달
+curl -sS http://${GITEA_SERVER}/                        # Gitea 응답
+curl -sS http://${OPENCODE_SERVER}:${OPENCODE_PORT}/    # OpenCode 응답
 ```
 
 ### 6-2. 기동
@@ -178,15 +201,15 @@ docker compose ps
 
 ### 6-3. (조건부) React 재빌드
 
-외부망 빌드 시점에 사용한 `REACT_APP_*` 가 폐쇄망의 실제 사용자 접근 URL 과 다를 경우:
+외부망 빌드 시점에 사용한 사용자 access URL (`*_SERVER` + `*_PORT`) 이 폐쇄망의 실제값과 다를 경우:
 
 ```bash
-# .env 의 REACT_APP_* 수정 후
+# .env 의 *_SERVER / *_PORT 수정 후
 docker compose build platform-app gojira-app
 docker compose up -d platform-app gojira-app
 ```
 
-> 백엔드 환경변수 (Mongo URI, secrets, OpenCode URL 등) 만 다르다면 **재빌드 불요**. `.env` 수정 + `docker compose up -d` 만으로 반영.
+> 백엔드 환경변수 (Mongo, Gitea, OpenCode, 시크릿 등) 만 다르다면 **재빌드 불요**. `.env` 수정 + `docker compose up -d` 만으로 반영.
 
 ---
 
@@ -194,14 +217,17 @@ docker compose up -d platform-app gojira-app
 
 ### 7-1. 헬스 체크 (서버 내부)
 
+`.env` 의 `*_PORT` (또는 `*_HOST_PORT` 가 설정됐으면 그 값) 으로 호출. 아래는 `.env` 의 값을 읽어 자동 호출:
+
 ```bash
-curl -sS http://localhost:9000/                       # Platform-API → 404 OK (route 없음)
-curl -sS http://localhost:9001/                       # GoJIRA-API   → 404 OK
-curl -sS http://localhost:9002/docs                   # Agent-Service → HTTP 200 (Swagger)
-curl -sS http://localhost:8000/rest/api/2/serverInfo  # JIRA Mock    → JSON
-curl -sS http://localhost:8080/                       # PlantUML     → HTML
-curl -sS http://localhost:3000/                       # Platform-App → HTML
-curl -sS http://localhost:3001/                       # GoJIRA-App   → HTML
+source .env
+curl -sS http://localhost:${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT}}/                  # Platform-API → 404 OK
+curl -sS http://localhost:${GOJIRA_API_HOST_PORT:-${GOJIRA_API_PORT}}/                      # GoJIRA-API   → 404 OK
+curl -sS http://localhost:${AGENT_API_HOST_PORT:-${AGENT_API_PORT}}/docs                    # Agent-Service → HTTP 200
+curl -sS http://localhost:${JIRA_API_HOST_PORT:-8000}/rest/api/2/serverInfo                 # JIRA Mock    → JSON
+curl -sS http://localhost:${PLANTUML_HOST_PORT:-${PLANTUML_PORT}}/                          # PlantUML     → HTML
+curl -sS http://localhost:${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT}}/                  # Platform-App → HTML
+curl -sS http://localhost:${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT}}/                      # GoJIRA-App   → HTML
 ```
 
 ### 7-2. startup 로그 확인
@@ -217,15 +243,76 @@ docker compose logs agent-service | head -30
 ### 7-3. 브라우저 통합 확인
 
 ```
-http://<gojira-host>:3000   # Platform-App (계정/공지/문서)
-http://<gojira-host>:3001   # GoJIRA-App (이슈/프로젝트/채팅)
+http://${PLATFORM_APP_SERVER}:${PLATFORM_APP_PORT}   # Platform-App (계정/공지/문서)
+http://${GOJIRA_APP_SERVER}:${GOJIRA_APP_PORT}       # GoJIRA-App (이슈/프로젝트/채팅)
 ```
+(.env 에 채운 값이 그대로 사용자 access URL)
 
 체크리스트:
 - [ ] Platform-App 로그인 / 프로젝트 목록 표시
 - [ ] GoJIRA-App 이슈 목록 / 다이어그램 (PlantUML) 렌더링
 - [ ] Platform-App 의 채팅 popup → 백엔드 Agent-Service → OpenCode → LLM 까지 SSE 응답 도착
 - [ ] Module Federation: Platform-App 화면에 GoJIRA-App 의 `remoteEntry.js` 로드 (DevTools Network 탭)
+
+---
+
+## ⑦-1. (선택) 사용자별 OpenCode 인스턴스 등록
+
+> 단계 A 구현 완료, 단계 B (Agent-Service 라우팅 전환) 활성화 시 실제 사용됨. 지금 등록해두어도 무해.
+
+### 사전 준비
+
+```bash
+# 1) opencode 바이너리를 시스템 경로에 배치 (운영자 책임)
+sudo install -m 755 /path/to/opencode /usr/local/bin/opencode
+opencode --version
+
+# 2) mongosh CLI 설치 (등록 스크립트가 사용)
+sudo apt install -y mongodb-mongosh
+
+# 3) systemd template unit 설치
+sudo install -m 644 deploy/systemd/opencode@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# 4) 환경파일 디렉토리
+sudo install -d -m 755 /etc/gojira
+```
+
+### 사용자 추가
+
+```bash
+sudo ./deploy/scripts/gojira-user-add.sh batman
+# → /etc/gojira/opencode-batman.env 생성 (포트는 Mongo 의 최대값+1, 비어있으면 4096)
+# → Mongo opencodeInstances 에 {userId, host, port, status:'active'} upsert
+# → systemctl enable --now opencode@batman.service
+#
+# 옵션:
+#   --no-start          systemctl 호출 생략 (env + Mongo 등록만)
+#   GOJIRA_NODE_HOST=…  노드 분산 시 호스트 주소 명시 (default localhost)
+#   OPENCODE_BIN=…      opencode 바이너리 경로 override (default /usr/local/bin/opencode)
+```
+
+상태 확인:
+
+```bash
+systemctl status opencode@batman.service
+journalctl -u opencode@batman.service -f
+mongosh "${MONGO_URI}" --eval "db.getSiblingDB('gojira').opencodeInstances.find().pretty()"
+```
+
+### 사용자 제거
+
+```bash
+sudo ./deploy/scripts/gojira-user-remove.sh batman
+# → systemctl disable --now / env 파일 삭제 / Mongo 레코드 삭제
+# → worktree (${GOJIRA_REPOS_DIR}/.../worktrees/batman) 는 보존 — 명시적으로 삭제하려면 별도 절차
+```
+
+### 미적용 항목 (단계 B 에서)
+
+- Agent-Service 가 `OPENCODE_URL` env 가 아니라 `opencodeInstances` 컬렉션을 조회해 라우팅하도록 전환
+- 헬스체크 (cron 또는 Platform-API 의 백그라운드 goroutine) — status=down 자동 표시
+- 자세한 설계: `docs/refactor-skill-fs-direct.md` § 7
 
 ---
 
@@ -244,25 +331,33 @@ http://<gojira-host>:3001   # GoJIRA-App (이슈/프로젝트/채팅)
 
 | 변경 대상 | 절차 |
 |---|---|
-| 백엔드 환경변수 (`.env`) | `.env` 수정 → `docker compose up -d` |
-| React 관련 변수 (`REACT_APP_*`) | `.env` 수정 → `docker compose build platform-app gojira-app && docker compose up -d` |
+| 백엔드용 변수 (Mongo/Gitea/OpenCode/시크릿) | `.env` 수정 → `docker compose up -d` |
+| React 가 inline 한 사용자 access URL (`*_SERVER` / `*_PORT`) | `.env` 수정 → `docker compose build platform-app gojira-app && docker compose up -d` |
 | LLM provider swap | `config/llm.json` 편집 (active provider 와 `_disabled_*` swap) → `docker compose restart platform-api` |
 | llm.json 만 수정 | volume mount 이므로 컨테이너 재시작만 (`docker compose restart platform-api`) |
 
 ### 백업 / 복구
 
+`GOJIRA_REPOS_DIR` 은 이제 호스트 디렉토리 (bind mount) 이므로 일반 tar 로 직접 백업:
+
 ```bash
-# Gitea 와 동기화되는 로컬 repo cache 백업
-docker run --rm \
-  -v deploy_platform-repos:/data \
-  -v "$PWD":/backup \
-  alpine tar czf /backup/repos-$(date +%F).tgz /data
+source .env
+tar czf repos-$(date +%F).tgz -C "$(dirname ${GOJIRA_REPOS_DIR})" "$(basename ${GOJIRA_REPOS_DIR})"
+```
+
+복구는 호스트에서 tar 풀기 + 권한 재설정:
+
+```bash
+tar xzf repos-YYYY-MM-DD.tgz -C "$(dirname ${GOJIRA_REPOS_DIR})"
+sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}
 ```
 
 ### 완전 제거
 
 ```bash
-docker compose down -v   # 컨테이너 + volume 모두 삭제 (platform-repos 도)
+docker compose down       # 컨테이너만 제거 (bind mount 호스트 디렉토리는 보존)
+# repos 도 같이 지우려면 명시적으로:
+# rm -rf ${GOJIRA_REPOS_DIR}
 ```
 
 ### 업데이트 (새 이미지 반입)
@@ -282,9 +377,11 @@ docker image prune                     # 옛 이미지 정리
 | 증상 | 원인 / 대처 |
 |---|---|
 | `docker compose up` 시 `WARN: required` 에러 | `.env` 누락 — `?required` 항목 확인 |
-| 백엔드 startup 시 `MongoDB connect timeout` | URI host / 인증 / `@` → `%40` URL encoding 확인 |
-| 브라우저 콘솔 `ERR_CONNECTION_REFUSED localhost` | `REACT_APP_*` 가 빌드 결과에 안 들어감 → `docker compose build platform-app gojira-app` |
-| Module Federation `remoteEntry.js` 실패 | `REACT_APP_GOJIRA_APP_REMOTE` 가 브라우저 접근 가능한 URL 인지 확인 |
+| Platform-API 가 `permission denied` 로 worktree 생성 실패 | `GOJIRA_REPOS_DIR` 디렉토리 소유자가 `${UID}:${GID}` 와 다름. `sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}` |
+| Platform-API startup 시 `mkdir /data/repos: permission denied` | 위와 동일 — bind mount 호스트 디렉토리 권한 확인 |
+| 백엔드 startup 시 `MongoDB connect timeout` | `MONGODB_SERVER` / `MONGO_USER` / `MONGO_PASS` 확인. 비밀번호에 `@` / `:` / `/` 들어가면 URL encoding 필요 (`@` → `%40`) |
+| 브라우저 콘솔 `ERR_CONNECTION_REFUSED localhost` | `*_SERVER` / `*_PORT` 가 빌드 결과에 안 들어감 → `docker compose build platform-app gojira-app` |
+| Module Federation `remoteEntry.js` 실패 | `GOJIRA_APP_SERVER` + `GOJIRA_APP_PORT` 가 브라우저 접근 가능한 endpoint 인지 확인 |
 | Agent-Service `/Agent/chat` 시 OpenCode 401 | `OPENCODE_SERVER_PASSWORD` 가 OpenCode 측과 일치하는지 |
 | LLM 호출 시 `unauthorized` | `OPENAI_API_KEY` / `PLATFORM_LLM_TICKET` 확인. `GOJIRA_ENC_KEY` 가 `ENC:` 값 암호화 시 사용한 키와 동일한지 |
 | `ENC:` 값 복호화 fail | 두 환경의 `GOJIRA_ENC_KEY` 가 다름. 양쪽 모두 미설정이면 코드 default key 가 동일하게 적용됨 |

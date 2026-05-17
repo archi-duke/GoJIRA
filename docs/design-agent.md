@@ -2,6 +2,14 @@
 
 본 문서는 GoJIRA AI 에이전트 백엔드의 동작 구조, 설계 결정을 정리한 설계 자료다. 기존 자체 ReACT 루프 기반 Agent-Service 를 **OpenCode 서버 기반** 으로 전면 전환한다.
 
+> **⚠ 리팩토링 진행 중 (2026-05)** — 사내 폐쇄망 배포 검토 과정에서 다음 변경이 결정되었습니다. 본 문서는 구현 완료 후 본문이 갱신됩니다.
+> - 스킬 스크립트가 Platform-API HTTP 경유 대신 **worktree fs 에 직접 read/write** (`.claude/skills/_scripts/doc-*.sh` 등)
+> - OpenCode **사용자별 인스턴스** 운영 (systemd template unit + Mongo 매핑) — Q6, Q8
+> - Agent-Service 에 `get_opencode_url(user_id)` **라우팅 추상화** 도입 (3.1 기동, 6.4 X-User-Id 영향)
+> - EditSession 의미 확장 — `holderKind: "ui" | "skill"` (UI ↔ 스킬 동시 작업 차단 + 상황 보고)
+>
+> 상세: [`docs/refactor-skill-fs-direct.md`](./refactor-skill-fs-direct.md)
+
 ---
 
 ## 1. 개요

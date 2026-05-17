@@ -26,7 +26,7 @@ export CODE="GOJIRA3"            # 실제 프로젝트 코드로 교체
 export USER="batman"             # 시스템 컨텍스트의 knoxID
 export TYPE=""                   # 필요 시 타입 지정
 export REQTYPE=""                # 필요 시 reqType 지정
-export GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 # 1) 반드시 파일로 저장 ($() 캡처 금지)
 curl -s "${GOJIRA_API}/Issue" \

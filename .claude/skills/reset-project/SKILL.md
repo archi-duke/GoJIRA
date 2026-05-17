@@ -6,8 +6,8 @@ allowed-tools: Bash
 
 ## 환경
 
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 
 ## 인자 추출
 
@@ -53,8 +53,8 @@ export CONFIRM="true"
 ## 1. 사전 체크
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 CONFIRM="${CONFIRM:-false}"
 RESET_ISSUES="${RESET_ISSUES:-true}"
 RESET_ARCH_SETTINGS="${RESET_ARCH_SETTINGS:-true}"

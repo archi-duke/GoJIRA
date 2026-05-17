@@ -29,12 +29,12 @@
 
 | 키 | 종류 | 코드 위치 | 설명 |
 |---|---|---|---|
-| PLATFORM_MONGO_URI | 필수 | `config/config.go:48` | `mongodb://<host>:27017` 또는 `mongodb://user:pw@host:27017/?authSource=admin` |
+| MONGO_URI | 필수 | `config/config.go:48` | `mongodb://<host>:27017` 또는 `mongodb://user:pw@host:27017/?authSource=admin` |
 | PLATFORM_GITHUB_TOKEN | 필수 | `config/config.go:49` | Gitea PAT — `repo` + `admin:org` 권한 |
 | PLATFORM_GITHUB_ORG | 필수 | `config/config.go:50` | Gitea organization 이름 (예: `gojira`) |
 | GITHUB_URL | 필수 | `config/config.go:51` | Gitea/GitHub base URL. 끝에 `/` 포함 |
-| PLATFORM_GOJIRA_API | 필수 | `config/config.go:52` | GoJIRA-API peer URL |
-| PLATFORM_REPO_DIR | 선택 | `config/config.go:57` | 기본 `./repos`. 로컬 git 워크트리 디렉토리 |
+| GOJIRA_API_URL | 필수 | `config/config.go:52` | GoJIRA-API peer URL |
+| PLATFORM_REPO_DIR | 선택 | `config/config.go:57` | 기본 `./repos`. 컨테이너 내부의 bare clone + worktree 경로. deploy 환경에선 `deploy/images/platform-api/Dockerfile` 이 `/data/repos` 로 고정 — 호스트 측에서는 `GOJIRA_REPOS_DIR` 가 그 마운트의 호스트 경로 (§ 8.5 참조) |
 | SMTP_HOST/PORT/USER/PASS/FROM | 선택 | `config/config.go:60-70` | 메일 발송 사용 시. `SMTP_PASS` 는 `ENC:` 형식 |
 | OPENAI_API_KEY | 선택 | `config/config.go:80`, `llm/client.go:43` | `llm.json` 의 `${OPENAI_API_KEY}` 치환 — 활성 LLM 이 OpenAI 일 때만 필요. `ENC:` 형식 |
 | PLATFORM_LLM_TICKET | 선택 | `config/config.go:80` | 사내 LLM (Code Mate 등) `X-Dep-Ticket`. `ENC:` 형식. `_disabled_Internal` 사용 시 필수 |
@@ -88,9 +88,9 @@ LLM 게이트웨이 정의. **활성 설정 1개** + **대체 설정들** (`_dis
 cp Platform-API/.env.example Platform-API/.env
 
 # 2. 필수 값 채우기 (편집기로 열어 <placeholder> 치환)
-#    - PLATFORM_MONGO_URI
+#    - MONGO_URI
 #    - PLATFORM_GITHUB_TOKEN / PLATFORM_GITHUB_ORG / GITHUB_URL
-#    - PLATFORM_GOJIRA_API
+#    - GOJIRA_API_URL
 
 # 3. 시크릿 암호화 (Gitea PAT, SMTP_PASS, OpenAI 키 등)
 #    GOJIRA_ENC_KEY 를 먼저 환경변수로 export
@@ -111,7 +111,7 @@ go build -o platform-api .
 
 | 키 | 종류 | 코드 위치 | 설명 |
 |---|---|---|---|
-| GOJIRA_MONGO_URI | 필수 | `config/config.go:33` | Mongo 연결 문자열 |
+| MONGO_URI | 필수 | `config/config.go:33` | Mongo 연결 문자열 |
 | GOJIRA_PLATFORM_API | 필수 | `config/config.go:34` | Platform-API peer URL |
 | GOJIRA_JIRA_URL | 필수 | `config/config.go:35` | JIRA mock 또는 실 JIRA URL |
 | GOJIRA_JIRA_USER | 선택 | `config/config.go:44` | JIRA 인증. `ENC:` 형식 |
@@ -142,7 +142,7 @@ pydantic-settings 가 cwd `.env` + OS 환경변수 모두 읽음. 필수 4개 �
 
 | 키 | 종류 | 코드 위치 | 설명 |
 |---|---|---|---|
-| GOJIRA_MONGO_URI | 필수 | `config.py:15` | Mongo 연결 |
+| MONGO_URI | 필수 | `config.py:15` | Mongo 연결 |
 | GOJIRA_API_URL | 필수 | `config.py:16` | GoJIRA-API peer (`/api/v2` 포함) |
 | GOJIRA_PLATFORM_API | 필수 | `config.py:17` | Platform-API peer (`/api/v2` 포함) |
 | OPENCODE_SERVER_URL | 필수 | `config.py:18` | OpenCode `serve` URL. 호스팅 위치별로 다름 — 단일 호스트: `http://localhost:4096` / 게스트 VM ↔ 호스트의 OpenCode: `http://<host-ip>:4096` (Parallels 공유망 Mac = `10.211.55.2`) / 별도 서버 또는 폐쇄망 컨테이너: `http://<opencode-host>:4096`. OpenCode 는 cwd 의 `opencode.json` 을 읽으므로 **반드시 repo 디렉토리에서** `opencode serve --hostname 0.0.0.0 --port 4096` 으로 실행 (외부 노출 시 `--hostname 0.0.0.0` 필수) |
@@ -173,7 +173,7 @@ CRA 가 빌드 시점에 `REACT_APP_*` 변수를 번들에 inline. 미설정 시
 |---|---|---|---|
 | PORT | 선택 | (CRA 기본 3000/3001) | dev server 포트 |
 | REACT_APP_PLATFORM_API | 선택 | `http://localhost:9000/api/v2` | Platform-API base URL |
-| REACT_APP_API_BASE | 선택 | `http://localhost:9001/api/v2` | GoJIRA-API (GoJIRA-App 용) |
+| REACT_APP_GOJIRA_API | 선택 | `http://localhost:9001/api/v2` | GoJIRA-API (GoJIRA-App 용) |
 | REACT_APP_GOJIRA_API | 선택 | `http://localhost:9001/api/v2` | GoJIRA-API (Platform-App 용) |
 | REACT_APP_AGENT_API | 선택 | `http://localhost:9002/api/v2` | Agent-Service |
 | REACT_APP_PLANTUML_SERVER | 선택 | `http://localhost:8080/svg/` | PlantUML 렌더링 서버 (GoJIRA-App) |
@@ -254,6 +254,18 @@ GoJIRA 워크플로우 에이전트 정의 (시스템 프롬프트 + tools). 8KB
 | Gitea host | `10.227.37.92:44350` | Docker 또는 native install — 둘 다 OK. `FixReviewState` 는 docker 미발견 시 자동 skip |
 | Gitea org | `gojira` (또는 환경별) | Platform-API `.env` 의 `PLATFORM_GITHUB_ORG` 와 일치 필요 |
 | Gitea PAT | 토큰 | scope: `repo` + `admin:org` (org webhook 등록용) |
+
+## 8.5 폐쇄망 배포 특화 (`deploy/.env`)
+
+`deploy/docker-compose.yml` 만 읽는 변수들. 컨테이너 내부 서비스 코드는 안 본다. 자세한 셋업은 [deploy/DEPLOY.md](../deploy/DEPLOY.md) 참조.
+
+| 키 | 종류 | 사용 위치 | 설명 |
+|---|---|---|---|
+| GOJIRA_REPOS_DIR | 필수(권장) | `docker-compose.yml` volumes | 호스트 측 bare clone + worktree 디렉토리. 컨테이너의 `/data/repos` 로 bind mount. 폐쇄망은 절대경로 권장 (예: `/var/lib/gojira/repos`). 호스트에 미리 mkdir + `chown ${UID}:${GID}` 필요 |
+| UID / GID | 필수(권장) | `docker-compose.yml` `user:` | Platform-API 컨테이너 실행 user. 호스트 `id -u` / `id -g` 값. bind mount 권한 일치 목적. 미설정 시 fallback `1000:1000` |
+| GOJIRA_REPOS_DIR 와 OpenCode 의 약속 | (Phase 1+) | 향후 스킬이 fs 직접 access | OpenCode 측 스킬이 같은 디렉토리를 직접 read/write 할 때 (`docs/refactor-skill-fs-direct.md` 참조) 같은 환경변수 이름으로 공유 — 호스트 한 곳에서 관리 |
+
+> **컨테이너 내부 변수와의 관계**: `PLATFORM_REPO_DIR` 은 컨테이너 내부 fs 경로 (Dockerfile 의 `ENV PLATFORM_REPO_DIR=/data/repos` 로 고정). `GOJIRA_REPOS_DIR` 는 그 마운트의 **호스트 측** 경로. 한 마운트의 양 끝이라 둘 다 노출하지 않고 호스트 측만 `.env` 에서 관리.
 
 ## 9. 시크릿 마스터 키 (`GOJIRA_ENC_KEY`)
 

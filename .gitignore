@@ -43,5 +43,6 @@ screenshot*.png
 [a-z][0-9]*.png
 scripts/
 !Agent-Service/scripts/
+!deploy/scripts/
 package.json
 package-lock.json

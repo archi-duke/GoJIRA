@@ -11,7 +11,7 @@ allowed-tools: Bash, Read
 - 본 스킬은 **명시적 일회성 처리** 또는 **수정 결과 + PlantUML 서버 검증** 까지 함께 받고 싶을 때 사용
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
 - `PLANTUML_SERVER` 기본값: `http://localhost:8080/svg/` (검증용 — 없어도 fix 자체는 동작)
 
 ## 인자
@@ -44,7 +44,7 @@ export PATH_SPEC="architecture/design-decisions"
 ## Step 0 — 데이터 수집 (대상 파일 목록)
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 
 # 단일 파일이면 PATH_SPEC 그대로, 디렉터리 prefix 면 tree 에서 *.md 추출
 if [[ "$PATH_SPEC" == *.md ]]; then

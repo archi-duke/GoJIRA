@@ -37,11 +37,11 @@ async def _ensure_opencode_session(gojira_sid: str, user: str) -> str:
     """Mongo 세션에서 openCodeSessionId 를 찾거나 새로 생성. stale 세션은 자동 교체."""
     doc = agent_sessions().find_one({"_id": gojira_sid}) or {}
     oc_sid = doc.get("openCodeSessionId")
-    if oc_sid and await oc.session_exists(oc_sid):
+    if oc_sid and await oc.session_exists(oc_sid, user):
         return oc_sid
     if oc_sid:
         log.warning(f"OpenCode 세션 {oc_sid[:16]} 만료 — 새 세션 생성")
-    oc_sid = await oc.create_session(title=f"GoJIRA {gojira_sid[:8]}")
+    oc_sid = await oc.create_session(user, title=f"GoJIRA {gojira_sid[:8]}")
     agent_sessions().update_one(
         {"_id": gojira_sid},
         {
@@ -79,10 +79,10 @@ async def chat_send(
 
     # persistent subscriber: 이미 살아있으면 그대로, 없으면 시작.
     # 버퍼는 비우지 않음 — 프론트의 lastEventId 기반 재연결 호환성 + turn 사이 이벤트 보존.
-    await eb.ensure_subscriber(oc_sid, gojira_sid)
+    await eb.ensure_subscriber(oc_sid, gojira_sid, x_user_id)
 
     # 메시지 전송
-    await oc.send_message_async(oc_sid, req.message)
+    await oc.send_message_async(oc_sid, req.message, x_user_id)
 
     return {"sessionId": gojira_sid, "openCodeSessionId": oc_sid}
 
@@ -102,6 +102,8 @@ async def session_events(
         async def _err():
             yield _sse("error", {"message": "세션에 연결된 OpenCode 세션이 없습니다."})
         return StreamingResponse(_err(), media_type="text/event-stream")
+    # 세션 등록 사용자 우선 (다른 탭/세션 복원 시 헤더보다 더 정확)
+    session_user = doc.get("userId") or x_user_id
 
     # EventSource API 가 custom header 설정을 지원 안 해서 클라이언트가 수동 재연결할 때
     # 쿼리 파라미터로도 last-event-id 를 받는다 (header 우선).
@@ -112,7 +114,7 @@ async def session_events(
         last_event_id = 0
 
     # 재연결 시 백그라운드 구독자가 없으면 시작
-    await eb.ensure_subscriber(oc_sid, session_id)
+    await eb.ensure_subscriber(oc_sid, session_id, session_user)
 
     async def sse_stream():
         # 서버 측 IDLE 타임아웃 없음 — 에이전트가 얼마나 오래 걸려도 대기.
@@ -159,8 +161,8 @@ async def chat_stream(
         },
     )
 
-    await eb.ensure_subscriber(oc_sid, gojira_sid)
-    await oc.send_message_async(oc_sid, req.message)
+    await eb.ensure_subscriber(oc_sid, gojira_sid, x_user_id)
+    await oc.send_message_async(oc_sid, req.message, x_user_id)
 
     async def sse_stream():
         cursor = 0
@@ -189,58 +191,31 @@ async def chat_stream(
 # ── 세션 관리 ──
 
 @router.post("/session/{session_id}/terminal")
-async def open_terminal(session_id: str):
-    """OS 별 터미널에서 해당 세션의 OpenCode attach 실행.
+async def open_terminal(
+    session_id: str,
+    x_user_id: str = Header(default="batman", alias="X-User-Id"),
+):
+    """현재 세션의 OpenCode TUI attach 명령을 반환.
 
-    - macOS  : Terminal.app + bash 스크립트
-    - Windows: PowerShell 새 콘솔 창
-    - 기타   : 미지원 (사용자가 직접 명령 실행 — 응답에 command 포함)
+    Agent-Service 는 컨테이너 안에서 도므로 사용자 호스트의 GUI 터미널을 직접 띄울 수 없다.
+    UI 가 응답을 받아 사용자에게 modal/clipboard 로 노출하면, 사용자가 자기 PC 터미널에서
+    직접 실행해 OpenCode TUI 에 attach 한다.
+
+    응답: {ok: true, command: "opencode attach <url> -s <sid>", openCodeSessionId, baseUrl}
     """
-    import sys
-    import subprocess
-
     doc = agent_sessions().find_one({"_id": session_id}) or {}
     oc_sid = doc.get("openCodeSessionId")
     if not oc_sid:
         return {"ok": False, "reason": "openCodeSessionId 없음"}
-    base_url = oc._base_url()
+    # 세션 등록 사용자 우선 (다른 탭에서 attach 요청해도 원본 사용자 인스턴스로 연결)
+    session_user = doc.get("userId") or x_user_id
+    base_url = oc._resolve_url(session_user)
     cmd = f"opencode attach {base_url} -s {oc_sid}"
-
-    if sys.platform == "darwin":
-        import tempfile, os
-        sh = tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False, prefix="gojira-term-")
-        sh.write("#!/bin/bash\n")
-        sh.write('echo -e "\\033[1;36m[GoJIRA] OpenCode 세션 연결 — Ctrl+C 로 안전하게 종료\\033[0m\\n"\n')
-        sh.write(f"{cmd}\n")
-        sh.write('echo -e "\\n\\033[1;33m세션 연결 종료. 창을 닫아도 안전합니다.\\033[0m"\n')
-        sh.write("sleep 2; exit\n")
-        sh.close()
-        os.chmod(sh.name, 0o755)
-        subprocess.Popen(["open", "-a", "Terminal", sh.name])
-        return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid, "platform": "darwin"}
-
-    if sys.platform == "win32":
-        # PowerShell 새 콘솔 창 (-NoExit 로 명령 종료 후에도 창 유지)
-        ps_cmd = (
-            'Write-Host "[GoJIRA] OpenCode 세션 연결 - Ctrl+C 로 안전하게 종료" -ForegroundColor Cyan; '
-            'Write-Host ""; '
-            f"{cmd}; "
-            'Write-Host ""; '
-            'Write-Host "세션 연결 종료. 창을 닫아도 안전합니다." -ForegroundColor Yellow'
-        )
-        subprocess.Popen(
-            ["powershell", "-NoExit", "-Command", ps_cmd],
-            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-        )
-        return {"ok": True, "command": cmd, "openCodeSessionId": oc_sid, "platform": "win32"}
-
-    # Linux 등 — 자동 실행 미지원, 사용자가 직접 실행할 수 있도록 명령만 반환
     return {
-        "ok": False,
-        "reason": f"자동 터미널 실행 미지원 OS: {sys.platform} — 아래 command 를 직접 실행해주세요",
+        "ok": True,
         "command": cmd,
         "openCodeSessionId": oc_sid,
-        "platform": sys.platform,
+        "baseUrl": base_url,
     }
 
 
@@ -258,13 +233,17 @@ async def delete_all_sessions(x_user_id: str = Header(default="batman", alias="X
 
 
 @router.post("/session/{session_id}/cancel")
-async def cancel_session(session_id: str):
+async def cancel_session(
+    session_id: str,
+    x_user_id: str = Header(default="batman", alias="X-User-Id"),
+):
     """진행 중인 세션 중단 — OpenCode abort 전달."""
     doc = agent_sessions().find_one({"_id": session_id}) or {}
     oc_sid = doc.get("openCodeSessionId")
     if not oc_sid:
         return {"ok": False, "reason": "no openCodeSessionId"}
-    ok = await oc.abort_session(oc_sid)
+    session_user = doc.get("userId") or x_user_id
+    ok = await oc.abort_session(oc_sid, session_user)
     return {"ok": ok, "openCodeSessionId": oc_sid}
 
 
@@ -296,14 +275,18 @@ async def list_sessions(x_user_id: str = Header(default="batman", alias="X-User-
 
 
 @router.get("/session/{session_id}")
-async def get_session(session_id: str):
+async def get_session(
+    session_id: str,
+    x_user_id: str = Header(default="batman", alias="X-User-Id"),
+):
     doc = agent_sessions().find_one({"_id": session_id})
     if not doc:
         return {"sessionId": session_id, "messages": [], "active": False}
     oc_sid = doc.get("openCodeSessionId")
     active = False
     if oc_sid:
-        active = await oc.session_exists(oc_sid)
+        session_user = doc.get("userId") or x_user_id
+        active = await oc.session_exists(oc_sid, session_user)
     return {
         "sessionId": doc["_id"],
         "messages": doc.get("messages", []),
@@ -312,7 +295,10 @@ async def get_session(session_id: str):
 
 
 @router.get("/session/{session_id}/state")
-async def get_session_state(session_id: str):
+async def get_session_state(
+    session_id: str,
+    x_user_id: str = Header(default="batman", alias="X-User-Id"),
+):
     """경량 상태 조회 — 클라이언트가 이벤트 침묵 후 폴링할 때 사용.
 
     returns:
@@ -321,13 +307,14 @@ async def get_session_state(session_id: str):
       - lastActivityAt: 마지막 assistant part 생성 시간 (unix ms) — 정체 판단용
       - assistantMsgId: 현재(혹은 마지막) assistant message id
     """
-    doc = agent_sessions().find_one({"_id": session_id}, {"openCodeSessionId": 1}) or {}
+    doc = agent_sessions().find_one({"_id": session_id}, {"openCodeSessionId": 1, "userId": 1}) or {}
     oc_sid = doc.get("openCodeSessionId")
     if not oc_sid:
         return {"finish": None, "hasPermissionPending": False, "lastActivityAt": None, "assistantMsgId": None, "active": False}
 
+    session_user = doc.get("userId") or x_user_id
     try:
-        msgs = await oc.get_session_messages(oc_sid)
+        msgs = await oc.get_session_messages(oc_sid, session_user)
     except Exception:
         return {"finish": None, "hasPermissionPending": False, "lastActivityAt": None, "assistantMsgId": None, "active": False}
 
@@ -379,12 +366,13 @@ async def get_session_state(session_id: str):
 
 
 @router.get("/health")
-async def health():
+async def health(x_user_id: str = Header(default="", alias="X-User-Id")):
+    """헬스 — 사용자 헤더가 있으면 해당 사용자의 인스턴스를, 없으면 settings.opencode_url 의 헬스 확인."""
     try:
         import httpx
         async with httpx.AsyncClient(timeout=3.0) as c:
-            r = await c.get(f"{oc._base_url()}/global/health", headers=oc._auth_header())
+            r = await c.get(f"{oc._resolve_url(x_user_id)}/global/health", headers=oc._auth_header())
             up = r.status_code == 200
     except Exception:
         up = False
-    return {"bridge": "ok", "opencode": "up" if up else "down"}
+    return {"bridge": "ok", "opencode": "up" if up else "down", "user": x_user_id or "(fallback)"}

@@ -30,7 +30,7 @@ func init() {
 	envload.Load("GOJIRA_ENV_FILE")
 
 	// 필수 항목 — 미설정 시 log.Fatal
-	MongoURI = requireEnv("GOJIRA_MONGO_URI")
+	MongoURI = requireEnv("MONGO_URI")
 	PlatformAPI = requireEnv("GOJIRA_PLATFORM_API")
 	JiraMockURL = requireEnv("GOJIRA_JIRA_URL")
 

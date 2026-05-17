@@ -12,8 +12,8 @@ allowed-tools: Bash, Read
 - assistant 출력에는 document / JSON 전체를 뱉지 말 것. "iter N 완료 / critical K건" 식 한두 줄 요약만
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://localhost:9000/api/v2`
-- `GOJIRA_API` 기본값: `http://localhost:9001/api/v2`
+- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
 - 모든 요청에 `X-User-Id: ${USER}` 헤더 필수
 
 ## 인자 추출
@@ -90,8 +90,8 @@ drift 모두 CLEAN 인 경우 **반드시 사용자에게 다음 3 옵션을 명
 ### 0.3 데이터 수집
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://localhost:9000/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://localhost:9001/api/v2}"
+PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 # project-description.md (docs/{user} 우선, fallback main — 스크립트 자동 처리)
 DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md" 2>/dev/null || true)
