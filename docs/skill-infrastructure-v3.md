@@ -221,7 +221,29 @@ Step 1.5 결정적 문서 조립 (LLM 0회)
 
 **design-integrate2 v3 와의 차이**: 산출물은 단일 `business/use-cases.md` 그대로. LLM generation 단계만 분할. 이유는 추적성 + 하류 호환성 (Feature 이슈 ↔ docId 매칭 + 기존 단일 파일 의존 흐름 유지).
 
-### 5.3 결정적 조립 인프라
+### 5.3 satam-analyze2 v3 — 알고리즘 재설계 (commit: 4월 24일자, refactored-skills-evaluation.md §13)
+
+LLM 분할 패턴은 아니지만 **판정 알고리즘 자체를 재설계** 해 reasoning -89% / 토큰 -39% 달성. 핵심 변경 한 줄: "self-mitigated risk 는 등록 자체 금지" (편법 우회를 사후 제거가 아닌 구조로 차단).
+
+```
+v2: ADSN 원문(risk/sensitivity/tradeoffs)을 분해 → LLM 이 자기 risk 를 자기 tradeoff 로 완화
+    완화 쌍을 사후 제거 (mitigated_pair_not_removed critical)
+v3: (ADSN, Requirement) 이중 루프 판정 → 자체 극복 가능하면 risk 자체 미등록
+    Mitigation = cross-ADSN 전용 (targetADSN + targetRisk, self 면 critical)
+```
+
+스키마 변경점:
+
+| v2 | v3 |
+|---|---|
+| `risks[].qa: [key,key]` (복수 QA) | `risks[].requirement: <key>` + `reqType: "FR"\|"NFR"\|"CNST"` (단일) |
+| `tradeoffs[].counterRisk: ["R1:QA_KEY"]` | `mitigations[].targetADSN + targetRisk` (cross-ADSN 전용) |
+| 완화 쌍 사후 제거 규칙 | self-mitigated risk 등록 자체 금지 (구조 방지) |
+| `mitigated_pair_not_removed` critical | `same_adsn_mitigation` critical (targetADSN = 자기 자신) |
+
+`validate-satam.py` 전면 재작성 — `requirement_hallucination` / `fr_not_asr` / `reqType_mismatch` / `same_adsn_mitigation` / `mitigation_target_unknown` critical 분류. UI 의 `parseRST` 호환을 위해 저장 YAML 은 `QA : [<key>]` 라벨 유지(값은 1개).
+
+### 5.4 결정적 조립 인프라
 
 | 도구 | 역할 |
 |---|---|
@@ -232,12 +254,13 @@ Step 1.5 결정적 문서 조립 (LLM 0회)
 
 `draft-io.sh` 의 jq 머지 (`draft-io.sh:67-88`) 는 features 배열에 대해 docId 키로 항목별 deep merge — 같은 docId 면 필드 누적, 없으면 append.
 
-### 5.4 효과
+### 5.5 효과
 
 - **PlantUML 오류**: design-integrate2 단일 21건 → 분할 1건 (95% ↓)
 - **단일 큰 generation 부담**: PlantUML 채우기 (가장 위험) 를 별도 sub-step 으로 격리. 다른 step 의 스톨 위험 차단.
 - **재시도 비용**: 분할 시 실패한 sub-step 만 재실행 가능.
 - **일관성**: 두 스킬에 같은 패턴 적용으로 향후 다른 스킬 (현재는 driver-select2 / style-define2 / design-decide2 / requirement-refine2 가 단일 generation 부담 적음 — 후순위) 적용 시 학습/유지보수 비용 ↓.
+- **satam-analyze2 v3 알고리즘 재설계** (TEST 프로젝트 v2→v3): 턴 -55% / 경과 -68% / Reasoning -89% / 합계 토큰 -39%. 편법 완화 쌍 0건 (이전 v2 가 남기던 "R1 + M1 self-pair" 가 구조적으로 발생 불가).
 
 ---
 

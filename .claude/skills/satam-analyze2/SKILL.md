@@ -1,6 +1,6 @@
 ---
 name: satam-analyze2
-description: ADSN(Architectural Design) 이슈의 risk/sensitivity/tradeoffs 원문을 구조화 YAML 로 변환해 각 ADSN 의 risk/sensitivity/mitigation 필드에 저장합니다. QA(NFR) 매핑 자가검증 + self-loop(최대 3회). 문서 파일 생성 없음. Claude Code 네이티브(curl/jq).
+description: ADSN(Architectural Design) × Requirement(FR-ASR/NFR/CNST) 이중 루프로 SATAM 판정 — 각 설계가 requirement 달성을 위협하는 지점을 Risk/Sensitivity/Mitigation(cross-ADSN) 으로 구조화해 ADSN 의 risk/sensitivity/mitigation/concerns 필드에 저장합니다. self-mitigated risk 등록 금지(편법 우회 차단). 자가검증 + self-loop(최대 3회). 문서 파일 생성 없음. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
 
@@ -407,7 +407,7 @@ cat /tmp/${CODE}-satam-validation.json
   "score_effective": number,
   "critical": [{"type":"...","adsn":"...","id":"...","detail":"..."}],
   "suggestions": [...],
-  "stats": {"adsns":N,"risks":R,"sensitivities":S,"tradeoffs":T,"qaCoveredADSNs":Q}
+  "stats": {"adsns":N,"risks":R,"sensitivities":S,"mitigations":M,"concerns":C,"qaCoveredADSNs":Q}
 }
 ```
 
@@ -550,7 +550,7 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 ### 6.1 보고 출력
 
 ```
-## SATAM 분석 완료 (v2 Claude Code) — MODE={full}
+## SATAM 분석 완료 (v3 Claude Code) — MODE={full}
 
 - 진입 drift: satam=<NO-BASELINE|CLEAN|DRIFT>, design-decide=<...> (Step 0.1 결과)
 - ADSN 업데이트: N건 (키 리스트)
@@ -591,9 +591,9 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 
 ## 주의
 - 모든 curl 에 `X-User-Id: ${USER}` 헤더 필수 (403 방지)
-- `qa` 배열 및 ADSN 매핑 키는 반드시 **이슈 key** (subkey 금지)
-- Trade-off 의 `counterRisk` 는 **같은 ADSN 내** Risk ID 만 참조 (`R<id>:<QA_KEY>` 형식)
-- 문서 파일 생성 절대 금지 — 이슈 필드 3종 반영만
+- `requirement` 필드 및 ADSN 매핑 키는 반드시 **이슈 key** (subkey 금지)
+- Mitigation 의 `targetADSN` 은 **자기 자신과 다른** ADSN 만 참조 (self-mitigation 은 critical, risk 등록 자체 금지). `targetRisk` 는 그 ADSN 의 R-id 정확히 참조
+- 문서 파일 생성 절대 금지 — 이슈 필드 4종(risk/sensitivity/mitigation/concerns) 반영만
 - Step 0 flush / Step 1 draft save / Step 2 validate / Step 3 재-save / Step 5 PUT 루프 **모두 Bash tool call** 로 종료. 한 generation 에 몰아서 처리 금지
 - 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 본 스킬은 문서 산출이 없어 강제 재생성 모드 자체가 무의미 — 모두 CLEAN 이면 사용자 질문 없이 즉시 종료
 - baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage satam` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다

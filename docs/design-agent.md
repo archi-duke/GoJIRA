@@ -156,7 +156,7 @@ Python executor 없음. LLM 이 SKILL.md 본문을 따라 Bash 로 curl 실행.
 - `style-define2` — 아키텍처 스타일 추천 (카탈로그 점수 규칙을 본문에 서술)
 - `design-decide2` — ADR 기반 설계 결정
 - `design-integrate2` — 통합 설계 문서 작성 (이슈 없음)
-- `satam-analyze2` — ADSN risk/sensitivity/mitigation 필드 업데이트
+- `satam-analyze2` (v3) — ADSN × Requirement 이중 루프 판정. Risk/Sensitivity 는 단일 requirement 참조(`reqType` 명시), Mitigation 은 **cross-ADSN 전용**(`targetADSN`+`targetRisk`). self-mitigated risk 등록 자체 금지(구조적 편법 우회 차단). 상세는 [`skill-infrastructure-v3.md` §5.3](./skill-infrastructure-v3.md#53-satam-analyze2-v3)
 
 **이슈 생성 스킬 (타입별 분리)**
 - `issue-create-vos`
