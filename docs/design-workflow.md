@@ -285,6 +285,22 @@ Agent-Service의 LLM 오케스트레이션 스킬(`vos_collect`, `usecase_analyz
 - `docId` 접두사는 고정: `UC`, `FR`, `NFR`, `CNST` (대시/밑줄 모두 허용하지 않고 `UC-N` 형식만)
 - docId가 매핑에 없으면(LLM 실수/누락) 원문 유지 — 사용자에게 경고 메시지로 보고
 
+### 9.6 LLM generation 5단계 분할 — `usecase-analyze2` v3 (2026-04, commit `d4c3e49`)
+
+기존 단일 generation (357초 / 13.6K 토큰) 은 PlantUML 채우기·시나리오 작성·엔티티 도출이 한 호출에 몰려 GLM 계열에서 스톨 위험이 컸다. v3 는 Step 1 을 5개 sub-step + 1.5 결정적 조립으로 분리한다.
+
+| sub-step | 산출 | 비고 |
+|---|---|---|
+| 1.1 Entities | Domain + User Story + Use Case (JSON only) | 텍스트 추출 집중 |
+| 1.2 Features | 선정 + `relatedVOS` + mode | docId(`UC-1`...)는 §9.3 규칙 그대로 |
+| 1.3 Scenarios | basicflow / alternative / exception | per-feature |
+| 1.4 Diagrams | Context / Use Case / Sequence × Feature (PlantUML) | 가장 스톨 위험 큰 단계를 격리 |
+| 1.5 결정적 조립 | LLM 0회 — `_scripts/usecase-assemble.py` + `templates/use-cases.md` | 7 marker 치환 |
+
+핵심 원칙은 **§9 의 docId↔subkey 정책과 산출물 단일성 유지** — 산출 파일은 `business/use-cases.md` 하나 그대로(다중 파일 분리 X)며, LLM generation 단계만 분할. design-integrate2 v3 의 view-별 다중 파일 분리와 의도적으로 다른 선택(추적성 + 하류 Feature 이슈 매칭 호환성).
+
+자세한 결정적 조립 인프라(`draft-io.sh merge` jq 누적, `validate-usecases.py --stage` 단계별 critical) 는 [`skill-infrastructure-v3.md` §5.2 / §5.4](./skill-infrastructure-v3.md#52-usecase-analyze2-v3-commit-d4c3e49) 참조.
+
 ---
 
 ## 10. 워크플로우 상태 인지와 자동 위임
