@@ -54,11 +54,9 @@ curl -s "${GOJIRA_API}/Issue" \
 
 ```bash
 GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 
-RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
+RESP=$(cat <<EOF | bash "${SCRIPTS}/issue-write.sh" POST /Issue
 {
   "prjID": "${CODE}",
   "issueType": "Requirement",
@@ -75,12 +73,11 @@ SUBKEY=$(echo "$RESP" | jq -r '.subkey')
 ## Step 2 — reqType + 공통 필드 PUT
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --arg rt "$REQTYPE" --arg pr "$PRIORITY" --arg as "$ASSIGNEE" \
-    '{prjID:$p, key:$k, user:$u, data:{reqType:$rt, priority:$pr, assignee:$as}}')"
+    '{prjID:$p, key:$k, user:$u, data:{reqType:$rt, priority:$pr, assignee:$as}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ## Step 3 — NFR 전용: 품질 속성 시나리오 + 평가 점수 PUT
@@ -102,10 +99,8 @@ NFR 일 때만 아래 필드를 가능한 한 채웁니다. FR/CNST 는 생략.
 | qas | customfield_15206 | 종합 점수 |
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --arg qa "$QA" --arg src "$SOURCE" --arg st "$STIMULUS" \
     --arg env "$ENV" --arg art "$ARTIFACT" --arg rs "$RESPONSE" \
     --arg me "$MEASURE" --arg rsc "$RESP_SCENARIO" \
@@ -113,7 +108,8 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
     '{prjID:$p, key:$k, user:$u,
       data:{qa:$qa, source:$src, stimulus:$st, environment:$env,
             artifact:$art, response:$rs, measure:$me,
-            responseScenario:$rsc, qai:$qai, qad:$qad, qas:$qas}}')"
+            responseScenario:$rsc, qai:$qai, qad:$qad, qas:$qas}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ## 규칙

@@ -61,6 +61,7 @@ curl -s "${GOJIRA_API}/Issue" \
 
 ```bash
 GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 
 # LEVEL="Architectural" | "Detailed"
 if [ "$LEVEL" = "Architectural" ]; then
@@ -69,10 +70,7 @@ else
   ISSUE_TYPE="Detailed Design"
 fi
 
-RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
+RESP=$(cat <<EOF | bash "${SCRIPTS}/issue-write.sh" POST /Issue
 {
   "prjID": "${CODE}",
   "issueType": "${ISSUE_TYPE}",
@@ -94,14 +92,13 @@ SUBKEY=$(echo "$RESP" | jq -r '.subkey')
 | bdiagram | customfield_18205 | 동적 동작 다이어그램 (PlantUML) |
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --arg ad "$ADIAGRAM" --arg bd "$BDIAGRAM" \
     --arg pr "$PRIORITY" --arg as "$ASSIGNEE" \
     '{prjID:$p, key:$k, user:$u,
-      data:{adiagram:$ad, bdiagram:$bd, priority:$pr, assignee:$as}}')"
+      data:{adiagram:$ad, bdiagram:$bd, priority:$pr, assignee:$as}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ## Step 3 — ADSN 전용 필드 PUT (Architectural 일 때만)
@@ -123,10 +120,8 @@ DDSN 은 adiagram/bdiagram 만 의미 있으므로 이 Step 은 **Architectural 
 | decision | customfield_18211 | 채택 여부 — 비어있지 않으면 최종 선택안 |
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --arg dm "$DMODEL" --arg ar "$ARCHDIAGRAM" --arg ob "$OBJECTIVES" \
     --arg pro "$PROS" --arg con "$CONS" --arg sc "$SCORE" --arg ev "$EVAL" \
     --arg se "$SENSITIVITY" --arg mi "$MITIGATION" --arg ri "$RISK" \
@@ -134,7 +129,8 @@ curl -s -X PUT "${GOJIRA_API}/Issue" \
     '{prjID:$p, key:$k, user:$u,
       data:{dmodel:$dm, archdiagram:$ar, objectives:$ob,
             pros:$pro, cons:$con, score:$sc, eval:$ev,
-            sensitivity:$se, mitigation:$mi, risk:$ri, decision:$de}}')"
+            sensitivity:$se, mitigation:$mi, risk:$ri, decision:$de}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ## 규칙

@@ -127,7 +127,16 @@ Mongo upsert 를 **동시(dual-write)** 수행하고, 과제 열 때 로컬 YAML
    `onEditChange` 미전달 → 편집 토글 미노출. `editMode` 를 세터 없는 `useState(false)` 로
    고정해 모든 편집·생성·삭제·링크 UI 게이트 차단. IssueDetailDialog 는 `editMode=false` 로
    이미 readonly. write 함수는 dead JSX 에 lexically 잔존(런타임 도달 불가, lint 무경고).
+5.5 ✅ **이슈 스킬 로컬화** (step 6 선결 — §5-2 의 "이슈 스킬 동일" 보류분). 이슈 write 의
+   실질 주 호출자가 스킬(배치 스크립트 + 직접 curl)이므로, 이를 먼저 로컬화해야 6 이 안전.
+   - `_scripts/_local-write.sh`(신규): `gj_apply_local_writes` — X-Local-Write 응답의
+     localWrites 를 로컬 clone 에 반영. localWrites 없으면 noop(하위호환).
+   - `issue-batch-create.sh`/`issue-batch-link.sh`(choke point): 헤더 + localWrites 적용.
+   - `issue-write.sh`(신규): 단건 write 래퍼. 직접 curl 11개 SKILL.md(18 호출처)를 이 래퍼
+     경유로 전환(raw curl write 0). read-only GET 은 보존.
+   - launcher `agentEnv` 에 `GOJIRA_API`(스킬 관례) 추가 주입.
 6. 트랙 D §4 서버 worktree 제거(3.4) + legacy SaveFile 분기 제거 — 각 단계 go build 검증.
+   (5.5 완료로 서버 write 경로 호출자 0 → 이제 안전하게 진행 가능)
 
 ## 관련 문서
 - [`local-agent-mvp.md`](./local-agent-mvp.md) — 상위 §5/§6

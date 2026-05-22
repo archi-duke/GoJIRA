@@ -54,11 +54,9 @@ curl -s "${GOJIRA_API}/Issue" \
 
 ```bash
 GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 
-RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
+RESP=$(cat <<EOF | bash "${SCRIPTS}/issue-write.sh" POST /Issue
 {
   "prjID": "${CODE}",
   "issueType": "Feature",
@@ -84,17 +82,16 @@ SUBKEY=$(echo "$RESP" | jq -r '.subkey')
 | postcondition | customfield_15220 | 종료 상태 |
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --arg ac "$ACTOR" --arg pre "$PRECOND" --arg bf "$BASIC" \
     --arg af "$ALT" --arg ef "$EXC" --arg po "$POST" \
     --arg pr "$PRIORITY" --arg as "$ASSIGNEE" \
     '{prjID:$p, key:$k, user:$u,
       data:{actor:$ac, precondition:$pre, basicflow:$bf,
             alternativeflow:$af, exceptionflow:$ef, postcondition:$po,
-            priority:$pr, assignee:$as}}')"
+            priority:$pr, assignee:$as}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ## 규칙

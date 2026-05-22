@@ -228,12 +228,12 @@ critical + suggestions 항목만 국소 수정. 나머지 원문 유지. 수정 
 **강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — Requirement 이슈 PUT 하지 않는다.
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --argjson qad $QAD --argjson qai $QAI --argjson pri $PRIORITY \
     --arg imp "$IMPORTANCE" --arg diff "$DIFFICULTY" \
-    '{prjID:$p, key:$k, user:$u, data:{qad:$qad, qai:$qai, priority:$pri, importance:$imp, difficulty:$diff, driverSelected:true}}')"
+    '{prjID:$p, key:$k, user:$u, data:{qad:$qad, qai:$qai, priority:$pri, importance:$imp, difficulty:$diff, driverSelected:true}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ### 5.2 ASR 라벨 부여 (선정된 Driver + 모든 NFR)
@@ -247,10 +247,10 @@ LABELS=$(curl -s "${GOJIRA_API}/Issue" \
   -H "X-User-Id: ${USER}" \
   | jq -c '.[0].labels // []')
 NEW_LABELS=$(echo "$LABELS" | jq -c 'if index("ASR") then . else . + ["ASR"] end')
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson l "$NEW_LABELS" \
-    '{prjID:$p, key:$k, user:$u, data:{labels:$l}}')"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson l "$NEW_LABELS" \
+    '{prjID:$p, key:$k, user:$u, data:{labels:$l}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 선정되지 않았더라도 **모든 NFR Requirement** 에 ASR 라벨 부여.
