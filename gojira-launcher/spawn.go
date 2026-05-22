@@ -89,7 +89,8 @@ func (s *Server) agentEnv(repoPath, user string) []string {
 		env = append(env, "GOJIRA_USER="+user)
 	}
 	if s.cfg.Backend.GojiraAPI != "" {
-		env = append(env, "GOJIRA_API_URL="+s.cfg.Backend.GojiraAPI)
+		// GOJIRA_API_URL — gojira-cli 관례, GOJIRA_API — 이슈 스킬 스크립트 관례. 둘 다 주입.
+		env = append(env, "GOJIRA_API_URL="+s.cfg.Backend.GojiraAPI, "GOJIRA_API="+s.cfg.Backend.GojiraAPI)
 	}
 	if s.cfg.Backend.PlatformAPI != "" {
 		env = append(env, "GOJIRA_PLATFORM_URL="+s.cfg.Backend.PlatformAPI)
