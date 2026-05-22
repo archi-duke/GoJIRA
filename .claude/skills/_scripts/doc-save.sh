@@ -1,25 +1,21 @@
 #!/usr/bin/env bash
-# doc-save.sh — 사용자별 worktree 에 문서를 직접 write + SSE notify.
+# doc-save.sh — 로컬 clone 작업본에 문서를 직접 write (local-agent 모델).
 #
 # 사용법:
 #   bash doc-save.sh <CODE> <USER> <PATH> < content.md
 #   bash doc-save.sh <CODE> <USER> <PATH> --file /tmp/content.md
 #
-# 흐름:
-#   1) EditSession lock acquire (holderKind=skill)  — UI 와 동시 편집 방지
+# 흐름 (로컬 전용 — 서버 왕복 없음):
+#   1) repo 루트 결정: GOJIRA_REPO_ROOT (런처 주입) 우선, 없으면 git toplevel
 #   2) PlantUML 자동 수정 (md 파일, DOC_FIX=0 으로 비활성화)
-#   3) ${WT}/${PATH} 에 fs 직접 write (mkdir -p, file-level flock 으로 직렬화)
-#   4) Platform-API notify-change 호출 — SSE broadcast 트리거 (UI DocEditor 갱신)
-#   5) post-save sanity 검사 (DOC_POST_VALIDATE=0 으로 비활성화)
+#   3) ${ROOT}/${PATH} 에 fs 직접 write (mkdir -p)
+#   4) post-save sanity 검사 (DOC_POST_VALIDATE=0 으로 비활성화)
 #
 # 동시성:
-#   - EditSession holderKind lock 은 UI ↔ 스킬 충돌만 막음 (Phase 2).
-#   - 같은 user + 같은 holderKind (예: OpenCode 세션 2개) 의 같은 파일 race 는
-#     ${WT}/.gojira-locks/<sanitized-path>.lock 위에서 flock 으로 직렬화 (Phase 3).
-#     Platform-API 의 WriteWorktreeFile 도 같은 lock 경로를 사용하므로 UI ↔ 스킬 사이도 같이 보호된다.
+#   - 로컬 작업본은 단일 writer (사용자 PC 의 clone 한 개) 이므로 lock 불필요.
+#   - 서버 EditSession lock / SSE notify 는 사용하지 않는다.
 #
-# lock 은 자동 release 하지 않음 — 작업 종료 시 _edit-release.sh 명시 호출 권장.
-# 같은 user 의 reentry 는 heartbeat 갱신이므로 매 save 마다 호출해도 부담 없음.
+# CODE/USER 인자는 8개 doc 스킬 호환을 위해 유지(현재 미사용 가능).
 set -euo pipefail
 
 CODE="${1:?projectCode required}"
@@ -27,7 +23,6 @@ USER="${2:?user required}"
 DOCPATH="${3:?document path required (e.g. business/use-cases.md)}"
 shift 3
 
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 본문 읽기
@@ -37,8 +32,15 @@ else
   CONTENT=$(cat)
 fi
 
-# 1) lock acquire + worktree 경로 획득
-WT=$(bash "${SCRIPT_DIR}/_edit-acquire.sh" "$CODE" "$USER")
+# 1) repo 루트 결정 — 런처가 GOJIRA_REPO_ROOT 주입, 없으면 git toplevel fallback
+ROOT="${GOJIRA_REPO_ROOT:-}"
+if [[ -z "$ROOT" ]]; then
+  ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+fi
+if [[ -z "$ROOT" || ! -d "$ROOT" ]]; then
+  echo "ERROR: repo 루트를 찾을 수 없음 — GOJIRA_REPO_ROOT 를 설정하거나 clone 안에서 실행하세요." >&2
+  exit 1
+fi
 
 # 2) PlantUML 결정적 자동 수정 (md 파일)
 if [[ "${DOC_FIX:-1}" == "1" && "$DOCPATH" == *.md ]]; then
@@ -49,25 +51,12 @@ if [[ "${DOC_FIX:-1}" == "1" && "$DOCPATH" == *.md ]]; then
   rm -f "$TMPMD"
 fi
 
-# 3) fs write (flock 으로 같은 파일 동시 write 직렬화)
-FILE="${WT}/${DOCPATH}"
+# 3) fs write (단일 writer — flock 불필요)
+FILE="${ROOT}/${DOCPATH}"
 mkdir -p "$(dirname "$FILE")"
+printf '%s' "$CONTENT" > "$FILE"
 
-LOCKS_DIR="${WT}/.gojira-locks"
-mkdir -p "$LOCKS_DIR"
-SANITIZED_PATH=$(printf '%s' "$DOCPATH" | tr '/' '_')
-LOCK_FILE="${LOCKS_DIR}/${SANITIZED_PATH}.lock"
-
-(
-  exec 9>"$LOCK_FILE"
-  flock -x 9
-  printf '%s' "$CONTENT" > "$FILE"
-)
-
-# 4) SSE broadcast 트리거 — 실패해도 save 자체에 영향 없음
-bash "${SCRIPT_DIR}/_notify-change.sh" "$CODE" "$USER" "$DOCPATH" save >/dev/null 2>&1 || true
-
-# 5) post-save sanity 검사
+# 4) post-save sanity 검사
 WARNINGS_JSON="[]"
 if [[ "${DOC_POST_VALIDATE:-1}" == "1" && "$DOCPATH" == *.md ]]; then
   WARNS=()

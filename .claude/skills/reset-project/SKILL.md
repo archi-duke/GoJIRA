@@ -6,8 +6,9 @@ allowed-tools: Bash
 
 ## 환경
 
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2` — 이슈/archSettings 리셋용
+- `GOJIRA_REPO_ROOT` — 로컬 clone 루트 (런처 주입). 미설정 시 `git rev-parse --show-toplevel` fallback.
+- 문서 리셋은 **로컬 clone 작업본에 직접 fs write/delete** (서버 `PUT/DELETE /file` 미사용 — local-agent 모델)
 
 ## 인자 추출
 
@@ -53,7 +54,6 @@ export CONFIRM="true"
 ## 1. 사전 체크
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
 GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 CONFIRM="${CONFIRM:-false}"
 RESET_ISSUES="${RESET_ISSUES:-true}"
@@ -62,6 +62,16 @@ RESET_DOCS="${RESET_DOCS:-true}"
 
 if [ -z "$CODE" ] || [ -z "$USER" ]; then
   echo "ERROR: projectCode 와 user 모두 필수"
+  exit 1
+fi
+
+# 로컬 clone 루트 결정 (런처가 GOJIRA_REPO_ROOT 주입, 없으면 git toplevel)
+ROOT="${GOJIRA_REPO_ROOT:-}"
+if [ -z "$ROOT" ]; then
+  ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+fi
+if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+  echo "ERROR: repo 루트를 찾을 수 없음 — GOJIRA_REPO_ROOT 를 설정하거나 clone 안에서 실행"
   exit 1
 fi
 ```
@@ -93,7 +103,7 @@ curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
 }
 ```
 
-`RESET_DOCS=true` 라면 아래 8 파일이 덮어써짐(보고에만 포함, 서버측 처리 아님 — Step 4-2 에서 스킬이 직접 PUT):
+`RESET_DOCS=true` 라면 아래 8 파일이 로컬 clone(`${ROOT}`)에서 덮어써짐(보고에만 포함, 서버측 처리 아님 — Step 4-2 에서 스킬이 직접 로컬 fs write):
 - `business/project-description.md`
 - `business/use-cases.md`
 - `business/requirements.md`
@@ -127,20 +137,23 @@ echo "$RESET_RESULT" | jq '{mode, deletedCount, failedCount, archSettingsCleared
 
 응답에 `failedCount > 0` 이면 최종 보고에 `failed[]` 내용을 포함. 그래도 Step 4-2 진행(부분 성공이어도 문서 초기화는 시도).
 
-### 4-2. 문서 초기화 (사용자 브랜치 docs/{USER})
+### 4-2. 문서 초기화 (로컬 clone)
 
-`.claude/skills/reset-project/templates/` 하위 8개 파일을 Platform-API `PUT /DocRepo/{code}/file` 로 각각 덮어쓴다. 템플릿은 Agent-Service `_TEMPLATES` 와 동일한 내용이다.
+`.claude/skills/reset-project/templates/` 하위 8개 파일을 로컬 clone(`${ROOT}`)의 대응 경로에 직접 복사해 덮어쓴다. 서버 왕복(`PUT /file`/`init-files`) 없음 — 결과는 이후 런처 push → PR 로 반영.
 
 ```bash
+TEMPLATE_DIR="${ROOT}/.claude/skills/reset-project/templates"
+
 put_template() {
   local REL_PATH="$1"
-  local CONTENT
-  CONTENT=$(cat "${PROJECT_ROOT}/.claude/skills/reset-project/templates/${REL_PATH}")
-  curl -s -X PUT "${PLATFORM_API}/DocRepo/${CODE}/file" \
-    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-    -d "$(jq -n --arg p "$REL_PATH" --arg c "$CONTENT" --arg m "[reset-project] ${REL_PATH} 초기화" \
-      '{path:$p, content:$c, message:$m}')" \
-    -o /dev/null -w "PUT ${REL_PATH} -> %{http_code}\n"
+  local DST="${ROOT}/${REL_PATH}"
+  if [ ! -f "${TEMPLATE_DIR}/${REL_PATH}" ]; then
+    echo "WRITE ${REL_PATH} -> SKIP (template 없음)"
+    return
+  fi
+  mkdir -p "$(dirname "$DST")"
+  cp "${TEMPLATE_DIR}/${REL_PATH}" "$DST"
+  echo "WRITE ${REL_PATH} -> ok"
 }
 
 if [ "$CONFIRM" = "true" ] && [ "$RESET_DOCS" = "true" ]; then
@@ -155,50 +168,38 @@ if [ "$CONFIRM" = "true" ] && [ "$RESET_DOCS" = "true" ]; then
     architecture/architecture-integrated.md; do
     put_template "$F"
   done
-
-  # main 브랜치 누락 파일 보충
-  curl -s -X POST "${PLATFORM_API}/DocRepo/${CODE}/init-files" \
-    -H "X-User-Id: ${USER}" \
-    -o /dev/null -w "INIT-FILES -> %{http_code}\n"
 fi
 ```
 
 ### 4-3. 하위 디렉토리 후보별/뷰별 파일 정리 (PR #11 보강)
 
-style-define2 / design-decide2 / design-integrate2 가 만드는 sub-directory 의 동적 파일들 정리. `GET /DocRepo/{code}/tree` 로 트리 listing 후 매칭 패턴을 일괄 DELETE.
+style-define2 / design-decide2 / design-integrate2 가 만드는 sub-directory 의 동적 파일들 정리. 로컬 clone(`${ROOT}`)의 해당 디렉토리를 직접 비운다(서버 tree/DELETE 미사용).
 
 ```bash
 if [ "$CONFIRM" = "true" ] && [ "$RESET_DOCS" = "true" ]; then
-  # 트리 조회 (docs/{user} 우선)
-  TREE=$(curl -s "${PLATFORM_API}/DocRepo/${CODE}/tree?ref=docs/${USER}" \
-    -H "X-User-Id: ${USER}")
-
-  # 정리 대상 디렉토리 패턴
-  PATTERNS=(
-    "architecture/architecture-style/"
-    "architecture/design-decisions/"
-    "architecture/architecture-integrated/"
+  # 정리 대상 디렉토리 (로컬 clone 기준)
+  DIRS=(
+    "architecture/architecture-style"
+    "architecture/design-decisions"
+    "architecture/architecture-integrated"
   )
 
-  for prefix in "${PATTERNS[@]}"; do
-    # tree 응답에서 해당 prefix 의 파일 path 추출 + DELETE
-    paths=$(echo "$TREE" | jq -r --arg p "$prefix" '[.[] | select(.path | startswith($p)) | .path] | .[]')
-    for p in $paths; do
-      curl -s -X DELETE "${PLATFORM_API}/DocRepo/${CODE}/file" \
-        -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-        -d "$(jq -n --arg p "$p" --arg m "[reset] $p" '{path:$p, message:$m}')" \
-        -o /dev/null -w "DELETE $p -> %{http_code}\n"
-    done
+  for d in "${DIRS[@]}"; do
+    TARGET="${ROOT}/${d}"
+    [ -d "$TARGET" ] || { echo "CLEAN ${d}/ -> SKIP (없음)"; continue; }
+    # 디렉토리 내부 .md 파일만 제거 (서브디렉토리 구조는 유지)
+    find "$TARGET" -maxdepth 1 -type f -name '*.md' -print -delete \
+      | sed "s|^${ROOT}/|DELETE |"
   done
 fi
 ```
 
-서버측 `POST /Project/{code}/reset` 의 issue 정리는 자기 과제 이슈 (key prefix=CODE) 만 처리하므로, 다른 user 의 worktree 에 잔존한 yaml 은 소거 안 됨 — 알려진 한계 (issue YAML 영속화가 user 별 worktree 라 cross-user 정리 미지원).
+서버측 `POST /Project/{code}/reset` 의 issue 정리는 자기 과제 이슈 (key prefix=CODE) 만 처리한다. 문서 정리는 이제 로컬 clone 단일 작업본에서만 일어나므로 cross-user worktree 잔존 문제는 사라졌다(서버측 user 별 worktree 자체가 제거됨 — 트랙 A/C).
 
 ## 5. 최종 보고
 
 - **dry-run**: 이슈 수 / archSettings 존재 여부 / 덮어쓸 파일 목록 + `CONFIRM=true` 재호출 안내
-- **executed**: 삭제된 이슈 수/실패 수 + archSettingsCleared + 문서 PUT 결과(HTTP 코드) + init-files 응답
+- **executed**: 삭제된 이슈 수/실패 수 + archSettingsCleared + 로컬 문서 write/delete 결과 + 런처 push→PR 안내(로컬 변경은 push 전까지 서버/웹 미반영)
 
 모든 보고는 한국어 마크다운. 실패(4xx/5xx) 는 반드시 보고에 명시.
 
@@ -206,7 +207,6 @@ fi
 
 - `CONFIRM=true` 는 반드시 사용자 명시 동의 후에만 설정
 - 서버측 `POST /Project/{code}/reset` 이 없는 옛 버전 GoJIRA-API 에서는 404 반환 → 최신 빌드로 업그레이드 필요
-- 템플릿 8개는 `.claude/skills/reset-project/templates/` 하위에 있으며 Agent-Service `reset_project._TEMPLATES` 와 동일하게 유지
-- 문서 PUT 응답 content 는 Platform-API 가 서버측에서 base64 처리 — 호출은 plain UTF-8
+- 템플릿 8개는 `.claude/skills/reset-project/templates/` 하위에 있으며 로컬 clone 안에 동봉됨
+- 문서 리셋은 **로컬 clone fs 직접 write/delete** — 결과는 런처 push → PR 로만 서버/웹 반영
 - **Soft delete 인지** (PR #11): 이슈는 `issues_trash` 컬렉션으로 이동, 3일 후 자동 영구 삭제. 사고 시 3일 내 복구 시도 가능
-- **Cross-user yaml 한계**: 다른 user 의 worktree 에 잔존한 issue yaml 은 본 스킬로 정리 안 됨 — 별도 manual cleanup 필요 (직접 worktree rm) 또는 archive-project 로 통째 삭제
