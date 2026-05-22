@@ -10,12 +10,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"context"
-	"time"
-
 	"platform-api/config"
 	"platform-api/db"
-	gitpkg "platform-api/github"
 	"platform-api/handlers"
 )
 
@@ -44,18 +40,8 @@ func main() {
 	db.InitAccountIndexes()
 	db.InitNoticeIndexes()
 	db.InitDocRepoIndexes()
-	db.InitEditSessionIndexes()
 	db.InitNotificationIndexes()
 	db.SeedAccountData()
-
-	// Workspace TTL worker 시작
-	gitpkg.StartTTLWorker(func(owner, repo, userID string) bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// projectCode는 repo name과 동일하다고 가정 (docrepo 매핑)
-		session, err := db.FindActiveSessionByUser(ctx, repo, userID)
-		return err == nil && session != nil
-	})
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -134,14 +120,8 @@ func main() {
 			r.Post("/{code}", handlers.DocRepoCreateHandler)
 			r.Delete("/{code}/purge", handlers.DocRepoPurgeHandler)
 			r.Delete("/{code}/github", handlers.DocRepoGHDeleteHandler)
-			r.Post("/{code}/init-files", handlers.DocRepoInitFilesHandler)
-			r.Post("/{code}/ensure-branch", handlers.DocRepoEnsureBranchHandler)
-			r.Get("/{code}/worktree-info", handlers.DocRepoWorktreeInfoHandler)
-			r.Post("/{code}/notify-change", handlers.DocRepoNotifyChangeHandler)
 			r.Get("/{code}/tree", handlers.DocRepoTreeHandler)
 			r.Get("/{code}/file", handlers.DocRepoFileHandler)
-			r.Put("/{code}/file", handlers.DocRepoFileUpdateHandler)
-			r.Delete("/{code}/file", handlers.DocRepoFileDeleteHandler)
 			r.Get("/{code}/commits", handlers.DocRepoCommitsHandler)
 			r.Get("/{code}/branches", handlers.DocRepoBranchesHandler)
 			r.Get("/{code}/graph", handlers.DocRepoGraphHandler)
@@ -150,15 +130,6 @@ func main() {
 			r.Post("/{code}/pr/{num}/review", handlers.DocRepoPRReviewHandler)
 			r.Post("/{code}/pr/{num}/merge", handlers.DocRepoPRMergeHandler)
 			r.Get("/{code}/pr/{num}/reviews", handlers.DocRepoPRReviewsHandler)
-			// 문서 편집 API — 스킬 락(edit/start·release) + 조회(edit/file·status·pending) 만 유지.
-			// 웹 편집 폐기(트랙 B)로 worktree write 엔드포인트는 제거됨 (local-agent-mvp §5-4 트랙 C).
-			r.Post("/{code}/edit/start", handlers.DocRepoEditStartHandler)
-			r.Get("/{code}/edit/file", handlers.DocRepoEditFileHandler)
-			r.Get("/{code}/edit/status", handlers.DocRepoEditStatusHandler)
-			r.Get("/{code}/edit/pending", handlers.DocRepoEditPendingHandler)
-			r.Post("/{code}/edit/release", handlers.DocRepoEditReleaseHandler)
-			r.Post("/{code}/conflict-resolve", handlers.DocRepoConflictResolveHandler)
-			r.Post("/{code}/open-folder", handlers.DocRepoOpenFolderHandler)
 		})
 
 		// DocLink — 향후 구현

@@ -2,19 +2,13 @@ package handlers
 
 import (
 	"context"
-	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,15 +18,6 @@ import (
 	"platform-api/github"
 	"platform-api/llm"
 )
-
-// repo별 init-files 동시 실행 방지 뮤텍스
-var initFilesMu sync.Map // key: "owner/repo" → *sync.Mutex
-
-func getRepoMutex(owner, name string) *sync.Mutex {
-	key := owner + "/" + name
-	v, _ := initFilesMu.LoadOrStore(key, &sync.Mutex{})
-	return v.(*sync.Mutex)
-}
 
 // GET /DocRepo/git-users — Git 플랫폼 사용자 목록
 func GitUsersHandler(w http.ResponseWriter, r *http.Request) {
@@ -360,332 +345,6 @@ func DocRepoPurgeHandler(w http.ResponseWriter, r *http.Request) {
 
 // --- GitHub 프록시 API (projectCode 기반) ---
 
-// POST /DocRepo/{code}/init-files — 초기 폴더/파일 자동 생성 (main 브랜치, 없는 것만)
-func DocRepoInitFilesHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	// 동일 repo에 대한 동시 init-files 호출 직렬화
-	mu := getRepoMutex(owner, name)
-	mu.Lock()
-	defer mu.Unlock()
-
-	initialFiles := map[string]string{
-		"business/project-description.md": "# Project Description\n\n" +
-			"과제의 배경, 목적, 주요 사항을 기록하는 문서입니다.\n\n" +
-			"## 과제 배경\n\n(작성 필요)\n\n" +
-			"## 과제 목적\n\n(작성 필요)\n\n" +
-			"## 주요 사항\n\n(작성 필요)\n\n" +
-			"> VOS 자동생성 시 이 문서의 내용을 참조합니다. 반드시 작성해 주세요.\n",
-		"business/use-cases.md": "# Use Cases\n\n" +
-			"과제의 유즈케이스를 기술하는 문서입니다.\n\n" +
-			"## Actors\n\n(작성 필요)\n\n" +
-			"## Use Case 목록\n\n(작성 필요)\n\n" +
-			"## Use Case 상세\n\n(작성 필요)\n",
-		"business/requirements.md": "# Requirements\n\n" +
-			"과제의 요구사양을 기술하는 문서입니다.\n\n" +
-			"## Functional Requirements (FR)\n\n(작성 필요)\n\n" +
-			"## Quality Attributes / Non-Functional Requirements (NFR)\n\n(작성 필요)\n\n" +
-			"## Constraints (CNST)\n\n(작성 필요)\n",
-		"architecture/architecture.md": "# Architecture Design\n\n" +
-			"과제의 주요 설계 사항을 기술하는 문서입니다.\n" +
-			"Architecture의 스타일과 주요 디자인 포인트의 설계, 다양한 관점의 통합 디자인 및 설계 평가(SATAM)를 포함합니다.\n\n" +
-			"## Architecture Style\n\n(작성 필요)\n\n" +
-			"## Key Design Points\n\n(작성 필요)\n\n" +
-			"## Integrated Design Views\n\n(작성 필요)\n\n" +
-			"## SATAM (Sensitivity, Architecture Tradeoff Analysis)\n\n(작성 필요)\n",
-	}
-
-	var created []string
-	needProtectionToggle := false
-	for path := range initialFiles {
-		if _, err := github.GetFileContent(owner, name, path, "main"); err != nil {
-			needProtectionToggle = true
-			break
-		}
-	}
-
-	if needProtectionToggle {
-		// 브랜치 보호 임시 해제
-		github.DeleteBranchProtection(owner, name, "main")
-
-		for path, content := range initialFiles {
-			if _, err := github.GetFileContent(owner, name, path, "main"); err == nil {
-				continue // 이미 존재하면 스킵
-			}
-			encoded := base64.StdEncoding.EncodeToString([]byte(content))
-			if _, err := github.CreateFile(owner, name, path, encoded, fmt.Sprintf("%s 초기 생성", path), "main"); err != nil {
-				log.Printf("init-files: %s 생성 실패: %v", path, err)
-				continue
-			}
-			created = append(created, path)
-		}
-
-		// 브랜치 보호 복원
-		prj, _ := db.FindProjectByCode(ctx, code)
-		auditors := toStringSlice(prj["auditors"])
-		reviewCount := len(auditors)
-		if reviewCount == 0 {
-			reviewCount = 1
-		}
-		github.SetBranchProtection(owner, name, "main", reviewCount)
-	}
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"created": created,
-		"count":   len(created),
-	})
-}
-
-// GET /DocRepo/{code}/worktree-info — fs 직접 read 하는 스킬용 메타정보.
-// EditSession lock 잡지 않음 (read 전용). worktree 만 보장.
-// 응답: { owner, repo, branch, worktreeRelPath }
-// 호스트 측 절대경로 = ${GOJIRA_REPOS_DIR}/${worktreeRelPath}
-func DocRepoWorktreeInfoHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	userId := r.Header.Get("X-User-Id")
-	if userId == "" {
-		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if _, _, err := github.EnsureWorktree(owner, name, userId); err != nil {
-		respondError(w, http.StatusInternalServerError, "worktree 생성 실패: "+err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"owner":           owner,
-		"repo":            name,
-		"branch":          "docs/" + userId,
-		"worktreeRelPath": fmt.Sprintf("%s/%s.worktrees/%s", owner, name, userId),
-	})
-}
-
-// POST /DocRepo/{code}/notify-change — 스킬이 fs 직접 write 한 뒤 SSE broadcast 트리거.
-// body: {path, op?: "save" | "delete"}  (op 기본 "save")
-// UI DocEditor 가 변경 사실을 즉시 인지하도록 user_doc_update event 발사.
-func DocRepoNotifyChangeHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
-		return
-	}
-	var body struct {
-		Path string `json:"path"`
-		Op   string `json:"op"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	if body.Path == "" {
-		respondError(w, http.StatusBadRequest, "path 필요")
-		return
-	}
-	if body.Op == "" {
-		body.Op = "save"
-	}
-	BroadcastDocEvent(map[string]interface{}{
-		"type":        "user_doc_update",
-		"projectCode": code,
-		"user":        userID,
-		"path":        body.Path,
-		"branch":      "docs/" + userID,
-		"op":          body.Op,
-		"source":      "skill",
-	})
-	respondJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
-}
-
-// POST /DocRepo/{code}/ensure-branch — 사용자 브랜치 없으면 main에서 자동 생성
-func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	userId := r.Header.Get("X-User-Id")
-	if userId == "" {
-		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	branch := "docs/" + userId
-
-	// 로컬 worktree 가 이미 존재하면 Gitea 없이도 성공
-	if _, _, wtErr := github.EnsureWorktree(owner, name, userId); wtErr == nil {
-		go UpdateBranchAlert(owner, name, code, userId)
-		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": false})
-		return
-	}
-
-	// Gitea 에서 브랜치 목록 확인
-	branchList, _ := github.ListBranches(owner, name)
-	branches, _ := branchList.([]interface{})
-	branchExists := false
-	mainSHA := ""
-	for _, b := range branches {
-		bm, _ := b.(map[string]interface{})
-		bName, _ := bm["name"].(string)
-		if bName == branch {
-			branchExists = true
-		}
-		if bName == "main" {
-			if commit, ok := bm["commit"].(map[string]interface{}); ok {
-				mainSHA, _ = commit["id"].(string)
-			}
-		}
-	}
-	if branchExists {
-		go UpdateBranchAlert(owner, name, code, userId)
-		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": false})
-		return
-	}
-	if mainSHA == "" {
-		respondError(w, http.StatusBadGateway, "main 브랜치 조회 실패")
-		return
-	}
-	if err := github.CreateBranch(owner, name, branch, mainSHA); err != nil {
-		respondError(w, http.StatusBadGateway, "브랜치 생성 실패: "+err.Error())
-		return
-	}
-	log.Printf("ensure-branch: %s/%s branch=%s 생성 (from main=%s)", owner, name, branch, mainSHA[:8])
-	go UpdateBranchAlert(owner, name, code, userId)
-	respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": true})
-}
-
-// POST /DocRepo/{code}/conflict-resolve — 변경 보관 → sync → 재반영
-// 사용자 브랜치의 변경 파일을 보관하고, main으로 동기화한 뒤, 변경 내용을 다시 적용
-func DocRepoConflictResolveHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	userId := r.Header.Get("X-User-Id")
-	if userId == "" {
-		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	branch := "docs/" + userId
-
-	// 1. main과 user branch 트리 비교 → 다른 파일 찾기
-	mainTree, err := github.GetTree(owner, name, "main")
-	if err != nil {
-		respondError(w, http.StatusBadGateway, "main 트리 조회 실패")
-		return
-	}
-	userTree, err := github.GetTree(owner, name, branch)
-	if err != nil {
-		respondError(w, http.StatusBadGateway, "사용자 브랜치 트리 조회 실패")
-		return
-	}
-
-	mainFiles := extractTreeFiles(mainTree)
-	userFiles := extractTreeFiles(userTree)
-
-	// user에만 있거나 SHA가 다른 파일의 내용을 보관
-	type savedFile struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-	}
-	var saved []savedFile
-	for path, sha := range userFiles {
-		if mainFiles[path] != sha {
-			// 사용자 파일 내용 다운로드
-			fileData, err := github.GetFileContent(owner, name, path, branch)
-			if err != nil {
-				continue
-			}
-			content, _ := fileData["content"].(string)
-			if content != "" {
-				saved = append(saved, savedFile{Path: path, Content: content})
-			}
-		}
-	}
-
-	if len(saved) == 0 {
-		respondJSON(w, http.StatusOK, map[string]interface{}{"resolved": false, "message": "변경 파일 없음"})
-		return
-	}
-
-	log.Printf("conflict-resolve: %s/%s branch=%s 보관 파일 %d개", owner, name, branch, len(saved))
-
-	// 2. 브랜치 삭제 → main에서 재생성 (sync)
-	github.DeleteBranch(owner, name, branch)
-	time.Sleep(500 * time.Millisecond)
-
-	branchList, _ := github.ListBranches(owner, name)
-	branches, _ := branchList.([]interface{})
-	mainSHA := ""
-	for _, b := range branches {
-		bm, _ := b.(map[string]interface{})
-		if bName, _ := bm["name"].(string); bName == "main" {
-			if commit, ok := bm["commit"].(map[string]interface{}); ok {
-				mainSHA, _ = commit["id"].(string)
-			}
-		}
-	}
-	if mainSHA == "" {
-		respondError(w, http.StatusBadGateway, "main SHA 조회 실패")
-		return
-	}
-	if err := github.CreateBranch(owner, name, branch, mainSHA); err != nil {
-		respondError(w, http.StatusBadGateway, "브랜치 재생성 실패: "+err.Error())
-		return
-	}
-
-	// 3. 보관된 변경 파일을 user branch에 다시 적용
-	var applied []string
-	for _, f := range saved {
-		// 브랜치 보호 우회를 위해 직접 API 호출
-		existingFile, _ := github.GetFileContent(owner, name, f.Path, branch)
-		if existingFile != nil {
-			// 파일이 이미 존재 (main에서 온 것) → SHA로 업데이트
-			sha, _ := existingFile["sha"].(string)
-			_, err = github.CreateOrUpdateFile(owner, name, f.Path, f.Content,
-				fmt.Sprintf("%s 충돌 해결 재반영", f.Path), branch, sha)
-		} else {
-			// 새 파일
-			_, err = github.CreateFileOnBranch(owner, name, f.Path, f.Content,
-				fmt.Sprintf("%s 충돌 해결 재반영", f.Path), branch, "")
-		}
-		if err != nil {
-			log.Printf("conflict-resolve: %s 재반영 실패: %v", f.Path, err)
-			continue
-		}
-		applied = append(applied, f.Path)
-	}
-
-	go UpdateBranchAlert(owner, name, code, userId)
-
-	log.Printf("conflict-resolve: %s 완료 — %d/%d 파일 재반영", branch, len(applied), len(saved))
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"resolved": true,
-		"saved":    len(saved),
-		"applied":  applied,
-	})
-}
-
 func getRepoInfo(ctx context.Context, code string) (string, string, error) {
 	owner, name, _, err := db.GetProjectDocInfo(ctx, code)
 	if err != nil || name == "" {
@@ -709,22 +368,7 @@ func DocRepoTreeHandler(w http.ResponseWriter, r *http.Request) {
 		ref = "main"
 	}
 
-	// 사용자 브랜치 → 로컬 worktree 에서 트리 생성
-	if strings.HasPrefix(ref, "docs/") {
-		userID := strings.TrimPrefix(ref, "docs/")
-		wtDir, _, wtErr := github.EnsureWorktree(owner, name, userID)
-		if wtErr == nil {
-			entries := buildLocalTree(wtDir, "")
-			respondJSON(w, http.StatusOK, map[string]interface{}{
-				"tree":        entries,
-				"total_count": len(entries),
-				"source":      "worktree",
-			})
-			return
-		}
-	}
-
-	// fallback: Gitea API
+	// Gitea API (docs/<user> 브랜치 포함). Gitea 미가동 시 로컬 bare repo fallback.
 	tree, err := github.GetTree(owner, name, ref)
 	if err != nil {
 		// Gitea 미가동 시 로컬 bare repo 에서 git ls-tree 로 대체
@@ -741,51 +385,6 @@ func DocRepoTreeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, tree)
-}
-
-// buildLocalTree — worktree 디렉토리를 재귀 탐색해 Gitea tree 호환 응답 생성.
-// sha 는 git blob hash (git hash-object 호환) 로 계산해 main 과 비교 가능하게 한다.
-func buildLocalTree(baseDir, prefix string) []map[string]interface{} {
-	var entries []map[string]interface{}
-	dir := filepath.Join(baseDir, prefix)
-	items, err := os.ReadDir(dir)
-	if err != nil {
-		return entries
-	}
-	for _, item := range items {
-		if item.Name() == ".git" {
-			continue
-		}
-		rel := item.Name()
-		if prefix != "" {
-			rel = prefix + "/" + item.Name()
-		}
-		if item.IsDir() {
-			entries = append(entries, map[string]interface{}{
-				"path": rel,
-				"type": "tree",
-				"mode": "040000",
-				"size": 0,
-			})
-			entries = append(entries, buildLocalTree(baseDir, rel)...)
-		} else {
-			info, _ := item.Info()
-			size := int64(0)
-			if info != nil {
-				size = info.Size()
-			}
-			fullPath := filepath.Join(baseDir, rel)
-			sha := gitBlobHash(fullPath)
-			entries = append(entries, map[string]interface{}{
-				"path": rel,
-				"type": "blob",
-				"mode": "100644",
-				"size": size,
-				"sha":  sha,
-			})
-		}
-	}
-	return entries
 }
 
 // buildBareTree — 로컬 bare repo 에서 git ls-tree 로 트리를 생성 (Gitea 미가동 시 fallback).
@@ -822,21 +421,8 @@ func buildBareTree(owner, name, ref string) ([]map[string]interface{}, error) {
 	return entries, nil
 }
 
-// gitBlobHash — git hash-object 호환 SHA-1 계산.
-func gitBlobHash(filePath string) string {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return ""
-	}
-	header := fmt.Sprintf("blob %d\x00", len(data))
-	h := sha1.New()
-	h.Write([]byte(header))
-	h.Write(data)
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
 // GET /DocRepo/{code}/file?path=...&ref=...
-// 사용자 브랜치(docs/{user}) 요청 시 로컬 worktree 우선, fallback 으로 Gitea API.
+// docs/{user} 브랜치 포함 모든 ref 를 Gitea API 로 조회.
 func DocRepoFileHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -849,23 +435,6 @@ func DocRepoFileHandler(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("path")
 	ref := r.URL.Query().Get("ref")
 
-	// 사용자 브랜치 요청 시 로컬 worktree 우선 조회
-	// worktree 파일은 항상 UTF-8 plain text 로 저장되어 있다 (WriteWorktreeFile 보장).
-	// API 호환을 위해 base64 인코딩해서 반환.
-	if strings.HasPrefix(ref, "docs/") {
-		userID := strings.TrimPrefix(ref, "docs/")
-		if localContent, err := github.ReadWorktreeFile(owner, name, userID, filePath); err == nil {
-			encoded := base64.StdEncoding.EncodeToString([]byte(localContent))
-			respondJSON(w, http.StatusOK, map[string]interface{}{
-				"path":    filePath,
-				"content": encoded,
-				"source":  "worktree",
-			})
-			return
-		}
-	}
-
-	// fallback: Gitea API
 	content, err := github.GetFileContent(owner, name, filePath, ref)
 	if err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
@@ -873,110 +442,6 @@ func DocRepoFileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, content)
 }
-
-// PUT /DocRepo/{code}/file — 파일 수정 (로컬 worktree 에 write, push 하지 않음)
-//
-// 변경: Gitea API 경유 commit+push 를 제거하고 로컬 worktree 에 직접 write.
-// push 는 PR 생성(POST /DocRepo/{code}/pr) 시 일괄 수행.
-func DocRepoFileUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	userId := r.Header.Get("X-User-Id")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	var body struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-
-	// worktree 확보 (없으면 자동 생성)
-	if _, _, err := github.EnsureWorktree(owner, name, userId); err != nil {
-		respondError(w, http.StatusInternalServerError, "worktree 생성 실패: "+err.Error())
-		return
-	}
-
-	// 로컬 파일 write (commit/push 없음)
-	if err := github.WriteWorktreeFile(owner, name, userId, body.Path, body.Content); err != nil {
-		respondError(w, http.StatusInternalServerError, "파일 저장 실패: "+err.Error())
-		return
-	}
-
-	// SSE 브로드캐스트 — UI DocEditor 자동 갱신
-	branch := "docs/" + userId
-	BroadcastDocEvent(map[string]interface{}{
-		"type":        "user_doc_update",
-		"projectCode": code,
-		"user":        userId,
-		"path":        body.Path,
-		"branch":      branch,
-	})
-	respondJSON(w, http.StatusOK, map[string]string{"path": body.Path, "status": "saved"})
-}
-
-// DELETE /DocRepo/{code}/file — 파일 삭제 (로컬 worktree 에서, push 하지 않음)
-func DocRepoFileDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	userId := r.Header.Get("X-User-Id")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	var body struct {
-		Path    string `json:"path"`
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-
-	// 로컬 worktree 에서 파일 삭제
-	branch := "docs/" + userId
-	wtDir, _, err := github.EnsureWorktree(owner, name, userId)
-	if err == nil {
-		fullPath := filepath.Join(wtDir, body.Path)
-		if removeErr := os.Remove(fullPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			respondError(w, http.StatusInternalServerError, "파일 삭제 실패: "+removeErr.Error())
-			return
-		}
-	} else {
-		// worktree 없으면 기존 Gitea API fallback
-		existing, err := github.GetFileContent(owner, name, body.Path, branch)
-		if err != nil {
-			respondError(w, http.StatusNotFound, "file not found")
-			return
-		}
-		sha, _ := existing["sha"].(string)
-		userToken := getUserToken(r)
-		if err := github.DeleteFileAs(owner, name, body.Path, body.Message, branch, sha, userToken); err != nil {
-			respondError(w, http.StatusBadGateway, err.Error())
-			return
-		}
-	}
-
-	BroadcastDocEvent(map[string]interface{}{
-		"type":        "user_doc_update",
-		"projectCode": code,
-		"user":        userId,
-		"path":        body.Path,
-		"branch":      branch,
-		"deleted":     true,
-	})
-	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
 
 // GET /DocRepo/{code}/commits
 func DocRepoCommitsHandler(w http.ResponseWriter, r *http.Request) {
@@ -1271,28 +736,13 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 		Body  string `json:"body"`
 		Head  string `json:"head"`
 		Base  string `json:"base"`
-		// SkipAutoCommit — 로컬 에이전트 전환(local-agent-mvp §5-3)에서 사용.
-		// 사용자 PC 런처가 이미 docs/{user} 를 push 한 경우, 서버측 worktree
-		// commit+push 를 건너뛴다(서버에 변경분이 없으므로). 기본 false=기존 동작.
+		// SkipAutoCommit — 무시됨(deprecated). 로컬 에이전트 전환 이후 서버는
+		// 절대 commit/push 하지 않는다. 런처가 docs/{user} 를 로컬에서 push 한다.
 		SkipAutoCommit bool `json:"skipAutoCommit"`
 	}
 	decodeJSON(r, &req)
 	if req.Base == "" {
 		req.Base = "main"
-	}
-
-	// 발행 전 로컬 worktree 변경사항을 commit + push (서버측 Worktree 아키텍처).
-	// 로컬 런처가 이미 push 했다면(skipAutoCommit) 생략.
-	if strings.HasPrefix(req.Head, "docs/") && !req.SkipAutoCommit {
-		userID := strings.TrimPrefix(req.Head, "docs/")
-		commitMsg := req.Title
-		if commitMsg == "" {
-			commitMsg = fmt.Sprintf("[%s] 설계문서 발행", code)
-		}
-		if err := github.CommitAndPush(owner, name, req.Head, commitMsg); err != nil {
-			log.Printf("PR 선행 commit+push 경고: %v", err)
-		}
-		_ = userID
 	}
 
 	// PR 생성 전 diff 확인 — head가 base의 ancestor이면 변경사항 없음
@@ -1497,22 +947,6 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 	db.UpdateProjectField(ctx, code, "gitOpenPRReviewers", []string{})
 	db.UpdateProjectField(ctx, code, "gitLastCommit", nil)
 
-	// merge 후 처리: workspace 삭제 + 세션 해제 (브랜치는 유지)
-	// PR에서 head branch의 userID 추출
-	pr, _ := github.GetPR(owner, name, num)
-	if pr != nil {
-		if head, ok := pr["head"].(map[string]interface{}); ok {
-			if ref, ok := head["ref"].(string); ok && strings.HasPrefix(ref, "docs/") {
-				mergedUserID := strings.TrimPrefix(ref, "docs/")
-				// workspace만 삭제 (브랜치는 유지)
-				github.RemoveWorktreeOnly(owner, name, mergedUserID)
-				// 세션 lock 해제
-				db.ReleaseEditSession(ctx, code, mergedUserID)
-				log.Printf("merge 후 처리: workspace 삭제, 세션 ���제 (user=%s)", mergedUserID)
-			}
-		}
-	}
-
 	respondJSON(w, http.StatusOK, "merged")
 }
 
@@ -1533,205 +967,6 @@ func DocRepoPRReviewsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, reviews)
-}
-
-// --- 문서 편집 API ---
-
-// POST /DocRepo/{code}/edit/start — 편집 시작 (worktree 생성 + 세션 lock)
-func DocRepoEditStartHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-
-	// holderKind — 기본 "ui" (backward compat). body 또는 query 로 "skill" 지정 가능.
-	holderKind := r.URL.Query().Get("holderKind")
-	if holderKind == "" && r.ContentLength > 0 {
-		var b struct {
-			HolderKind string `json:"holderKind"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&b)
-		holderKind = b.HolderKind
-	}
-	if holderKind == "" {
-		holderKind = "ui"
-	}
-
-	// 만료된 세션 정리
-	db.ExpireStaleSessions(ctx, config.EditSessionTTL)
-
-	// 세션 lock 획득 시도
-	acquired, existingHolderKind, err := db.AcquireEditSession(ctx, code, userID, holderKind)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "세션 lock 획득 실패: "+err.Error())
-		return
-	}
-	if !acquired {
-		respondJSON(w, http.StatusConflict, map[string]interface{}{
-			"locked":     true,
-			"holderKind": existingHolderKind,
-			"readOnly":   true,
-			"message":    fmt.Sprintf("같은 사용자가 다른 도구(%s)로 편집 중입니다. 먼저 종료해 주세요.", existingHolderKind),
-		})
-		return
-	}
-
-	_, branch, err := github.EnsureWorktree(owner, name, userID)
-	if err != nil {
-		db.ReleaseEditSession(ctx, code, userID)
-		respondError(w, http.StatusInternalServerError, "작업 공간 생성 실패: "+err.Error())
-		return
-	}
-
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"branch":   branch,
-		"userId":   userID,
-		"locked":   false,
-		"readOnly": false,
-		// owner/repo 는 fs 직접 access 하는 스킬이 worktree 절대경로 조합에 사용.
-		// 호스트 경로 = ${GOJIRA_REPOS_DIR}/<owner>/<repo>.worktrees/<userId>
-		"owner": owner,
-		"repo":  name,
-	})
-}
-
-// POST /DocRepo/{code}/edit/release — 세션 lock 해제
-func DocRepoEditReleaseHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-	if err := db.ReleaseEditSession(ctx, code, userID); err != nil {
-		respondError(w, http.StatusInternalServerError, "세션 해제 실패")
-		return
-	}
-	respondJSON(w, http.StatusOK, "released")
-}
-
-// GET /DocRepo/{code}/edit/pending — 워크트리 미커밋 변경 파일 목록
-func DocRepoEditPendingHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-	files := github.PendingFiles(owner, name, userID)
-	if files == nil {
-		files = []string{}
-	}
-	respondJSON(w, http.StatusOK, files)
-}
-
-// GET /DocRepo/{code}/edit/file?path=...  — worktree에서 파일 읽기
-func DocRepoEditFileHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-	filePath := r.URL.Query().Get("path")
-	if filePath == "" {
-		respondError(w, http.StatusBadRequest, "path 필요")
-		return
-	}
-
-	content, err := github.ReadWorktreeFile(owner, name, userID, filePath)
-	if err != nil {
-		respondError(w, http.StatusNotFound, "파일을 찾을 수 없습니다: "+err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"path": filePath, "content": content})
-}
-
-// GET /DocRepo/{code}/edit/status — 미완료 작업 확인
-func DocRepoEditStatusHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-
-	hasPending := github.HasPendingWork(owner, name, userID)
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"hasPending": hasPending,
-		"branch":     fmt.Sprintf("docs/%s", userID),
-	})
-}
-
-func DocRepoOpenFolderHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-	wtDir := filepath.Join(config.RepoBaseDir, owner, name+".worktrees", userID)
-	if _, err := os.Stat(wtDir); os.IsNotExist(err) {
-		respondError(w, http.StatusNotFound, "작업공간 폴더가 없습니다. Pull을 먼저 실행하세요.")
-		return
-	}
-	// OS 별 폴더 탐색기. 기존엔 /usr/bin/open / /mnt/c/... 같은 경로 존재 여부로
-	// 분기해 네이티브 Windows 에서 셋 다 없어 xdg-open 으로 떨어져 실행 실패하던
-	// 회귀를 runtime.GOOS 직접 판별로 해소.
-	var cmd string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-	case "windows":
-		cmd = "explorer.exe"
-	default: // linux / wsl — xdg-open 표준 (WSL 은 wslu 의 wslview 가 hijack)
-		cmd = "xdg-open"
-	}
-	go func() {
-		if err := exec.Command(cmd, wtDir).Run(); err != nil {
-			log.Printf("open folder failed: cmd=%s path=%s err=%v", cmd, wtDir, err)
-		}
-	}()
-	respondJSON(w, http.StatusOK, map[string]string{"path": wtDir, "cmd": cmd})
 }
 
 func hasRef(refs []string, name string) bool {

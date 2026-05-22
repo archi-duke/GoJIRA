@@ -135,8 +135,18 @@ Mongo upsert 를 **동시(dual-write)** 수행하고, 과제 열 때 로컬 YAML
    - `issue-write.sh`(신규): 단건 write 래퍼. 직접 curl 11개 SKILL.md(18 호출처)를 이 래퍼
      경유로 전환(raw curl write 0). read-only GET 은 보존.
    - launcher `agentEnv` 에 `GOJIRA_API`(스킬 관례) 추가 주입.
-6. 트랙 D §4 서버 worktree 제거(3.4) + legacy SaveFile 분기 제거 — 각 단계 go build 검증.
-   (5.5 완료로 서버 write 경로 호출자 0 → 이제 안전하게 진행 가능)
+6. ✅ 트랙 D §4 서버 worktree 제거(3.4) + legacy SaveFile 분기 제거. (5.5 완료로 호출자 0)
+   - 6-1 GoJIRA-API: isLocalWrite 듀얼 분기 → 로컬 전용, `clients.SaveFile/DeleteFile` 삭제,
+     ProjectReset 가 삭제 localWrites 반환(reset-project 스킬 적용).
+   - 6-2a read 스킬 로컬화(`_worktree-ensure.sh` 제거 → GOJIRA_REPO_ROOT read).
+   - 6-2b 웹 DocEditor legacy 호출(init-files/ensure-branch/open-folder) 제거.
+   - 6-2c Platform-API worktree 서브시스템 제거(~1500줄): edit/* · file PUT/DELETE ·
+     worktree-info · notify-change · open-folder · conflict-resolve · init-files ·
+     ensure-branch 핸들러+라우트, `EnsureWorktree`/`WriteWorktreeFile`/`CommitAndPush`/
+     `RemoveWorktreeOnly` 등 worktree github 함수, `workspace_ttl.go`/`StartTTLWorker`,
+     `db/edit_session.go`+config TTL 삭제. tree/file GET → Gitea API+bare fallback 일원화,
+     PRCreate commit/push 제거(런처가 push)→CreatePR만, PRMerge worktree 정리 제거.
+     보존: EnsureClone/read + Gitea PR 생성·리뷰·머지. go build+go vet green.
 
 ## 관련 문서
 - [`local-agent-mvp.md`](./local-agent-mvp.md) — 상위 §5/§6
