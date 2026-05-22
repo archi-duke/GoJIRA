@@ -128,12 +128,16 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
    기존 `Platform-App/DocManager`의 `PRList`(Gitea-API 기반, worktree 비의존)를 그대로 재사용** —
    추가 작업 불필요. E2E(로컬 bare origin) 검증: clone→checkout→commit→push→origin 반영 확인.
    **잔여**: push 인증(git 자격증명 헬퍼/clone URL — §6).
-4. **server-side 제거** — Agent-Service/OpenCode 호스팅/EditSession write 단계적 제거(롤백 가능하게 마지막). ← **다음 착수점**
+4. **server-side 제거** — Agent-Service/OpenCode 호스팅/EditSession write 단계적 제거(롤백 가능하게 마지막).
+   ← **다음 착수점**. 인벤토리 확정됨([`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md)).
+   트랙 A(호스팅 인프라)부터 단계적 삭제 예정 — 트랙 D(스킬 write)는 실행모델 선결정 후.
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
 ## 6. 미해결 / 다음 세션에서 확정할 것
 
-- 제거 대상 **파일/엔드포인트 정확한 목록** (코드 기준 재확인).
+- ~~제거 대상 **파일/엔드포인트 정확한 목록** (코드 기준 재확인).~~ → **인벤토리 확정 (2026-05-22)**:
+  [`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md) — 4개 트랙(A 호스팅
+  인프라 / B 프론트 write UI / C Platform-API write / D 스킬 write)으로 결합도順 단계화. 삭제 미수행.
 - 웹 채팅 UI 존치 여부 — 폐기(편집은 CLI/IDE) vs 로컬 `opencode serve` 직결(client-side 브리지 부활).
 - `agent-workflow-evolution.md` 의 **서버측 State Machine(jobState) 로드맵 재설계** (로컬 실행 전제와 충돌).
 - 비개발자 stakeholder 보완(코멘트/export) 범위.
