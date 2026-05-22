@@ -192,8 +192,8 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => window.open(`${config.GOJIRA_APP}/?mode=agent`, 'gojira-agent', 'width=480,height=720')} />
-        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => window.open(`${config.GOJIRA_APP}/?mode=agent`, 'gojira-agent', 'width=480,height=720')}>GoJIRA</span>
+        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" />
+        <span className="app-logo">GoJIRA</span>
         <nav className="app-nav">
           {visibleApps.map((app) => (
             <button

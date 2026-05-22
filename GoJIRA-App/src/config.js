@@ -11,8 +11,6 @@ const config = {
   PLATFORM_API: pick('REACT_APP_PLATFORM_API', 'http://localhost:9000/api/v2'),
   // GoJIRA 앱 API (이슈, 프로젝트)
   API_BASE: pick('REACT_APP_GOJIRA_API', 'http://localhost:9001/api/v2'),
-  // Agent Service (Python, 스트리밍)
-  AGENT_API: pick('REACT_APP_AGENT_API', 'http://localhost:9002/api/v2'),
   PLANTUML_SERVER: pick('REACT_APP_PLANTUML_SERVER', 'http://localhost:8080/svg/'),
   // pumlex (plantumlEx) 서버 — 인라인 메타 편집 + /render-with-layout
   PUMLEX_SERVER: pick('REACT_APP_PUMLEX_SERVER', 'http://localhost:3030'),

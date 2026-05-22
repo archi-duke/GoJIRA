@@ -128,7 +128,6 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
   const [content, setContent] = useState('');
   const [original, setOriginal] = useState('');
   const [saving, setSaving] = useState(false);
-  const [aiGenerating, setAiGenerating] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
   const [conflictDiff, setConflictDiff] = useState(null);
@@ -179,109 +178,6 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
   };
-  const chatWinRef = React.useRef(null);
-  // 인터뷰 후 자동 이어서 AI 생성할 원본 요청 파일 (예: 'business/use-cases.md')
-  const pendingAIFileRef = React.useRef(null);
-  // handleAIGenerate 를 useEffect 내부에서 호출하기 위한 ref (정의 뒤 동기화)
-  const handleAIGenerateRef = React.useRef(null);
-
-  // AI 생성 버튼 노출 대상 — 워크플로우 스킬과 매핑된 문서만
-  const AI_ENABLED_FILES = {
-    'business/project-description.md': 'projdesc_generate',
-    'business/use-cases.md': 'usecase_analyze',
-    'business/requirements.md': 'requirement_refine',
-  };
-  const aiSkillForFile = selectedFile ? AI_ENABLED_FILES[selectedFile] : null;
-
-  // 채팅창에서 생성된 문서 수신 → 편집기에 반영 → 저장 확인
-  useEffect(() => {
-    function handleDocApply(e) {
-      if (e.data?.type !== 'gojira-doc-apply') return;
-      const { filePath, content: docContent } = e.data;
-      if (!filePath || !docContent) return;
-      setSelectedFile(filePath);
-      setContent(docContent);
-      setOriginal('');
-      setEditMode(true);
-      setSelectedMainOnly(false);
-      setTimeout(async () => {
-        const ok = await modalConfirm('AI가 문서를 생성했습니다.\n내용을 확인 후 저장하시겠습니까?');
-        if (ok) {
-          setSaving(true);
-          const res = await fetch(`${API}/${projectCode}/file`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-            body: JSON.stringify({ path: filePath, content: docContent, message: `${filePath} AI 생성` }),
-          });
-          setSaving(false);
-          if (res.ok) {
-            setOriginal(docContent);
-            setEditMode(false);
-            refreshDocState();
-
-            // 인터뷰를 통해 과제 설명을 완성한 경우, 원래 요청 문서로 자동 이어감
-            const pending = pendingAIFileRef.current;
-            pendingAIFileRef.current = null;
-            if (pending && pending !== filePath && AI_ENABLED_FILES[pending]) {
-              // 채팅 창이 열려있으면 그 안에서 이어감 (SSE 진행상황 노출)
-              if (chatWinRef.current && !chatWinRef.current.closed) {
-                try {
-                  chatWinRef.current.postMessage(
-                    { type: 'gojira-continue', target: pending, projectCode },
-                    '*'
-                  );
-                  chatWinRef.current.focus();
-                } catch {}
-                modalAlert('과제 설명 저장 완료. 채팅 창에서 이어진 작업을 확인하세요.');
-              } else {
-                modalAlert('저장 완료');
-              }
-            } else {
-              modalAlert('저장 완료');
-            }
-          } else {
-            modalAlert('저장 실패');
-          }
-        }
-      }, 300);
-    }
-    // 워크플로우 스킬이 docs/{user}에 직접 저장한 경우 — 편집기 새로고침
-    async function handleDocReload(e) {
-      if (e.data?.type !== 'gojira-doc-reload') return;
-      const { filePath } = e.data;
-      if (!filePath) return;
-      try {
-        const branch = `docs/${user}`;
-        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(filePath)}&ref=${encodeURIComponent(branch)}`);
-        if (!res.ok) return;
-        const d = await res.json();
-        const text = d.content ? decodeBase64(d.content) : '';
-        setSelectedFile(filePath);
-        setSelectedMainOnly(false);
-        setContent(text);
-        setOriginal(text);
-        setEditMode(false);
-        refreshDocState();
-      } catch {}
-    }
-    window.addEventListener('message', handleDocApply);
-    window.addEventListener('message', handleDocReload);
-    // BroadcastChannel: 같은 origin 다른 창(popup 채팅) → DocEditor 통지
-    let bc = null;
-    try {
-      bc = new BroadcastChannel('gojira-doc');
-      bc.onmessage = (e) => {
-        if (e.data?.type === 'gojira-doc-apply') handleDocApply({ data: e.data });
-        else if (e.data?.type === 'gojira-doc-reload') handleDocReload({ data: e.data });
-      };
-    } catch {}
-    return () => {
-      window.removeEventListener('message', handleDocApply);
-      window.removeEventListener('message', handleDocReload);
-      if (bc) bc.close();
-    };
-  }, [projectCode, user]); // eslint-disable-line
-
   // 문서 상태 갱신 통합 함수 — 트리 로드 + fileStatus 재계산
   async function refreshDocState(retry = 0) {
     const branch = `docs/${user}`;
@@ -439,189 +335,6 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
     }
   }
 
-  async function handleAIGenerate() {
-    const AGENT_API = config.AGENT_API || 'http://localhost:9002/api/v2';
-    const skill = aiSkillForFile;
-    if (!skill) {
-      modalAlert('이 문서는 AI 생성을 지원하지 않습니다.');
-      return;
-    }
-
-    // 워크플로우 스킬은 채팅 창에서 진행 (SSE 스트리밍으로 작업 과정 노출)
-    if (skill === 'usecase_analyze' || skill === 'requirement_refine') {
-      const skillLabel = skill === 'usecase_analyze' ? 'Use Case/Feature 분석' : 'Requirement 정제';
-      if (!await modalConfirm(`${skillLabel}을(를) 채팅 창에서 진행합니다.\n진행 상황은 채팅 창에서 확인할 수 있습니다.`)) return;
-      const docLabel = selectedFile === 'business/use-cases.md' ? '유즈케이스 문서'
-        : selectedFile === 'business/requirements.md' ? '요구사양서' : selectedFile;
-      const autoMsg = `${projectCode} 과제의 ${docLabel}를 작성해줘.`;
-      const chatW = 480, chatH = 720;
-      const left = window.screenX - chatW - 10;
-      const top = window.screenY;
-      chatWinRef.current = window.open(
-        `/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(autoMsg)}`,
-        'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
-      );
-      return;
-    }
-
-    const promptMsg = 'AI가 문서를 분석하여 보강합니다.\n진행하시겠습니까?';
-    if (!await modalConfirm(promptMsg)) return;
-
-    // 생성 시작 — 편집 모드 해제(잠금)
-    setAiGenerating(true);
-    setEditMode(false);
-    try {
-      const res = await fetch(`${AGENT_API}/Agent/doc/enrich`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-        body: JSON.stringify({ projectCode, filePath: selectedFile, content: content || '' }),
-      });
-      if (!res.ok) {
-        modalAlert('AI 서비스 연결 실패');
-        return;
-      }
-      const data = await res.json();
-
-      // 문서 부족 → 인터뷰 안내 (project-description.md 전용)
-      if (data.needsInterview) {
-        setAiGenerating(false);
-        const ok = await modalConfirm(
-          `${data.reason || data.message}\n채팅 창에서 인터뷰를 진행할까요?`
-        );
-        if (ok) {
-          const chatW = 480, chatH = 720;
-          const left = window.screenX - chatW - 10;
-          const top = window.screenY;
-          chatWinRef.current = window.open(
-            `/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
-            'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
-          );
-        }
-        return;
-      }
-
-      // 워크플로우 스킬 — 백엔드가 파일을 이미 저장했으므로 재로드
-      if (data.refreshFile) {
-        // 선행 조건 미달(예: VOS 없음 / Feature 없음) — 사용자에게 자동 선행 실행 여부 확인
-        if (data.suggestSkill && (data.created?.length === 0 || data.createdCount === 0)) {
-          const prereqLabel = {
-            vos_collect: 'VOS 수집',
-            usecase_analyze: 'Use Case/Feature 분석',
-            projdesc_interview: '과제 설명 인터뷰',
-          }[data.suggestSkill] || data.suggestSkill;
-
-          // 과제 설명이 비어있음 → 인터뷰 채팅창 자동 오픈 (project-description.md AI 생성과 동일한 흐름)
-          if (data.suggestSkill === 'projdesc_interview') {
-            const ok = await modalConfirm(
-              `${data.message || '과제 설명이 부족합니다.'}\n채팅 창에서 인터뷰를 진행할까요?`
-            );
-            if (ok) {
-              // 인터뷰 완료 후 원래 문서(use-cases/requirements)로 이어갈 수 있도록 기록
-              pendingAIFileRef.current = selectedFile;
-              const chatW = 480, chatH = 720;
-              const left = window.screenX - chatW - 10;
-              const top = window.screenY;
-              chatWinRef.current = window.open(
-                `/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
-                'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
-              );
-            }
-            return;
-          }
-
-          const ok = await modalConfirm(`${prereqLabel}을(를) 먼저 진행할까요?`);
-          if (!ok) return;
-
-          // 같은 endpoint를 runPrerequisites=true로 재호출 (오버레이 유지)
-          try {
-            const res2 = await fetch(`${AGENT_API}/Agent/doc/enrich`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-              body: JSON.stringify({
-                projectCode,
-                filePath: selectedFile,
-                content: '',
-                runPrerequisites: true,
-              }),
-            });
-            if (!res2.ok) {
-              modalAlert('선행 스킬 실행 실패');
-              return;
-            }
-            const data2 = await res2.json();
-
-            // 선행 단계에서도 막혔으면 메시지 안내 (예: 과제 설명도 비어있음)
-            if (data2.suggestSkill && (data2.created?.length === 0 || data2.createdCount === 0)) {
-              modalAlert(data2.message || '실행 조건이 부족합니다.');
-              return;
-            }
-
-            // 정상 완료 → 파일 + 트리 재로드
-            try {
-              const branch = `docs/${user}`;
-              const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(branch)}`);
-              if (r.ok) {
-                const d = await r.json();
-                const text = d.content ? decodeBase64(d.content) : '';
-                setContent(text);
-                setOriginal(text);
-              }
-            } catch {}
-            await refreshDocState();
-
-            // 선행 단계 결과 + 본 단계 결과 모두 안내
-            const SKILL_LABEL = {
-              vos_collect: 'VOS 수집',
-              usecase_analyze: 'Use Case/Feature 분석',
-              requirement_refine: 'Requirement 정제',
-            };
-            const ranSummary = (data2.prerequisitesRan || [])
-              .map(p => `• ${SKILL_LABEL[p.skill] || p.skill}: ${p.message || `${p.createdCount}건`}`)
-              .join('\n');
-            modalAlert(
-              (ranSummary ? `[선행 단계]\n${ranSummary}\n\n` : '') +
-              (data2.message || 'AI 생성이 완료되었습니다.')
-            );
-          } catch (e) {
-            modalAlert('선행 스킬 실행 실패: ' + e.message);
-          }
-          return;
-        }
-
-        // 정상 완료 — 파일 재로드
-        try {
-          const branch = `docs/${user}`;
-          const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(branch)}`);
-          if (r.ok) {
-            const d = await r.json();
-            const text = d.content ? decodeBase64(d.content) : '';
-            setContent(text);
-            setOriginal(text);
-          }
-        } catch {}
-        await refreshDocState();
-        modalAlert(data.message || 'AI 생성이 완료되었습니다.');
-        return;
-      }
-
-      // 단일 보강 (project-description.md) — content를 편집기에 반영
-      if (data.content) {
-        setContent(data.content);
-        // 사용자가 보강된 내용을 검토 후 저장할 수 있도록 편집 모드 복귀
-        setEditMode(true);
-        modalAlert('AI 보강이 완료되었습니다. 내용을 확인 후 저장하세요.');
-      } else if (data.error) {
-        modalAlert(data.error);
-      }
-    } catch (e) {
-      modalAlert('AI 서비스 연결 실패: ' + e.message);
-    } finally {
-      setAiGenerating(false);
-    }
-  }
-
-  // 인터뷰 → 과제 설명 저장 후 handleDocApply가 handleAIGenerate를 호출할 수 있도록 ref 동기화
-  handleAIGenerateRef.current = handleAIGenerate;
 
   async function handleDelete() {
     if (!await modalConfirm(`"${selectedFile}" 파일을 삭제하시겠습니까?`)) return;
@@ -1148,18 +861,9 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                 <div className="de-actions">
                   {selectedMainOnly ? (
                     <button className="de-tab de-tab-active">미리보기</button>
-                  ) : aiGenerating ? (
-                    <>
-                      <span className="de-ai-running">⏳ AI 생성 중... (편집 일시 비활성화)</span>
-                    </>
                   ) : editMode ? (
                     <>
                       <button className="de-tab" onClick={() => setEditMode(false)}>미리보기</button>
-                      {aiSkillForFile && (
-                        <button className="de-btn de-btn-ai" onClick={handleAIGenerate} disabled={aiGenerating}>
-                          AI생성
-                        </button>
-                      )}
                       <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
                     </>
                   ) : (
@@ -1191,17 +895,6 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                 </div>
               </div>
               <div className="de-body" style={{ position: 'relative' }}>
-                {aiGenerating && (
-                  <div className="de-ai-overlay">
-                    <div className="de-ai-overlay-box">
-                      <div className="de-ai-spinner" />
-                      <div style={{ marginTop: 10, fontWeight: 600 }}>AI가 문서를 생성하는 중입니다…</div>
-                      <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
-                        편집은 완료 후 다시 활성화됩니다.
-                      </div>
-                    </div>
-                  </div>
-                )}
                 {diffMode ? (
                   <DiffAnalysis oldText={mainContent} newText={content} fileName={selectedFile} activeTab={diffTab} onTabChange={setDiffTab} />
                 ) : editMode && !selectedMainOnly ? (

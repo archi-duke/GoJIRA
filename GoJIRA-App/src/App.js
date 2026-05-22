@@ -6,7 +6,6 @@ import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
 import AlertModal from './components/AlertModal';
 import NoticePopup from './components/NoticePopup';
-import AgentChat from './components/AgentChat';
 import { getAuthUser } from './utils/auth';
 import config from './config';
 import './App.css';
@@ -77,18 +76,6 @@ function App() {
 
   if (!user) return null;
 
-  // Agent 독립 모드: ?mode=agent 로 열린 경우
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlMode = urlParams.get('mode');
-  if (urlMode === 'agent') {
-    const autoMessage = urlParams.get('autoMessage') || '';
-    const newSession = urlParams.get('newSession') === '1';
-    const interviewPrompt = urlParams.get('interview') || '';
-    const continueTo = urlParams.get('continueTo') || '';
-    const agentProjectCode = urlParams.get('project') || (selectedProject?.jiraCodes?.main?.jiraCode) || '';
-    return <AgentChat user={user} authority={authority} context={{ projectCode: agentProjectCode }} standalone onClose={() => window.close()} autoMessage={autoMessage} newSession={newSession} interviewPrompt={interviewPrompt} continueTo={continueTo} />;
-  }
-
   let content;
   if (page === 'docs' && selectedProject) {
     content = <DocEditor project={selectedProject} user={user} authority={authority} onBack={() => navigate('map')} currentPage={page} onNavigate={onNavigate} />;
@@ -105,8 +92,8 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" style={{ cursor: 'pointer' }} onClick={() => window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')} />
-        <span className="app-logo" style={{ cursor: 'pointer' }} onClick={() => window.open('/?mode=agent', 'gojira-agent', 'width=480,height=720')}>GoJIRA</span>
+        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" />
+        <span className="app-logo">GoJIRA</span>
         <nav className="app-nav">
           <button className={`app-nav-btn app-nav-active`} onClick={() => navigate('map')}>Project</button>
         </nav>

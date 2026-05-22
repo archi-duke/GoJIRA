@@ -26,20 +26,6 @@ const SUBTYPE_COLORS = {
   DDSN: '#7030a0',
 };
 
-const COLUMN_STAR_COLORS = {
-  vos: SUBTYPE_COLORS.VOS,
-  feature: SUBTYPE_COLORS.Feature,
-  requirement: SUBTYPE_COLORS.FR,
-  design: SUBTYPE_COLORS.ADSN,
-  test: '#999',
-};
-
-const COLUMN_AGENT_MESSAGES = {
-  vos: '{name}({code}) 과제의 VOS 수집해줘',
-  feature: '{name}({code}) 과제의 use case 분석해줘',
-  requirement: '{name}({code}) 과제의 Requirements 정재해줘',
-  design: '{name}({code}) 과제의 설계 진행해줘',
-};
 
 /* ---------- helpers ---------- */
 
@@ -368,17 +354,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     return prefix + String(maxNum + 1).padStart(3, '0');
   }
 
-  function handleColumnAssist(col) {
-    const tmpl = COLUMN_AGENT_MESSAGES[col.id];
-    if (!tmpl) {
-      alert(`${col.label} 컬럼은 자동 메시지가 정의되지 않았습니다.`);
-      return;
-    }
-    const msg = tmpl.replace('{name}', project.name).replace('{code}', projectCode);
-    const url = `/?mode=agent&autoMessage=${encodeURIComponent(msg)}&project=${encodeURIComponent(projectCode)}&newSession=1`;
-    window.open(url, 'gojira-agent', 'width=480,height=720');
-  }
-
   async function addIssue(subtype) {
     let issueType, reqtype = '';
     switch (subtype) {
@@ -526,16 +501,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
               <div key={col.id} className="rm-column">
                 <div className="rm-column-header">
                   {col.label}
-                  {editMode && (
-                    <button className="rm-ai-btn" title={`${col.label} AI 자동생성`}
-                      onClick={() => handleColumnAssist(col)}>
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill={COLUMN_STAR_COLORS[col.id] || '#f4b400'}>
-                        <path d="M8 4 L9.4 10.6 L16 12 L9.4 13.4 L8 20 L6.6 13.4 L0 12 L6.6 10.6 Z" />
-                        <path d="M17 2 L17.8 6.2 L22 7 L17.8 7.8 L17 12 L16.2 7.8 L12 7 L16.2 6.2 Z" />
-                        <path d="M16 14 L16.6 17 L19.5 17.6 L16.6 18.2 L16 21 L15.4 18.2 L12.5 17.6 L15.4 17 Z" />
-                      </svg>
-                    </button>
-                  )}
                 </div>
 
                 {col.issues.map((issue) => {

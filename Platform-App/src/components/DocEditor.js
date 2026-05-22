@@ -38,7 +38,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [content, setContent] = useState('');
   const [original, setOriginal] = useState('');
   const [saving, setSaving] = useState(false);
-  const [aiGenerating, setAiGenerating] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [readOnly, setReadOnly] = useState(false);
   const [conflictDiff, setConflictDiff] = useState(null);
@@ -151,46 +150,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       const err = await res.json().catch(() => ({}));
       modalAlert(err.error || '저장 실패');
     }
-  }
-
-  async function handleAIGenerate() {
-    const AGENT_API = config.AGENT_API || 'http://localhost:9002/api/v2';
-    if (!await modalConfirm('AI가 문서를 분석하여 보강합니다.\n진행하시겠습니까?')) return;
-    setAiGenerating(true);
-    try {
-      const res = await fetch(`${AGENT_API}/Agent/doc/enrich`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-        body: JSON.stringify({ projectCode, filePath: selectedFile, content: content || '' }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.needsInterview) {
-          setAiGenerating(false);
-          const ok = await modalConfirm(
-            `${data.message}\n채팅 창에서 인터뷰를 진행할까요?`
-          );
-          if (ok) {
-            window.open(
-              `${config.GOJIRA_APP}/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(`${projectCode} 과제의 project-description.md를 작성해줘`)}`,
-              'gojira-agent', 'width=480,height=720'
-            );
-          }
-          return;
-        }
-        if (data.content) {
-          setContent(data.content);
-          modalAlert('AI 보강이 완료되었습니다. 내용을 확인 후 저장하세요.');
-        } else if (data.error) {
-          modalAlert(data.error);
-        }
-      } else {
-        modalAlert('AI 보강 실패');
-      }
-    } catch (e) {
-      modalAlert('AI 서비스 연결 실패: ' + e.message);
-    }
-    setAiGenerating(false);
   }
 
   async function handleDelete() {
@@ -604,7 +563,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                   ) : editMode ? (
                     <>
                       <button className="de-tab" onClick={() => setEditMode(false)}>미리보기</button>
-                      <button className="de-btn de-btn-ai" onClick={handleAIGenerate} disabled={aiGenerating}>{aiGenerating ? 'AI 생성중...' : 'AI생성'}</button>
                       <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
                     </>
                   ) : (
