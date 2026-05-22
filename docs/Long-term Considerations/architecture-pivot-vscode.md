@@ -1,12 +1,137 @@
 # 시스템 방향 전환 — Web 조회 + VS Code 편집 아키텍처
 
 > 기록 일자: 2026-04-21
-> 상태: 방향 합의 완료, **실행 보류 중** (2026-05-01 갱신)
+> 상태: **'좁은 안(에이전트 로컬 실행)' 우선 추진 결정** (2026-05-22 갱신) — 이전 '실행 보류 중'(2026-05-01)에서 전환.
 >
-> 보류 사유: 웹 측에서 해결 가능한 사용성 개선 (pumlex 인라인 PlantUML 편집,
-> 다이어그램 ✓ 적용 시 자동 저장 등) 을 우선 진행 중. VS Code 로의 편집
-> 이전은 웹 측 복잡도가 다시 누적될 때 재검토. 자세한 내용은
-> `design-application.md` §3.7.1 참조.
+> 2026-05-22 재검토: 폐쇄망에 GoJIRA 를 배포하고 OpenCode 를 server-side 로 호스팅하던 중
+> server-side 모델 고유의 구조적 한계(개인 SSO 토큰 격리, docker↔host git worktree 절대경로
+> 불일치, Agent-Service 브리지 복잡도)가 드러났고, 보류 사유였던 웹 pumlex 인라인 편집이
+> 배포 완료되어 재검토 트리거 충족. → full pivot 전체가 아니라 **Phase 1(에이전트 로컬 실행 +
+> `docs/{user}` push/PR)만 "좁은 안"으로 우선 추진.** 상세는 아래 「## 2026-05-22 재검토」 참조.
+>
+> (2026-05-01 보류 사유 — 해소됨) 웹 측 사용성 개선(pumlex 인라인 PlantUML 편집 등)을 우선
+> 진행 → 2026-05-22 배포 완료. VS Code full pivot(편집 UI 전면 이전)은 장기 목표로 보존.
+> 자세한 배경은 `design-application.md` §3.7.1 참조.
+
+## 2026-05-22 재검토 — 폐쇄망 한계로 '좁은 안(에이전트 로컬 실행)' 우선 추진
+
+> 이 절은 아래 full pivot 설계를 **폐쇄망 배포 경험에 비추어 재평가**하고, 실제로 먼저 실행할
+> **축소 범위**를 확정한다. 아래 「## 최종 아키텍처」(full pivot, VS Code 편집 전면 이전)는
+> **장기 목표로 보존**하되, 1차로는 본 절의 좁은 안만 추진한다.
+
+### 재검토 트리거 — server-side OpenCode 의 구조적 한계
+
+폐쇄망에 GoJIRA 를 docker 로 배포하고 OpenCode 를 사내 서버에 호스팅하는 과정에서, server-side
+모델에서만 발생하는 한계가 드러났다:
+
+| 한계 | 내용 |
+|------|------|
+| **개인 SSO 토큰 격리** | OpenCode 인증(`opencode auth login` → `~/.opencode/auth.json`)은 **실행 OS 계정 홈에 묶임**. 공용 서비스 계정(`gojira`)으로 다수 사용자를 돌리면 개인별 SSO 토큰을 인스턴스별 `HOME` 으로 격리·반입·만료갱신해야 함 → 운영 부담 + SSO 만료 시 무응답. |
+| **docker↔host git worktree 절대경로 불일치** | Platform-API(컨테이너, `/data/repos`)가 만든 git worktree 의 gitdir **절대경로**를, 도커 밖 OpenCode(호스트 `${GOJIRA_REPOS_DIR}`)가 못 따라가 깨짐. 안/밖 경로를 동일하게 강제해야 겨우 동작. |
+| **Agent-Service ↔ OpenCode 브리지** | prompt_async / SSE / 세션 라우팅 / 클라이언트-서버 버전 정합 등 지속적 복잡도. |
+
+동시에 2026-05-01 보류 사유였던 **웹 pumlex 인라인 PlantUML 편집이 배포 완료(2026-05-22)** 되어
+"웹 사용성 우선" 블로커가 해소 → 재검토 트리거 충족.
+
+### 결정 — full pivot 의 Phase 1 만 먼저 (좁은 안)
+
+- **하는 것**: 에이전트 실행 위치를 server-side → **사용자 PC 로컬**로 이동. 사용자가 자기 로컬
+  clone 에서 OpenCode 실행(오피스 PC 에 이미 설치됨), 편집 결과를 `docs/{user}` 브랜치로 push → PR.
+- **안 하는 것(당장)**: GoJIRA 전용 VS Code 확장 빌드, RelationMap/SATAM 의 webview 이전,
+  공유 컴포넌트 NPM 패키징(= full pivot Phase 2~3). **장기 목표로 보존.**
+- **근거**: 위 server-side 한계(토큰/경로/브리지)는 **에이전트를 로컬로 옮기는 것만으로 구조적으로
+  소멸**. full pivot 의 가장 무거운 부분(확장/공유 컴포넌트) 없이도 운영 이득의 대부분을 확보.
+
+### 문서 편집 환경 변화 (핵심 확인 사항)
+
+현재는 **사람(웹 DocEditor)과 에이전트(스킬)가 같은 서버측 worktree 를 공유**하며 `docs/{user}` 를
+편집하고, EditSession 락(`holderKind` = ui/skill)으로 조율한다(`Platform-API` + `_edit-acquire.sh`).
+
+에이전트가 로컬 clone 에서 편집·push 하면 **같은 브랜치에 writer 가 둘(서버 worktree + 로컬 clone)**
+이 되어 diverge/충돌. 따라서 **사람의 문서 편집도 로컬 작업본으로 함께 이동**해야 한다 — 이 한
+가지만큼은 좁은 안이 full pivot 의 편집 모델(웹 read-only, 로컬 편집)로 **수렴**한다.
+
+| | 변경 전 | 변경 후 |
+|---|---|---|
+| 편집 위치 | 웹 DocEditor (서버 worktree) | 사용자 PC 로컬 clone |
+| 편집 도구 | 웹 에디터 + 웹 pumlex PexBlock | 로컬 에디터/IDE + pumlex `pex-vscode` 확장(인라인 PlantUML) |
+| 저장 경로 | Platform-API write API → 서버 worktree commit | 로컬 git commit → push `docs/{user}` → PR |
+| 조율 | EditSession ui/skill 락 | 불필요 (사용자 브랜치 writer 1명) |
+| 웹의 역할 | 편집 + 조회 | 조회 + PR 리뷰 |
+
+**충돌 모델**: 사용자 브랜치 내부는 writer 1명 → 충돌 0. 사용자 간 충돌은 `docs/{user}` → main
+**PR 머지 시점**으로 이동 → 표준 git 리뷰/머지로 처리(기존 커스텀 EditSession 락 대체). 서버 사본은
+읽기 전용이라 worktree 없이 브랜치 내용 조회만 하면 됨. (충돌이 사라지는 게 아니라 **정상적인
+자리로 이동**.)
+
+### 트레이드오프 (수용 전제)
+
+- 비개발자 stakeholder 직접 편집 불가 → 코멘트/PR 리뷰/export 로 보완 (아래 §6 과 동일).
+- 사용자 PC 셋업 분산(로컬 clone·OpenCode·SSO·백엔드 도달). 단 오피스 PC 엔 OpenCode 기설치,
+  앱·Gitea 도달 가능 → 진입장벽 낮음.
+- 중앙 채팅/세션 이력 소멸(로컬 세션만) → 감사 추적은 PR/이슈 로그로 대체.
+- `agent-workflow-evolution.md` 의 **서버측 State Machine(jobState) 로드맵은 로컬 실행 전제와
+  충돌** → 보류/재설계 필요(Plan 모드 포함).
+
+### 1차 실행 범위 (세부는 별도 MVP 설계 노트로)
+
+- **제거**: Agent-Service(컨테이너/코드/배포), OpenCode server-side 호스팅(systemd 멀티유저/토큰
+  격리), docker repos bind-mount 경로 정합 작업, EditSession write 경로.
+- **이전**: 사용자 로컬 OpenCode 실행 가이드, `docs/{user}` 로컬 편집 → push → PR 흐름,
+  pumlex `pex-vscode` 인라인 편집.
+- **보존**: 웹 조회/대시보드/프로젝트 생성, JIRA-API/Platform-API 의 read + 프로젝트 init, PR 리뷰.
+
+### 웹 → 로컬 소환 — 로컬 런처 서비스 (양방향, **채택: B안**)
+
+§10("프로젝트 열기" 딥링크)을 구체화한다. 웹에서 "수정"을 누르면 **로컬 VS Code + 사용자 설정의
+에이전트 CLI(opencode | claude)** 를 소환한다. 두 방식 중 **B 채택**:
+
+- **(A) 프로토콜 핸들러** (`gojira://...`): 상주 데몬 없음, URI 열릴 때 1회 실행. **단방향**(웹→로컬 트리거만).
+- **(B) 로컬 런처 서비스** *(채택)*: localhost 에서 listen. **양방향** — 웹이 설치·기동 감지, 진행상태/결과
+  수신, 완료 후 자동 갱신 가능. 양방향 UX 가 필요하므로 B.
+
+**정체 (중요)**: 이 런처는 **agent-service 부활이 아니다.** prompt/SSE/세션 라우팅 같은 에이전트 브리지
+로직은 없다(그건 CLI 자신이 처리). 역할은 **"소환 + 상태 회신" 전용 경량 데몬**뿐이다.
+
+흐름:
+```
+[웹] "수정" 클릭 → fetch http://127.0.0.1:<port>/edit  (POST {code, user, file, agent})
+[로컬 런처]  Origin·토큰 검증 → 로컬 clone 보장 → `code <repo>/<file>` 오픈
+            → 사용자 설정 CLI spawn (opencode | claude, repo cwd)
+            → 진행상태/완료를 웹에 회신 (응답 또는 WS/SSE)
+[웹] 상태 표시, 완료 후 문서 뷰 갱신
+```
+
+API 표면(초안):
+
+| 엔드포인트 | 용도 |
+|---|---|
+| `GET /health` | 런처 설치·기동 여부 (웹이 "수정" 버튼 활성화 판단) |
+| `POST /open` | 프로젝트 clone 보장 + VS Code 오픈 |
+| `POST /edit` | `/open` + 특정 `file` 오픈 + agent CLI spawn |
+| `GET /status?code=` | 로컬 작업/세션 진행 상태 |
+| `WS /events` (옵션) | 진행 스트림 |
+
+사용자별 설정: 기본 agent(`opencode`|`claude`), repo 루트 경로, 백엔드 URL, 포트. 첫 실행 시 CLI 자체
+로그인(SSO) → 토큰은 로컬.
+
+**보안 (필수 — git/프로세스 실행 데몬이므로)**:
+- `127.0.0.1` 만 bind (외부 노출 금지)
+- **Origin 허용목록** = GoJIRA 웹 origin 만 수락 (CORS preflight + Origin 검증)
+- **설치별 토큰/핸드셰이크** — 인증 없는 요청 거부 (아무 웹페이지의 `fetch` 차단; CSRF/DNS-rebinding 방어)
+
+**Windows 배포/등록**: 경량 런처(exe). **NSSM** 또는 작업 스케줄러(logon 트리거)로 사용자 세션 상주.
+HKCU 설치(관리자 불필요), 사내 배포 패키지로 푸시. 전제: `code` / `opencode`|`claude` / `git` /
+(스킬용) `bash`·`jq`·`python3` (WSL 또는 Git Bash).
+
+**관계**: 서버 측 Agent-Service 제거는 그대로. 이 런처는 그 대체가 아니라 "웹→로컬 소환" 전용 컴포넌트.
+(웹 안에서 채팅까지 원하면 런처 대신/병행해 `opencode serve` localhost:4096 에 브라우저 직결도 가능하나,
+1차 범위는 "소환 + 편집 + 상태"로 한정.)
+
+### 1차 실행 범위 (세부는 별도 MVP 설계 노트로) — 갱신
+- 추가: **로컬 런처 서비스(B)** 패키징·등록·보안 잠금, 웹 "수정" 버튼 ↔ 런처 연동.
+
+---
 
 ## 배경
 
@@ -154,3 +279,5 @@
 
 - 당일 논의: 2026-04-21, `skill_v2` 브랜치 진행 중 발생한 SSE 스트림 안정화 / OpenCode delta 이벤트 처리 작업을 거치며 구조적 한계를 재검토.
 - Agent-Service 의 `opencode_bridge` 코드는 `76dcbbb` 기준 기능적으로 작동하지만, 이 전환 이후 Phase 1 단계에서 폐기 예정.
+- 2026-05-22: 폐쇄망 server-side OpenCode 운영 한계(개인 SSO 토큰 격리 · docker↔host git worktree 절대경로 불일치 · Agent-Service 브리지)와 웹 pumlex 인라인 편집 배포 완료를 근거로 재검토. **full pivot 의 Phase 1(에이전트 로컬 실행 + `docs/{user}` push/PR)을 "좁은 안"으로 우선 추진** 결정. 문서 편집 환경은 로컬 작업본으로 이전(웹은 조회·리뷰로 축소, EditSession 락 제거, 충돌은 PR 머지로 이동), full VS Code 확장/공유 컴포넌트는 장기 보존. 상세는 「## 2026-05-22 재검토」.
+- 2026-05-22: 웹→로컬 소환 방식으로 **(B) 양방향 로컬 런처 서비스 채택**(단방향 프로토콜 핸들러 A 대신). 웹 "수정" → localhost 런처 → VS Code + 선택 CLI(opencode|claude) spawn + 상태 회신. 단 이 런처는 **agent-service 부활이 아니라 "소환+상태 회신" 전용 경량 데몬**(브리지 로직 없음). 보안(127.0.0.1 bind·Origin 허용목록·설치별 토큰) 필수. 상세는 「### 웹 → 로컬 소환」.
