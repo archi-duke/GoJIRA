@@ -569,83 +569,6 @@ func DocRepoEnsureBranchHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "created": true})
 }
 
-// POST /DocRepo/{code}/sync-branch — 사용자 브랜치를 main에 동기화 (main의 내용을 merge)
-func DocRepoSyncBranchHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	userId := r.Header.Get("X-User-Id")
-	if userId == "" {
-		respondError(w, http.StatusBadRequest, "X-User-Id 필요")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	branch := "docs/" + userId
-
-	// 로컬 worktree 가 있으면 로컬에서 직접 main merge (Gitea 불필요)
-	wtDir, _, wtErr := github.EnsureWorktree(owner, name, userId)
-	if wtErr == nil {
-		bareDir := github.GetLocalRepoDir(owner, name)
-		github.GitCmd(bareDir, "fetch", "origin")
-		github.GitCmd(wtDir, "checkout", "--", ".")
-		if out, mergeErr := github.GitCmd(wtDir, "merge", "main", "--no-edit"); mergeErr != nil {
-			// merge 실패 시 hard reset
-			github.GitCmd(wtDir, "merge", "--abort")
-			github.GitCmd(wtDir, "reset", "--hard", "main")
-			log.Printf("sync-branch: merge 실패, hard reset to main — %s: %s", wtDir, out)
-		} else {
-			log.Printf("sync-branch: worktree merged main — %s", wtDir)
-		}
-		go UpdateBranchAlert(owner, name, code, userId)
-		respondJSON(w, http.StatusOK, map[string]interface{}{"branch": branch, "synced": true, "source": "local"})
-		return
-	}
-
-	// fallback: Gitea API 경유
-	branchList, _ := github.ListBranches(owner, name)
-	branches, _ := branchList.([]interface{})
-	branchExists := false
-	mainSHA := ""
-	for _, b := range branches {
-		bm, _ := b.(map[string]interface{})
-		bName, _ := bm["name"].(string)
-		if bName == branch {
-			branchExists = true
-		}
-		if bName == "main" {
-			if commit, ok := bm["commit"].(map[string]interface{}); ok {
-				mainSHA, _ = commit["id"].(string)
-			}
-		}
-	}
-
-	if mainSHA == "" {
-		respondError(w, http.StatusBadGateway, "main 브랜치 조회 실패")
-		return
-	}
-
-	if branchExists {
-		github.DeleteBranch(owner, name, branch)
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	if err := github.CreateBranch(owner, name, branch, mainSHA); err != nil {
-		respondError(w, http.StatusBadGateway, "브랜치 동기화 실패: "+err.Error())
-		return
-	}
-
-	// 알림 갱신
-	go UpdateBranchAlert(owner, name, code, userId)
-
-	log.Printf("sync-branch: %s/%s branch=%s → main(%s)", owner, name, branch, mainSHA[:8])
-	respondJSON(w, http.StatusOK, map[string]interface{}{"synced": true, "branch": branch})
-}
-
 // POST /DocRepo/{code}/conflict-resolve — 변경 보관 → sync → 재반영
 // 사용자 브랜치의 변경 파일을 보관하고, main으로 동기화한 뒤, 변경 내용을 다시 적용
 func DocRepoConflictResolveHandler(w http.ResponseWriter, r *http.Request) {
@@ -1612,76 +1535,6 @@ func DocRepoPRReviewsHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, reviews)
 }
 
-// --- Git 로컬 작업 ---
-
-// POST /DocRepo/{code}/git/publish
-func DocRepoGitPublishHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
-	prj, _ := db.FindProjectByCode(ctx, code)
-	auditors := toStringSlice(prj["auditors"])
-	if len(auditors) == 0 {
-		respondError(w, http.StatusBadRequest, "승인자를 먼저 지정하세요")
-		return
-	}
-
-	// 리뷰어 계정 존재 여부 확인
-	if missing := github.CheckUsersExist(auditors); len(missing) > 0 {
-		respondError(w, http.StatusBadRequest,
-			fmt.Sprintf("Git 플랫폼에 존재하지 않는 사용자: %s — 해당 계정을 먼저 생성하세요", strings.Join(missing, ", ")))
-		return
-	}
-
-	var req struct {
-		Branch  string            `json:"branch"`
-		Files   map[string]string `json:"files"`
-		Message string            `json:"message"`
-		PRTitle string            `json:"prTitle"`
-		PRBody  string            `json:"prBody"`
-	}
-	decodeJSON(r, &req)
-
-	// 브랜치에서 userID 추출
-	userID := req.Branch
-	if strings.HasPrefix(req.Branch, "docs/") {
-		userID = strings.TrimPrefix(req.Branch, "docs/")
-	}
-
-	// 사용자별 worktree 생성
-	if _, _, err := github.EnsureWorktree(owner, name, userID); err != nil {
-		respondError(w, http.StatusInternalServerError, "worktree 생성 실패: "+err.Error())
-		return
-	}
-	if err := github.CheckoutNewBranch(owner, name, req.Branch); err != nil {
-		respondError(w, http.StatusInternalServerError, "브랜치 리셋 실패: "+err.Error())
-		return
-	}
-	for path, content := range req.Files {
-		if err := github.WriteWorktreeFile(owner, name, userID, path, content); err != nil {
-			respondError(w, http.StatusInternalServerError, "파일 쓰기 실패: "+err.Error())
-			return
-		}
-	}
-	if err := github.CommitAndPush(owner, name, req.Branch, req.Message); err != nil {
-		respondError(w, http.StatusInternalServerError, "commit/push 실패: "+err.Error())
-		return
-	}
-
-	// PR은 생성하지 않음 — 사용자가 Edit 탭에서 확인/수정 후 명시적으로 배포 요청
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"branch": req.Branch, "files": len(req.Files),
-		"message": "문서가 작업 브랜치에 생성되었습니다. Edit 탭에서 확인 후 배포(PR) 요청하세요.",
-	})
-}
-
 // --- 문서 편집 API ---
 
 // POST /DocRepo/{code}/edit/start — 편집 시작 (worktree 생성 + 세션 lock)
@@ -1751,23 +1604,6 @@ func DocRepoEditStartHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /DocRepo/{code}/edit/heartbeat — 세션 하트비트
-func DocRepoEditHeartbeatHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-	if err := db.UpdateHeartbeat(ctx, code, userID); err != nil {
-		respondError(w, http.StatusInternalServerError, "하트비트 갱신 실패")
-		return
-	}
-	respondJSON(w, http.StatusOK, "ok")
-}
-
 // POST /DocRepo/{code}/edit/release — 세션 lock 해제
 func DocRepoEditReleaseHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
@@ -1783,34 +1619,6 @@ func DocRepoEditReleaseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, "released")
-}
-
-// POST /DocRepo/{code}/edit/rebase — main 동기화 (rebase)
-func DocRepoEditRebaseHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-
-	result := github.RebaseOnMain(owner, name, userID)
-	if result.Conflict {
-		respondJSON(w, http.StatusConflict, result)
-		return
-	}
-	if !result.Success {
-		respondError(w, http.StatusInternalServerError, result.Message)
-		return
-	}
-	respondJSON(w, http.StatusOK, result)
 }
 
 // GET /DocRepo/{code}/edit/pending — 워크트리 미커밋 변경 파일 목록
@@ -1864,148 +1672,6 @@ func DocRepoEditFileHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"path": filePath, "content": content})
 }
 
-// PUT /DocRepo/{code}/edit/file — worktree에 파일 저장 (commit 없이)
-func DocRepoEditSaveHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-
-	var req struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-	}
-	decodeJSON(r, &req)
-	if req.Path == "" {
-		respondError(w, http.StatusBadRequest, "path 필요")
-		return
-	}
-
-	if err := github.WriteWorktreeFile(owner, name, userID, req.Path, req.Content); err != nil {
-		respondError(w, http.StatusInternalServerError, "파일 저장 실패: "+err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, "saved")
-}
-
-// POST /DocRepo/{code}/edit/commit — worktree 변경사항 commit + push
-func DocRepoEditCommitHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-
-	var req struct {
-		Message string `json:"message"`
-	}
-	decodeJSON(r, &req)
-	if req.Message == "" {
-		req.Message = "문서 수정"
-	}
-
-	branch := fmt.Sprintf("docs/%s", userID)
-	if err := github.CommitAndPush(owner, name, branch, req.Message); err != nil {
-		respondError(w, http.StatusInternalServerError, "commit/push 실패: "+err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]string{"branch": branch, "message": req.Message})
-}
-
-// POST /DocRepo/{code}/edit/pr — 배포(PR) 요청
-func DocRepoEditPRHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-
-	prj, _ := db.FindProjectByCode(ctx, code)
-	auditors := toStringSlice(prj["auditors"])
-	if len(auditors) == 0 {
-		respondError(w, http.StatusBadRequest, "승인자를 먼저 지정하세요")
-		return
-	}
-	if missing := github.CheckUsersExist(auditors); len(missing) > 0 {
-		respondError(w, http.StatusBadRequest,
-			fmt.Sprintf("Git 플랫폼에 존재하지 않는 사용자: %s", strings.Join(missing, ", ")))
-		return
-	}
-
-	var req struct {
-		Title string `json:"title"`
-		Body  string `json:"body"`
-	}
-	decodeJSON(r, &req)
-
-	branch := fmt.Sprintf("docs/%s", userID)
-
-	// 미저장 변경이 있으면 먼저 커밋
-	if err := github.CommitAndPush(owner, name, branch, "배포 전 자동 커밋"); err != nil {
-		log.Printf("edit/pr auto-commit: %v", err)
-	}
-
-	if req.Title == "" {
-		req.Title = fmt.Sprintf("[%s] 설계문서 배포 요청", code)
-	}
-	if req.Body == "" {
-		req.Body = fmt.Sprintf("%s의 설계문서 변경 사항을 main에 반영합니다.", code)
-	}
-
-	// PR 생성 전 diff 확인
-	compare, _ := github.CompareBranches(owner, name, "main", branch)
-	if compare != nil {
-		if files, ok := compare["files"].([]interface{}); ok && len(files) == 0 {
-			respondError(w, http.StatusConflict, "변경사항이 없습니다. 파일을 수정한 후 발행 신청해주세요.")
-			return
-		}
-		if totalCommits, ok := compare["total_commits"].(float64); ok && totalCommits == 0 {
-			respondError(w, http.StatusConflict, "변경사항이 없습니다. 파일을 수정한 후 발행 신청해주세요.")
-			return
-		}
-	}
-
-	userToken := getUserToken(r)
-	pr, err := github.CreatePR(owner, name, req.Title, req.Body, branch, "main", userToken)
-	if err != nil {
-		respondError(w, http.StatusBadGateway, "PR 생성 실패: "+err.Error())
-		return
-	}
-
-	prNum := int(pr["number"].(float64))
-	prURL, _ := pr["html_url"].(string)
-	prTitle, _ := pr["title"].(string)
-	github.RequestReviewers(owner, name, prNum, auditors)
-	notifyPRCreated(name, prNum, prTitle, prURL, auditors)
-
-	respondJSON(w, http.StatusOK, pr)
-}
-
 // GET /DocRepo/{code}/edit/status — 미완료 작업 확인
 func DocRepoEditStatusHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
@@ -2027,29 +1693,6 @@ func DocRepoEditStatusHandler(w http.ResponseWriter, r *http.Request) {
 		"hasPending": hasPending,
 		"branch":     fmt.Sprintf("docs/%s", userID),
 	})
-}
-
-// DELETE /DocRepo/{code}/edit/discard — 작업 폐기
-func DocRepoEditDiscardHandler(w http.ResponseWriter, r *http.Request) {
-	code := chi.URLParam(r, "code")
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	owner, name, err := getRepoInfo(ctx, code)
-	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	userID := r.Header.Get("X-User-Id")
-	if userID == "" {
-		respondError(w, http.StatusBadRequest, "로그인 정보 없음")
-		return
-	}
-
-	if err := github.DiscardWorktree(owner, name, userID); err != nil {
-		respondError(w, http.StatusInternalServerError, "폐기 실패: "+err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, "discarded")
 }
 
 func DocRepoOpenFolderHandler(w http.ResponseWriter, r *http.Request) {
