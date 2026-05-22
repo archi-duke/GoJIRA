@@ -13,10 +13,13 @@ CODE="${1:?projectCode required}"
 USER="${2:?user required}"
 GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# 0) worktree 보장 + 호스트 경로 획득
-WT=$(bash "${SCRIPT_DIR}/_worktree-ensure.sh" "$CODE" "$USER")
+# 0) 로컬 clone 루트 (트랙 E — 서버 worktree 제거). 런처가 GOJIRA_REPO_ROOT 주입.
+ROOT="${GOJIRA_REPO_ROOT:-}"
+if [ -z "$ROOT" ]; then ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true); fi
+if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+  echo "ERROR: repo 루트 미확인 — GOJIRA_REPO_ROOT 설정 또는 clone 안에서 실행" >&2
+  exit 1
+fi
 
 # 1) 이슈 통계 (HTTP 유지 — DB)
 curl -s "${GOJIRA_API}/Issue" \
@@ -28,14 +31,14 @@ ISSUE_STATS=$(jq '{
   byType: (group_by(.issueType) | map({type: .[0].issueType, count: length}))
 }' /tmp/gojira_issues.json)
 
-# 2) 문서 목록 (worktree fs)
-DOC_LIST=$(cd "$WT" && find . -type f -not -path './.git/*' -not -name '.git' -printf '%P\n' \
+# 2) 문서 목록 (로컬 clone fs)
+DOC_LIST=$(cd "$ROOT" && find . -type f -not -path './.git/*' -not -name '.git' -printf '%P\n' \
   | jq -Rn '[inputs]')
 
-# 3) project-description.md 내용 (worktree fs — main 분기이므로 main 의 내용도 보임)
+# 3) project-description.md 내용 (로컬 clone fs)
 PROJDESC=""
-if [ -f "${WT}/business/project-description.md" ]; then
-  PROJDESC=$(cat "${WT}/business/project-description.md")
+if [ -f "${ROOT}/business/project-description.md" ]; then
+  PROJDESC=$(cat "${ROOT}/business/project-description.md")
 fi
 
 # 4) 워크플로우 단계 판정
