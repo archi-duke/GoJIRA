@@ -127,14 +127,7 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5) Mongo 캐시 upsert (실패해도 YAML 이 진실이므로 경고만)
-	cacheDoc := bson.M{}
-	for k, v := range doc {
-		cacheDoc[k] = v
-	}
-	cacheDoc["projectId"] = projectID
-	cacheDoc["_dirty"] = false
-	cacheDoc["_syncedAt"] = time.Now()
-	if err := db.UpsertIssue(ctx, key, cacheDoc); err != nil {
+	if err := upsertIssueCacheFromDoc(ctx, key, projectID, bson.M(doc)); err != nil {
 		log.Printf("cache upsert warn key=%s: %v", key, err)
 	}
 
@@ -269,9 +262,7 @@ func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	merged["_dirty"] = false
-	merged["_syncedAt"] = time.Now()
-	if err := db.UpsertIssue(ctx, req.Key, merged); err != nil {
+	if err := upsertIssueCacheFromDoc(ctx, req.Key, merged["projectId"], merged); err != nil {
 		log.Printf("cache upsert warn key=%s: %v", req.Key, err)
 	}
 
@@ -349,4 +340,21 @@ func keyToProjectCode(key string) string {
 		return ""
 	}
 	return key[:idx]
+}
+
+// upsertIssueCacheFromDoc — 이슈 YAML doc(map) 를 Mongo 캐시 형태로 변환해 upsert.
+// "YAML = 진실, Mongo = 캐시" 변환을 한 곳에 모은다 (create/update/ingest 공용).
+// 내부 필드(_id/_dirty/_syncedAt)는 제외하고, projectId·동기화 메타를 다시 채운다.
+func upsertIssueCacheFromDoc(ctx context.Context, key string, projectID interface{}, doc bson.M) error {
+	cacheDoc := bson.M{}
+	for k, v := range doc {
+		if k == "_id" || k == "_dirty" || k == "_syncedAt" {
+			continue
+		}
+		cacheDoc[k] = v
+	}
+	cacheDoc["projectId"] = projectID
+	cacheDoc["_dirty"] = false
+	cacheDoc["_syncedAt"] = time.Now()
+	return db.UpsertIssue(ctx, key, cacheDoc)
 }
