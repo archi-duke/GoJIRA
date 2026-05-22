@@ -139,8 +139,10 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
      write 엔드포인트 8개(sync-branch/git/publish/edit:file·commit·pr·discard·heartbeat·rebase) 제거.
      나머지(`PUT /file`·`notify-change`·`edit/start·release` 등)는 **서버측 스킬 문서생성 경로라
      트랙 D 와 한 묶음**으로 보존. go build 클린.
-   - **D. 스킬 write — 다음 착수점** — 스킬이 로컬 CLI 로 로컬 clone 에 직접 write 하는 실행모델
-     확정이 선행. 그 후 잔여 서버 write 경로(C 나머지 + `doc-save.sh`/`_edit-*`/`notify-change`) 제거.
+   - **D. 스킬 write — 설계 확정 (2026-05-22)**: [`local-agent-skill-execution.md`](./local-agent-skill-execution.md).
+     스킬은 로컬 CLI 가 로컬 clone 에서 실행, `doc-save.sh`(단일 choke point, 8개 doc 스킬 공용)를
+     로컬 fs 직접 write 로 전환 → `_edit-acquire/_edit-release/_notify-change` 및 서버 EditSession/
+     worktree write/`PUT·DELETE /file`/`notify-change` 제거 가능. **실행 대기**(코드 수정 미수행).
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
 ## 6. 미해결 / 다음 세션에서 확정할 것
