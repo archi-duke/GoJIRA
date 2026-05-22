@@ -129,6 +129,68 @@ func (s *Server) checkoutUserBranch(path, branch string) error {
 	return err
 }
 
+// PushResult — /push 응답용.
+type PushResult struct {
+	Status     string `json:"status"` // "ok"
+	Branch     string `json:"branch"`
+	Pushed     bool   `json:"pushed"`  // 실제로 push 한 커밋이 있었는지
+	Commits    int    `json:"commits"` // push 전 upstream 대비 ahead 수
+	Dirty      bool   `json:"dirty"`   // 미커밋 변경 잔존 여부(경고)
+	LastCommit string `json:"lastCommit,omitempty"`
+	Message    string `json:"message,omitempty"`
+}
+
+// Push — 로컬 clone 의 docs/<user> 브랜치를 origin 으로 push 한다.
+//
+// 로컬 커밋 자체는 사용자/CLI 의 몫(설계 §1: "저장 → 로컬 git commit → push").
+// 여기서는 이미 커밋된 것을 올릴 뿐이며, 미커밋(dirty) 변경은 경고만 한다.
+// 인증은 git 자격증명 헬퍼/clone URL 에 위임(PoC — §6 잔여).
+func (s *Server) Push(code, user string) (*PushResult, error) {
+	path, err := s.EnsureRepo(code, user)
+	if err != nil {
+		return nil, err
+	}
+	mu := getRepoLock(code)
+	mu.Lock()
+	defer mu.Unlock()
+
+	branch := "docs/" + user
+	res := &PushResult{Status: "ok", Branch: branch}
+	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
+		res.Dirty = true
+	}
+	if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
+		res.LastCommit = c
+	}
+
+	// upstream 대비 ahead 수 — 새 커밋이 없으면 push 생략.
+	if counts, err := gitCmd(path, "rev-list", "--count", "@{upstream}..HEAD"); err == nil {
+		res.Commits, _ = strconv.Atoi(strings.TrimSpace(counts))
+	} else {
+		// upstream 미설정(원격에 브랜치 없음) → 새 브랜치 push 필요. 커밋 수는 미상.
+		res.Commits = -1
+	}
+
+	if res.Commits == 0 {
+		res.Pushed = false
+		res.Message = "push 할 새 커밋이 없습니다"
+		if res.Dirty {
+			res.Message += " (미커밋 변경 있음 — 먼저 commit 하세요)"
+		}
+		return res, nil
+	}
+
+	// 신규 브랜치면 upstream 설정, 아니면 일반 push.
+	if _, err := gitCmd(path, "push", "-u", "origin", branch); err != nil {
+		return nil, err
+	}
+	res.Pushed = true
+	if res.Dirty {
+		res.Message = "push 완료 (단, 미커밋 변경이 남아있습니다)"
+	}
+	return res, nil
+}
+
 // RepoStatus — /status 응답용 (브랜치/ahead·behind/dirty/마지막 커밋).
 type RepoStatus struct {
 	State      string `json:"state"` // "clean" | "dirty" | "missing"

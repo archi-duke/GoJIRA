@@ -23,6 +23,8 @@ func main() {
 	mux.HandleFunc("OPTIONS /open", srv.secure(true, srv.handleOpen))
 	mux.HandleFunc("POST /edit", srv.secure(true, srv.handleEdit))
 	mux.HandleFunc("OPTIONS /edit", srv.secure(true, srv.handleEdit))
+	mux.HandleFunc("POST /push", srv.secure(true, srv.handlePush))
+	mux.HandleFunc("OPTIONS /push", srv.secure(true, srv.handlePush))
 	mux.HandleFunc("GET /status", srv.secure(true, srv.handleStatus))
 	mux.HandleFunc("OPTIONS /status", srv.secure(true, srv.handleStatus))
 

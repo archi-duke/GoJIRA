@@ -113,6 +113,22 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /push — 로컬 docs/{user} 브랜치를 origin 으로 push (§5-3: push→PR 흐름).
+func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
+	var req openReq // {code, user}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	res, err := s.Push(req.Code, req.User)
+	if err != nil {
+		log.Printf("/push 실패 code=%s user=%s: %v", req.Code, req.User, err)
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // GET /status?code= — 로컬 작업/브랜치 진행 상태 (§2.1).
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")

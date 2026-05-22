@@ -59,6 +59,14 @@ export async function requestOpen({ code, user, token }) {
   return post('/open', { code, user }, token);
 }
 
+/**
+ * "push" — 로컬 docs/{user} 브랜치를 origin 으로 push (§5-3 push→PR).
+ * @returns {Promise<{ok:boolean, data?:{pushed,commits,dirty,branch,message}, error?:string}>}
+ */
+export async function requestPush({ code, user, token }) {
+  return post('/push', { code, user }, token);
+}
+
 async function post(path, body, token) {
   try {
     const headers = { 'Content-Type': 'application/json' };

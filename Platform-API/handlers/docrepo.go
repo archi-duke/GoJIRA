@@ -1348,14 +1348,19 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 		Body  string `json:"body"`
 		Head  string `json:"head"`
 		Base  string `json:"base"`
+		// SkipAutoCommit — 로컬 에이전트 전환(local-agent-mvp §5-3)에서 사용.
+		// 사용자 PC 런처가 이미 docs/{user} 를 push 한 경우, 서버측 worktree
+		// commit+push 를 건너뛴다(서버에 변경분이 없으므로). 기본 false=기존 동작.
+		SkipAutoCommit bool `json:"skipAutoCommit"`
 	}
 	decodeJSON(r, &req)
 	if req.Base == "" {
 		req.Base = "main"
 	}
 
-	// 발행 전 로컬 worktree 변경사항을 commit + push (로컬 Worktree 아키텍처)
-	if strings.HasPrefix(req.Head, "docs/") {
+	// 발행 전 로컬 worktree 변경사항을 commit + push (서버측 Worktree 아키텍처).
+	// 로컬 런처가 이미 push 했다면(skipAutoCommit) 생략.
+	if strings.HasPrefix(req.Head, "docs/") && !req.SkipAutoCommit {
 		userID := strings.TrimPrefix(req.Head, "docs/")
 		commitMsg := req.Title
 		if commitMsg == "" {

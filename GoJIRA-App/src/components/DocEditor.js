@@ -8,7 +8,7 @@ import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { detectLauncher, requestEdit } from '../utils/launcher';
+import { detectLauncher, requestEdit, requestPush } from '../utils/launcher';
 import './DocEditor.css';
 
 /**
@@ -136,6 +136,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
   const [globalEditMode, setGlobalEditMode] = useState(false);
   const [launcher, setLauncher] = useState(null); // 로컬 런처 감지 결과 { ready, agents, token } | null
   const [launching, setLaunching] = useState(false); // /edit 호출 진행 중
+  const [publishing, setPublishing] = useState(false); // 로컬 push→PR 진행 중
   const [showGraph, setShowGraph] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState(() => new Set());
   const toggleFolder = (path) => {
@@ -799,6 +800,45 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
     }
   }
 
+  // 로컬 push → 발행(PR). 로컬 모델에서는 커밋이 사용자 PC 에 있으므로
+  // (1) 런처가 docs/{user} 를 push 한 뒤 (2) 서버 /pr 을 skipAutoCommit 으로 호출한다.
+  // 서버측 worktree commit 을 건너뛰어 로컬에서 올린 변경분으로 PR 을 만든다 (§5-3).
+  async function handleLocalPublish() {
+    if (!launcher || !launcher.token) return;
+    if (!await modalConfirm(`로컬 docs/${user} 브랜치를 push 하고 발행 신청(PR)하시겠습니까?`)) return;
+    setPublishing(true);
+    try {
+      const push = await requestPush({ code: projectCode, user, token: launcher.token });
+      if (!push.ok) {
+        modalAlert(push.error || '로컬 push 에 실패했습니다.');
+        return;
+      }
+      if (push.data && push.data.pushed === false) {
+        modalAlert(push.data.message || 'push 할 새 커밋이 없습니다. VS Code 에서 변경을 commit 한 뒤 다시 시도하세요.');
+        return;
+      }
+      // push 성공 → 서버 worktree commit 없이 PR 생성.
+      const res = await fetch(`${API}/${projectCode}/pr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+        body: JSON.stringify({
+          title: `[${projectCode}] 설계문서 배포 요청`,
+          head: `docs/${user}`,
+          skipAutoCommit: true,
+        }),
+      });
+      if (res.ok) {
+        modalAlert('로컬 변경을 push 하고 발행 신청(PR)을 생성했습니다.');
+        refreshDocState();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        modalAlert(err.error || 'PR 생성 실패 (push 는 완료됨)');
+      }
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   async function handleGitPull() {
     if (!await modalConfirm('main 브랜치의 최신 내용을 작업공간에 동기화하시겠습니까?\n(작업공간의 미커밋 변경사항은 초기화됩니다)')) return;
     try {
@@ -1012,6 +1052,17 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
               >
                 <img src="/icons/git-pull.svg" alt="" width="12" height="12" style={{marginRight:4,verticalAlign:'middle',filter:hasChanges?'invert(1)':'invert(0.6)'}} />
                 발행신청
+              </button>
+            )}
+            {activeTab === 'workspace' && launcher?.ready && (
+              <button
+                className="de-btn"
+                style={{ marginLeft: '4px', padding: '3px 10px', fontSize: '11px' }}
+                onClick={handleLocalPublish}
+                disabled={publishing}
+                title="로컬에서 commit 한 변경을 push 하고 발행 신청(PR)합니다"
+              >
+                {publishing ? '발행 중...' : '로컬 push & 발행'}
               </button>
             )}
           </div>
