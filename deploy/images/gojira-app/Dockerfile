@@ -1,25 +1,19 @@
-### GoJIRA-App — React build → nginx 정적 서빙
+### GoJIRA-App — React build → nginx 정적 서빙 (런타임 config)
+#
+# 빌드된 번들은 host-agnostic — REACT_APP_* 를 빌드시점에 inline 하지 않는다.
+# nginx 컨테이너 startup 시 entrypoint.sh 가 env → /usr/share/nginx/html/env.js
+# 를 생성해 window._env_ 로 노출. React (src/config.js) 가 1순위로 읽음.
 
 FROM node:lts-alpine AS builder
 WORKDIR /src
 COPY GoJIRA-App/package.json GoJIRA-App/package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY GoJIRA-App/ ./
-ARG REACT_APP_PLATFORM_API
-ARG REACT_APP_GOJIRA_API
-ARG REACT_APP_AGENT_API
-ARG REACT_APP_PLANTUML_SERVER
-ARG REACT_APP_PUMLEX_SERVER
-ARG REACT_APP_SSO_URL
-ENV REACT_APP_PLATFORM_API=${REACT_APP_PLATFORM_API} \
-    REACT_APP_GOJIRA_API=${REACT_APP_GOJIRA_API} \
-    REACT_APP_AGENT_API=${REACT_APP_AGENT_API} \
-    REACT_APP_PLANTUML_SERVER=${REACT_APP_PLANTUML_SERVER} \
-    REACT_APP_PUMLEX_SERVER=${REACT_APP_PUMLEX_SERVER} \
-    REACT_APP_SSO_URL=${REACT_APP_SSO_URL}
 RUN npm run build
 
 FROM nginx:alpine
 COPY deploy/images/gojira-app/nginx.conf /etc/nginx/conf.d/default.conf
+COPY deploy/images/gojira-app/entrypoint.sh /docker-entrypoint.d/40-env-js.sh
 COPY --from=builder /src/build /usr/share/nginx/html
+RUN chmod +x /docker-entrypoint.d/40-env-js.sh
 EXPOSE 3001

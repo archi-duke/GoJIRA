@@ -11,13 +11,17 @@
 x-build-context: &build-context
   context: ..
 
-x-react-args: &react-args
+# React 두 앱이 사용하는 런타임 env. nginx entrypoint 가 컨테이너 startup 시
+# env → /usr/share/nginx/html/env.js 로 직렬화 → window._env_ 로 노출.
+# 더 이상 build-arg 가 아니므로 host/port 변경 시 React 재빌드 불요 — 컨테이너
+# recreate (docker compose up -d) 만 하면 즉시 반영.
+x-react-env: &react-env
   REACT_APP_PLATFORM_API: "http://${PLATFORM_API_SERVER:?required}:${PLATFORM_API_PORT:?required}/api/v2"
   REACT_APP_GOJIRA_API: "http://${GOJIRA_API_SERVER:?required}:${GOJIRA_API_PORT:?required}/api/v2"
   REACT_APP_AGENT_API: "http://${AGENT_API_SERVER:?required}:${AGENT_API_PORT:?required}/api/v2"
   REACT_APP_GOJIRA_APP_REMOTE: "http://${GOJIRA_APP_SERVER:?required}:${GOJIRA_APP_PORT:?required}"
   REACT_APP_PLANTUML_SERVER: "http://${PLANTUML_SERVER:?required}:${PLANTUML_PORT:?required}/svg/"
-  REACT_APP_PUMLEX_SERVER: "${REACT_APP_PUMLEX_SERVER:-http://localhost:3030}"
+  REACT_APP_PUMLEX_SERVER: "http://${PUMLEX_SERVER:?required}:${PUMLEX_PORT:?required}"
   REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
 
 services:
@@ -28,6 +32,24 @@ services:
     restart: unless-stopped
     ports:
       - "${PLANTUML_HOST_PORT:-${PLANTUML_PORT:-8080}}:8080"
+
+  # ── 외부 도구: pumlex (plantumlEx) 렌더러 ─────────────────────────────────
+  # GoJIRA-App PexBlock 이 런타임에 /render-with-layout 호출. 내부적으로
+  # plantuml-server:8080 을 호출해 SVG 를 받고 pex-core layout delta 적용.
+  pumlex-server:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/pumlex-server/Dockerfile
+    image: gojira/pumlex-server:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${PUMLEX_HOST_PORT:-${PUMLEX_PORT:-3030}}:3030"
+    environment:
+      PORT: "3030"
+      # compose 내부 DNS 로 plantuml 컨테이너 직접 호출 (브라우저 경유 아님).
+      PLANTUML_URL: "http://plantuml-server:8080"
+    depends_on:
+      - plantuml-server
 
   # ── 백엔드: Platform-API ──────────────────────────────────────────────────
   platform-api:
@@ -115,30 +137,30 @@ services:
       - platform-api
 
   # ── 프론트엔드: Platform-App ──────────────────────────────────────────────
-  # REACT_APP_* 는 빌드 시점에 inline 되므로 atomic 변수 (*_SERVER, *_PORT)
-  # 가 바뀌면 재빌드 필요: `docker compose build platform-app gojira-app`
+  # 런타임 config — REACT_APP_* 는 environment 로 주입되며 entrypoint 가 env.js 생성.
+  # 호스트/포트 변경 시 재빌드 불요. `docker compose up -d` 만으로 반영.
   platform-app:
     build:
       <<: *build-context
       dockerfile: deploy/images/platform-app/Dockerfile
-      args:
-        <<: *react-args
     image: gojira/platform-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT:-3000}}:3000"
+    environment:
+      <<: *react-env
 
   # ── 프론트엔드: GoJIRA-App ────────────────────────────────────────────────
   gojira-app:
     build:
       <<: *build-context
       dockerfile: deploy/images/gojira-app/Dockerfile
-      args:
-        <<: *react-args
     image: gojira/gojira-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT:-3001}}:3001"
+    environment:
+      <<: *react-env
 
 # named volume 은 더 이상 사용하지 않음 — ${GOJIRA_REPOS_DIR} 호스트 bind mount 로 전환.
 # 기존 platform-repos volume 데이터가 있다면 호스트 디렉토리로 미리 이전 후 `docker volume rm deploy_platform-repos`.

@@ -1,0 +1,23 @@
+# 폐쇄망 반입 대상 이미지 목록 (single source of truth)
+# - 베이스 이미지: 외부망에서 docker pull 로 받아두어야 폐쇄망 build/run 가능
+# - 서비스 이미지: docker compose build 결과물
+# 사용: build-images.sh / save-images.sh / load-images.sh 가 이 파일을 읽음.
+# 라인 형식: <image>:<tag>   (# 로 시작하는 줄과 빈 줄은 무시)
+
+# ── 베이스 이미지 (외부망 pull 필요) ───────────────────────────────────────
+plantuml/plantuml-server:jetty
+nginx:alpine
+python:3.12-slim
+alpine:3.20
+golang:1.26-alpine
+node:lts-alpine
+
+# ── 서비스 이미지 (docker compose build 결과) ──────────────────────────────
+# IMAGE_TAG=${IMAGE_TAG:-latest} 가 적용된 형태로 스크립트가 치환함.
+gojira/platform-api:${IMAGE_TAG}
+gojira/gojira-api:${IMAGE_TAG}
+gojira/agent-service:${IMAGE_TAG}
+gojira/jira-api:${IMAGE_TAG}
+gojira/platform-app:${IMAGE_TAG}
+gojira/gojira-app:${IMAGE_TAG}
+gojira/pumlex-server:${IMAGE_TAG}
