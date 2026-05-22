@@ -132,7 +132,9 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
    인벤토리 확정([`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md)). 트랙별 진행:
    - **A. 호스팅 인프라 ✅ 완료 (2026-05-22)** — Agent-Service/OpenCode 호스팅/systemd/user 스크립트/
      opencodeInstances + 배포 플러밍 제거. (프론트 AGENT_API 코드·docs 서술은 B/§6 로 보류)
-   - B 프론트 write UI / C Platform-API write / D 스킬 write — **다음 착수점**(C·D 는 선결정 후).
+   - **B1. 웹 채팅 폐기 ✅ 완료 (2026-05-22)** — AgentChat(양 앱)·`?mode=agent`·AGENT_API·
+     AI생성(enrich) 전부 제거. (웹 채팅 존치 여부 §6 → **폐기 확정**)
+   - B2·B3 프론트 write UI(웹 read-only 전환) / C Platform-API write / D 스킬 write — **다음 착수점**.
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
 ## 6. 미해결 / 다음 세션에서 확정할 것
@@ -140,7 +142,8 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
 - ~~제거 대상 **파일/엔드포인트 정확한 목록** (코드 기준 재확인).~~ → **인벤토리 확정 (2026-05-22)**:
   [`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md) — 4개 트랙(A 호스팅
   인프라 / B 프론트 write UI / C Platform-API write / D 스킬 write)으로 결합도順 단계화. 삭제 미수행.
-- 웹 채팅 UI 존치 여부 — 폐기(편집은 CLI/IDE) vs 로컬 `opencode serve` 직결(client-side 브리지 부활).
+- ~~웹 채팅 UI 존치 여부 — 폐기 vs 로컬 `opencode serve` 직결.~~ → **폐기 확정 (2026-05-22)**:
+  편집/문서생성은 로컬 런처(VS Code+CLI)로 일원화. AgentChat·AGENT_API 제거(트랙 B1 완료).
 - `agent-workflow-evolution.md` 의 **서버측 State Machine(jobState) 로드맵 재설계** (로컬 실행 전제와 충돌).
 - 비개발자 stakeholder 보완(코멘트/export) 범위.
 - ~~런처 ↔ 웹 토큰 핸드셰이크 구체 방식.~~ → **PoC 채택 (2026-05-22)**: 런처가 첫 기동 시
