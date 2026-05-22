@@ -24,13 +24,21 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 }
 
 // GET /health — 웹이 런처 설치/기동을 감지해 "수정" 버튼을 활성화 (§2.1).
+//
+// 토큰 핸드셰이크(설계 §6): Origin 이 webOrigin 과 일치하는 요청에만 응답에 token 을
+// 포함한다. 브라우저는 Origin 을 위조할 수 없으므로 GoJIRA 웹만 토큰을 읽어 이후
+// /edit·/open 호출에 사용한다. (DNS-rebinding 은 잔여 리스크 — §6)
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	agents := availableAgents()
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"version": version,
 		"agents":  agents,
 		"ready":   hasGit() && hasEditor() && len(agents) > 0,
-	})
+	}
+	if s.originAllowed(r.Header.Get("Origin")) {
+		resp["token"] = s.cfg.Token
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type openReq struct {

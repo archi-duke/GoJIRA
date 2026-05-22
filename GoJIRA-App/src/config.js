@@ -16,6 +16,9 @@ const config = {
   PLANTUML_SERVER: pick('REACT_APP_PLANTUML_SERVER', 'http://localhost:8080/svg/'),
   // pumlex (plantumlEx) 서버 — 인라인 메타 편집 + /render-with-layout
   PUMLEX_SERVER: pick('REACT_APP_PUMLEX_SERVER', 'http://localhost:3030'),
+  // 로컬 런처 (gojira-launcher) — 사용자 PC 의 127.0.0.1 데몬. "수정" 버튼이
+  // VS Code + CLI(opencode|claude) 를 소환 (local-agent-mvp §2).
+  LAUNCHER_BASE: pick('REACT_APP_LAUNCHER_BASE', 'http://127.0.0.1:5599'),
   SSO_URL: pick('REACT_APP_SSO_URL', 'https://10.227.37.90:443'),
   USE_SSO: false,
   DEV_USER: 'duke.kimm',

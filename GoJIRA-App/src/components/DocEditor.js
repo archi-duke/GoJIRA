@@ -8,6 +8,7 @@ import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
+import { detectLauncher, requestEdit } from '../utils/launcher';
 import './DocEditor.css';
 
 /**
@@ -133,6 +134,8 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
   const [conflictDiff, setConflictDiff] = useState(null);
   const [pendingFiles, setPendingFiles] = useState(new Set());
   const [globalEditMode, setGlobalEditMode] = useState(false);
+  const [launcher, setLauncher] = useState(null); // 로컬 런처 감지 결과 { ready, agents, token } | null
+  const [launching, setLaunching] = useState(false); // /edit 호출 진행 중
   const [showGraph, setShowGraph] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState(() => new Set());
   const toggleFolder = (path) => {
@@ -364,6 +367,38 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
       } catch {}
     });
   }, [projectCode, hasRepo, user]); // eslint-disable-line
+
+  // 로컬 런처 감지 — 기동/설치돼 있으면 "로컬 수정" 버튼을 활성화 (local-agent-mvp §2.1).
+  // 마운트 시 + 창 포커스 복귀 시 재감지(런처를 나중에 켰을 수 있으므로).
+  useEffect(() => {
+    let alive = true;
+    const probe = () => detectLauncher().then((r) => { if (alive) setLauncher(r); });
+    probe();
+    window.addEventListener('focus', probe);
+    return () => { alive = false; window.removeEventListener('focus', probe); };
+  }, []);
+
+  // "로컬 수정" — 런처에 /edit 요청해 VS Code + CLI(opencode|claude)를 소환.
+  // 서버측 write(handleSave/edit-start)와 별개로, 사용자 PC 로컬 작업본에서 편집한다.
+  async function handleLocalEdit() {
+    if (!launcher || !selectedFile) return;
+    setLaunching(true);
+    try {
+      const res = await requestEdit({
+        code: projectCode,
+        user,
+        file: selectedFile,
+        token: launcher.token,
+      });
+      if (res.ok) {
+        modalAlert(`로컬에서 "${selectedFile}" 을(를) 열었습니다.\nVS Code 와 ${res.data.agent || '에이전트'} 가 실행됩니다. 편집 후 push → PR 로 반영하세요.`);
+      } else {
+        modalAlert(res.error || '로컬 런처 호출에 실패했습니다.');
+      }
+    } finally {
+      setLaunching(false);
+    }
+  }
 
   async function handleFileClick(path, isMainOnly) {
     if (editMode && content !== original) {
@@ -1089,6 +1124,16 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                         </button>
                       )}
                       {globalEditMode && <button className="de-btn" onClick={() => setEditMode(true)}>편집</button>}
+                      {launcher?.ready && (
+                        <button
+                          className="de-btn de-btn-primary"
+                          onClick={handleLocalEdit}
+                          disabled={launching}
+                          title="로컬 VS Code + 에이전트(opencode/claude)로 이 문서를 엽니다"
+                        >
+                          {launching ? '여는 중...' : '로컬 수정'}
+                        </button>
+                      )}
                       {globalEditMode && <button className="de-btn de-btn-danger" onClick={handleDelete}>삭제</button>}
                     </>
                   )}

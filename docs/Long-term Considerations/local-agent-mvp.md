@@ -114,8 +114,13 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
    `/open` `/edit` `/status` + Origin 허용목록 + 설치 토큰(`~/.gojira/launcher-token`) +
    명령/입력 화이트리스트(path traversal·agent 검증). clone→`docs/{user}` checkout→VS Code+CLI.
    Windows 크로스컴파일 확인. 상세: [`gojira-launcher/README.md`](../../gojira-launcher/README.md).
-2. **웹 "수정" 버튼** — 런처 감지(`/health`) → `/edit` 호출 → 상태 표시. ← **다음 착수점**
-3. **docs/{user} push→PR 흐름** 정착 + 웹 PR 리뷰 연동.
+2. ~~**웹 "수정" 버튼** — 런처 감지(`/health`) → `/edit` 호출 → 상태 표시.~~
+   **✅ 완료 (2026-05-22)** — `GoJIRA-App`: `src/utils/launcher.js`(detect/requestEdit,
+   AbortController 타임아웃), `config.LAUNCHER_BASE`(기본 `http://127.0.0.1:5599`),
+   `DocEditor` 툴바에 "로컬 수정" 버튼(런처 `ready` 감지 시 노출, 포커스 복귀 시 재감지).
+   토큰 핸드셰이크(§6 해소안): 런처 `/health` 가 **Origin 일치 요청에만 `token` 반환** →
+   웹이 `/edit` 헤더로 전송. (DNS-rebinding 잔여 리스크는 §6 유지)
+3. **docs/{user} push→PR 흐름** 정착 + 웹 PR 리뷰 연동. ← **다음 착수점**
 4. **server-side 제거** — Agent-Service/OpenCode 호스팅/EditSession write 단계적 제거(롤백 가능하게 마지막).
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
@@ -125,7 +130,9 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
 - 웹 채팅 UI 존치 여부 — 폐기(편집은 CLI/IDE) vs 로컬 `opencode serve` 직결(client-side 브리지 부활).
 - `agent-workflow-evolution.md` 의 **서버측 State Machine(jobState) 로드맵 재설계** (로컬 실행 전제와 충돌).
 - 비개발자 stakeholder 보완(코멘트/export) 범위.
-- 런처 ↔ 웹 토큰 핸드셰이크 구체 방식.
+- ~~런처 ↔ 웹 토큰 핸드셰이크 구체 방식.~~ → **PoC 채택 (2026-05-22)**: 런처가 첫 기동 시
+  토큰 생성(`~/.gojira/launcher-token`), `/health` 가 Origin 일치 요청에만 토큰을 반환,
+  웹이 이후 호출 헤더에 사용. **잔여**: DNS-rebinding 방어(Host 헤더 검증 등), 토큰 회전.
 - VS Code 확장(공식 OpenCode 확장 vs GoJIRA 전용) 채택 여부 — full pivot Phase 2 와 연계.
 
 ## 관련 문서
