@@ -5,7 +5,7 @@
 # 검사 항목:
 #   1. .env 존재 + ?required 항목 비어있지 않음
 #   2. ${GOJIRA_REPOS_DIR} 디렉토리 존재 + 호스트 ${UID}:${GID} 소유
-#   3. Mongo / Gitea / OpenCode TCP 도달 (nc -zv)
+#   3. Mongo / Gitea TCP 도달 (nc -zv)
 #   4. docker compose config 평가 가능 (변수 치환 실패 없음)
 #   5. 필요 이미지 로컬 존재 (load-images.sh 이후 검증용)
 #
@@ -40,10 +40,8 @@ load_env "$ENV_FILE"
 REQUIRED_VARS=(
   MONGODB_SERVER MONGO_USER MONGO_PASS
   GITEA_SERVER PLATFORM_GITHUB_TOKEN PLATFORM_GITHUB_ORG
-  OPENCODE_SERVER OPENCODE_PORT
   PLATFORM_API_SERVER PLATFORM_API_PORT
   GOJIRA_API_SERVER  GOJIRA_API_PORT
-  AGENT_API_SERVER   AGENT_API_PORT
   PLATFORM_APP_SERVER PLATFORM_APP_PORT
   GOJIRA_APP_SERVER   GOJIRA_APP_PORT
   PLANTUML_SERVER     PLANTUML_PORT
@@ -100,7 +98,6 @@ if [[ $SKIP_NET -eq 0 ]]; then
   }
   _check_tcp "MongoDB" "${MONGODB_SERVER}"
   _check_tcp "Gitea"   "${GITEA_SERVER}"
-  _check_tcp "OpenCode" "${OPENCODE_SERVER}:${OPENCODE_PORT}"
   [[ $fail -eq 1 ]] && die "외부 인프라 도달 실패 — 방화벽/host 값 확인"
 else
   warn "3) --skip-net: 외부 인프라 도달 검사 생략"

@@ -18,7 +18,6 @@ x-build-context: &build-context
 x-react-env: &react-env
   REACT_APP_PLATFORM_API: "http://${PLATFORM_API_SERVER:?required}:${PLATFORM_API_PORT:?required}/api/v2"
   REACT_APP_GOJIRA_API: "http://${GOJIRA_API_SERVER:?required}:${GOJIRA_API_PORT:?required}/api/v2"
-  REACT_APP_AGENT_API: "http://${AGENT_API_SERVER:?required}:${AGENT_API_PORT:?required}/api/v2"
   REACT_APP_GOJIRA_APP_REMOTE: "http://${GOJIRA_APP_SERVER:?required}:${GOJIRA_APP_PORT:?required}"
   REACT_APP_PLANTUML_SERVER: "http://${PLANTUML_SERVER:?required}:${PLANTUML_PORT:?required}/svg/"
   REACT_APP_PUMLEX_SERVER: "http://${PUMLEX_SERVER:?required}:${PUMLEX_PORT:?required}"
@@ -115,26 +114,6 @@ services:
     restart: unless-stopped
     ports:
       - "${JIRA_API_HOST_PORT:-8000}:8000"
-
-  # ── 백엔드: Agent-Service ─────────────────────────────────────────────────
-  agent-service:
-    build:
-      <<: *build-context
-      dockerfile: deploy/images/agent-service/Dockerfile
-    image: gojira/agent-service:${IMAGE_TAG:-latest}
-    restart: unless-stopped
-    ports:
-      - "${AGENT_API_HOST_PORT:-${AGENT_API_PORT:-9002}}:9002"
-    environment:
-      MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
-      GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
-      GOJIRA_PLATFORM_API: "http://platform-api:9000/api/v2"
-      OPENCODE_SERVER_URL: "http://${OPENCODE_SERVER:?required}:${OPENCODE_PORT:?required}"
-      OPENCODE_SERVER_USERNAME: "${OPENCODE_SERVER_USERNAME:-opencode}"
-      OPENCODE_SERVER_PASSWORD: "${OPENCODE_SERVER_PASSWORD:-}"
-    depends_on:
-      - gojira-api
-      - platform-api
 
   # ── 프론트엔드: Platform-App ──────────────────────────────────────────────
   # 런타임 config — REACT_APP_* 는 environment 로 주입되며 entrypoint 가 env.js 생성.

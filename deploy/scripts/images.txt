@@ -16,7 +16,6 @@ node:lts-alpine
 # IMAGE_TAG=${IMAGE_TAG:-latest} 가 적용된 형태로 스크립트가 치환함.
 gojira/platform-api:${IMAGE_TAG}
 gojira/gojira-api:${IMAGE_TAG}
-gojira/agent-service:${IMAGE_TAG}
 gojira/jira-api:${IMAGE_TAG}
 gojira/platform-app:${IMAGE_TAG}
 gojira/gojira-app:${IMAGE_TAG}

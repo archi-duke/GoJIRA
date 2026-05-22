@@ -129,8 +129,10 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
    추가 작업 불필요. E2E(로컬 bare origin) 검증: clone→checkout→commit→push→origin 반영 확인.
    **잔여**: push 인증(git 자격증명 헬퍼/clone URL — §6).
 4. **server-side 제거** — Agent-Service/OpenCode 호스팅/EditSession write 단계적 제거(롤백 가능하게 마지막).
-   ← **다음 착수점**. 인벤토리 확정됨([`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md)).
-   트랙 A(호스팅 인프라)부터 단계적 삭제 예정 — 트랙 D(스킬 write)는 실행모델 선결정 후.
+   인벤토리 확정([`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md)). 트랙별 진행:
+   - **A. 호스팅 인프라 ✅ 완료 (2026-05-22)** — Agent-Service/OpenCode 호스팅/systemd/user 스크립트/
+     opencodeInstances + 배포 플러밍 제거. (프론트 AGENT_API 코드·docs 서술은 B/§6 로 보류)
+   - B 프론트 write UI / C Platform-API write / D 스킬 write — **다음 착수점**(C·D 는 선결정 후).
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
 ## 6. 미해결 / 다음 세션에서 확정할 것

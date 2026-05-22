@@ -10,7 +10,7 @@
 
 | 트랙 | 결합도 | 롤백 위험 | 순서 |
 |---|---|---|---|
-| **A. 호스팅 인프라** (Agent-Service, OpenCode 호스팅, systemd, user 스크립트, opencodeInstances) | 낮음(독립) | 낮음 | 1 |
+| **A. 호스팅 인프라** ✅ **완료(2026-05-22)** | 낮음(독립) | 낮음 | 1 |
 | **B. 프론트 write UI** (양 앱 편집/저장/삭제 버튼) | 중간(read 와 한 컴포넌트) | 중간 | 2 |
 | **C. Platform-API write 엔드포인트** (EditSession/worktree/file write) | 높음(read 와 헬퍼 공유) | 높음 | 3 |
 | **D. 스킬 write 경로** (`doc-save.sh`/`_edit-acquire`/`notify-change` — 스킬 실행 모델과 직결) | 높음(스킬 문서생성 전체) | 높음 | 4(별도 설계 선행) |
@@ -22,7 +22,14 @@
 
 ---
 
-## 트랙 A — 호스팅 인프라 (독립, 안전)
+## 트랙 A — 호스팅 인프라 (독립, 안전) — ✅ 완료 (2026-05-22)
+
+> 삭제 완료. **단, 프론트 React 코드(config.js `AGENT_API`, `AgentChat.js`, DocEditor AI생성)는
+> 트랙 B/§6(채팅 UI 결정)로 보류** — 배포 플러밍(compose/.env/entrypoint/preflight)만 제거했으므로
+> AGENT_API(:9002) 호출은 backend 부재로 graceful fail 상태. **docs 서술 갱신(deploy/README,
+> DEPLOY.md, docs/architecture/*)은 별도 doc-sweep 으로 보류**(코드/배포 동작엔 영향 없음).
+> 검증: Platform-API go.work 빌드 OK, 양 compose YAML 파싱 OK, 코드/배포 잔여 참조 0.
+
 
 ### A-1. 완전 삭제 (파일/디렉터리)
 - `Agent-Service/` 전체 (Python 서비스 — 다른 모듈 import 없음)

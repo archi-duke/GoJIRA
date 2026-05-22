@@ -45,12 +45,8 @@ func main() {
 	db.InitNoticeIndexes()
 	db.InitDocRepoIndexes()
 	db.InitEditSessionIndexes()
-	db.InitOpencodeInstanceIndexes()
 	db.InitNotificationIndexes()
 	db.SeedAccountData()
-
-	// OpenCode 인스턴스 헬스체크 — 5분 주기, status=active/down 갱신
-	go handlers.StartOpencodeHealthcheck(context.Background())
 
 	// Workspace TTL worker 시작
 	gitpkg.StartTTLWorker(func(owner, repo, userID string) bool {
@@ -75,9 +71,6 @@ func main() {
 
 	// Webhook (버전 없이)
 	r.Post("/webhook/github", handlers.GitHubWebhookHandler)
-
-	// 관리자 트리거 — 헬스체크 즉시 실행
-	r.Post("/admin/opencode-healthcheck", handlers.RunOpencodeHealthcheckHandler)
 
 	r.Route("/api/v{version}", func(r chi.Router) {
 		// Account 관리
