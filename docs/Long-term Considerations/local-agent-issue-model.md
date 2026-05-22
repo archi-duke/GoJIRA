@@ -71,13 +71,26 @@ Mongo upsert 를 **동시(dual-write)** 수행하고, 과제 열 때 로컬 YAML
 - 삭제: `DELETE /Issue/ingest`(key) 또는 ingest 가 "현재 YAML 집합 = 진실"로 보고 누락분 정리.
 - YAML→Mongo 변환은 현 `issue.go` 5단계(`cacheDoc` = doc + projectId + _syncedAt)를 헬퍼로 추출해 재사용.
 
-### 3.2 이슈 쓰기 경로 로컬화
-- `gojira-cli/cmd/issue.go`: create/update/delete/link 를 **로컬 YAML write + ingest 호출**로 재작성
-  (현재 `apiPost/Put/Delete /Issue` → 로컬 fs + `/Issue/ingest`).
-- 이슈 생성/수정 스킬(있다면)도 동일 패턴(로컬 fs + ingest).
-- `GoJIRA-API/handlers/issue.go`·`link.go`: write 핸들러에서 `clients.SaveFile/DeleteFile`(서버
-  worktree write) **제거**. Mongo upsert 는 ingest 로 일원화. (GET/조회 핸들러는 유지)
-- `GoJIRA-API/clients/docrepo.go` `SaveFile`/`DeleteFile`: 호출자 0 이 되면 제거.
+### 3.2 이슈 쓰기 경로 로컬화 — 확정 구현 (2026-05-22)
+
+> **설계 보정**: "로컬 YAML write + ingest 호출"을 그대로 가면 **키/subkey 할당**(전역 카운터
+> `db.NextIssueNum`/`NextSubkey`, Mongo)과 update 병합·link 양방향 갱신 로직을 CLI 에 중복
+> 구현해야 한다. 키 할당은 본질상 전역 조율이라 로컬 단독 불가(다중 사용자 키 충돌). 그래서
+> **서버를 "작성 두뇌"로 유지하되 fs 만 떼는** 방식으로 확정:
+
+- **`X-Local-Write` 헤더 게이트 듀얼 모드** (`handlers/issue.go`·`link.go`):
+  - 헤더 있음(CLI/에이전트) → 서버는 할당·병합·link·Mongo upsert 를 그대로 하고 **worktree 에
+    손대지 않음**. 대신 응답에 `localWrites: [{path, content}|{path, delete:true}]` 동봉.
+  - 헤더 없음(웹/legacy) → 기존대로 `clients.SaveFile/DeleteFile`(서버 worktree). **웹 무중단**.
+- **CLI** (`gojira-cli/cmd/issue.go` + `common.go`): create/update/delete/link 가 `apiWriteLocal`
+  (헤더 부착)로 호출 → 응답 `localWrites` 를 `applyLocalWrites` 로 repo root(`GOJIRA_REPO_ROOT`
+  또는 git toplevel) 기준 로컬 clone 에 기록/삭제. 로직·할당 중복 0.
+- 즉 **별도 ingest 왕복 불필요**(서버가 같은 호출에서 Mongo upsert) — ingest 엔드포인트는
+  콜드스타트 벌크·reconcile·수작업 YAML 편집 반영 용도로 잔존.
+- `clients.SaveFile/DeleteFile` 제거는 **헤더 없는(웹) 경로가 사라진 뒤**(3.3/3.4) — 현재는
+  legacy 분기로 보존.
+- (덤) 기존 CLI `issue link` 가 `{fromKey,toKey,type}` 를 보내 서버 `{inwardKey,outwardKey,
+  linkType}` 와 어긋나 깨져 있던 것도 이때 수정.
 
 ### 3.3 웹 이슈 UI → 읽기 전용 (track B 의 이슈판)
 - `RelationMap`(드래그 연결), `SATAM`, `IssueList`(인라인 편집/생성/삭제), `IssueDetailDialog` 의
@@ -103,12 +116,13 @@ Mongo upsert 를 **동시(dual-write)** 수행하고, 과제 열 때 로컬 YAML
 
 ## 5. 실행 순서 (제안)
 
-1. GoJIRA-API ingest 엔드포인트(단건/벌크) + cacheDoc 변환 헬퍼 추출. (go build 검증)
-2. `gojira-cli issue` 로컬화(로컬 YAML write + ingest). 이슈 스킬 동일.
-3. GoJIRA-API write 핸들러에서 `SaveFile/DeleteFile` 제거 → `clients` 래퍼 제거.
+1. ✅ GoJIRA-API ingest 엔드포인트(단건/벌크) + cacheDoc 변환 헬퍼 추출. (커밋 `559a55c`)
+2. ✅ `gojira-cli issue` 로컬화 — `X-Local-Write` 듀얼 모드 + `applyLocalWrites`(3.2 확정안).
+   서버 fs 분기는 헤더로 게이트, 웹 무중단. 이슈 스킬은 doc-save 패턴 따라 후속.
+3. (3.2 에 흡수) `SaveFile/DeleteFile` 는 헤더 없는 웹 경로용 legacy 분기로만 잔존 → 5/6 후 제거.
 4. 런처: 콜드 스타트 시 로컬 YAML 벌크 ingest 트리거 + push 전 `git pull --rebase`(경로 분리 무충돌).
 5. 웹 이슈 UI 읽기 전용화(3.3).
-6. 트랙 D §4 서버 worktree 제거(3.4) — 각 단계 go build 검증.
+6. 트랙 D §4 서버 worktree 제거(3.4) + legacy SaveFile 분기 제거 — 각 단계 go build 검증.
 
 ## 관련 문서
 - [`local-agent-mvp.md`](./local-agent-mvp.md) — 상위 §5/§6

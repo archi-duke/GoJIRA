@@ -19,18 +19,18 @@ import (
 // saveLinkYamlFor reads the full issue from Mongo and writes its YAML file,
 // preserving issueLinks. Returns nil if the issue has no subkey (YAML path
 // cannot be derived) — Mongo-only state is tolerated.
-func saveLinkYamlFor(ctx context.Context, key, user, msg string) error {
+func saveLinkYamlFor(ctx context.Context, key, user, msg string, local bool) (*localWrite, error) {
 	existing, err := db.FindIssueByKey(ctx, key)
 	if err != nil || existing == nil {
-		return fmt.Errorf("find %s: %w", key, err)
+		return nil, fmt.Errorf("find %s: %w", key, err)
 	}
 	subkey, _ := existing["subkey"].(string)
 	if subkey == "" {
-		return nil
+		return nil, nil
 	}
 	code := keyToProjectCode(key)
 	if code == "" {
-		return fmt.Errorf("cannot derive project code from %s", key)
+		return nil, fmt.Errorf("cannot derive project code from %s", key)
 	}
 
 	merged := bson.M{}
@@ -44,10 +44,14 @@ func saveLinkYamlFor(ctx context.Context, key, user, msg string) error {
 
 	yamlBytes, err := yaml.Marshal(merged)
 	if err != nil {
-		return fmt.Errorf("yaml marshal %s: %w", key, err)
+		return nil, fmt.Errorf("yaml marshal %s: %w", key, err)
 	}
-	if err := clients.SaveFile(code, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
-		return fmt.Errorf("save yaml %s: %w", key, err)
+
+	var lw *localWrite
+	if local {
+		lw = &localWrite{Path: issueYamlPath(subkey), Content: string(yamlBytes)}
+	} else if err := clients.SaveFile(code, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
+		return nil, fmt.Errorf("save yaml %s: %w", key, err)
 	}
 
 	merged["_dirty"] = false
@@ -55,7 +59,24 @@ func saveLinkYamlFor(ctx context.Context, key, user, msg string) error {
 	if err := db.UpsertIssue(ctx, key, merged); err != nil {
 		log.Printf("cache upsert warn key=%s: %v", key, err)
 	}
-	return nil
+	return lw, nil
+}
+
+// collectLinkWrites — 여러 key 의 link YAML 을 저장/수집한다.
+// local=true 면 localWrite 목록을 모아 반환(서버 fs 미사용), false 면 즉시 worktree 커밋.
+func collectLinkWrites(ctx context.Context, keys []string, user, msg string, local bool) []localWrite {
+	var writes []localWrite
+	for _, k := range keys {
+		lw, err := saveLinkYamlFor(ctx, k, user, msg, local)
+		if err != nil {
+			log.Printf("link yaml save warn (%s): %v", k, err)
+			continue
+		}
+		if lw != nil {
+			writes = append(writes, *lw)
+		}
+	}
+	return writes
 }
 
 // POST /api/v{version}/Issue/link
@@ -110,15 +131,14 @@ func LinkCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg := fmt.Sprintf("[link] create %s → %s", req.InwardKey, req.OutwardKey)
-	if err := saveLinkYamlFor(ctx, req.InwardKey, user, msg); err != nil {
-		log.Printf("link yaml save warn (inward %s): %v", req.InwardKey, err)
-	}
-	if err := saveLinkYamlFor(ctx, req.OutwardKey, user, msg); err != nil {
-		log.Printf("link yaml save warn (outward %s): %v", req.OutwardKey, err)
-	}
+	writes := collectLinkWrites(ctx, []string{req.InwardKey, req.OutwardKey}, user, msg, isLocalWrite(r))
 
 	db.SyncIssueToJira(req.InwardKey)
-	respondJSON(w, http.StatusOK, "link created")
+	resp := map[string]interface{}{"status": "link created"}
+	if writes != nil {
+		resp["localWrites"] = writes
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // DELETE /api/v{version}/Issue/link
@@ -147,13 +167,15 @@ func LinkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := fmt.Sprintf("[link] delete %s", req.LinkID)
+	writes := collectLinkWrites(ctx, keys, user, msg, isLocalWrite(r))
 	for _, k := range keys {
-		if err := saveLinkYamlFor(ctx, k, user, msg); err != nil {
-			log.Printf("link yaml save warn (%s): %v", k, err)
-		}
 		db.SyncIssueToJira(k)
 	}
-	respondJSON(w, http.StatusOK, "link deleted")
+	resp := map[string]interface{}{"status": "link deleted"}
+	if writes != nil {
+		resp["localWrites"] = writes
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // DELETE /api/v{version}/Issue/link/{linkId}/of/{key}
@@ -178,11 +200,13 @@ func LinkDeleteByKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := fmt.Sprintf("[link] delete %s", linkID)
+	writes := collectLinkWrites(ctx, keys, user, msg, isLocalWrite(r))
 	for _, k := range keys {
-		if err := saveLinkYamlFor(ctx, k, user, msg); err != nil {
-			log.Printf("link yaml save warn (%s): %v", k, err)
-		}
 		db.SyncIssueToJira(k)
 	}
-	respondJSON(w, http.StatusOK, "link deleted")
+	resp := map[string]interface{}{"status": "link deleted"}
+	if writes != nil {
+		resp["localWrites"] = writes
+	}
+	respondJSON(w, http.StatusOK, resp)
 }

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -65,6 +67,69 @@ func apiDelete(path string, body interface{}) (interface{}, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", userID())
 	return doRequest(req)
+}
+
+// apiWriteLocal — 이슈 쓰기(create/update/delete/link) 전용. X-Local-Write 헤더를 붙여
+// 서버가 worktree 에 손대지 않고 YAML 본문을 응답(localWrites)으로 돌려주게 한다.
+// 응답의 localWrites 는 호출부에서 applyLocalWrites 로 로컬 clone 에 반영한다.
+func apiWriteLocal(method, path string, body interface{}) (interface{}, error) {
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest(method, apiURL()+path, strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", userID())
+	req.Header.Set("X-Local-Write", "true")
+	return doRequest(req)
+}
+
+// repoRoot — 로컬 clone 의 루트. GOJIRA_REPO_ROOT 우선, 없으면 git toplevel.
+func repoRoot() (string, error) {
+	if v := os.Getenv("GOJIRA_REPO_ROOT"); v != "" {
+		return v, nil
+	}
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("repo root 미확인: GOJIRA_REPO_ROOT 설정 또는 clone 안에서 실행 (%v)", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// applyLocalWrites — 서버 응답의 localWrites 배열을 로컬 clone 에 반영한다.
+// content 있으면 기록, delete=true 면 삭제. 경로는 repo root 기준 상대경로.
+func applyLocalWrites(result interface{}) error {
+	m, ok := result.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	raw, ok := m["localWrites"].([]interface{})
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	for _, item := range raw {
+		w, _ := item.(map[string]interface{})
+		rel, _ := w["path"].(string)
+		if rel == "" {
+			continue
+		}
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if del, _ := w["delete"].(bool); del {
+			if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("local delete %s: %w", rel, err)
+			}
+			continue
+		}
+		content, _ := w["content"].(string)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return fmt.Errorf("local mkdir %s: %w", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("local write %s: %w", rel, err)
+		}
+	}
+	return nil
 }
 
 func platformPost(path string, body interface{}) (interface{}, error) {

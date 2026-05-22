@@ -317,7 +317,7 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 	deleted := make([]string, 0, len(issueKeys))
 	failed := make([]map[string]interface{}, 0)
 	for _, k := range issueKeys {
-		if err := deleteIssueInternal(ctx, jiraCode, k, user); err != nil {
+		if _, err := deleteIssueInternal(ctx, jiraCode, k, user, false); err != nil {
 			failed = append(failed, map[string]interface{}{"key": k, "error": err.Error()})
 			continue
 		}
