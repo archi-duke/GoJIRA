@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // repoLocks 레포별 mutex (동시 git 작업 직렬화) — Platform-API/github 의 패턴을 단순화.
@@ -57,10 +62,84 @@ func (s *Server) repoPath(code string) string {
 	return filepath.Join(s.cfg.RepoRoot, code)
 }
 
-func (s *Server) cloneURL(code string) string {
+func (s *Server) cloneURL(repoName string) string {
 	base := strings.TrimRight(s.cfg.Git.Base, "/")
 	org := strings.Trim(s.cfg.Git.Org, "/")
-	return fmt.Sprintf("%s/%s/%s.git", base, org, code)
+	return fmt.Sprintf("%s/%s/%s.git", base, org, repoName)
+}
+
+// projCode — 프로젝트 문서에서 code 추출 (jiraCodes.main.jiraCode 우선, 없으면 top-level code).
+func projCode(m map[string]any) string {
+	if jc, ok := m["jiraCodes"].(map[string]any); ok {
+		if main, ok := jc["main"].(map[string]any); ok {
+			if c, ok := main["jiraCode"].(string); ok {
+				return c
+			}
+		}
+	}
+	if c, ok := m["code"].(string); ok {
+		return c
+	}
+	return ""
+}
+
+func repoNameOf(m map[string]any) string {
+	if docs, ok := m["documents"].(map[string]any); ok {
+		if rn, ok := docs["repoName"].(string); ok {
+			return rn
+		}
+	}
+	return ""
+}
+
+// resolveRepoName — 프로젝트 code 를 실제 Gitea repo 이름으로 해석한다.
+// code 와 repo 이름이 다를 수 있으므로(예: NBBALL → number-baseball) GoJIRA-API 의
+// 프로젝트 documents.repoName 을 조회한다. 백엔드 미설정/조회 실패 시 code 그대로(하위호환).
+func (s *Server) resolveRepoName(code, user string) string {
+	base := strings.TrimRight(s.cfg.Backend.GojiraAPI, "/")
+	if base == "" {
+		return code
+	}
+	req, _ := http.NewRequest(http.MethodGet, base+"/Project", nil)
+	req.Header.Set("XBody", fmt.Sprintf(`{"jiraCode":%q}`, code))
+	req.Header.Set("X-User-Id", user)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		log.Printf("resolveRepoName warn (%s): %v — code 사용", code, err)
+		return code
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		log.Printf("resolveRepoName warn (%s): HTTP %d — code 사용", code, resp.StatusCode)
+		return code
+	}
+	body, _ := io.ReadAll(resp.Body)
+
+	// 응답은 배열(필터 안 될 수 있음) 또는 단일 객체. code 일치 항목의 repoName 사용.
+	var arr []map[string]any
+	if json.Unmarshal(body, &arr) == nil && len(arr) > 0 {
+		for _, m := range arr {
+			if projCode(m) == code {
+				if rn := repoNameOf(m); rn != "" {
+					return rn
+				}
+			}
+		}
+		// 단일 결과면 code 검증 없이도 사용
+		if len(arr) == 1 {
+			if rn := repoNameOf(arr[0]); rn != "" {
+				return rn
+			}
+		}
+	}
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) == nil {
+		if rn := repoNameOf(obj); rn != "" {
+			return rn
+		}
+	}
+	log.Printf("resolveRepoName: %s 의 repoName 미발견 — code 사용", code)
+	return code
 }
 
 // EnsureRepo 는 로컬 clone 을 보장하고 docs/<user> 브랜치를 체크아웃한다.
@@ -88,7 +167,9 @@ func (s *Server) EnsureRepo(code, user string) (string, error) {
 		if err := os.MkdirAll(s.cfg.RepoRoot, 0o755); err != nil {
 			return "", fmt.Errorf("repoRoot 생성 실패: %w", err)
 		}
-		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(code), code); err != nil {
+		// code ≠ Gitea repo 이름일 수 있으므로 repoName 으로 clone (로컬 디렉터리명은 code).
+		repoName := s.resolveRepoName(code, user)
+		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(repoName), code); err != nil {
 			return "", err
 		}
 	} else {
