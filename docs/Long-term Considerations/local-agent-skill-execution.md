@@ -67,7 +67,13 @@ doc-save.sh <CODE> <USER> <PATH> < content      # CODE/USER 는 호환 위해 �
 
 ## 4. D 완료 후 가능해지는 서버측 제거 (트랙 C 나머지)
 
-스킬이 더 이상 서버 write 를 호출하지 않으면 아래를 제거할 수 있다(별도 커밋):
+> ⚠️ 정정 (2026-05-22): 아래 §4 제거는 **트랙 E 선행 필요**. 감사 결과 `PUT/DELETE /file` +
+> worktree write 인프라의 주 호출자는 reset-project/CLI 가 아니라 **GoJIRA-API 이슈 YAML 영속화
+> 경로**(issue.go create/update/delete, link.go)였다. 이슈를 로컬 모델로 옮기기 전에는 worktree
+> 인프라를 제거할 수 없다 → [`local-agent-issue-model.md`](./local-agent-issue-model.md)(트랙 E)에서
+> 해소. 트랙 D 1~3(doc-save/reset-project 로컬화, 헬퍼 삭제)은 완료, §4 서버 제거는 E 완료 후로 보류.
+
+스킬이 더 이상 서버 write 를 호출하지 않으면 아래를 제거할 수 있다(별도 커밋, **트랙 E 완료 후**):
 - 엔드포인트: `POST /edit/start`, `POST /edit/release`, `POST /notify-change`,
   `PUT /file`, `DELETE /file`(reset-project 로컬 재작성[결정] 후 제거 — `gojira-cli doc` 는 결정3 보류),
   `GET /edit/status`·`/edit/pending`·`/edit/file`(웹 read-only 후 잔여 호출자 재확인).
