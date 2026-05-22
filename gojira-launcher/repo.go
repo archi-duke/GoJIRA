@@ -159,6 +159,18 @@ func (s *Server) Push(code, user string) (*PushResult, error) {
 	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
 		res.Dirty = true
 	}
+
+	// push 전 원격 변경 반영(rebase). 이슈(data/issues)·문서(business/architecture)는 경로가
+	// 분리돼 같은 파일을 건드리지 않으므로 rebase 는 항상 무충돌(설계 §경로 분리).
+	// dirty 면 rebase 가 실패하므로 건너뛰고 push 단계에서 경고만 한다(커밋은 사용자 몫).
+	if !res.Dirty {
+		if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/"+branch); err == nil {
+			if _, err := gitCmd(path, "pull", "--rebase", "origin", branch); err != nil {
+				return nil, fmt.Errorf("pull --rebase 실패(수동 해결 필요): %w", err)
+			}
+		}
+	}
+
 	if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
 		res.LastCommit = c
 	}

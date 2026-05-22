@@ -120,7 +120,9 @@ Mongo upsert 를 **동시(dual-write)** 수행하고, 과제 열 때 로컬 YAML
 2. ✅ `gojira-cli issue` 로컬화 — `X-Local-Write` 듀얼 모드 + `applyLocalWrites`(3.2 확정안).
    서버 fs 분기는 헤더로 게이트, 웹 무중단. 이슈 스킬은 doc-save 패턴 따라 후속.
 3. (3.2 에 흡수) `SaveFile/DeleteFile` 는 헤더 없는 웹 경로용 legacy 분기로만 잔존 → 5/6 후 제거.
-4. 런처: 콜드 스타트 시 로컬 YAML 벌크 ingest 트리거 + push 전 `git pull --rebase`(경로 분리 무충돌).
+4. ✅ 런처: `/open`·`/edit` 콜드스타트 시 로컬 YAML 벌크 ingest(reconcile=true) + `Push` 에
+   `git pull --rebase`(경로 분리 무충돌) + spawn 시 `GOJIRA_REPO_ROOT`/`GOJIRA_USER`/`GOJIRA_API_URL`
+   주입(`ingest.go`/`spawn.go`/`repo.go`).
 5. 웹 이슈 UI 읽기 전용화(3.3).
 6. 트랙 D §4 서버 worktree 제거(3.4) + legacy SaveFile 분기 제거 — 각 단계 go build 검증.
 

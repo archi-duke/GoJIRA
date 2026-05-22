@@ -59,11 +59,16 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// 콜드스타트: 방금 내려받은 로컬 YAML → Mongo 캐시 동기화. YAML 이 진실이라 실패는 비치명적.
+	ingest, err := s.IngestIssues(req.Code, req.User)
+	if err != nil {
+		log.Printf("/open ingest 경고 code=%s: %v", req.Code, err)
+	}
 	if err := OpenInEditor(repoPath, ""); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "repoPath": repoPath})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "repoPath": repoPath, "ingest": ingest})
 }
 
 type editReq struct {
@@ -96,20 +101,26 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// 콜드스타트: 로컬 YAML → Mongo 캐시 동기화 (CLI 가 편집 시작하기 전 캐시 최신화).
+	ingest, err := s.IngestIssues(req.Code, req.User)
+	if err != nil {
+		log.Printf("/edit ingest 경고 code=%s: %v", req.Code, err)
+	}
 	if err := OpenInEditor(repoPath, fullFile); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	sessionID, err := SpawnAgent(agent, repoPath)
+	sessionID, err := SpawnAgent(agent, repoPath, s.agentEnv(repoPath, req.User))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "ok",
 		"repoPath":  repoPath,
 		"agent":     agent,
 		"sessionId": sessionID,
+		"ingest":    ingest,
 	})
 }
 
