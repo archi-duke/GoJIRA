@@ -11,7 +11,7 @@
 | 트랙 | 결합도 | 롤백 위험 | 순서 |
 |---|---|---|---|
 | **A. 호스팅 인프라** ✅ **완료(2026-05-22)** | 낮음(독립) | 낮음 | 1 |
-| **B. 프론트 write UI** — B1(채팅) ✅ **완료(2026-05-22)** / B2·B3(write UI) 대기 | 중간(read 와 한 컴포넌트) | 중간 | 2 |
+| **B. 프론트 write UI** ✅ **완료(2026-05-22)** — B1(채팅)+B2(GoJIRA-App)+B3(Platform-App) | 중간(read 와 한 컴포넌트) | 중간 | 2 |
 | **C. Platform-API write 엔드포인트** (EditSession/worktree/file write) | 높음(read 와 헬퍼 공유) | 높음 | 3 |
 | **D. 스킬 write 경로** (`doc-save.sh`/`_edit-acquire`/`notify-change` — 스킬 실행 모델과 직결) | 높음(스킬 문서생성 전체) | 높음 | 4(별도 설계 선행) |
 
@@ -79,11 +79,16 @@
 - 내부 DocEditor 서브: `startEdit`/`discardEdit`/`handleSave`/`handleCommit`/`handleCreatePR` (worktree 편집) → 제거 또는 Edit 탭 비활성화.
 - **보존**: `PRList` 의 `handleReview`/`handleMerge` (Gitea-API 기반 PR 리뷰/머지) — 그대로 둔다.
 
-> **진행 현황**: **B1(웹 채팅 폐기) ✅ 완료(2026-05-22, commit 818acc5)** — AgentChat(양 앱)
-> 삭제, `?mode=agent` 마운트/로고/RelationMap·SATAM assist 트리거 제거, AGENT_API config·
-> AI생성(enrich) 호출 제거. **B2(GoJIRA-App write UI)·B3(Platform-App write UI)는 대기** —
-> 웹을 read-only 로 전환(저장/삭제/새파일/이름변경/편집모드/인라인 PlantUML write/구 발행신청
-> 제거). node_modules 부재로 전체 빌드 검증 불가(babel 파싱까지만) → 신중 진행.
+> **진행 현황 — 트랙 B 전체 완료 (2026-05-22)**:
+> - **B1(웹 채팅 폐기) ✅ commit 818acc5** — AgentChat(양 앱) 삭제, `?mode=agent` 마운트/로고/
+>   RelationMap·SATAM assist 트리거 제거, AGENT_API config·AI생성(enrich) 호출 제거.
+> - **B2(GoJIRA-App DocEditor read-only) ✅ commit 280593b** — 파일 CRUD·편집모드·textarea·
+>   인라인 PlantUML write·구 발행신청 제거. 보존: 조회/Diff/graph + 로컬 수정·로컬 push & 발행.
+> - **B3(Platform-App read-only) ✅ commit 03b67c9** — DocEditor write 제거, DocManager 내부
+>   worktree 편집기(Edit 탭) 제거. 보존: DocTree/Commits/PRList(리뷰·머지)/Graph. CommonBar
+>   "편집모드" 토글은 onEditChange 게이팅(이슈/Relation/SATAM 편집은 그대로, 문서편집만 숨김).
+> - **검증 한계**: node_modules 부재로 전체 craco 빌드는 미실행 — babel JSX 파싱 + 잔여참조
+>   스캔까지. 실제 런타임 확인은 node 환경 빌드에서 권장.
 
 ### B-4. AGENT_API(:9002) 참조 — ✅ B1 에서 제거 완료
 - `GoJIRA-App/src/config.js`, `Platform-App/src/config.js`: `AGENT_API` 항목.

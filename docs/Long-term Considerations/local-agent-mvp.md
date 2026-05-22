@@ -132,9 +132,11 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
    인벤토리 확정([`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md)). 트랙별 진행:
    - **A. 호스팅 인프라 ✅ 완료 (2026-05-22)** — Agent-Service/OpenCode 호스팅/systemd/user 스크립트/
      opencodeInstances + 배포 플러밍 제거. (프론트 AGENT_API 코드·docs 서술은 B/§6 로 보류)
-   - **B1. 웹 채팅 폐기 ✅ 완료 (2026-05-22)** — AgentChat(양 앱)·`?mode=agent`·AGENT_API·
-     AI생성(enrich) 전부 제거. (웹 채팅 존치 여부 §6 → **폐기 확정**)
-   - B2·B3 프론트 write UI(웹 read-only 전환) / C Platform-API write / D 스킬 write — **다음 착수점**.
+   - **B. 프론트 write UI ✅ 완료 (2026-05-22)** — B1 웹 채팅 폐기(818acc5) + B2 GoJIRA-App
+     DocEditor read-only(280593b) + B3 Platform-App read-only(03b67c9). 웹은 조회+리뷰 전용,
+     편집은 "로컬 수정", 발행은 "로컬 push & 발행"으로 일원화. (이슈/Relation/SATAM 편집은 유지)
+   - **C. Platform-API write 엔드포인트 / D. 스킬 write — 다음 착수점** (C: read·헬퍼 분리 후
+     EditSession/worktree write 핸들러 제거 + /pr·merge 부분수정 / D: 스킬 실행모델 확정 후).
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
 ## 6. 미해결 / 다음 세션에서 확정할 것
