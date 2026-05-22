@@ -46,7 +46,7 @@ doc-save.sh <CODE> <USER> <PATH> < content      # CODE/USER 는 호환 위해 �
   1) repo 루트 결정:
        ROOT = ${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}   # cwd = clone
   2) plantuml-fix.py        (그대로 유지)
-  3) fs write → ${ROOT}/${PATH}   (mkdir -p; flock 은 유지해도 무방하나 단일 writer 라 선택적)
+  3) fs write → ${ROOT}/${PATH}   (mkdir -p; flock 제거 — 단일 writer)
   4) (삭제) _notify-change 호출 없음
   5) post-save sanity       (그대로 유지)
 ```
@@ -69,7 +69,7 @@ doc-save.sh <CODE> <USER> <PATH> < content      # CODE/USER 는 호환 위해 �
 
 스킬이 더 이상 서버 write 를 호출하지 않으면 아래를 제거할 수 있다(별도 커밋):
 - 엔드포인트: `POST /edit/start`, `POST /edit/release`, `POST /notify-change`,
-  `PUT /file`, `DELETE /file`(단, `reset-project`·`gojira-cli doc` 잔존 호출 먼저 정리),
+  `PUT /file`, `DELETE /file`(reset-project 로컬 재작성[결정] 후 제거 — `gojira-cli doc` 는 결정3 보류),
   `GET /edit/status`·`/edit/pending`·`/edit/file`(웹 read-only 후 잔여 호출자 재확인).
 - `db/edit_session.go` 전체 + Mongo `editSessions` 컬렉션.
 - `github/localrepo.go` 의 worktree write 군: `EnsureWorktree`, `WriteWorktreeFile`,
@@ -78,17 +78,28 @@ doc-save.sh <CODE> <USER> <PATH> < content      # CODE/USER 는 호환 위해 �
 - `DocRepoPRCreateHandler` 의 `!skipAutoCommit` CommitAndPush 분기(이제 항상 로컬 push 전제).
 - 보존: `EnsureClone`/read 계열, Gitea PR 생성·리뷰·머지.
 
-## 5. 미해결 / 선결정
+## 5. 선결정 — 확정 (2026-05-22)
 
-1. **`reset-project` (dev/test 전용)** — 직접 `PUT/DELETE /file`·`init-files` 사용. 로컬 clone
-   대상으로 재작성 vs 서버 admin API 보존 vs 폐기. (dev 도구라 우선순위 낮음)
-2. **`gojira-cli doc` (`doc.go` PUT /file)** — CLI write 경로 폐기 vs 로컬 fs write 전환.
-3. **repo 루트 결정** — `git rev-parse --show-toplevel`(cwd=clone) 기본, `GOJIRA_REPO_ROOT`
-   override. 런처가 CLI spawn 시 env 주입할지 확정.
-4. **전환 전략** — doc-save.sh 를 (a) 하드 스위치(로컬 전용) vs (b) `DOC_SAVE_MODE=local|api`
-   듀얼 모드(서버 제거 전까지 호환). MVP 는 (a) 권장 — 서버 호스팅 이미 제거됨(트랙 A).
-5. **PLATFORM_API 의존 잔존** — doc-save.sh 에서 PLATFORM_API 기본값/참조 제거.
-6. **동시성** — 단일 writer 가정이 깨지는 경우(같은 사용자가 두 CLI 세션) flock 유지 여부.
+1. **전환 전략 = 하드 스위치(로컬 전용)** ✅ — doc-save.sh 를 로컬 fs 직접 write 전용으로 교체.
+   `DOC_SAVE_MODE` 듀얼 모드 없음. (서버 호스팅이 트랙 A 에서 이미 제거됐으므로 API 모드 대상 없음)
+2. **`reset-project` = 로컬 clone 기반으로 재작성** ✅ — 로컬 모델에선 리셋 시 "지울 서버 파일"이
+   없다(문서는 로컬 clone/Gitea). 따라서 스킬을 로컬 fs 기반으로 수정 → 직접 `PUT/DELETE /file`·
+   `init-files` 호출 제거. 이로써 서버 `PUT/DELETE /file` **완전 제거** 가능.
+3. **`gojira-cli doc` write = 보류** ⏳ — "파일을 로컬에서만 생성·사용하는 흐름"이 확정된 뒤 결정.
+   (실행 시 doc.go 의 실제 write 사용처를 감사해 폐기/로컬전환 판단)
+4. **repo 루트 = 런처가 `GOJIRA_REPO_ROOT` 주입** ✅ — launcher 설정(launcher.json)으로 관리.
+   doc-save.sh 는 `${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}` 로 안전망 fallback.
+   (런처 §2.4 설정 스키마에 항목 추가 필요)
+5. **`PLATFORM_API` 의존 = 제거** ✅ — doc-save.sh 에서 기본값/참조 삭제(1번 하드 스위치와 묶임).
+6. **flock = 제거** ✅ — 단일 writer 라 불필요. 서버 EditSession lock 과 함께 제거(놔두면 혼란).
+
+### 실행 순서(확정 결정 기준)
+1. doc-save.sh 로컬 모드 재작성(결정 1·4·5·6) → 8개 doc 스킬 자동 마이그레이션.
+2. reset-project 로컬 재작성(결정 2).
+3. 스크립트 제거: `_edit-acquire.sh`/`_edit-release.sh`/`_notify-change.sh`.
+4. 서버 제거(§4): edit/start·release·notify-change, PUT/DELETE file, edit_session.go,
+   localrepo worktree write 군, PRCreate CommitAndPush 분기. (각 단계 go build 검증)
+5. gojira-cli doc write 결정(결정 3) — 잔존 시 5단계 일부 보류.
 
 ## 관련 문서
 - [`local-agent-mvp.md`](./local-agent-mvp.md) — 상위 §5 구현 순서
