@@ -6,6 +6,8 @@ GoJIRA-App/build/
 GoJIRA-API/gojira-api
 GoJIRA-API/server
 Platform-API/platform-api
+gojira-launcher/gojira-launcher
+gojira-launcher/gojira-launcher.exe
 
 # Env
 .env

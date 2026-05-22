@@ -109,8 +109,12 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
 
 ## 5. 권장 구현 순서 (다음 세션)
 
-1. **런처 PoC** — `/health` `/open` `/edit` + 보안(127.0.0.1·Origin·토큰). opencode/claude spawn.
-2. **웹 "수정" 버튼** — 런처 감지(`/health`) → `/edit` 호출 → 상태 표시.
+1. ~~**런처 PoC** — `/health` `/open` `/edit` + 보안(127.0.0.1·Origin·토큰). opencode/claude spawn.~~
+   **✅ 완료 (2026-05-22)** — `gojira-launcher/` (Go, zero-dep stdlib, 단일 exe). `/health`
+   `/open` `/edit` `/status` + Origin 허용목록 + 설치 토큰(`~/.gojira/launcher-token`) +
+   명령/입력 화이트리스트(path traversal·agent 검증). clone→`docs/{user}` checkout→VS Code+CLI.
+   Windows 크로스컴파일 확인. 상세: [`gojira-launcher/README.md`](../../gojira-launcher/README.md).
+2. **웹 "수정" 버튼** — 런처 감지(`/health`) → `/edit` 호출 → 상태 표시. ← **다음 착수점**
 3. **docs/{user} push→PR 흐름** 정착 + 웹 PR 리뷰 연동.
 4. **server-side 제거** — Agent-Service/OpenCode 호스팅/EditSession write 단계적 제거(롤백 가능하게 마지막).
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
