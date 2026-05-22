@@ -130,7 +130,9 @@ const NAV_ITEMS = [
 export default function RelationMap({ project, user, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  // 웹은 조회 전용 (local-agent-issue-model.md §3.3). 편집/링크/생성/삭제는 로컬로
+  // 이전 → editMode 항상 false, 편집 토글 미노출.
+  const [editMode] = useState(false);
   const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_rm_A') === 'true');
   const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_rm_R') !== 'false');
   const [showTest, setShowTest] = useState(() => sessionStorage.getItem('gojira_rm_T') === 'true');
@@ -458,7 +460,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           title={barTitle}
           onBack={onBack}
           onPull={handlePull}
-          onEditChange={setEditMode}
           nav={nav}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
@@ -477,7 +478,6 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         title={barTitle}
         onBack={onBack}
         onPull={handlePull}
-        onEditChange={(mode) => { setEditMode(mode); if (!mode) setLinking(null); }}
         nav={nav}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },

@@ -580,7 +580,9 @@ const NAV_ITEMS = [
 export default function SATAM({ project, user, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  // 웹은 조회 전용 (local-agent-issue-model.md §3.3). 편집/링크/생성/삭제는 로컬로
+  // 이전 → editMode 항상 false, 편집 토글 미노출(셀 클릭은 readonly 팝업).
+  const [editMode] = useState(false);
   const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_sa_A') === 'true');
   const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_sa_R') !== 'false');
   const [showFR, setShowFR] = useState(() => sessionStorage.getItem('gojira_sa_F') !== 'false');
@@ -846,7 +848,6 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           title={barTitle}
           onBack={onBack}
           onPull={handlePull}
-          onEditChange={setEditMode}
           nav={nav}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
@@ -867,7 +868,6 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         title={barTitle}
         onBack={onBack}
         onPull={handlePull}
-        onEditChange={(mode) => { setEditMode(mode); if (!mode) setEditCell(null); }}
         nav={nav}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },

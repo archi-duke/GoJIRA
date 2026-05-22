@@ -123,7 +123,10 @@ Mongo upsert 를 **동시(dual-write)** 수행하고, 과제 열 때 로컬 YAML
 4. ✅ 런처: `/open`·`/edit` 콜드스타트 시 로컬 YAML 벌크 ingest(reconcile=true) + `Push` 에
    `git pull --rebase`(경로 분리 무충돌) + spawn 시 `GOJIRA_REPO_ROOT`/`GOJIRA_USER`/`GOJIRA_API_URL`
    주입(`ingest.go`/`spawn.go`/`repo.go`).
-5. 웹 이슈 UI 읽기 전용화(3.3).
+5. ✅ 웹 이슈 UI 읽기 전용화(3.3) — RelationMap/SATAM/IssueList 가 `CommonBar` 에
+   `onEditChange` 미전달 → 편집 토글 미노출. `editMode` 를 세터 없는 `useState(false)` 로
+   고정해 모든 편집·생성·삭제·링크 UI 게이트 차단. IssueDetailDialog 는 `editMode=false` 로
+   이미 readonly. write 함수는 dead JSX 에 lexically 잔존(런타임 도달 불가, lint 무경고).
 6. 트랙 D §4 서버 worktree 제거(3.4) + legacy SaveFile 분기 제거 — 각 단계 go build 검증.
 
 ## 관련 문서
