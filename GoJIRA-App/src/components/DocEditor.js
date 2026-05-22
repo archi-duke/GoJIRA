@@ -87,7 +87,7 @@ function renderYamlValue(v) {
   return <span className="de-yaml-value">{v}</span>;
 }
 
-export default function DocEditor({ project, user, authority, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
+export default function DocEditor({ project, user, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
   const projectCode = project?.jiraCodes?.main?.jiraCode || '';
   const hasRepo = !!project?.documents?.repoName;
 
@@ -193,15 +193,11 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
   };
   async function reloadSelectedFile() { return reloadRef.current && reloadRef.current(); }
 
-  // 진입 시 초기 파일 확인 → 사용자 브랜치 생성 → 트리 비교 (순차 실행)
+  // 진입 시 트리 상태 갱신만. 웹은 조회 전용 — 브랜치 생성/파일 초기화는 런처(로컬 clone)가
+  // 담당하므로 서버 init-files/ensure-branch 호출 제거 (트랙 E — 서버 worktree 제거).
   useEffect(() => {
     if (!hasRepo) return;
-    fetch(`${API}/${projectCode}/init-files`, { method: 'POST' })
-      .catch(() => {})
-      .then(() => fetch(`${API}/${projectCode}/ensure-branch`, {
-        method: 'POST', headers: { 'X-User-Id': user },
-      }).catch(() => {}))
-      .then(() => refreshDocState());
+    refreshDocState();
   }, [projectCode, hasRepo, user]); // eslint-disable-line
 
   // WebSocket 구독 — main 변경 시 실시간 트리 갱신
@@ -392,27 +388,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
               onClick={() => { setActiveTab('main'); setShowGraph(false); }}>Main</button>
             <button className={`de-sidebar-tab ${activeTab === 'workspace' ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setActiveTab('workspace'); setShowGraph(false); }}>작업공간</button>
-            {(authority?.USR || 0) >= 15 && (
-              <button
-                className="de-sidebar-tab de-graph-btn"
-                onClick={async () => {
-                  try {
-                    const res = await fetch(`${API}/${projectCode}/open-folder`, {
-                      method: 'POST', headers: { 'X-User-Id': user || '' }
-                    });
-                    if (!res.ok) {
-                      const err = await res.json().catch(() => ({}));
-                      alert(err.error || '폴더 열기 실패');
-                    }
-                  } catch { alert('서버 연결 실패'); }
-                }}
-                title="작업공간 폴더 열기"
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z"/>
-                </svg>
-              </button>
-            )}
+            {/* 작업공간 폴더 열기(서버 open-folder)는 런처(로컬 clone)로 대체 — 제거 (트랙 E) */}
             <button
               className={`de-sidebar-tab de-graph-btn ${showGraph ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setShowGraph(!showGraph); if (!showGraph) setSelectedFile(null); }}
