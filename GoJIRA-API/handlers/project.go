@@ -316,11 +316,15 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 	// 실행
 	deleted := make([]string, 0, len(issueKeys))
 	failed := make([]map[string]interface{}, 0)
+	localWrites := make([]localWrite, 0)
 	for _, k := range issueKeys {
-		if _, err := deleteIssueInternal(ctx, jiraCode, k, user, false); err != nil {
+		writes, err := deleteIssueInternal(ctx, jiraCode, k, user)
+		if err != nil {
 			failed = append(failed, map[string]interface{}{"key": k, "error": err.Error()})
 			continue
 		}
+		// 자기 과제 이슈 YAML 삭제 지시 — reset-project 스킬이 로컬 clone 에 적용.
+		localWrites = append(localWrites, writes...)
 		deleted = append(deleted, k)
 	}
 
@@ -356,6 +360,7 @@ func ProjectResetHandler(w http.ResponseWriter, r *http.Request) {
 		"failedCount":         len(failed),
 		"archSettingsCleared": archCleared,
 		"projectDeleted":      projectDeleted,
+		"localWrites":         localWrites,
 	})
 }
 

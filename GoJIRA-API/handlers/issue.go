@@ -12,7 +12,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"gopkg.in/yaml.v3"
 
-	"gojira-api/clients"
 	"gojira-api/db"
 	"gojira-api/models"
 )
@@ -35,12 +34,8 @@ type localWrite struct {
 	Delete  bool   `json:"delete,omitempty"`
 }
 
-// isLocalWrite — 호출자가 로컬 clone 에 직접 YAML 을 기록하는 CLI/에이전트인지.
-// true 면 서버는 fs(worktree)에 손대지 않고 YAML 본문을 응답으로 돌려준다.
-// false(웹 등) 면 기존대로 서버 worktree 에 SaveFile/DeleteFile.
-func isLocalWrite(r *http.Request) bool {
-	return strings.EqualFold(r.Header.Get("X-Local-Write"), "true")
-}
+// 이슈 쓰기는 항상 로컬 모델(트랙 E): 서버는 fs 에 손대지 않고 YAML 본문을 localWrites 로
+// 돌려주며, 호출자(CLI/스킬/에이전트)가 로컬 clone 에 기록한다. 웹은 조회 전용.
 
 // POST /api/v{version}/Issue — 이슈 생성.
 //
@@ -136,16 +131,11 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4) YAML 영속화 — 로컬 쓰기 모드면 CLI 가 로컬 clone 에 기록, 아니면 서버 worktree 커밋.
-	resp := map[string]interface{}{"key": key, "subkey": subkey}
-	if isLocalWrite(r) {
-		resp["localWrites"] = []localWrite{{Path: issueYamlPath(subkey), Content: string(yamlBytes)}}
-	} else {
-		msg := fmt.Sprintf("[issue] %s %s", key, truncate(req.Summary, 40))
-		if err := clients.SaveFile(prjKey, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
-			respondError(w, http.StatusBadGateway, "YAML 저장 실패: "+err.Error())
-			return
-		}
+	// 4) YAML 영속화 — 로컬 clone 에 기록 (호출자가 응답 localWrites 적용). 서버는 fs 미접촉.
+	resp := map[string]interface{}{
+		"key":         key,
+		"subkey":      subkey,
+		"localWrites": []localWrite{{Path: issueYamlPath(subkey), Content: string(yamlBytes)}},
 	}
 
 	// 5) Mongo 캐시 upsert (실패해도 YAML 이 진실이므로 경고만)
@@ -221,16 +211,15 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 
 // PUT /api/v{version}/Issue — 필드 업데이트.
 //
-// 동작: Mongo 캐시 문서 로드 → Data 병합 → YAML 재생성 → user 브랜치 커밋 → 캐시 업데이트.
-// JIRA 동기화는 제거. 추후 별도 push 플로우에서 처리.
+// 동작: Mongo 캐시 문서 로드 → Data 병합 → YAML 재생성 → localWrites 로 반환(호출자가 로컬
+// clone 에 기록) → 캐시 업데이트. 서버는 fs 미접촉. JIRA 동기화는 별도 push 플로우.
 func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.IssueUpdateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	user, ok := resolveUser(r, req.User)
-	if !ok {
+	if _, ok := resolveUser(r, req.User); !ok {
 		respondError(w, http.StatusForbidden, "user required")
 		return
 	}
@@ -278,15 +267,9 @@ func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]interface{}{"key": req.Key}
-	if isLocalWrite(r) {
-		resp["localWrites"] = []localWrite{{Path: issueYamlPath(subkey), Content: string(yamlBytes)}}
-	} else {
-		msg := fmt.Sprintf("[issue] update %s", req.Key)
-		if err := clients.SaveFile(code, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
-			respondError(w, http.StatusBadGateway, "YAML 저장 실패: "+err.Error())
-			return
-		}
+	resp := map[string]interface{}{
+		"key":         req.Key,
+		"localWrites": []localWrite{{Path: issueYamlPath(subkey), Content: string(yamlBytes)}},
 	}
 
 	if err := upsertIssueCacheFromDoc(ctx, req.Key, merged["projectId"], merged); err != nil {
@@ -320,7 +303,7 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	writes, err := deleteIssueInternal(ctx, req.PrjID, req.Key, user, isLocalWrite(r))
+	writes, err := deleteIssueInternal(ctx, req.PrjID, req.Key, user)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -337,7 +320,7 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 // Soft delete (2026-04-29 사고 후): mongo issue → issues_trash 컬렉션으로 이동, 3일 후
 // 자동 영구 삭제 (purgeOldTrashWorker). YAML 은 Gitea 에서 즉시 삭제 (git history 가
 // 자체 휴지통 역할). 복원 시 trash mongo doc 으로부터 yaml 재생성 가능.
-func deleteIssueInternal(ctx context.Context, code, key, user string, local bool) ([]localWrite, error) {
+func deleteIssueInternal(ctx context.Context, code, key, user string) ([]localWrite, error) {
 	isOwnIssue := code != "" && strings.HasPrefix(key, code+"-")
 
 	var writes []localWrite
@@ -345,11 +328,8 @@ func deleteIssueInternal(ctx context.Context, code, key, user string, local bool
 		existing, _ := db.FindIssueByKey(ctx, key)
 		subkey, _ := existing["subkey"].(string)
 		if subkey != "" {
-			if local {
-				writes = append(writes, localWrite{Path: issueYamlPath(subkey), Delete: true})
-			} else if err := clients.DeleteFile(code, issueYamlPath(subkey), fmt.Sprintf("[issue] delete %s", key), user); err != nil {
-				log.Printf("YAML delete warn key=%s: %v", key, err)
-			}
+			// 로컬 clone 의 YAML 삭제 지시 — 호출자가 적용. 서버는 fs 미접촉.
+			writes = append(writes, localWrite{Path: issueYamlPath(subkey), Delete: true})
 		}
 	}
 	// Mongo: issues → issues_trash (soft delete). 3일 후 자동 영구 삭제.

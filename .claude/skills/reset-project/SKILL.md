@@ -117,7 +117,8 @@ curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
 - `architecture/architecture-style/<subkey>-*.md` — style-define2 후보별 ADSN 파일
 - `architecture/design-decisions/DP-NN-*.md` — design-decide2 DP별 파일
 - `architecture/architecture-integrated/{logical,process,deployment,development}.md` — design-integrate2 view별
-- `data/issues/*.yaml` — 이슈 yaml (서버측 reset 이 자기 과제 이슈만 삭제하므로 잔존 가능)
+- `data/issues/*.yaml` — 이슈 yaml (서버 reset 이 자기 과제 이슈의 삭제 대상을 localWrites 로
+  돌려주고, 4-1 에서 로컬 clone 에 적용해 삭제됨)
 
 ## 3. Dry-run 최종 보고 (confirm != true)
 
@@ -133,6 +134,10 @@ RESET_RESULT=$(curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
   -d "$(jq -n --argjson ri "$RESET_ISSUES" --argjson ra "$RESET_ARCH_SETTINGS" \
     '{confirm:true, resetIssues:$ri, resetArchSettings:$ra}')")
 echo "$RESET_RESULT" | jq '{mode, deletedCount, failedCount, archSettingsCleared}'
+
+# 서버가 돌려준 삭제 대상 이슈 YAML(localWrites)을 로컬 clone 에 반영 (트랙 E — 서버 fs 미접촉).
+source "${ROOT}/.claude/skills/_scripts/_local-write.sh"
+GOJIRA_REPO_ROOT="${ROOT}" gj_apply_local_writes "$RESET_RESULT"
 ```
 
 응답에 `failedCount > 0` 이면 최종 보고에 `failed[]` 내용을 포함. 그래도 Step 4-2 진행(부분 성공이어도 문서 초기화는 시도).
