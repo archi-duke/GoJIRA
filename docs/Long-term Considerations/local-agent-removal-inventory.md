@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **A. 호스팅 인프라** ✅ **완료(2026-05-22)** | 낮음(독립) | 낮음 | 1 |
 | **B. 프론트 write UI** ✅ **완료(2026-05-22)** — B1(채팅)+B2(GoJIRA-App)+B3(Platform-App) | 중간(read 와 한 컴포넌트) | 중간 | 2 |
-| **C. Platform-API write 엔드포인트** (EditSession/worktree/file write) | 높음(read 와 헬퍼 공유) | 높음 | 3 |
+| **C. Platform-API write 엔드포인트** — 잔여 호출자 0 분만 ✅ **부분완료(2026-05-22)** | 높음(read 와 헬퍼 공유) | 높음 | 3 |
 | **D. 스킬 write 경로** (`doc-save.sh`/`_edit-acquire`/`notify-change` — 스킬 실행 모델과 직결) | 높음(스킬 문서생성 전체) | 높음 | 4(별도 설계 선행) |
 
 > **주의**: `/pr` 생성과 `/pr/{n}/review`·`/merge` 는 **보존**(웹 PR 리뷰). `/pr` 생성은 §5-3 에서
@@ -99,6 +99,20 @@
 ---
 
 ## 트랙 C — Platform-API write 엔드포인트 (read 와 분리 후)
+
+> **부분완료 (2026-05-22, commit a960cb6)** — 핵심 발견: EditSession/worktree write 의
+> 상당수는 **웹 UI 전용이 아니라 서버측 스킬 문서생성 경로**다. 코드 전역 호출자 스캔 결과:
+> - **잔여 호출자 0 → 제거함**: `sync-branch`, `git/publish`, `PUT edit/file`, `edit/commit`,
+>   `edit/pr`, `edit/discard`, `edit/heartbeat`, `edit/rebase` (라우트+핸들러).
+> - **아직 사용 중 → 보존**: `edit/start`·`edit/release`(스킬 `_edit-acquire/_edit-release`),
+>   `PUT /file`·`DELETE /file`(vos-collect2/doc.go/reset-project), `notify-change`(doc-save.sh),
+>   `init-files`·`ensure-branch`(프로젝트 셋업), `conflict-resolve`(알림 핸들러), `/pr`·`review`·
+>   `merge`(launcher flow/cli/PRList).
+> - **결론**: 나머지 write 제거는 **트랙 D(스킬 실행모델)와 한 묶음** — 스킬이 로컬 CLI 로
+>   로컬 clone 에 직접 write 하도록 전환해야 `PUT /file`/`notify-change`/EditSession 을 뗄 수 있다.
+> - localrepo.go/edit_session.go 의 worktree·세션 함수는 보존(잔존 엔드포인트가 계속 사용).
+> - C-2 부분수정(PRCreate 의 `!skipAutoCommit` CommitAndPush 제거)도 cli/skill 호환 위해 **D 로 연기**.
+
 
 ### C-1. 안전 제거 (write 전용 핸들러) — `handlers/docrepo.go`
 `DocRepoFileUpdateHandler`(PUT /file), `DocRepoFileDeleteHandler`(DELETE /file),

@@ -135,8 +135,12 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
    - **B. 프론트 write UI ✅ 완료 (2026-05-22)** — B1 웹 채팅 폐기(818acc5) + B2 GoJIRA-App
      DocEditor read-only(280593b) + B3 Platform-App read-only(03b67c9). 웹은 조회+리뷰 전용,
      편집은 "로컬 수정", 발행은 "로컬 push & 발행"으로 일원화. (이슈/Relation/SATAM 편집은 유지)
-   - **C. Platform-API write 엔드포인트 / D. 스킬 write — 다음 착수점** (C: read·헬퍼 분리 후
-     EditSession/worktree write 핸들러 제거 + /pr·merge 부분수정 / D: 스킬 실행모델 확정 후).
+   - **C. Platform-API write 엔드포인트 — 부분완료 (2026-05-22, a960cb6)** — 잔여 호출자 0 인
+     write 엔드포인트 8개(sync-branch/git/publish/edit:file·commit·pr·discard·heartbeat·rebase) 제거.
+     나머지(`PUT /file`·`notify-change`·`edit/start·release` 등)는 **서버측 스킬 문서생성 경로라
+     트랙 D 와 한 묶음**으로 보존. go build 클린.
+   - **D. 스킬 write — 다음 착수점** — 스킬이 로컬 CLI 로 로컬 clone 에 직접 write 하는 실행모델
+     확정이 선행. 그 후 잔여 서버 write 경로(C 나머지 + `doc-save.sh`/`_edit-*`/`notify-change`) 제거.
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
 ## 6. 미해결 / 다음 세션에서 확정할 것
