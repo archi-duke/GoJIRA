@@ -11,6 +11,13 @@
     />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <!--
+      런타임 config — nginx entrypoint 가 컨테이너 startup 시 env.js 를 생성한다.
+      window._env_ 로 모든 REACT_APP_* 값을 노출. src/config.js 가 1순위로 읽음.
+      dev 모드(npm start)에서는 public/env.js 가 없어 404 → window._env_ 미정의 →
+      src/config.js 가 process.env.* fallback 으로 동작.
+    -->
+    <script src="%PUBLIC_URL%/env.js"></script>
+    <!--
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
     -->

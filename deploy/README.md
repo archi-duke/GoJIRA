@@ -9,8 +9,17 @@ deploy/
 ├── docker-compose.yml          # 모든 컨테이너 정의
 ├── .env.example                # 설정 템플릿 (→ .env 로 복사 후 채움)
 ├── README.md                   # 본 문서
+├── DEPLOY.md                   # 운영자용 step-by-step 절차
 ├── config/
 │   └── llm.json                # LLM 게이트웨이 정의 (외부망 default 그대로. 사내 swap 가능)
+├── scripts/                    # 폐쇄망 배포 자동화 스크립트
+│   ├── images.txt              # 베이스 + 서비스 이미지 단일 출처 (모든 스크립트가 참조)
+│   ├── build-images.sh         # 외부망: pull baseline + docker compose build
+│   ├── save-images.sh          # 외부망: 전체 이미지 → gojira-images.tar
+│   ├── load-images.sh          # 폐쇄망: tar → docker, 적재 검증
+│   ├── preflight.sh            # 폐쇄망: .env/권한/TCP/compose/이미지 사전 검증
+│   ├── gojira-user-add.sh      # OpenCode 사용자 추가 (systemd)
+│   └── gojira-user-remove.sh   # OpenCode 사용자 제거
 └── images/
     ├── platform-api/Dockerfile      # multi-stage: go 1.26 → alpine + git
     ├── gojira-api/Dockerfile        # multi-stage: go 1.26 → alpine
@@ -18,8 +27,31 @@ deploy/
     ├── jira-api/Dockerfile          # 동일
     ├── platform-app/Dockerfile      # node:lts build → nginx:alpine
     │   └── nginx.conf
-    └── gojira-app/Dockerfile        # 동일
-        └── nginx.conf
+    ├── gojira-app/Dockerfile        # 동일
+    │   └── nginx.conf
+    └── pumlex-server/Dockerfile     # node:lts-alpine (Express PlantUML 렌더러)
+
+vendor/
+└── pumlex/                          # pumlex 서브셋 vendoring (pex-core + pex-server)
+```
+
+> **pumlex-server**: GoJIRA-App 의 인라인 PlantUML 편집(PexBlock)이 런타임에 호출하는
+> 렌더러. 소스는 외부 repo (`pumlex`) 의존을 없애려고 `deploy/vendor/pumlex/` 로
+> vendoring 했다. 내부적으로 `plantuml-server:8080` 을 호출하므로 PlantUML 컨테이너에 의존.
+
+## 폐쇄망 배포 단축 명령 (TL;DR)
+
+```bash
+# ── 외부망 ──
+cd deploy && cp .env.example .env && vi .env   # atomic 입력 채우기
+./scripts/build-images.sh                       # pull base + compose build
+./scripts/save-images.sh                        # → gojira-images.tar
+
+# ── 폐쇄망 (deploy/ 와 tar 반입 후) ──
+cd deploy
+./scripts/load-images.sh                        # docker load + 검증
+./scripts/preflight.sh                          # .env/권한/TCP/compose/이미지 검증
+docker compose up -d
 ```
 
 ## 한 곳에서 설정 관리 (atomic 입력)
@@ -67,6 +99,7 @@ docker save \
   gojira/jira-api:latest \
   gojira/platform-app:latest \
   gojira/gojira-app:latest \
+  gojira/pumlex-server:latest \
   -o gojira-images.tar
 ```
 
@@ -99,16 +132,16 @@ curl -sS http://localhost:8000/rest/api/2/serverInfo  # JIRA Mock
 curl -sS http://localhost:8080/                    # PlantUML
 curl -sS http://localhost:3000/                    # Platform-App
 curl -sS http://localhost:3001/                    # GoJIRA-App
+curl -sS http://localhost:3030/                    # pumlex (plantumlEx 렌더러)
 ```
 
-## React 앱과 빌드 시점 환경변수 (중요)
+## React 런타임 config (재빌드 불요)
 
-`REACT_APP_*` 는 webpack 이 빌드 결과물에 inline 한다. 즉 한 번 빌드된 이미지는 특정 host:port 에 종속.
+`REACT_APP_*` 는 nginx 컨테이너 entrypoint 가 컨테이너 startup 시 environment → `/usr/share/nginx/html/env.js` (`window._env_`) 로 직렬화한다. React (`src/config.js`) 가 1순위로 이를 읽고, 없으면 `process.env.REACT_APP_*` 로 fallback (dev 모드 호환).
 
-**외부망 빌드 시점에 사내 host 가 결정되어 있어야 한다.** 후속 변경 시:
-
-- IP / 도메인 변경 → `docker compose build platform-app gojira-app` 으로 React 만 재빌드
-- 백엔드 환경변수 (Mongo URI, secrets, OpenCode URL 등) 변경 → `.env` 수정 후 `docker compose up -d` (재빌드 불요)
+- 빌드된 이미지는 host-agnostic — 어떤 사내망에도 그대로 반입 가능
+- 폐쇄망에서 host/도메인 변경 → `.env` 수정 → `docker compose up -d` (재빌드 불요)
+- Module Federation remote URL 도 Promise-based dynamic remote (craco.config.js) 로 런타임 결정 — 동일하게 재빌드 불요
 
 ## LLM provider 변경
 
@@ -125,8 +158,10 @@ curl -sS http://localhost:3001/                    # GoJIRA-App
 |---|---|
 | `docker compose up` 시 `required` 메시지 | `.env` 에 해당 변수 누락 — `?required` 마크된 항목 다시 확인 |
 | 백엔드 startup 시 `MongoDB connect: ...` | `MONGO_URI` 의 host/auth 확인. URL encoding (`@` → `%40`) |
-| Frontend 가 `localhost:9000` 호출 | `REACT_APP_*` 값이 빌드에 inline 안 됨 → `docker compose build platform-app gojira-app` 재실행 |
+| Frontend 가 `localhost:9000` 호출 | env.js 미생성 / 빈 값. `docker compose exec platform-app cat /usr/share/nginx/html/env.js` 확인, `.env` 보완 후 `docker compose up -d platform-app gojira-app` |
 | Module Federation `remoteEntry.js` 실패 | `REACT_APP_GOJIRA_APP_REMOTE` 가 브라우저에서 접근 가능한 URL 인지 확인 |
+| PlantUML 블록이 `렌더링 오류` / `fetch failed` | pumlex-server 가 plantuml-server 도달 못함. `docker compose logs pumlex-server` 확인. compose 내부 `PLANTUML_URL=http://plantuml-server:8080` 고정이므로 보통 plantuml 컨테이너 미기동이 원인 |
+| PlantUML 블록이 빈 화면 / CORS | 브라우저가 `REACT_APP_PUMLEX_SERVER` (`PUMLEX_SERVER:PUMLEX_PORT`) 에 도달 가능한지 확인. env.js 값 점검: `docker compose exec gojira-app cat /usr/share/nginx/html/env.js` |
 | Agent-Service `/Agent/chat` 시 OpenCode 401 | `OPENCODE_SERVER_PASSWORD` 가 OpenCode 측 설정과 일치하는지 |
 | LLM 호출 시 `unauthorized` | `OPENAI_API_KEY` (외부) 또는 `PLATFORM_LLM_TICKET` (사내) 확인. `GOJIRA_ENC_KEY` 가 ENC: 값들을 암호화한 키와 동일한지 |
 

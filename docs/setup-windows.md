@@ -1,5 +1,14 @@
 # Windows 사내망 셋업 가이드
 
+> ⚠️ **방향 전환 예고 (2026-05-22)**: 본 문서는 **현행 server-side 모델**(Agent-Service +
+> WSL OpenCode 브리지 + Windows 네이티브 백엔드) 기준의 **동작하는 운영 가이드**입니다.
+> 단, 폐쇄망 server-side 운영 한계(개인 SSO 토큰 격리·docker↔host 경로 불일치·브리지 복잡도)로
+> **"에이전트 로컬 실행 + 웹→로컬 런처(B)"** 모델로 전환이 결정되었습니다. 전환 후에는 아래
+> §3(WSL OpenCode 서버), §5.3(Agent-Service .env) 등이 **로컬 런처 + CLI 선택(opencode|claude)**
+> 모델로 교체됩니다. 전환 설계는 [`Long-term Considerations/local-agent-mvp.md`](./Long-term%20Considerations/local-agent-mvp.md)
+> 및 [`architecture-pivot-vscode.md`](./Long-term%20Considerations/architecture-pivot-vscode.md) 참조.
+> **구현 전까지는 본 가이드가 유효합니다.**
+
 > 본 문서는 사내망에서 GoJIRA 를 운영하기 위한 Windows 환경 셋업 가이드입니다.
 > 테스트 후 Windows Server 로 옮길 예정이므로, 사용자 PC 와 운영 서버 양쪽에 적용 가능한 절차로 작성되어 있습니다.
 

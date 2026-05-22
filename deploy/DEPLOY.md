@@ -58,7 +58,7 @@ cp .env.example .env
 | 호스트 파일시스템 | `GOJIRA_REPOS_DIR` | Platform-API 의 bare clone + worktree 저장 경로 (호스트 측). 폐쇄망은 절대경로 권장 — 예: `/var/lib/gojira/repos` |
 | | `UID` / `GID` | 컨테이너가 호스트 사용자 권한으로 실행되도록 매핑. 보통 `id -u` / `id -g` 값. bind mount fs 권한 일치 목적 |
 | OpenCode | `OPENCODE_SERVER` + `OPENCODE_PORT` | 사내 OpenCode serve host + port |
-| GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 6종 | 브라우저가 접근하는 host + port (Platform/GoJIRA/Agent API + Platform/GoJIRA App + PlantUML). React 빌드 시점에 inline! |
+| GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 7종 | 브라우저가 접근하는 host + port (Platform/GoJIRA/Agent API + Platform/GoJIRA App + PlantUML + pumlex). React 에 **런타임** 주입 (env.js) — 재빌드 불요 |
 | 컨테이너 노출 port<br>(선택) | `*_HOST_PORT` | nginx reverse proxy 환경에서 컨테이너 외부 노출 port 가 사용자 access port 와 다를 때만 |
 
 ### 2-2. 선택 값
@@ -70,28 +70,36 @@ cp .env.example .env
 | `SMTP_*` | 메일 알림 사용 시 |
 | `GOJIRA_JIRA_USER` / `GOJIRA_JIRA_PASS` | 실제 JIRA 연동 시 (mock 사용하면 불요) |
 
-### 2-3. 중요: React 빌드 시점 종속성
+### 2-3. React 런타임 config (재빌드 불요)
 
-`REACT_APP_*` 는 webpack 이 빌드 결과물에 inline 한다. 즉 **빌드 시점에 사내 host 가 결정되어 있어야 한다.** 사내 URL 을 모르는 상태로 외부망 빌드 → 폐쇄망 반입 시, 사내에서 한 번 더 React 만 재빌드해야 한다 (⑥-3 참조).
+`REACT_APP_*` 는 더 이상 빌드 시점에 inline 되지 않는다. nginx 컨테이너 startup 시 entrypoint 가 environment → `/env.js` (`window._env_`) 로 직렬화하고 React 의 `src/config.js` 가 1순위로 읽는다. 따라서:
+
+- 외부망에서 한 번 빌드된 이미지는 host-agnostic — 어떤 사내망에도 반입 가능
+- 폐쇄망에서 host/port 변경 시 `.env` 수정 → `docker compose up -d` 만으로 즉시 반영
+- Module Federation remote URL (`REACT_APP_GOJIRA_APP_REMOTE`) 도 Promise-based dynamic remote 로 runtime 결정 — 동일하게 재빌드 불요
 
 ---
 
 ## ③ 외부망 — 빌드
 
-### 3-1. 베이스 이미지 미리 받기
+> **권장:** 아래 한 줄로 ③ 전체를 수행. 베이스 이미지 목록은 `deploy/scripts/images.txt` 가 단일 출처.
+>
+> ```bash
+> ./scripts/build-images.sh
+> ```
+>
+> 옵션: `--no-pull` (베이스 이미지 pull 생략), `--service platform-app gojira-app` (React 만 재빌드).
+
+### 3-1. (수동) 베이스 이미지 미리 받기
 
 폐쇄망에선 Docker Hub 접근 불가이므로 베이스 이미지도 함께 반입해야 한다.
 
 ```bash
-docker pull plantuml/plantuml-server:jetty
-docker pull nginx:alpine
-docker pull python:3.12-slim
-docker pull alpine:3.20
-docker pull golang:1.26-alpine
-docker pull node:lts-alpine
+# scripts/images.txt 의 베이스 이미지 라인을 한 줄씩 pull
+xargs -n1 docker pull < <(grep -v '^gojira/\|^#\|^$' scripts/images.txt)
 ```
 
-### 3-2. 서비스 이미지 빌드
+### 3-2. (수동) 서비스 이미지 빌드
 
 ```bash
 docker compose build
@@ -109,12 +117,22 @@ docker images | grep -E "gojira|plantuml"
 # gojira/jira-api        latest
 # gojira/platform-app    latest
 # gojira/gojira-app      latest
+# gojira/pumlex-server   latest
 # plantuml/plantuml-server  jetty
 ```
 
 ---
 
 ## ④ 외부망 — 패키징
+
+> **권장:** 한 줄로 모든 이미지를 tar 로 추출 (누락 이미지 사전 감지 포함).
+>
+> ```bash
+> ./scripts/save-images.sh                 # → deploy/gojira-images.tar
+> IMAGE_TAG=v1.2.3 ./scripts/save-images.sh /tmp/out.tar   # 태그/경로 지정
+> ```
+
+(수동 등가 명령)
 
 ```bash
 docker save \
@@ -125,6 +143,7 @@ docker save \
   gojira/jira-api:latest \
   gojira/platform-app:latest \
   gojira/gojira-app:latest \
+  gojira/pumlex-server:latest \
   -o gojira-images.tar
 ```
 
@@ -151,12 +170,19 @@ tar czf gojira-deploy-$(date +%F).tgz gojira-images.tar deploy/
 
 ## ⑤ 폐쇄망 — 이미지 load
 
-```bash
-tar xzf gojira-deploy-YYYY-MM-DD.tgz
-cd deploy
+> **권장:** `images.txt` 의 전체 이미지가 정말 적재됐는지 검증까지 한 번에.
+>
+> ```bash
+> tar xzf gojira-deploy-YYYY-MM-DD.tgz && cd deploy
+> ./scripts/load-images.sh                   # ../gojira-images.tar 자동
+> ./scripts/load-images.sh /path/to/x.tar    # 경로 지정
+> ```
 
+(수동 등가)
+
+```bash
 docker load -i ../gojira-images.tar
-docker images | grep -E "gojira|plantuml"   # 7개 확인
+docker images | grep -E "gojira|plantuml"   # 8개 확인
 ```
 
 ---
@@ -177,7 +203,17 @@ sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}
 
 ### 6-1. `.env` 사후 점검
 
-외부망에서 채운 `.env` 값이 폐쇄망 환경과 일치하는지 확인:
+> **권장:** required 변수 / 디렉토리 권한 / TCP 도달 / compose config / 이미지 적재까지 단일 명령으로.
+>
+> ```bash
+> ./scripts/preflight.sh                     # 전체
+> ./scripts/preflight.sh --skip-net          # 네트워크 검사 생략
+> ./scripts/preflight.sh --skip-images       # 이미지 검사 생략 (build 전)
+> ```
+>
+> 실패 항목은 비-0 종료 코드와 함께 조치 명령을 함께 출력.
+
+(수동 등가)
 
 ```bash
 # compose 가 조합한 최종 URL 미리보기 (시크릿도 함께 출력되니 주의)
@@ -197,19 +233,18 @@ docker compose up -d
 docker compose ps
 ```
 
-7개 컨테이너가 `Up` 상태여야 한다.
+8개 컨테이너가 `Up` 상태여야 한다.
 
-### 6-3. (조건부) React 재빌드
+### 6-3. (재빌드 불요)
 
-외부망 빌드 시점에 사용한 사용자 access URL (`*_SERVER` + `*_PORT`) 이 폐쇄망의 실제값과 다를 경우:
+이전 버전과 달리 React 도 런타임 config 로 전환됐다. `.env` 의 어떤 값을 바꾸든 (`*_SERVER`, `*_PORT`, Mongo, Gitea, OpenCode, 시크릿 등) `docker compose up -d` 만으로 반영된다.
 
 ```bash
-# .env 의 *_SERVER / *_PORT 수정 후
-docker compose build platform-app gojira-app
-docker compose up -d platform-app gojira-app
+# .env 수정 후
+docker compose up -d
 ```
 
-> 백엔드 환경변수 (Mongo, Gitea, OpenCode, 시크릿 등) 만 다르다면 **재빌드 불요**. `.env` 수정 + `docker compose up -d` 만으로 반영.
+> 단, 코드 변경 (Go/Python/React 소스) 이 있는 경우만 외부망에서 재빌드 → tar 반입 절차가 필요.
 
 ---
 
@@ -228,6 +263,7 @@ curl -sS http://localhost:${JIRA_API_HOST_PORT:-8000}/rest/api/2/serverInfo     
 curl -sS http://localhost:${PLANTUML_HOST_PORT:-${PLANTUML_PORT}}/                          # PlantUML     → HTML
 curl -sS http://localhost:${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT}}/                  # Platform-App → HTML
 curl -sS http://localhost:${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT}}/                      # GoJIRA-App   → HTML
+curl -sS http://localhost:${PUMLEX_HOST_PORT:-${PUMLEX_PORT}}/                              # pumlex       → HTML
 ```
 
 ### 7-2. startup 로그 확인
@@ -332,7 +368,7 @@ sudo ./deploy/scripts/gojira-user-remove.sh batman
 | 변경 대상 | 절차 |
 |---|---|
 | 백엔드용 변수 (Mongo/Gitea/OpenCode/시크릿) | `.env` 수정 → `docker compose up -d` |
-| React 가 inline 한 사용자 access URL (`*_SERVER` / `*_PORT`) | `.env` 수정 → `docker compose build platform-app gojira-app && docker compose up -d` |
+| 사용자 access URL (`*_SERVER` / `*_PORT`) | `.env` 수정 → `docker compose up -d` (런타임 config 라 재빌드 불요) |
 | LLM provider swap | `config/llm.json` 편집 (active provider 와 `_disabled_*` swap) → `docker compose restart platform-api` |
 | llm.json 만 수정 | volume mount 이므로 컨테이너 재시작만 (`docker compose restart platform-api`) |
 
@@ -380,7 +416,7 @@ docker image prune                     # 옛 이미지 정리
 | Platform-API 가 `permission denied` 로 worktree 생성 실패 | `GOJIRA_REPOS_DIR` 디렉토리 소유자가 `${UID}:${GID}` 와 다름. `sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}` |
 | Platform-API startup 시 `mkdir /data/repos: permission denied` | 위와 동일 — bind mount 호스트 디렉토리 권한 확인 |
 | 백엔드 startup 시 `MongoDB connect timeout` | `MONGODB_SERVER` / `MONGO_USER` / `MONGO_PASS` 확인. 비밀번호에 `@` / `:` / `/` 들어가면 URL encoding 필요 (`@` → `%40`) |
-| 브라우저 콘솔 `ERR_CONNECTION_REFUSED localhost` | `*_SERVER` / `*_PORT` 가 빌드 결과에 안 들어감 → `docker compose build platform-app gojira-app` |
+| 브라우저 콘솔 `ERR_CONNECTION_REFUSED localhost` | env.js 가 생성되지 않았거나 비어있음. `docker compose exec platform-app cat /usr/share/nginx/html/env.js` 로 확인. `.env` 의 `*_SERVER`/`*_PORT` 값 검증 후 `docker compose up -d platform-app gojira-app` |
 | Module Federation `remoteEntry.js` 실패 | `GOJIRA_APP_SERVER` + `GOJIRA_APP_PORT` 가 브라우저 접근 가능한 endpoint 인지 확인 |
 | Agent-Service `/Agent/chat` 시 OpenCode 401 | `OPENCODE_SERVER_PASSWORD` 가 OpenCode 측과 일치하는지 |
 | LLM 호출 시 `unauthorized` | `OPENAI_API_KEY` / `PLATFORM_LLM_TICKET` 확인. `GOJIRA_ENC_KEY` 가 `ENC:` 값 암호화 시 사용한 키와 동일한지 |

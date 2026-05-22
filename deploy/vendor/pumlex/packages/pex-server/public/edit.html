@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>plantumlEx editor</title>
+<style>
+  :root { --border:#e5e7eb; --bg:#fafafa; --accent:#2563eb; --danger:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: flex; height: 100vh; }
+  .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
+  .pane:last-child { border-right: none; }
+  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; background: var(--bg); flex-wrap: wrap; }
+  textarea { flex: 1; border: none; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; resize: none; outline: none; }
+  #preview { flex: 1; overflow: auto; padding: 16px; background: #f7f7f7; position: relative; }
+  #preview svg { max-width: 100%; user-select: none; }
+  button { padding: 5px 12px; border: 1px solid #ccc; background: white; cursor: pointer; border-radius: 4px; font-size: 13px; }
+  button:hover { background: #f0f0f0; }
+  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.primary:hover { filter: brightness(1.1); }
+  input { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+  .status { margin-left: auto; font-size: 12px; color: #666; }
+  .status a { color: var(--accent); text-decoration: none; }
+  .status a:hover { text-decoration: underline; }
+  .hint { font-size: 12px; color:#888; padding: 6px 12px; background: #fffbe8; border-bottom: 1px solid var(--border); }
+  /* Note: SVG-overlay styles (entity hover/selected, handles, edge toolbar)
+     are injected automatically by pex-inline.js. */
+</style>
+</head>
+<body>
+
+<div class="pane">
+  <div class="toolbar">
+    <input id="did" placeholder="diagram id" style="width: 150px" />
+    <button id="btnLoad">Load</button>
+    <button id="btnNew">New</button>
+    <button id="btnSaveSource">Save Source</button>
+    <button id="btnDownload" title="Download .puml with embedded layout">⤓ .puml</button>
+    <span class="status" id="statusL"></span>
+  </div>
+  <textarea id="src" spellcheck="false"></textarea>
+</div>
+
+<div class="pane">
+  <div class="toolbar">
+    <button id="btnRender" class="primary">Render</button>
+    <button id="btnApply">Apply Layout</button>
+    <button id="btnReset">Reset Layout</button>
+    <span class="status">
+      <span id="statusR"></span>
+      <a id="embedLink" href="#" target="_blank" style="display:none; margin-left:12px"></a>
+    </span>
+  </div>
+  <div class="hint">엔티티 드래그로 배치 조정. 연결선 클릭 후 떠오르는 작은 메뉴에서 직선/곡선/꺾은선 선택, 곡선의 핸들로 모양 수정.</div>
+  <div id="preview">← 좌측 소스를 작성하고 Render를 누르세요.</div>
+</div>
+
+<script src="/pex-core/geom.js"></script>
+<script src="/pex-core/meta.js"></script>
+<script src="/pex-core/inline.js"></script>
+<script>
+// The full editor is now a thin shell over PexInline:
+//  - PexInline owns the SVG drag/handle/edge-toolbar overlay.
+//  - This file owns persistence (id, /diagrams CRUD), the source textarea,
+//    and the embed-mode postMessage handoff.
+const state = {
+  id: null,
+  layout: { nodes: {}, edges: {} },
+  inline: null, // active PexInline instance, if any
+};
+
+const $ = (id) => document.getElementById(id);
+const setStatus = (side, msg) => {
+  const el = $(side === 'L' ? 'statusL' : 'statusR');
+  el.textContent = msg;
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 2500);
+};
+
+// ---- Source<->meta plumbing ----------------------------------------------
+function absorbEmbeddedMeta() {
+  const raw = $('src').value;
+  const parsed = PexMeta.parseSource(raw);
+  if (parsed.meta && parsed.meta.layout) {
+    state.layout = PexInline.normalizeLayout(parsed.meta.layout);
+    setStatus('L', 'imported embedded layout');
+  }
+  return parsed.source;
+}
+
+// Re-embed the current state.layout under `@enduml` so the textarea always
+// reflects the canonical source-plus-meta. Skipped while the user is actively
+// typing in the textarea so the cursor isn't yanked around.
+function syncTextareaMeta(cleanSource) {
+  const ta = $('src');
+  if (document.activeElement === ta) return;
+  const src = (cleanSource !== undefined) ? cleanSource : PexMeta.parseSource(ta.value).source;
+  const hasLayout = state.layout && (
+    Object.keys(state.layout.nodes || {}).length ||
+    Object.keys(state.layout.edges || {}).length
+  );
+  ta.value = hasLayout
+    ? PexMeta.embedMeta(src, { schema: 1, layout: state.layout })
+    : src;
+}
+
+// ---- Render + activate inline overlay ------------------------------------
+async function render() {
+  const cleanSource = absorbEmbeddedMeta();
+  const res = await fetch('/render', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: cleanSource })
+  });
+  if (!res.ok) { setStatus('R', 'render failed: ' + (await res.text()).slice(0, 120)); return; }
+  const svgText = await res.text();
+  $('preview').innerHTML = svgText;
+  if (state.inline) state.inline.deactivate();
+  state.inline = PexInline.activate($('preview'), {
+    layout: state.layout,
+    onLayoutChange: (layout) => {
+      state.layout = layout;
+      syncTextareaMeta();
+    },
+  });
+  syncTextareaMeta(cleanSource);
+  setStatus('R', 'rendered');
+}
+
+// ---- Persistence (diagram id / source / layout) --------------------------
+async function createDiagram() {
+  const raw = $('src').value;
+  const parsed = PexMeta.parseSource(raw);
+  const res = await fetch('/diagrams', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: raw })
+  });
+  const { id } = await res.json();
+  state.id = id;
+  if (parsed.meta) {
+    state.layout = PexInline.normalizeLayout(parsed.meta.layout);
+    $('src').value = parsed.source;
+  }
+  $('did').value = id;
+  history.replaceState(null, '', `/edit/${id}`);
+  updateEmbedLink();
+  setStatus('L', parsed.meta ? `imported ${id}` : `created ${id}`);
+}
+
+async function loadDiagram() {
+  const id = $('did').value.trim();
+  if (!id) return;
+  const res = await fetch(`/diagrams/${id}`);
+  if (!res.ok) { setStatus('L', 'not found'); return; }
+  const d = await res.json();
+  state.id = d.id;
+  state.layout = PexInline.normalizeLayout(d.layout);
+  $('src').value = d.source || '';
+  history.replaceState(null, '', `/edit/${d.id}`);
+  updateEmbedLink();
+  await render();
+  setStatus('L', 'loaded');
+}
+
+async function saveSource() {
+  if (!state.id) return createDiagram();
+  const raw = $('src').value;
+  const parsed = PexMeta.parseSource(raw);
+  const res = await fetch(`/diagrams/${state.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source: raw })
+  });
+  if (!res.ok) return;
+  if (parsed.meta) {
+    state.layout = PexInline.normalizeLayout(parsed.meta.layout);
+    setStatus('L', 'source saved (imported layout)');
+  } else {
+    setStatus('L', 'source saved');
+  }
+  syncTextareaMeta(parsed.source);
+}
+
+function downloadPuml() {
+  if (!state.id) { setStatus('L', 'save first'); return; }
+  const a = document.createElement('a');
+  a.href = `/diagrams/${state.id}.puml`;
+  a.download = `${state.id}.puml`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+async function applyLayout() {
+  if (!state.id) { setStatus('R', 'save source first'); return; }
+  const res = await fetch(`/layouts/${state.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ layout: state.layout })
+  });
+  if (res.ok) { setStatus('R', 'layout applied'); syncTextareaMeta(); }
+}
+
+function resetLayout() {
+  state.layout = { nodes: {}, edges: {} };
+  if (state.inline) state.inline.setLayout(state.layout);
+  syncTextareaMeta();
+  setStatus('R', 'layout reset (not saved)');
+}
+
+function updateEmbedLink() {
+  const link = $('embedLink');
+  if (state.id) {
+    link.href = `/embed/${state.id}`;
+    link.style.display = 'inline';
+    link.textContent = `↗ /embed/${state.id}`;
+  } else {
+    link.style.display = 'none';
+  }
+}
+
+// ---- Sample + button wiring ----------------------------------------------
+const SAMPLE = `@startuml
+class Customer {
+  +id: UUID
+  +name: String
+}
+class Order {
+  +id: UUID
+  +total: Decimal
+}
+class Product {
+  +sku: String
+  +price: Decimal
+}
+Customer "1" --> "*" Order
+Order "*" --> "*" Product
+@enduml`;
+
+$('btnRender').onclick = render;
+$('btnNew').onclick = () => {
+  if (state.inline) { state.inline.deactivate(); state.inline = null; }
+  state.id = null; state.layout = { nodes: {}, edges: {} };
+  $('did').value = '';
+  $('src').value = SAMPLE;
+  $('preview').innerHTML = 'Click Render.';
+  history.replaceState(null, '', '/');
+  updateEmbedLink();
+};
+$('btnLoad').onclick = loadDiagram;
+$('btnSaveSource').onclick = saveSource;
+$('btnDownload').onclick = downloadPuml;
+$('btnApply').onclick = applyLayout;
+$('btnReset').onclick = resetLayout;
+
+// Init
+$('src').value = SAMPLE;
+const m = location.pathname.match(/\/edit\/([\w-]+)/);
+if (m) {
+  $('did').value = m[1];
+  loadDiagram();
+}
+
+// === Embed / postMessage handoff ==========================================
+//
+// A host page (markdown viewer, VS Code webview, …) can open this editor in
+// a popup or iframe with `?embed=1` to drive it via postMessage:
+//
+//   host  → editor : { type: 'pex-load',  source: <text> }
+//   editor → host  : { type: 'pex-ready' }                          (on load)
+//   editor → host  : { type: 'pex-source-updated', source: <text> } (on save)
+//   editor → host  : { type: 'pex-cancel' }                         (on close)
+//
+// The "source" in both directions is the FULL embedded form (source +
+// `' @startmeta ... ' @endmeta`).
+const __pexEmbed = new URLSearchParams(location.search).has('embed');
+function pexEmbedSend(msg) {
+  const target = window.opener || window.parent;
+  if (target && target !== window) target.postMessage(msg, '*');
+}
+async function pexEmbedSaveAndPost() {
+  absorbEmbeddedMeta();
+  syncTextareaMeta();
+  pexEmbedSend({ type: 'pex-source-updated', source: $('src').value });
+  setStatus('L', 'sent updated source to host');
+}
+if (__pexEmbed) {
+  ['did','btnLoad','btnNew','btnSaveSource','btnDownload','btnApply'].forEach((id) => {
+    const el = $(id); if (el) el.style.display = 'none';
+  });
+  const btn = document.createElement('button');
+  btn.textContent = '✓ 적용 후 닫기';
+  btn.className = 'primary';
+  btn.style.marginLeft = '8px';
+  btn.onclick = async () => { await pexEmbedSaveAndPost(); window.close(); };
+  $('btnRender').parentNode.insertBefore(btn, $('btnRender').nextSibling);
+
+  window.addEventListener('message', (e) => {
+    const d = e.data; if (!d || typeof d !== 'object') return;
+    if (d.type === 'pex-load' && typeof d.source === 'string') {
+      $('src').value = d.source;
+      render();
+    }
+  });
+  window.addEventListener('beforeunload', () => pexEmbedSend({ type: 'pex-cancel' }));
+  pexEmbedSend({ type: 'pex-ready' });
+}
+</script>
+</body>
+</html>

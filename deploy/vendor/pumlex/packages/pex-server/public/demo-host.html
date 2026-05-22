@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>plantumlEx — host integration demo (in-place edit)</title>
+<style>
+  body { margin: 0; padding: 24px 32px; font: 14px/1.55 system-ui, sans-serif; max-width: 980px; color: #222; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #666; margin-bottom: 24px; }
+  .pex-block {
+    position: relative; background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 12px; margin: 16px 0;
+  }
+  .pex-block .pex-toolbar {
+    position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 5;
+    opacity: 0; transition: opacity 0.15s ease-in;
+  }
+  /* Reveal toolbar on hover, on keyboard focus, or while editing. */
+  .pex-block:hover .pex-toolbar,
+  .pex-block:focus-within .pex-toolbar,
+  .pex-block.editing .pex-toolbar { opacity: 1; }
+  .pex-block .pex-toolbar button {
+    padding: 4px 10px; cursor: pointer; border: 1px solid #d0d7de;
+    background: #f6f8fa; border-radius: 4px; font-size: 12px;
+  }
+  .pex-block .pex-toolbar button:hover { background: #e7ecf1; }
+  .pex-block.editing .pex-edit-btn { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .pex-block svg { max-width: 100%; height: auto; }
+  .pex-block .pex-loading { color: #666; padding: 24px; text-align: center; }
+  textarea { width: 100%; height: 240px; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+  .toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    background: #1f2937; color: #fff; padding: 8px 16px; border-radius: 4px;
+    font-size: 13px; transition: opacity .3s; opacity: 0;
+  }
+  .toast.show { opacity: 1; }
+  details { margin: 12px 0; }
+  details summary { cursor: pointer; color: #2563eb; }
+  .host-bar {
+    margin: 12px 0; padding: 8px 12px; background: #f6f8fa; border: 1px solid #d0d7de;
+    border-radius: 4px; display: flex; gap: 8px; align-items: center; font-size: 13px;
+  }
+  .host-bar-hint { color: #666; font-size: 12px; }
+  .host-bar .mode-btn {
+    padding: 4px 12px; cursor: pointer; border: 1px solid #d0d7de;
+    background: white; border-radius: 4px; font-size: 13px;
+  }
+  .host-bar .mode-btn.active { background: #2563eb; color: white; border-color: #2563eb; cursor: default; }
+  .host-bar .mode-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+  /* Markdown edit mode: hide per-block toolbars (the markdown text is the
+     source of truth right now), make the textarea editable, draw attention. */
+  body.host-edit-mode .pex-toolbar { display: none !important; }
+  body.host-edit-mode #rawMd { background: #fffbe8; outline: 2px solid #fde68a; }
+</style>
+</head>
+<body>
+  <h1>호스트 통합 데모 — 인라인 편집</h1>
+  <p class="sub">
+    ✎ 편집 = 다이어그램 위에서 직접 편집 (핸들 오버레이 → 드래그 → ✓ 완료) ·
+    ↗ 새 창 = 풀 에디터를 별도 창으로 (좌측 소스 패널 포함, postMessage로 회신).
+  </p>
+
+  <div class="host-bar">
+    <strong>[호스트 모드]</strong>
+    <button id="btnHostEdit" class="mode-btn">✎ 편집</button>
+    <button id="btnHostSave" class="mode-btn">💾 저장</button>
+    <button id="btnHostView" class="mode-btn">👁 보기</button>
+    <span class="host-bar-hint">변경사항은 자동으로 localStorage 드래프트에 저장됩니다. 저장 누르면 호스트 측에 영구 반영(데모는 localStorage).</span>
+    <button id="btnReload" style="margin-left:auto; padding: 4px 12px; cursor: pointer;">↺ 새로고침</button>
+  </div>
+
+  <p>일반 텍스트입니다. 아래는 plantuml 코드 블록 (예: <code>language-plantuml</code>):</p>
+
+  <div class="pex-block" data-source-id="0">
+    <div class="pex-toolbar">
+      <button class="pex-popup-btn" data-idx="0" title="풀 에디터를 새 창으로 띄움">↗ 새 창</button>
+      <button class="pex-edit-btn"  data-idx="0">✎ 편집</button>
+    </div>
+    <div class="pex-render"><div class="pex-loading">렌더링 중…</div></div>
+  </div>
+
+  <p>또 다른 plantuml 블록:</p>
+
+  <div class="pex-block" data-source-id="1">
+    <div class="pex-toolbar">
+      <button class="pex-popup-btn" data-idx="1" title="풀 에디터를 새 창으로 띄움">↗ 새 창</button>
+      <button class="pex-edit-btn"  data-idx="1">✎ 편집</button>
+    </div>
+    <div class="pex-render"><div class="pex-loading">렌더링 중…</div></div>
+  </div>
+
+  <p>시퀀스 다이어그램 (E-4): participant 의 lifeline / head / tail 을 가로로 드래그하면 컬럼 전체가 이동합니다. 메타에 <code>"layout.participants"</code> 가 사전 임베드되어 있어 첫 렌더부터 dx 가 반영되고, ✎ 편집 후 추가 드래그 → ✓ 완료 시 메타가 재기록됩니다.</p>
+
+  <div class="pex-block" data-source-id="2">
+    <div class="pex-toolbar">
+      <button class="pex-popup-btn" data-idx="2" title="풀 에디터를 새 창으로 띄움">↗ 새 창</button>
+      <button class="pex-edit-btn"  data-idx="2">✎ 편집</button>
+    </div>
+    <div class="pex-render"><div class="pex-loading">렌더링 중…</div></div>
+  </div>
+
+  <details open>
+    <summary>마크다운 원본 (편집 시 메타 포함하여 자동 갱신)</summary>
+    <textarea id="rawMd" readonly></textarea>
+  </details>
+
+  <div class="toast" id="toast"></div>
+
+<script src="/pex-core/geom.js"></script>
+<script src="/pex-core/meta.js"></script>
+<script src="/pex-core/inline.js"></script>
+<script>
+const PLANTUMLEX = location.origin;
+const $ = (id) => document.getElementById(id);
+
+const sources = [
+  `@startuml
+class Customer {
+  +id: UUID
+}
+class Order {
+  +id: UUID
+}
+class Product {
+  +sku: String
+}
+Customer "1" --> "*" Order
+Order "*" --> "*" Product
+@enduml`,
+  `@startuml
+left to right direction
+actor Admin
+rectangle System {
+  usecase "Manage Users" as UC1
+  usecase "View Reports" as UC2
+}
+Admin --> UC1
+Admin --> UC2
+@enduml`,
+  `@startuml
+actor User
+participant "Web App" as Web
+participant "API" as Api
+database DB
+
+User -> Web : login(id, pw)
+activate Web
+Web -> Api : POST /auth
+activate Api
+Api -> DB : SELECT user
+DB --> Api : row
+Api --> Web : token
+deactivate Api
+Web --> User : OK
+deactivate Web
+@enduml
+
+' @startmeta
+' {
+'   "schema": 2,
+'   "layout": {
+'     "nodes": {},
+'     "edges": {},
+'     "participants": {
+'       "DB": { "dx": 60 },
+'       "Api": { "dx": 30 }
+'     }
+'   }
+' }
+' @endmeta`,
+];
+
+// Track per-block editing session
+const editing = new Map(); // idx -> { inline }
+// Mirror of sources[] persisted on host save. If absent, drafts may exist
+// only in localStorage (managed by pex-inline).
+const HOST_STORE_KEY = 'demo-host:sources';
+function loadHostSavedSources() {
+  try { return JSON.parse(localStorage.getItem(HOST_STORE_KEY) || 'null'); } catch { return null; }
+}
+function saveHostSources() {
+  localStorage.setItem(HOST_STORE_KEY, JSON.stringify(sources));
+}
+// Restore from previous host save, if any.
+const __saved = loadHostSavedSources();
+if (Array.isArray(__saved) && __saved.length === sources.length) {
+  for (let i = 0; i < sources.length; i++) {
+    if (typeof __saved[i] === 'string' && __saved[i].length) sources[i] = __saved[i];
+  }
+}
+
+function refreshRawMd() {
+  $('rawMd').value = sources.map((s) => '```plantuml\n' + s + '\n```').join('\n\n');
+}
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1600);
+}
+
+async function renderBlock(idx) {
+  const blockEl = document.querySelector(`.pex-block[data-source-id="${idx}"] .pex-render`);
+  blockEl.innerHTML = '<div class="pex-loading">렌더링 중…</div>';
+  try {
+    const res = await fetch(PLANTUMLEX + '/render-with-layout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body: sources[idx],
+    });
+    if (!res.ok) throw new Error(await res.text());
+    blockEl.innerHTML = await res.text();
+  } catch (e) {
+    blockEl.innerHTML = `<div class="pex-loading" style="color:#b00">⚠ ${e.message}</div>`;
+  }
+}
+
+function startEditing(idx) {
+  // Stop any other in-progress edit (only one at a time)
+  for (const [otherIdx] of editing) if (otherIdx !== idx) stopEditing(otherIdx, /* commit */ true);
+
+  const block = document.querySelector(`.pex-block[data-source-id="${idx}"]`);
+  const renderEl = block.querySelector('.pex-render');
+  const editBtn = block.querySelector('.pex-edit-btn');
+  if (!renderEl.querySelector('svg')) { toast('아직 렌더링 중'); return; }
+
+  // Use the new source-aware API: pex-inline parses the embedded meta on its
+  // own and reports back updated source-with-meta strings whenever the user
+  // drags / changes edge type. localStorage drafts are managed inside.
+  const inline = PexInline.activate(renderEl, {
+    source: sources[idx],
+    onSourceChange: (newSrc) => { sources[idx] = newSrc; refreshRawMd(); },
+  });
+  editing.set(idx, { inline });
+  block.classList.add('editing');
+  editBtn.textContent = '✓ 완료';
+  editBtn.onclick = () => stopEditing(idx, /* commit */ true);
+}
+
+function stopEditing(idx, commit) {
+  const sess = editing.get(idx);
+  if (!sess) return;
+  // sources[idx] is already up to date (onSourceChange fired during edits).
+  // The inline still holds the dirty badge — keep it visible in the post-edit
+  // static view so the user can see "변경됨, 저장 필요". markSaved() is only
+  // called when the host actually persists.
+  sess.inline.deactivate();
+  editing.delete(idx);
+
+  const block = document.querySelector(`.pex-block[data-source-id="${idx}"]`);
+  const editBtn = block.querySelector('.pex-edit-btn');
+  block.classList.remove('editing');
+  editBtn.textContent = '✎ 편집';
+  editBtn.onclick = () => startEditing(idx);
+
+  if (commit) {
+    refreshRawMd();
+    renderBlock(idx);
+    toast(`블록 ${idx + 1} 갱신`);
+  }
+}
+
+document.querySelectorAll('.pex-edit-btn').forEach((b) => {
+  b.onclick = () => startEditing(parseInt(b.dataset.idx, 10));
+});
+
+// "↗ 새 창" — open the full editor in a popup, hand the source over via
+// postMessage, accept the updated source back and treat it the same as
+// an in-place commit.
+function openInPopup(idx) {
+  // If an in-place edit is in progress on this block, drop it first so
+  // there's only one editing surface at a time.
+  if (editing.has(idx)) stopEditing(idx, /* commit */ false);
+
+  const popup = window.open(PLANTUMLEX + '/edit?embed=1', `pex-popup-${idx}`, 'width=1280,height=820');
+  if (!popup) { toast('팝업 차단을 해제해주세요'); return; }
+
+  const onMessage = (e) => {
+    const d = e.data; if (!d || typeof d !== 'object') return;
+    if (d.type === 'pex-ready') {
+      popup.postMessage({ type: 'pex-load', source: sources[idx] }, '*');
+    } else if (d.type === 'pex-source-updated' && typeof d.source === 'string') {
+      sources[idx] = d.source;
+      refreshRawMd();
+      renderBlock(idx);
+      toast(`블록 ${idx + 1} 갱신 (새 창)`);
+      window.removeEventListener('message', onMessage);
+    } else if (d.type === 'pex-cancel') {
+      window.removeEventListener('message', onMessage);
+    }
+  };
+  window.addEventListener('message', onMessage);
+}
+document.querySelectorAll('.pex-popup-btn').forEach((b) => {
+  b.onclick = () => openInPopup(parseInt(b.dataset.idx, 10));
+});
+
+// ---- Markdown edit / save / view modes ----------------------------------
+//
+// 편집  -- enter markdown-edit mode: textarea becomes editable, in-place
+//          diagram editing is suppressed (markdown text is source of truth)
+// 저장  -- if in edit mode, parse textarea back into sources[] first, then
+//          persist to localStorage and call markSaved on inline sessions
+// 보기  -- exit edit mode without committing (textarea reverts from sources[])
+let mode = 'view';
+function setMode(m) {
+  mode = m;
+  document.body.classList.toggle('host-edit-mode', m === 'edit');
+  $('rawMd').readOnly = (m !== 'edit');
+  $('btnHostEdit').classList.toggle('active', m === 'edit');
+  $('btnHostView').classList.toggle('active', m === 'view');
+  $('btnHostEdit').disabled = (m === 'edit');
+  $('btnHostView').disabled = (m === 'view');
+}
+function enterEdit() {
+  // Drop any in-place diagram-edit sessions before manual markdown editing
+  for (const [idx] of editing) stopEditing(idx, /* commit */ true);
+  refreshRawMd(); // sync textarea with current sources[]
+  setMode('edit');
+  $('rawMd').focus();
+}
+// Pull `\`\`\`plantuml ... \`\`\`` blocks back out of the markdown text.
+function parseMarkdownToSources(md) {
+  const re = /```plantuml\r?\n([\s\S]*?)\r?\n```/g;
+  const out = []; let m;
+  while ((m = re.exec(md)) !== null) out.push(m[1]);
+  return out;
+}
+function clearAllDrafts() {
+  sources.forEach((s) => {
+    const clean = PexMeta.parseSource(s).source;
+    if (!clean) return;
+    let h = 5381;
+    for (let i = 0; i < clean.length; i++) h = ((h * 33) ^ clean.charCodeAt(i)) >>> 0;
+    localStorage.removeItem('pex:draft:' + h.toString(36));
+  });
+}
+function hostSave() {
+  // If user was hand-editing markdown, parse it back into sources[]
+  if (mode === 'edit') {
+    const parsed = parseMarkdownToSources($('rawMd').value);
+    if (parsed.length === sources.length) {
+      for (let i = 0; i < sources.length; i++) sources[i] = parsed[i];
+    } else {
+      toast(`⚠ plantuml 블록 수가 ${sources.length}개여야 하는데 ${parsed.length}개`);
+      return;
+    }
+  }
+  saveHostSources();
+  for (const [, sess] of editing) sess.inline.markSaved();
+  clearAllDrafts();
+  setMode('view');
+  refreshRawMd();
+  sources.forEach((_, i) => renderBlock(i));
+  toast('마크다운 저장됨 (localStorage)');
+}
+function exitToView() {
+  // Cancel any unsaved manual markdown edits — restore textarea from sources[]
+  refreshRawMd();
+  setMode('view');
+}
+$('btnHostEdit').onclick = enterEdit;
+$('btnHostSave').onclick = hostSave;
+$('btnHostView').onclick = exitToView;
+$('btnReload').onclick = () => location.reload();
+setMode('view');
+
+// Initial render
+refreshRawMd();
+sources.forEach((_, i) => renderBlock(i));
+</script>
+</body>
+</html>
