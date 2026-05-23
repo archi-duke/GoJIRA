@@ -113,6 +113,10 @@ func main() {
 		// LLM gateway — Platform-API 가 키/모델/엔드포인트를 단독 관리, 다른 서비스는 HTTP 호출
 		r.Post("/LLM/call", handlers.LLMCallHandler)
 
+		// Launcher 바이너리 호스팅 — 웹이 런처 미감지 상태에서 다운로드.
+		r.Get("/launcher/manifest", handlers.LauncherManifestHandler)
+		r.Get("/launcher/download/{os}", handlers.LauncherDownloadHandler)
+
 		// DocRepo — 문서 이력관리 (projectCode 기반)
 		r.Route("/DocRepo", func(r chi.Router) {
 			r.Get("/", handlers.DocRepoListHandler)

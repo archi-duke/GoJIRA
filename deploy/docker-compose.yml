@@ -85,6 +85,8 @@ services:
       - ${GOJIRA_REPOS_DIR:-../repos}:/data/repos
       # 사내 LLM swap 위해 llm.json 외부 주입 (없으면 이미지에 내장된 default 사용)
       - ./config/llm.json:/app/config/llm.json:ro
+      # 미리 빌드된 런처 바이너리 (OS별) — /api/v2/launcher/download/{os} 가 stream.
+      - ./launcher-dist:/app/launcher-dist:ro
 
   # ── 백엔드: GoJIRA-API ────────────────────────────────────────────────────
   gojira-api:
