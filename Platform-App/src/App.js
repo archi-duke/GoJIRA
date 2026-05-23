@@ -9,6 +9,7 @@ import { subscribe, onStatus } from './utils/sseManager';
 import { modalAlert, modalConfirm } from './components/AlertModal';
 import appRegistry from './apps/registry';
 import config from './config';
+import { detectLauncher, requestChat } from './utils/launcher';
 import './App.css';
 
 const API_BASE = config.API_BASE;
@@ -133,6 +134,24 @@ function App() {
     if (p === 'map') setMapResetCount(c => c + 1);
   }, []);
 
+  // 로고/타이틀 클릭 — 활성 프로젝트가 있으면 그 로컬 clone 에서, 없으면 일반 repoRoot 에서 에이전트 spawn.
+  // 활성 프로젝트는 GoJIRA-App 이 진입 시 sessionStorage.gojira_project 에 저장 (같은 window 공유).
+  // 런처 /chat 이 code 가 오면 EnsureRepo 로 clone 없으면 생성한 뒤 그 디렉토리에서 띄운다.
+  const launchAgentChat = useCallback(async () => {
+    const r = await detectLauncher();
+    if (!r?.ready) {
+      modalAlert('로컬 런처가 감지되지 않았습니다.\n프로젝트 화면의 "로컬 수정" 버튼을 클릭하면 설치 안내가 표시됩니다.');
+      return;
+    }
+    let code = '';
+    try {
+      const proj = JSON.parse(sessionStorage.getItem('gojira_project') || 'null');
+      code = proj?.jiraCodes?.main?.jiraCode || '';
+    } catch {}
+    const res = await requestChat({ code, user, token: r.token });
+    if (!res.ok) modalAlert(res.error || '에이전트 실행에 실패했습니다.');
+  }, [user]);
+
   // Agent 독립 창(GoJIRA-App :3001)에서 보낸 네비게이션 명령 수신
   useEffect(() => {
     function handleMessage(e) {
@@ -192,8 +211,14 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon" />
-        <span className="app-logo">GoJIRA</span>
+        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon"
+          style={{ cursor: 'pointer' }}
+          onClick={launchAgentChat}
+          title="에이전트 채팅 띄우기" />
+        <span className="app-logo"
+          style={{ cursor: 'pointer' }}
+          onClick={launchAgentChat}
+          title="에이전트 채팅 띄우기">GoJIRA</span>
         <nav className="app-nav">
           {visibleApps.map((app) => (
             <button

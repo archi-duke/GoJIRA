@@ -9,6 +9,7 @@ import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import { detectLauncher, requestEdit, requestPush } from '../utils/launcher';
+import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
 
 const API = config.PLATFORM_API + '/DocRepo';
@@ -100,6 +101,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [content, setContent] = useState('');
   const [launcher, setLauncher] = useState(null); // 로컬 런처 감지 결과 { ready, agents, token } | null
   const [launching, setLaunching] = useState(false); // /edit 호출 진행 중
+  const [installOpen, setInstallOpen] = useState(false); // 설치 안내 모달
   const [publishing, setPublishing] = useState(false); // 로컬 push→PR 진행 중
   const [showGraph, setShowGraph] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState(() => new Set());
@@ -232,10 +234,11 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     return () => { alive = false; window.removeEventListener('focus', probe); };
   }, []);
 
-  // "로컬 수정" — 런처에 /edit 요청해 VS Code + CLI(opencode|claude)를 소환.
-  // 웹은 조회 전용이며, 편집은 사용자 PC 로컬 작업본에서 이뤄진다 (local-agent-mvp §4).
+  // "로컬 수정" — VS Code 만 띄움. 런처 미감지면 설치 모달.
+  // 에이전트(채팅)는 별도 handleLocalChat 으로 분리.
   async function handleLocalEdit() {
-    if (!launcher || !selectedFile) return;
+    if (!selectedFile) return;
+    if (!launcher?.ready) { setInstallOpen(true); return; }
     setLaunching(true);
     try {
       const res = await requestEdit({
@@ -244,14 +247,17 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         file: selectedFile,
         token: launcher.token,
       });
-      if (res.ok) {
-        modalAlert(`로컬에서 "${selectedFile}" 을(를) 열었습니다.\nVS Code 와 ${res.data.agent || '에이전트'} 가 실행됩니다. 편집 후 push → PR 로 반영하세요.`);
-      } else {
-        modalAlert(res.error || '로컬 런처 호출에 실패했습니다.');
-      }
+      if (!res.ok) modalAlert(res.error || '로컬 런처 호출에 실패했습니다.');
     } finally {
       setLaunching(false);
     }
+  }
+
+  // 설치 완료 후 "다시 시도" — 재감지 → 성공이면 모달 닫기.
+  async function handleInstallRetry() {
+    const r = await detectLauncher();
+    setLauncher(r);
+    if (r?.ready) setInstallOpen(false);
   }
 
   async function handleFileClick(path, isMainOnly) {
@@ -381,6 +387,12 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <CommonBar title={barTitle} onBack={onBack} nav={nav} projectAlert={projectAlert} />
+      {installOpen && (
+        <LauncherInstallModal
+          onClose={() => setInstallOpen(false)}
+          onRetry={handleInstallRetry}
+        />
+      )}
       <div className="de-editor">
         <div className="de-sidebar" style={{ width: sidebarWidth }}>
           <div className="de-sidebar-tabs">
@@ -411,7 +423,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 disabled={publishing}
                 title="로컬에서 commit 한 변경을 push 하고 발행 신청(PR)합니다"
               >
-                {publishing ? '발행 중...' : '로컬 push & 발행'}
+                {publishing ? '발행 중...' : '발행'}
               </button>
             )}
           </div>
@@ -503,16 +515,16 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                           {loadingDiff ? '로딩...' : 'Diff 분석'}
                         </button>
                       )}
-                      {launcher?.ready && (
-                        <button
-                          className="de-btn de-btn-primary"
-                          onClick={handleLocalEdit}
-                          disabled={launching}
-                          title="로컬 VS Code + 에이전트(opencode/claude)로 이 문서를 엽니다"
-                        >
-                          {launching ? '여는 중...' : '로컬 수정'}
-                        </button>
-                      )}
+                      <button
+                        className="de-btn de-btn-primary"
+                        onClick={handleLocalEdit}
+                        disabled={launching}
+                        title={launcher?.ready
+                          ? '로컬 VS Code 로 이 문서를 엽니다'
+                          : '로컬 런처가 감지되지 않았습니다 — 클릭하면 설치 안내'}
+                      >
+                        {launching ? '여는 중...' : '로컬 수정'}
+                      </button>
                     </>
                   )}
                 </div>

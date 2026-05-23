@@ -18,6 +18,8 @@ const config = {
   SSO_URL: pick('REACT_APP_SSO_URL', 'https://10.227.37.90:443'),
   USE_SSO: false,
   DEV_USER: 'duke.kimm',
+  // 로컬 런처 (사용자 PC) — 로고/타이틀 클릭 → /chat 으로 에이전트 spawn.
+  LAUNCHER_BASE: pick('REACT_APP_LAUNCHER_BASE', 'http://127.0.0.1:5599'),
 };
 
 export default config;

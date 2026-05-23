@@ -45,11 +45,20 @@ export async function detectLauncher() {
 }
 
 /**
- * "수정" — 로컬 clone 보장 + docs/{user} 체크아웃 + VS Code(특정 file) + CLI spawn.
+ * "수정" — 로컬 clone 보장 + docs/{user} 체크아웃 + VS Code(특정 file) 오픈.
+ *           에이전트 CLI 는 spawn 하지 않는다 (별도 /chat).
  * @returns {Promise<{ok:boolean, data?:object, error?:string}>}
  */
-export async function requestEdit({ code, user, file, agent, token }) {
-  return post('/edit', { code, user, file, agent }, token);
+export async function requestEdit({ code, user, file, token }) {
+  return post('/edit', { code, user, file }, token);
+}
+
+/**
+ * "채팅" — 등록된 에이전트 CLI(opencode|claude)만 새 터미널로 spawn.
+ *           VS Code 는 띄우지 않음 (필요하면 /edit 으로 분리 호출).
+ */
+export async function requestChat({ code, user, agent, token }) {
+  return post('/chat', { code, user, agent }, token);
 }
 
 /**
