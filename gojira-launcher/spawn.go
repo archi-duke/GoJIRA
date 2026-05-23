@@ -63,17 +63,17 @@ func safeFilePath(repoPath, file string) (string, error) {
 }
 
 // OpenInEditor — VS Code 로 폴더(+선택 파일)를 연다. fullFile 은 safeFilePath 검증을 통과한 절대경로.
+// 단일 호출로 폴더+파일을 한 번에 전달 — 더블 launch 시 새 창이 maximized 로 떠버리는 현상 회피.
 func OpenInEditor(repoPath, fullFile string) error {
 	if !hasEditor() {
 		return fmt.Errorf("'code' (VS Code) 를 PATH 에서 찾을 수 없습니다")
 	}
-	// 폴더를 기존 창에 열기.
-	if err := exec.Command("code", repoPath).Start(); err != nil {
-		return fmt.Errorf("VS Code 폴더 열기 실패: %w", err)
-	}
+	args := []string{repoPath}
 	if fullFile != "" {
-		// -r: 같은 창 재사용, -g: 파일로 이동.
-		_ = exec.Command("code", "-r", "-g", fullFile).Start()
+		args = append(args, "-g", fullFile)
+	}
+	if err := exec.Command("code", args...).Start(); err != nil {
+		return fmt.Errorf("VS Code 열기 실패: %w", err)
 	}
 	return nil
 }

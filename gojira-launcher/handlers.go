@@ -72,22 +72,16 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 }
 
 type editReq struct {
-	Code  string `json:"code"`
-	User  string `json:"user"`
-	File  string `json:"file"`
-	Agent string `json:"agent"`
+	Code string `json:"code"`
+	User string `json:"user"`
+	File string `json:"file"`
 }
 
-// POST /edit — /open + 특정 file 오픈 + CLI spawn (§2.1).
+// POST /edit — clone 보장 + ingest + VS Code(특정 file) 오픈. agent spawn 은 /chat 으로 분리.
 func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	var req editReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
-		return
-	}
-	agent, err := s.resolveAgent(req.Agent)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	repoPath, err := s.EnsureRepo(req.Code, req.User)
@@ -101,7 +95,7 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// 콜드스타트: 로컬 YAML → Mongo 캐시 동기화 (CLI 가 편집 시작하기 전 캐시 최신화).
+	// 콜드스타트: 로컬 YAML → Mongo 캐시 동기화.
 	ingest, err := s.IngestIssues(req.Code, req.User)
 	if err != nil {
 		log.Printf("/edit ingest 경고 code=%s: %v", req.Code, err)
@@ -110,17 +104,53 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	sessionID, err := SpawnAgent(agent, repoPath, s.agentEnv(repoPath, req.User))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"repoPath": repoPath,
+		"ingest":   ingest,
+	})
+}
+
+type chatReq struct {
+	Code  string `json:"code"`
+	User  string `json:"user"`
+	Agent string `json:"agent"`
+}
+
+// POST /chat — 등록된 에이전트 CLI(opencode|claude) 만 새 터미널로 spawn.
+// /edit 과 분리된 동작 — 사용자는 VS Code 만 열거나, 그 위에 채팅을 추가로 띄울 수 있다.
+// code 가 비어있으면 프로젝트 없는 일반 채팅 — repoRoot 에서 그대로 spawn (clone 안 함).
+func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	var req chatReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	agent, err := s.resolveAgent(req.Agent)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	spawnDir := s.cfg.RepoRoot
+	if req.Code != "" {
+		repoPath, err := s.EnsureRepo(req.Code, req.User)
+		if err != nil {
+			log.Printf("/chat 실패 code=%s user=%s: %v", req.Code, req.User, err)
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		spawnDir = repoPath
+	}
+	sessionID, err := SpawnAgent(agent, spawnDir, s.agentEnv(spawnDir, req.User))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "ok",
-		"repoPath":  repoPath,
+		"repoPath":  spawnDir,
 		"agent":     agent,
 		"sessionId": sessionID,
-		"ingest":    ingest,
 	})
 }
 

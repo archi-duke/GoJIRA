@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -179,7 +181,99 @@ func (s *Server) EnsureRepo(code, user string) (string, error) {
 	if err := s.checkoutUserBranch(path, branch); err != nil {
 		return "", err
 	}
+	s.ensureSkillsSymlink(path)
+	s.ensureGitIdentity(path, user)
 	return path, nil
+}
+
+// ensureGitIdentity — clone 의 user.name/user.email 이 비어있으면 주입한다 (commit author 식별).
+// 우선순위: launcher.json git.authorName/Email → 요청 user(knoxId) 기반 fallback.
+// 인증과는 무관 (인증은 clone URL embedded PAT). 이미 설정돼 있으면 손대지 않는다.
+func (s *Server) ensureGitIdentity(path, user string) {
+	name := s.cfg.Git.AuthorName
+	if name == "" {
+		name = user
+	}
+	email := s.cfg.Git.AuthorEmail
+	if email == "" {
+		email = user + "@gojira.local"
+	}
+	if cur, _ := gitCmd(path, "config", "--get", "user.name"); cur == "" {
+		if _, err := gitCmd(path, "config", "user.name", name); err != nil {
+			log.Printf("ensureGitIdentity user.name 실패 (%s): %v", path, err)
+		}
+	}
+	if cur, _ := gitCmd(path, "config", "--get", "user.email"); cur == "" {
+		if _, err := gitCmd(path, "config", "user.email", email); err != nil {
+			log.Printf("ensureGitIdentity user.email 실패 (%s): %v", path, err)
+		}
+	}
+}
+
+// ensureSkillsSymlink — skillsSourceDir 가 설정돼 있고 그 안에 .claude 가 있으면,
+// target/.claude 가 마스터 레포의 .claude 를 참조하도록 만든다 (이미 있으면 노옵).
+// 실패는 비치명적 — 로그만 남긴다. 목적: 런처가 spawn 하는 opencode/claude 가
+// 마스터 레포의 GoJIRA 스킬을 그대로 호출하도록.
+//
+// OS별 전략 (사용자가 추가한 .claude 가 있으면 어느 경우든 손대지 않음):
+//   - Linux/macOS: os.Symlink (권한 불요)
+//   - Windows: 1) symlink (Dev Mode 필요), 2) mklink /J 디렉토리 junction (권한 불요/동일 볼륨),
+//              3) .claude 트리 복사 (cross-volume 마지막 수단 — 스킬 수정 시 stale)
+func (s *Server) ensureSkillsSymlink(target string) {
+	src := s.cfg.SkillsSourceDir
+	if src == "" {
+		return
+	}
+	srcClaude := filepath.Join(src, ".claude")
+	if _, err := os.Stat(srcClaude); err != nil {
+		return
+	}
+	dst := filepath.Join(target, ".claude")
+	if _, err := os.Lstat(dst); err == nil {
+		return // 이미 있음 — 사용자 커밋이든 이전 symlink 든 건드리지 않는다.
+	}
+
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(srcClaude, dst); err != nil {
+			log.Printf("ensureSkillsSymlink symlink 실패 (%s → %s): %v", srcClaude, dst, err)
+		}
+		return
+	}
+
+	// Windows: 단계적 폴백.
+	if err := os.Symlink(srcClaude, dst); err == nil {
+		return
+	}
+	if err := exec.Command("cmd", "/c", "mklink", "/J", dst, srcClaude).Run(); err == nil {
+		return
+	}
+	if err := copyTree(srcClaude, dst); err != nil {
+		log.Printf("ensureSkillsSymlink Windows fallback (copy) 실패 (%s → %s): %v — Dev Mode 활성화를 권장합니다", srcClaude, dst, err)
+	}
+}
+
+// copyTree — src 트리를 dst 로 재귀 복사 (Windows symlink/junction 폴백 전용).
+// 심볼릭 링크 자체는 따라가지 않고 일반 파일로 복사 — .claude/skills 내부 일반 파일/디렉토리만 다룬다.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
 }
 
 // checkoutUserBranch — origin/<branch> 가 있으면 추적 체크아웃, 없으면 origin/main 기반 신규 생성.

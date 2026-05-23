@@ -15,13 +15,14 @@ import (
 // 토큰을 사용자 홈에 저장한다. 여기 Token 은 웹↔런처 핸드셰이크용 설치 토큰이며,
 // 설정에 없으면 첫 기동 시 자동 생성되어 token 파일에 영구 저장된다(§2.3).
 type Config struct {
-	DefaultAgent string  `json:"defaultAgent"` // opencode | claude
-	RepoRoot     string  `json:"repoRoot"`     // 로컬 clone 루트
-	Backend      Backend `json:"backend"`
-	Port         int     `json:"port"`
-	WebOrigin    string  `json:"webOrigin"` // 허용할 웹 origin (CORS/Origin 검증)
-	Git          Git     `json:"git"`       // clone 대상 Gitea base + org
-	Token        string  `json:"token"`     // 설치 토큰(미설정 시 자동 생성)
+	DefaultAgent    string  `json:"defaultAgent"`    // opencode | claude
+	RepoRoot        string  `json:"repoRoot"`        // 로컬 clone 루트
+	Backend         Backend `json:"backend"`
+	Port            int     `json:"port"`
+	WebOrigin       string  `json:"webOrigin"`       // 허용할 웹 origin (CORS/Origin 검증)
+	Git             Git     `json:"git"`             // clone 대상 Gitea base + org
+	Token           string  `json:"token"`           // 설치 토큰(미설정 시 자동 생성)
+	SkillsSourceDir string  `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink (있으면). agent CLI 가 GoJIRA 스킬 호출 가능하도록.
 }
 
 type Backend struct {
@@ -31,8 +32,10 @@ type Backend struct {
 
 // Git 은 clone URL 조립용. <Base>/<Org>/<code>.git
 type Git struct {
-	Base string `json:"base"` // 예: http://gitea-host:3000
-	Org  string `json:"org"`  // 예: gojira
+	Base        string `json:"base"`        // 예: http://gitea-host:3000
+	Org         string `json:"org"`         // 예: gojira
+	AuthorName  string `json:"authorName"`  // git config user.name (생략 시 요청 user 사용)
+	AuthorEmail string `json:"authorEmail"` // git config user.email (생략 시 <user>@gojira.local)
 }
 
 const (
