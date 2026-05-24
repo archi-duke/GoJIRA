@@ -51,11 +51,13 @@
 .de-file-modified { color: #e67e22; }
 .de-file-added { color: #27ae60; }
 .de-file-deleted { color: #e74c3c; text-decoration: line-through; }
-.de-file-badge { display: inline-block; width: 16px; height: 16px; line-height: 16px; text-align: center; font-size: 10px; font-weight: 700; color: #fff; border-radius: 3px; margin-right: 6px; flex-shrink: 0; }
-.de-badge-modified { background: #e67e22; }
-.de-badge-added { background: #27ae60; }
-.de-badge-deleted { background: #e74c3c; }
+.de-file-badge { display: inline-block; min-width: 16px; height: 16px; padding: 0 3px; line-height: 16px; text-align: center; font-size: 10px; font-weight: 700; color: #fff; border-radius: 3px; margin-right: 6px; flex-shrink: 0; box-sizing: border-box; }
+.de-badge-modified { --accent: #e67e22; background: var(--accent); }
+.de-badge-added    { --accent: #27ae60; background: var(--accent); }
+.de-badge-deleted  { --accent: #e74c3c; background: var(--accent); }
 .de-badge-mainonly { background: #95a5a6; }
+/* 미커밋(-) : 배경 흰색 + 강조색 폰트 + 강조색 윤곽선 (outline 으로 레이아웃 영향 없음). */
+.de-badge-uncommitted { background: #fff; color: var(--accent); outline: 1px solid var(--accent); outline-offset: -1px; }
 .de-sync-notice { padding: 6px 12px; font-size: 11px; color: #e67e22; background: #fef9e7; border-bottom: 1px solid #f0e0b0; }
 .de-badge-pending { background: orange; }
 .de-badge-both { background: tomato; }

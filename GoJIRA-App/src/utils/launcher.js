@@ -77,6 +77,14 @@ export async function requestPush({ code, user, token }) {
 }
 
 /**
+ * "등록" — dirty 면 git add -A + commit, 그 다음 push. 미커밋/미푸시를 한 번에 origin 까지 올린다.
+ * @returns {Promise<{ok:boolean, data?:{committed:boolean, push:object}, error?:string}>}
+ */
+export async function requestSync({ code, user, message, token }) {
+  return post('/sync', { code, user, message }, token);
+}
+
+/**
  * 로컬 working tree 파일 목록. 응답 shape 은 서버 /DocRepo/{code}/tree 와 호환:
  *   { tree: [{path, type:"blob", sha, size}], total_count, source }
  * sha 는 git blob 해시라 main 트리 sha 와 그대로 비교 가능.

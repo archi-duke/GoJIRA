@@ -8,7 +8,7 @@ import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile } from '../utils/launcher';
+import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
 
@@ -95,6 +95,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [mainTree, setMainTree] = useState(null);
   const [localTree, setLocalTree] = useState(null);
   const [fileStatus, setFileStatus] = useState({}); // path → 'modified' | 'added' | 'deleted'
+  const [fileCommitted, setFileCommitted] = useState({}); // path → bool — true: 차이가 docs/{user} HEAD 에 커밋됨(+), false: 미커밋(-)
+  const [ahead, setAhead] = useState(0); // docs/{user} HEAD 가 upstream 대비 앞서 있는 commit 수. -1 = upstream 미설정(신규 브랜치).
   const [activeTab, setActiveTab] = useState('local'); // 'main' | 'local'
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedMainOnly, setSelectedMainOnly] = useState(false);
@@ -162,28 +164,48 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         if (r.ok) lTree = r.data;
       }
       setLocalTree(lTree);
+      setAhead(lTree?.ahead ?? 0);
 
       if (!lTree) {
         setFileStatus({});
+        setFileCommitted({});
         if (onDocStateChange) onDocStateChange();
         return;
       }
-      const mainShaMap = {};
-      const mainPathSet = new Set();
-      (mTree.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
-      const localPathSet = new Set();
-      const status = {};
-      (lTree.tree || []).forEach(f => {
-        localPathSet.add(f.path);
-        if (!mainPathSet.has(f.path)) status[f.path] = 'added';
-        else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
+      // sha 맵 3개: main(서버) · wt(런처 working tree) · head(런처 HEAD).
+      const mainSha = {}, wtSha = {}, headSha = {};
+      const mainPaths = new Set(), wtPaths = new Set(), headPaths = new Set();
+      (mTree.tree || []).forEach(f => { mainSha[f.path] = f.sha; mainPaths.add(f.path); });
+      (lTree.tree || []).forEach(f => { wtSha[f.path] = f.sha; wtPaths.add(f.path); });
+      (lTree.headTree || []).forEach(f => { headSha[f.path] = f.sha; headPaths.add(f.path); });
+
+      // main vs working tree 차이 분류 + 그 차이가 HEAD 에 반영됐는지(=committed) 판정.
+      // committed = (현재 디스크의 내용이 HEAD 의 같은 path 와 동일) — 즉 사용자가 commit 까지 마쳤는지.
+      // added : path 가 wt 에만 → head 에도 있으면 +A (committed), 없으면 -A (untracked/uncommitted).
+      // modified : wt sha != main sha → wt sha == head sha 면 +M, 아니면 -M.
+      // deleted : path 가 main 에만 → head 에서도 빠졌으면 +D, head 에 있으면 -D (디스크에서만 지움, 아직 git rm/commit 안 함).
+      const status = {}, committed = {};
+      wtPaths.forEach(p => {
+        if (!mainPaths.has(p)) {
+          status[p] = 'added';
+          committed[p] = headPaths.has(p);
+        } else if (mainSha[p] !== wtSha[p]) {
+          status[p] = 'modified';
+          committed[p] = wtSha[p] === headSha[p];
+        }
       });
-      mainPathSet.forEach(p => { if (!localPathSet.has(p)) status[p] = 'deleted'; });
+      mainPaths.forEach(p => {
+        if (!wtPaths.has(p)) {
+          status[p] = 'deleted';
+          committed[p] = !headPaths.has(p);
+        }
+      });
       setFileStatus(status);
+      setFileCommitted(committed);
       if (onDocStateChange) onDocStateChange();
     } catch {
       if (retry < 1) setTimeout(() => refreshDocState(retry + 1), 1000);
-      else { setLocalTree(null); setFileStatus({}); }
+      else { setLocalTree(null); setFileStatus({}); setFileCommitted({}); setAhead(0); }
     }
   }
 
@@ -318,24 +340,34 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
 
-  // 로컬 push → 발행(PR). 로컬 모델에서는 커밋이 사용자 PC 에 있으므로
-  // (1) 런처가 docs/{user} 를 push 한 뒤 (2) 서버 /pr 을 skipAutoCommit 으로 호출한다.
-  // 서버측 worktree commit 을 건너뛰어 로컬에서 올린 변경분으로 PR 을 만든다 (§5-3).
-  async function handleLocalPublish() {
+  // "등록" — 미커밋(dirty) 이거나 unpushed commit 이 있을 때 한 번에 origin 까지 올린다.
+  // 런처 /sync 가 dirty 면 git add -A + commit, 그 다음 push 수행. 완료 후 트리 재로드.
+  async function handleSync() {
     if (!launcher || !launcher.token) return;
-    if (!await modalConfirm(`로컬 docs/${user} 브랜치를 push 하고 발행 신청(PR)하시겠습니까?`)) return;
+    const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+    const msg = hasUncommitted && ahead !== 0
+      ? `미커밋 변경과 미푸시 커밋을 모두 origin 으로 등록하시겠습니까?`
+      : hasUncommitted
+      ? `미커밋 변경을 커밋·푸시하시겠습니까?`
+      : `미푸시 커밋을 push 하시겠습니까?`;
+    if (!await modalConfirm(msg)) return;
     setPublishing(true);
     try {
-      const push = await requestPush({ code: projectCode, user, token: launcher.token });
-      if (!push.ok) {
-        modalAlert(push.error || '로컬 push 에 실패했습니다.');
-        return;
-      }
-      if (push.data && push.data.pushed === false) {
-        modalAlert(push.data.message || 'push 할 새 커밋이 없습니다. VS Code 에서 변경을 commit 한 뒤 다시 시도하세요.');
-        return;
-      }
-      // push 성공 → 서버 worktree commit 없이 PR 생성.
+      const r = await requestSync({ code: projectCode, user, token: launcher.token });
+      if (!r.ok) { modalAlert(r.error || '등록에 실패했습니다.'); return; }
+      refreshDocState();
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  // "발행" — origin/docs/{user} 가 이미 origin/main 과 다를 때 (모두 커밋+푸시 완료된 상태)
+  // 서버에 PR 생성만 요청. /push 는 호출하지 않는다 (이미 동기화된 상태).
+  async function handleLocalPublish() {
+    if (!launcher || !launcher.token) return;
+    if (!await modalConfirm(`origin/docs/${user} 변경을 발행 신청(PR)하시겠습니까?`)) return;
+    setPublishing(true);
+    try {
       const res = await fetch(`${API}/${projectCode}/pr`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
@@ -346,11 +378,11 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         }),
       });
       if (res.ok) {
-        modalAlert('로컬 변경을 push 하고 발행 신청(PR)을 생성했습니다.');
+        modalAlert('발행 신청(PR)을 생성했습니다.');
         refreshDocState();
       } else {
         const err = await res.json().catch(() => ({}));
-        modalAlert(err.error || 'PR 생성 실패 (push 는 완료됨)');
+        modalAlert(err.error || 'PR 생성 실패');
       }
     } finally {
       setPublishing(false);
@@ -398,13 +430,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 
   const statusBadge = (path) => {
     const diffMain = fileStatus[path]; // main과 차이
-    if (diffMain) {
-      // main과 차이: M/A/D
-      const label = diffMain === 'added' ? 'A' : diffMain === 'deleted' ? 'D' : 'M';
-      const cls = `de-file-badge de-badge-${diffMain}`;
-      return <span className={cls}>{label}</span>;
-    }
-    return null;
+    if (!diffMain) return null;
+    // prefix: + = 차이가 docs/{user} HEAD 에 커밋된 상태(발행 시 PR 에 포함됨),
+    //         - = working tree 의 미커밋 변경(commit 전이라 PR 에 안 들어감).
+    const sign = fileCommitted[path] ? '+' : '-';
+    const letter = diffMain === 'added' ? 'A' : diffMain === 'deleted' ? 'D' : 'M';
+    const cls = `de-file-badge de-badge-${diffMain}${fileCommitted[path] ? '' : ' de-badge-uncommitted'}`;
+    return <span className={cls}>{sign}{letter}</span>;
   };
 
   return (
@@ -438,17 +470,28 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           </div>
           <div className="de-sidebar-header">
             <span>{activeTab === 'main' ? 'main' : `local · docs/${user}`}</span>
-            {activeTab === 'local' && launcher?.ready && (
-              <button
-                className="de-btn"
-                style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
-                onClick={handleLocalPublish}
-                disabled={publishing}
-                title="로컬에서 commit 한 변경을 push 하고 발행 신청(PR)합니다"
-              >
-                {publishing ? '발행 중...' : '발행'}
-              </button>
-            )}
+            {activeTab === 'local' && launcher?.ready && (() => {
+              // 미커밋(-) 또는 unpushed commit 이 하나라도 있으면 "등록" 모드.
+              // (ahead === -1 은 upstream 미설정 → 신규 브랜치라 push 필요로 간주.)
+              const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+              const hasUnpushed = ahead !== 0;
+              const needsRegister = hasUncommitted || hasUnpushed;
+              const label = publishing
+                ? (needsRegister ? '등록 중...' : '발행 중...')
+                : (needsRegister ? '등록' : '발행');
+              const title = needsRegister
+                ? '미커밋/미푸시 변경을 origin 으로 올립니다'
+                : 'origin/docs/{user} 변경을 발행 신청(PR)합니다';
+              return (
+                <button
+                  className="de-btn"
+                  style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
+                  onClick={needsRegister ? handleSync : handleLocalPublish}
+                  disabled={publishing}
+                  title={title}
+                >{label}</button>
+              );
+            })()}
           </div>
           {activeTab === 'local' && !launcher?.ready && (
             <div className="de-sync-notice">

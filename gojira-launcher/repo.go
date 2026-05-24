@@ -182,8 +182,34 @@ func (s *Server) EnsureRepo(code, user string) (string, error) {
 		return "", err
 	}
 	s.ensureSkillsSymlink(path)
+	s.ensureExcluded(path, ".claude") // /sync 의 git add -A 가 .claude 심볼릭링크를 staging 하지 않도록 local-only ignore.
 	s.ensureGitIdentity(path, user)
 	return path, nil
+}
+
+// ensureExcluded — .git/info/exclude (local-only gitignore) 에 entry 가 없으면 추가.
+// .gitignore 와 달리 트래킹되지 않아 사용자/프로젝트 마다 다른 로컬 산물(예: 스킬 심볼릭링크)에 적합.
+func (s *Server) ensureExcluded(path, entry string) {
+	excludePath := filepath.Join(path, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil && !os.IsNotExist(err) {
+		log.Printf("ensureExcluded read 실패 (%s): %v", excludePath, err)
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == entry {
+			return
+		}
+	}
+	_ = os.MkdirAll(filepath.Dir(excludePath), 0o755)
+	content := string(data)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += entry + "\n"
+	if err := os.WriteFile(excludePath, []byte(content), 0o644); err != nil {
+		log.Printf("ensureExcluded write 실패 (%s): %v", excludePath, err)
+	}
 }
 
 // ensureGitIdentity — clone 의 user.name/user.email 이 비어있으면 주입한다 (commit author 식별).

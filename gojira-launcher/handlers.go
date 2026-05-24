@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -164,6 +165,55 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type syncReq struct {
+	Code    string `json:"code"`
+	User    string `json:"user"`
+	Message string `json:"message"` // 옵션 — 미지정시 auto-message.
+}
+
+// POST /sync — "등록" 액션: working tree dirty 면 stage+commit 한 뒤 origin 으로 push.
+// 웹에서 미커밋(-) 또는 unpushed 가 하나라도 있으면 이 엔드포인트로 한 번에 해소한다.
+// Push() 자체에는 손대지 않음 — 여기서 commit 만 보장하고 그 다음 기존 Push 흐름 재사용.
+func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
+	var req syncReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	path, err := s.EnsureRepo(req.Code, req.User)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	committed := false
+	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
+		if _, err := gitCmd(path, "add", "-A"); err != nil {
+			writeErr(w, http.StatusInternalServerError, "git add 실패: "+err.Error())
+			return
+		}
+		msg := strings.TrimSpace(req.Message)
+		if msg == "" {
+			msg = "[GoJIRA-web] sync local changes"
+		}
+		if _, err := gitCmd(path, "commit", "-m", msg); err != nil {
+			writeErr(w, http.StatusInternalServerError, "git commit 실패: "+err.Error())
+			return
+		}
+		committed = true
+	}
+	res, err := s.Push(req.Code, req.User)
+	if err != nil {
+		log.Printf("/sync push 실패 code=%s user=%s: %v", req.Code, req.User, err)
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"committed": committed,
+		"push":      res,
+	})
+}
+
 // POST /push — 로컬 docs/{user} 브랜치를 origin 으로 push (§5-3: push→PR 흐름).
 func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	var req openReq // {code, user}
@@ -180,10 +230,15 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// GET /files?code=&user= — 로컬 clone 의 working tree 파일 목록.
-// 응답 shape 은 서버 /DocRepo/{code}/tree 와 호환 — {tree:[{path,type,sha,size}], total_count, source}.
-// sha 는 git blob 해시(sha1("blob <size>\0"+content)) 라 main 트리의 sha 와 그대로 비교 가능 (변경 감지용).
-// .git / .claude(스킬 symlink) 는 노출에서 제외.
+// GET /files?code=&user= — 로컬 clone 의 working tree 파일 목록 + HEAD 트리.
+// 응답 shape: {tree, headTree, total_count, source}.
+//   - tree     : working tree (디스크에 있는 현재 내용 기준 blob sha) — 서버 /tree 와 호환.
+//   - headTree : 로컬 docs/{user} HEAD 의 `git ls-tree -r HEAD` 결과 (커밋된 상태).
+//
+// 웹은 두 트리를 사용해 path 별로 "main vs local 차이" 외에 "이 차이가 커밋됐는가" 까지 판정해
+// 배지에 +(committed) / -(uncommitted) 를 prefix 로 붙인다.
+//
+// sha 는 모두 git blob 해시라 비교 그대로 가능. .git / .claude(스킬 symlink) 는 노출 제외.
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	user := r.URL.Query().Get("user")
@@ -198,12 +253,26 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	headEntries, _ := listHeadTree(repoPath) // HEAD 가 없거나 ls-tree 실패면 빈 슬라이스로 진행(전부 uncommitted 로 표시됨).
+	ahead := computeAhead(repoPath)          // upstream 대비 unpushed commit 수. -1 = upstream 미설정(=신규 브랜치, push 필요).
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tree":        entries,
+		"headTree":    headEntries,
+		"ahead":       ahead,
 		"total_count": len(entries),
 		"source":      "local-launcher",
 		"repoPath":    repoPath,
 	})
+}
+
+// computeAhead — `@{upstream}..HEAD` commit 수. upstream 미설정이면 -1 (신규 브랜치 push 필요).
+func computeAhead(repoPath string) int {
+	out, err := gitCmd(repoPath, "rev-list", "--count", "@{upstream}..HEAD")
+	if err != nil {
+		return -1
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	return n
 }
 
 // GET /file?code=&user=&path= — 로컬 working tree 의 단일 파일 내용.
@@ -291,6 +360,36 @@ func listLocalTree(repoPath string) ([]map[string]any, error) {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i]["path"].(string) < entries[j]["path"].(string)
 	})
+	return entries, nil
+}
+
+// listHeadTree — `git ls-tree -r HEAD` 결과를 파싱해 평면 리스트로 반환.
+// HEAD 가 없거나(빈 레포) 실패면 빈 리스트 + err (호출 측이 비치명적으로 처리).
+// 포맷: <mode> <type> <sha>\t<path>
+func listHeadTree(repoPath string) ([]map[string]any, error) {
+	out, err := gitCmd(repoPath, "ls-tree", "-r", "HEAD")
+	if err != nil {
+		return []map[string]any{}, err
+	}
+	var entries []map[string]any
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		meta := strings.Fields(parts[0])
+		if len(meta) < 3 {
+			continue
+		}
+		entries = append(entries, map[string]any{
+			"path": parts[1],
+			"type": meta[1],
+			"sha":  meta[2],
+		})
+	}
 	return entries, nil
 }
 
