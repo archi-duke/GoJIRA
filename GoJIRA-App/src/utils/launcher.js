@@ -85,6 +85,13 @@ export async function requestSync({ code, user, message, token }) {
 }
 
 /**
+ * 인라인 편집 저장 — 로컬 working tree 의 단일 파일에 raw text 쓰기. commit/push 안 함.
+ */
+export async function requestWrite({ code, user, path, content, token }) {
+  return post('/write', { code, user, path, content }, token);
+}
+
+/**
  * 로컬 working tree 파일 목록. 응답 shape 은 서버 /DocRepo/{code}/tree 와 호환:
  *   { tree: [{path, type:"blob", sha, size}], total_count, source }
  * sha 는 git blob 해시라 main 트리 sha 와 그대로 비교 가능.

@@ -8,7 +8,7 @@ import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync } from '../utils/launcher';
+import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
 
@@ -116,6 +116,9 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   };
   const [viewMode, setViewMode] = useState('preview'); // 'preview' | 'raw' | 'diff' — 셋 중 하나만.
   const diffMode = viewMode === 'diff'; // 기존 변수명을 유지해 하위 분기 안 깨지게.
+  const [editing, setEditing] = useState(false); // 인라인 편집 모드 여부.
+  const [editContent, setEditContent] = useState(''); // textarea 바인딩. 진입 시 content 로 프리필.
+  const [saving, setSaving] = useState(false);
   const [diffTab, setDiffTab] = useState('semantic');
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -273,20 +276,59 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     return () => { alive = false; window.removeEventListener('focus', probe); };
   }, []);
 
-  // "로컬 수정" — VS Code 만 띄움. 런처 미감지면 설치 모달.
-  // 에이전트(채팅)는 별도 handleLocalChat 으로 분리.
-  async function handleLocalEdit() {
-    if (!selectedFile) return;
+  // "편집" — 인라인 편집 모드 진입. 런처 미감지면 설치 모달.
+  // 런처는 디스크 write 만 담당 (commit/push 는 Local 탭 "등록" 으로).
+  function handleStartEdit() {
+    if (!selectedFile || selectedMainOnly) return;
     if (!launcher?.ready) { setInstallOpen(true); return; }
+    setEditContent(content);
+    setEditing(true);
+  }
+
+  // 편집 중 "저장" — 런처 /write 로 로컬 디스크에 쓰고 편집 종료. 변경 트리 재로드.
+  async function handleSaveEdit() {
+    if (!selectedFile || !launcher?.ready) return;
+    setSaving(true);
+    try {
+      const r = await requestWrite({
+        code: projectCode, user, path: selectedFile,
+        content: editContent, token: launcher.token,
+      });
+      if (!r.ok) { modalAlert(r.error || '저장에 실패했습니다.'); return; }
+      setContent(editContent); // 미리보기/Raw 가 새 내용으로 반영되도록.
+      setEditing(false);
+      refreshDocState();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // 편집 중 "취소" — 변경 폐기 + 편집 종료.
+  function handleCancelEdit() {
+    setEditing(false);
+    setEditContent('');
+  }
+
+  // 편집 중 "VS Code" — 인라인 편집 내용을 먼저 disk 저장(보존)한 뒤 VS Code 띄움.
+  // 편집 모드 종료, 이후는 VS Code 가 책임.
+  async function handleOpenVSCode() {
+    if (!selectedFile || !launcher?.ready) return;
     setLaunching(true);
     try {
+      if (editing && editContent !== content) {
+        const w = await requestWrite({
+          code: projectCode, user, path: selectedFile,
+          content: editContent, token: launcher.token,
+        });
+        if (!w.ok) { modalAlert(w.error || '저장 실패 — VS Code 열기 중단'); return; }
+        setContent(editContent);
+      }
       const res = await requestEdit({
-        code: projectCode,
-        user,
-        file: selectedFile,
-        token: launcher.token,
+        code: projectCode, user, file: selectedFile, token: launcher.token,
       });
       if (!res.ok) modalAlert(res.error || '로컬 런처 호출에 실패했습니다.');
+      setEditing(false);
+      refreshDocState();
     } finally {
       setLaunching(false);
     }
@@ -300,6 +342,11 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
   async function handleFileClick(path, isMainOnly) {
+    if (editing) {
+      const dirty = editContent !== content;
+      if (dirty && !await modalConfirm('편집 중인 변경사항이 있습니다. 폐기하고 다른 파일을 열까요?')) return;
+      setEditing(false);
+    }
     let text = '';
     if (isMainOnly || activeTab === 'main') {
       const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
@@ -578,6 +625,18 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 <div className="de-actions">
                   {selectedMainOnly ? (
                     <button className="de-tab de-tab-active">미리보기</button>
+                  ) : editing ? (
+                    <>
+                      <button className="de-btn" onClick={handleCancelEdit} disabled={saving || launching}>취소</button>
+                      <button className="de-btn" onClick={handleOpenVSCode} disabled={saving || launching}
+                        title="현재 편집 내용을 저장한 뒤 VS Code 로 엽니다">
+                        {launching ? '여는 중...' : 'VS Code'}
+                      </button>
+                      <button className="de-btn de-btn-primary" onClick={handleSaveEdit} disabled={saving || launching}
+                        title="로컬 디스크에만 저장합니다 (커밋/푸시는 Local 탭의 '등록' 으로)">
+                        {saving ? '저장 중...' : '저장'}
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button className={`de-tab ${viewMode === 'preview' ? 'de-tab-active' : ''}`} onClick={() => setViewMode('preview')}>미리보기</button>
@@ -593,20 +652,25 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                       )}
                       <button
                         className="de-btn de-btn-primary"
-                        onClick={handleLocalEdit}
-                        disabled={launching}
+                        onClick={handleStartEdit}
                         title={launcher?.ready
-                          ? '로컬 VS Code 로 이 문서를 엽니다'
+                          ? '인라인 편집 모드로 진입합니다'
                           : '로컬 런처가 감지되지 않았습니다 — 클릭하면 설치 안내'}
-                      >
-                        {launching ? '여는 중...' : '로컬 수정'}
-                      </button>
+                      >편집</button>
                     </>
                   )}
                 </div>
               </div>
               <div className="de-body" style={{ position: 'relative' }}>
-                {viewMode === 'diff' ? (
+                {editing ? (
+                  <textarea
+                    className="de-editor-textarea"
+                    value={editContent}
+                    onChange={e => setEditContent(e.target.value)}
+                    spellCheck={false}
+                    autoFocus
+                  />
+                ) : viewMode === 'diff' ? (
                   <DiffAnalysis oldText={mainContent} newText={content} fileName={selectedFile} activeTab={diffTab} onTabChange={setDiffTab} />
                 ) : viewMode === 'raw' ? (
                   <pre className="de-raw">{content}</pre>

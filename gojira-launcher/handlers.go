@@ -230,6 +230,51 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+type writeReq struct {
+	Code    string `json:"code"`
+	User    string `json:"user"`
+	Path    string `json:"path"`
+	Content string `json:"content"` // raw text (인라인 에디터 산출물). base64 인코딩 안 함.
+}
+
+// POST /write — 인라인 편집 저장. 로컬 working tree 의 단일 파일에 raw text 를 쓴다.
+// commit/push 는 하지 않음 — Local 탭의 "등록" 흐름과 책임 분리(VS Code 저장과 동일 의미).
+// safeFilePath 로 경로 컨테인먼트, 부모 디렉터리 자동 생성, mode 0644.
+func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
+	var req writeReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	if req.Path == "" {
+		writeErr(w, http.StatusBadRequest, "path 누락")
+		return
+	}
+	repoPath, err := s.EnsureRepo(req.Code, req.User)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	full, err := safeFilePath(repoPath, req.Path)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.WriteFile(full, []byte(req.Content), 0o644); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"path":   req.Path,
+		"size":   len(req.Content),
+	})
+}
+
 // GET /files?code=&user= — 로컬 clone 의 working tree 파일 목록 + HEAD 트리.
 // 응답 shape: {tree, headTree, total_count, source}.
 //   - tree     : working tree (디스크에 있는 현재 내용 기준 blob sha) — 서버 /tree 와 호환.
