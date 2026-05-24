@@ -29,6 +29,10 @@ func main() {
 	mux.HandleFunc("OPTIONS /push", srv.secure(true, srv.handlePush))
 	mux.HandleFunc("GET /status", srv.secure(true, srv.handleStatus))
 	mux.HandleFunc("OPTIONS /status", srv.secure(true, srv.handleStatus))
+	mux.HandleFunc("GET /files", srv.secure(true, srv.handleFiles))
+	mux.HandleFunc("OPTIONS /files", srv.secure(true, srv.handleFiles))
+	mux.HandleFunc("GET /file", srv.secure(true, srv.handleFile))
+	mux.HandleFunc("OPTIONS /file", srv.secure(true, srv.handleFile))
 
 	// 127.0.0.1 전용 bind — 외부 인터페이스 노출 금지 (§2.3).
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)

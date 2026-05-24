@@ -8,7 +8,7 @@ import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { detectLauncher, requestEdit, requestPush } from '../utils/launcher';
+import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
 
@@ -93,9 +93,9 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const hasRepo = !!project?.documents?.repoName;
 
   const [mainTree, setMainTree] = useState(null);
-  const [userTree, setUserTree] = useState(null);
+  const [localTree, setLocalTree] = useState(null);
   const [fileStatus, setFileStatus] = useState({}); // path → 'modified' | 'added' | 'deleted'
-  const [activeTab, setActiveTab] = useState('workspace'); // 'main' | 'workspace'
+  const [activeTab, setActiveTab] = useState('local'); // 'main' | 'local'
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedMainOnly, setSelectedMainOnly] = useState(false);
   const [content, setContent] = useState('');
@@ -145,9 +145,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
   };
-  // 문서 상태 갱신 통합 함수 — 트리 로드 + fileStatus 재계산
+  // 문서 상태 갱신 — Main 은 서버 Gitea, Local 은 런처(로컬 clone working tree)에서 가져온다.
+  // 런처 미감지 시 localTree=null → Local 탭은 빈 상태 + 설치 안내(설계: 데이터소스 분리).
+  // fileStatus 는 main sha vs local sha 비교. sha 포맷이 동일한 git blob 해시라 그대로 매칭됨.
   async function refreshDocState(retry = 0) {
-    const branch = `docs/${user}`;
     try {
       const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
       if (!mRes.ok) throw new Error(`main tree ${mRes.status}`);
@@ -155,27 +156,34 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       if (!mTree?.tree) throw new Error('invalid main tree');
       setMainTree(mTree);
 
-      const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`);
-      if (!uRes.ok) throw new Error('user tree failed');
-      const uTree = await uRes.json();
-      setUserTree(uTree);
+      let lTree = null;
+      if (launcher?.ready) {
+        const r = await requestFiles({ code: projectCode, user, token: launcher.token });
+        if (r.ok) lTree = r.data;
+      }
+      setLocalTree(lTree);
 
+      if (!lTree) {
+        setFileStatus({});
+        if (onDocStateChange) onDocStateChange();
+        return;
+      }
       const mainShaMap = {};
       const mainPathSet = new Set();
       (mTree.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
-      const userPathSet = new Set();
+      const localPathSet = new Set();
       const status = {};
-      (uTree.tree || []).forEach(f => {
-        userPathSet.add(f.path);
+      (lTree.tree || []).forEach(f => {
+        localPathSet.add(f.path);
         if (!mainPathSet.has(f.path)) status[f.path] = 'added';
         else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
       });
-      mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
+      mainPathSet.forEach(p => { if (!localPathSet.has(p)) status[p] = 'deleted'; });
       setFileStatus(status);
       if (onDocStateChange) onDocStateChange();
     } catch {
       if (retry < 1) setTimeout(() => refreshDocState(retry + 1), 1000);
-      else { setUserTree(null); setFileStatus({}); }
+      else { setLocalTree(null); setFileStatus({}); }
     }
   }
 
@@ -184,23 +192,31 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const reloadRef = React.useRef(null);
   reloadRef.current = async () => {
     if (!selectedFile) return;
-    const ref = selectedMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
     try {
-      const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(ref)}`);
-      if (!res.ok) return;
-      const d = await res.json();
-      const text = d.content ? decodeBase64(d.content) : '';
+      let text = '';
+      if (selectedMainOnly || activeTab === 'main') {
+        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
+        if (!res.ok) return;
+        const d = await res.json();
+        text = d.content ? decodeBase64(d.content) : '';
+      } else if (activeTab === 'local' && launcher?.ready) {
+        const r = await requestLocalFile({ code: projectCode, user, path: selectedFile, token: launcher.token });
+        if (!r.ok) return;
+        text = r.data?.content ? decodeBase64(r.data.content) : '';
+      } else {
+        return;
+      }
       if (text !== content) setContent(text);
     } catch {}
   };
   async function reloadSelectedFile() { return reloadRef.current && reloadRef.current(); }
 
-  // 진입 시 트리 상태 갱신만. 웹은 조회 전용 — 브랜치 생성/파일 초기화는 런처(로컬 clone)가
-  // 담당하므로 서버 init-files/ensure-branch 호출 제거 (트랙 E — 서버 worktree 제거).
+  // 진입 시 + 런처 ready 상태 변동 시 트리 상태 갱신.
+  // 런처는 비동기 감지되므로 처음엔 launcher=null → main 만 로드, ready 후 재호출되어 local 트리 채움.
   useEffect(() => {
     if (!hasRepo) return;
     refreshDocState();
-  }, [projectCode, hasRepo, user]); // eslint-disable-line
+  }, [projectCode, hasRepo, user, launcher?.ready]); // eslint-disable-line
 
   // WebSocket 구독 — main 변경 시 실시간 트리 갱신
   useEffect(() => {
@@ -261,16 +277,22 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
   async function handleFileClick(path, isMainOnly) {
-    // mainOnly 파일이면 main에서 조회
-    const ref = isMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
-    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
-    if (res.ok) {
+    let text = '';
+    if (isMainOnly || activeTab === 'main') {
+      const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
+      if (!res.ok) return;
       const d = await res.json();
-      const text = d.content ? decodeBase64(d.content) : '';
-      setSelectedFile(path);
-      setSelectedMainOnly(!!isMainOnly);
-      setContent(text);
+      text = d.content ? decodeBase64(d.content) : '';
+    } else if (activeTab === 'local' && launcher?.ready) {
+      const r = await requestLocalFile({ code: projectCode, user, path, token: launcher.token });
+      if (!r.ok) return;
+      text = r.data?.content ? decodeBase64(r.data.content) : '';
+    } else {
+      return;
     }
+    setSelectedFile(path);
+    setSelectedMainOnly(!!isMainOnly);
+    setContent(text);
   }
 
   async function handleDiffToggle() {
@@ -349,12 +371,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     );
   }
 
-  const currentTree = activeTab === 'main' ? mainTree : (userTree || mainTree);
+  // Local 탭에서 런처 미감지 시 currentTree=null → 사이드바 비움 + 설치 안내(아래 헤더 영역).
+  const currentTree = activeTab === 'main' ? mainTree : localTree;
 
   const baseItems = (currentTree?.tree || []).filter(i => i.type !== 'tree');
-  // workspace 탭에서 main에만 있는 파일도 표시 (gray italic)
+  // Local 탭에서 main에만 있는 파일도 표시 (gray italic — Pull로 동기화 필요 표시).
   let items;
-  if (activeTab === 'workspace' && mainTree && userTree) {
+  if (activeTab === 'local' && mainTree && localTree) {
     const userPaths = new Set(baseItems.map(i => i.path));
     const mainOnly = (mainTree?.tree || [])
       .filter(i => i.type !== 'tree' && !userPaths.has(i.path))
@@ -398,9 +421,9 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           <div className="de-sidebar-tabs">
             <button className={`de-sidebar-tab ${activeTab === 'main' ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setActiveTab('main'); setShowGraph(false); }}>Main</button>
-            <button className={`de-sidebar-tab ${activeTab === 'workspace' ? 'de-sidebar-tab-active' : ''}`}
-              onClick={() => { setActiveTab('workspace'); setShowGraph(false); }}>작업공간</button>
-            {/* 작업공간 폴더 열기(서버 open-folder)는 런처(로컬 clone)로 대체 — 제거 (트랙 E) */}
+            <button className={`de-sidebar-tab ${activeTab === 'local' ? 'de-sidebar-tab-active' : ''}`}
+              onClick={() => { setActiveTab('local'); setShowGraph(false); }}>Local</button>
+            {/* Local 탭의 데이터소스는 런처 /files (로컬 working tree). 런처 미감지 시 빈 상태 + 설치 안내. */}
             <button
               className={`de-sidebar-tab de-graph-btn ${showGraph ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setShowGraph(!showGraph); if (!showGraph) setSelectedFile(null); }}
@@ -414,8 +437,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
             </button>
           </div>
           <div className="de-sidebar-header">
-            <span>{activeTab === 'main' ? 'main' : `docs/${user}`}</span>
-            {activeTab === 'workspace' && launcher?.ready && (
+            <span>{activeTab === 'main' ? 'main' : `local · docs/${user}`}</span>
+            {activeTab === 'local' && launcher?.ready && (
               <button
                 className="de-btn"
                 style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
@@ -427,7 +450,15 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
               </button>
             )}
           </div>
-          {activeTab === 'workspace' && !hasChanges && hasMainOnly && (
+          {activeTab === 'local' && !launcher?.ready && (
+            <div className="de-sync-notice">
+              로컬 런처가 감지되지 않았습니다.
+              <button className="de-btn"
+                style={{ marginLeft: 8, padding: '2px 8px', fontSize: 11 }}
+                onClick={() => setInstallOpen(true)}>런처 안내</button>
+            </div>
+          )}
+          {activeTab === 'local' && launcher?.ready && !hasChanges && hasMainOnly && (
             <div className="de-sync-notice">
               main에 새 파일이 추가되었습니다. Git Pull로 동기화 후 작업하세요.
             </div>
@@ -446,13 +477,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
               node.files.push({ ...item, _name: parts[parts.length - 1] });
             });
             const renderFile = (item) => {
-              const st = (activeTab === 'workspace' && !item._mainOnly) ? fileStatus[item.path] : null;
+              const st = (activeTab === 'local' && !item._mainOnly) ? fileStatus[item.path] : null;
               const isMainOnly = item._mainOnly;
               return (
                 <div key={item.path}
                   className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''} ${isMainOnly ? 'de-file-main-only' : ''}`}
                   onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path, item._mainOnly); }}>
-                  {activeTab === 'workspace' && (isMainOnly
+                  {activeTab === 'local' && (isMainOnly
                     ? <span className="de-file-badge de-badge-mainonly">M</span>
                     : statusBadge(item.path))}
                   <span className="de-file-name">{item._name || item.path}</span>
@@ -506,7 +537,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                   ) : (
                     <>
                       <button className={`de-tab ${!diffMode ? 'de-tab-active' : ''}`} onClick={() => setDiffMode(false)}>미리보기</button>
-                      {activeTab === 'workspace' && fileStatus[selectedFile] && (
+                      {activeTab === 'local' && fileStatus[selectedFile] && (
                         <button
                           className={`de-btn ${diffMode ? 'de-btn-primary' : ''}`}
                           onClick={handleDiffToggle}

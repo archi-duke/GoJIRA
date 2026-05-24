@@ -1,9 +1,19 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 )
 
 const version = "0.1.0"
@@ -168,6 +178,136 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// GET /files?code=&user= — 로컬 clone 의 working tree 파일 목록.
+// 응답 shape 은 서버 /DocRepo/{code}/tree 와 호환 — {tree:[{path,type,sha,size}], total_count, source}.
+// sha 는 git blob 해시(sha1("blob <size>\0"+content)) 라 main 트리의 sha 와 그대로 비교 가능 (변경 감지용).
+// .git / .claude(스킬 symlink) 는 노출에서 제외.
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	user := r.URL.Query().Get("user")
+	repoPath, err := s.EnsureRepo(code, user)
+	if err != nil {
+		log.Printf("/files 실패 code=%s user=%s: %v", code, user, err)
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entries, err := listLocalTree(repoPath)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tree":        entries,
+		"total_count": len(entries),
+		"source":      "local-launcher",
+		"repoPath":    repoPath,
+	})
+}
+
+// GET /file?code=&user=&path= — 로컬 working tree 의 단일 파일 내용.
+// 응답 shape 은 서버 /DocRepo/{code}/file 과 호환 — {path, content(base64), encoding:"base64", size, source}.
+func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	user := r.URL.Query().Get("user")
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		writeErr(w, http.StatusBadRequest, "path 누락")
+		return
+	}
+	repoPath, err := s.EnsureRepo(code, user)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	full, err := safeFilePath(repoPath, rel)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, http.StatusNotFound, "file 없음: "+rel)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":     rel,
+		"content":  base64.StdEncoding.EncodeToString(data),
+		"encoding": "base64",
+		"size":     len(data),
+		"source":   "local-launcher",
+	})
+}
+
+// listLocalTree — repoPath 하위 모든 파일을 git blob 해시와 함께 평면 리스트로 반환.
+// .git / .claude(skills symlink) / 디렉터리 본체는 제외 (blob 만). 정렬은 path 사전순.
+// 큰 파일이 많은 레포에서는 비용이 들 수 있으나 (수만 fork→0, sha1 read once),
+// 설계문서 레포(수십~수백 파일) 기준 충분히 빠르다.
+func listLocalTree(repoPath string) ([]map[string]any, error) {
+	var entries []map[string]any
+	err := filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(repoPath, path)
+		if rel == "." {
+			return nil
+		}
+		// 최상위 .git / .claude 컷오프 — 하위 traversal 도 스킵.
+		top := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
+		if top == ".git" || top == ".claude" {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil // 한 파일 stat 실패는 무시 — 트리는 계속.
+		}
+		sha, err := blobSha(path, info.Size())
+		if err != nil {
+			return nil
+		}
+		entries = append(entries, map[string]any{
+			"path": filepath.ToSlash(rel),
+			"type": "blob",
+			"sha":  sha,
+			"size": info.Size(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i]["path"].(string) < entries[j]["path"].(string)
+	})
+	return entries, nil
+}
+
+// blobSha — 파일 한 개의 git blob sha1 ("blob <size>\0<content>") 을 계산한다.
+// 서버 main 트리의 sha 와 동일 포맷이라 그대로 비교(modified/unchanged 판단)에 사용 가능.
+func blobSha(path string, size int64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", size)
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // GET /status?code= — 로컬 작업/브랜치 진행 상태 (§2.1).

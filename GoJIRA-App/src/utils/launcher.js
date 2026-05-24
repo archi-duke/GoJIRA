@@ -76,6 +76,37 @@ export async function requestPush({ code, user, token }) {
   return post('/push', { code, user }, token);
 }
 
+/**
+ * 로컬 working tree 파일 목록. 응답 shape 은 서버 /DocRepo/{code}/tree 와 호환:
+ *   { tree: [{path, type:"blob", sha, size}], total_count, source }
+ * sha 는 git blob 해시라 main 트리 sha 와 그대로 비교 가능.
+ */
+export async function requestFiles({ code, user, token }) {
+  return get(`/files?code=${encodeURIComponent(code)}&user=${encodeURIComponent(user)}`, token);
+}
+
+/**
+ * 로컬 working tree 단일 파일 내용. 응답 shape:
+ *   { path, content(base64), encoding:"base64", size, source }
+ */
+export async function requestLocalFile({ code, user, path, token }) {
+  const q = `code=${encodeURIComponent(code)}&user=${encodeURIComponent(user)}&path=${encodeURIComponent(path)}`;
+  return get(`/file?${q}`, token);
+}
+
+async function get(path, token) {
+  try {
+    const headers = {};
+    if (token) headers[TOKEN_HEADER] = token;
+    const res = await fetchWithTimeout(`${BASE}${path}`, { method: 'GET', headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
+    return { ok: true, data };
+  } catch {
+    return { ok: false, error: '로컬 런처에 연결할 수 없습니다 (127.0.0.1 데몬 미기동?)' };
+  }
+}
+
 async function post(path, body, token) {
   try {
     const headers = { 'Content-Type': 'application/json' };
