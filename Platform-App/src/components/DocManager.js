@@ -322,9 +322,12 @@ function PRList({ repo, user }) {
           fetch(`${API}/${repo.projectCode}/pr/${pr.number}/reviews`)
             .then(r => r.json()).then(reviews => {
               if (!Array.isArray(reviews)) return;
-              // 사용자별 최신 리뷰만 유지 (PENDING, REQUEST_REVIEW 제외)
+              // 사용자별 최신 리뷰만 유지 (PENDING, REQUEST_REVIEW, dismissed 제외).
+              // Gitea 1.25 는 반려 state 를 'REQUEST_CHANGES' 로 돌려주는데 본 코드는 'CHANGES_REQUESTED' 를 기대 — 정규화.
               const byUser = {};
               reviews.forEach(rv => {
+                if (rv.dismissed) return;
+                if (rv.state === 'REQUEST_CHANGES') rv.state = 'CHANGES_REQUESTED';
                 if (rv.state === 'PENDING' || rv.state === 'REQUEST_REVIEW') return;
                 byUser[rv.user?.login] = rv;
               });
