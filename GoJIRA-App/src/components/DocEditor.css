@@ -74,6 +74,8 @@
 .de-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
 .de-textarea { flex: 1; width: 100%; border: none; outline: none; resize: none; padding: 16px; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; box-sizing: border-box; overflow: auto; }
 .de-preview { flex: 1; overflow: auto; padding: 16px; font-size: 14px; line-height: 1.7; min-height: 0; }
+/* Raw 보기 — 마크다운 원문을 가공 없이 monospace 로. white-space:pre-wrap 으로 긴 라인은 자동 줄바꿈. */
+.de-raw { flex: 1; overflow: auto; padding: 16px; margin: 0; font-family: 'Consolas', 'Monaco', 'SF Mono', monospace; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; min-height: 0; color: #2c3e50; background: transparent; }
 
 /* YAML 전용 뷰어 */
 .de-yaml { font-family: 'Consolas', 'Monaco', 'SF Mono', monospace; font-size: 13px; line-height: 1.6; margin: 0; padding: 4px 0; white-space: pre; tab-size: 2; color: #2c3e50; background: transparent; }

@@ -114,7 +114,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       return next;
     });
   };
-  const [diffMode, setDiffMode] = useState(false);
+  const [viewMode, setViewMode] = useState('preview'); // 'preview' | 'raw' | 'diff' — 셋 중 하나만.
+  const diffMode = viewMode === 'diff'; // 기존 변수명을 유지해 하위 분기 안 깨지게.
   const [diffTab, setDiffTab] = useState('semantic');
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -318,7 +319,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
   async function handleDiffToggle() {
-    if (diffMode) { setDiffMode(false); return; }
+    if (diffMode) { setViewMode('preview'); return; }
     setLoadingDiff(true);
     try {
       const status = fileStatus[selectedFile];
@@ -331,7 +332,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         }
       }
       setMainContent(mainText);
-      setDiffMode(true);
+      setViewMode('diff');
       setDiffTab('semantic');
     } catch (e) {
       modalAlert('Diff 로딩 실패');
@@ -525,7 +526,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
               return (
                 <div key={item.path}
                   className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''} ${isMainOnly ? 'de-file-main-only' : ''}`}
-                  onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path, item._mainOnly); }}>
+                  onClick={() => { setShowGraph(false); setViewMode('preview'); handleFileClick(item.path, item._mainOnly); }}>
                   {activeTab === 'local' && (isMainOnly
                     ? <span className="de-file-badge de-badge-mainonly">M</span>
                     : statusBadge(item.path))}
@@ -579,7 +580,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                     <button className="de-tab de-tab-active">미리보기</button>
                   ) : (
                     <>
-                      <button className={`de-tab ${!diffMode ? 'de-tab-active' : ''}`} onClick={() => setDiffMode(false)}>미리보기</button>
+                      <button className={`de-tab ${viewMode === 'preview' ? 'de-tab-active' : ''}`} onClick={() => setViewMode('preview')}>미리보기</button>
+                      <button className={`de-tab ${viewMode === 'raw' ? 'de-tab-active' : ''}`} onClick={() => setViewMode('raw')}>Raw 보기</button>
                       {activeTab === 'local' && fileStatus[selectedFile] && (
                         <button
                           className={`de-btn ${diffMode ? 'de-btn-primary' : ''}`}
@@ -604,8 +606,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 </div>
               </div>
               <div className="de-body" style={{ position: 'relative' }}>
-                {diffMode ? (
+                {viewMode === 'diff' ? (
                   <DiffAnalysis oldText={mainContent} newText={content} fileName={selectedFile} activeTab={diffTab} onTabChange={setDiffTab} />
+                ) : viewMode === 'raw' ? (
+                  <pre className="de-raw">{content}</pre>
                 ) : (
                   <div className={`de-preview ${selectedMainOnly ? 'de-preview-mainonly' : ''}`}>
                     {/\.ya?ml$/i.test(selectedFile || '') ? (
