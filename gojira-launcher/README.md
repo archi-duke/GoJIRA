@@ -1,8 +1,9 @@
 # gojira-launcher
 
 웹→로컬 소환 전용 **경량 localhost 데몬**. 사용자 PC 에서 동작하며, GoJIRA 웹의 "수정"
-버튼이 누르면 로컬 clone 을 보장하고 VS Code + 에이전트 CLI(`opencode` | `claude`)를
-띄운다. 편집 결과는 `docs/{user}` 브랜치 push → PR 로 흐른다.
+버튼이 누르면 로컬 clone 을 보장하고 VS Code + 사용자가 등록한 CLI 에이전트(claude,
+opencode, aider 등 임의 등록 가능 — §2.4)를 띄운다. 편집 결과는 `docs/{user}`
+브랜치 push → PR 로 흐른다.
 
 > 설계 근거: [`docs/Long-term Considerations/local-agent-mvp.md`](../docs/Long-term%20Considerations/local-agent-mvp.md) §2.
 > **agent-service 부활이 아니다** — prompt/SSE/세션 브리지 로직 없음(CLI 가 자체 처리). 런처는
@@ -28,7 +29,8 @@
    `Authorization: Bearer`) 필요. 토큰은 첫 기동 시 `~/.gojira/launcher-token` 에 자동
    생성(0600)되며, 로그에 위치를 안내한다. 웹은 이 값을 헤더로 전송해야 한다.
    (구체 핸드셰이크 방식은 설계 §6 미해결 — PoC 는 파일 공유 토큰.)
-4. **명령 화이트리스트** — `git clone/checkout/...`, `code`, `opencode|claude` 만 실행.
+4. **명령 화이트리스트** — `git clone/checkout/...`, `code` 는 빌트인. 에이전트 CLI 는
+   `launcher.json` 의 `agents` 배열이 화이트리스트(사용자 자신의 머신에 명시 등록).
    `code`/`user`/`file` 은 영숫자·`. _ -` 만 허용하고 path traversal(`..`)을 차단한다.
 
 ## 설정 (§2.4)
@@ -37,7 +39,13 @@
 
 ```jsonc
 {
-  "defaultAgent": "opencode",          // opencode | claude
+  "defaultAgent": "claude",            // agents[].name 중 하나. 비면 첫 등록 agent.
+  "agents": [
+    { "name": "claude",   "command": "claude" },
+    { "name": "opencode", "command": "opencode" },
+    { "name": "aider",    "command": "aider", "args": ["--no-auto-commits"] },
+    { "name": "cursor",   "command": "cursor-agent", "env": ["CURSOR_PROFILE=work"] }
+  ],
   "repoRoot": "~/GoJIRA-projects",     // 로컬 clone 루트 (기본값)
   "backend": {
     "platformApi": "http://<host>:9000/api/v2",
@@ -49,10 +57,13 @@
 }
 ```
 
-- 파일이 없어도 기본값(port 5599, agent opencode, repoRoot `~/GoJIRA-projects`)으로 뜬다.
-- 단, `webOrigin` 미설정 시 모든 브라우저 요청을 거부하고, `git.base` 미설정 시 clone 이 거부된다.
-- **SSO/CLI 토큰은 설정에 넣지 않는다** — `opencode auth login` / `claude` 가 첫 실행 시
-  자체 로그인하고 토큰을 로컬 홈에 저장한다.
+- 파일이 없거나 `agents` 가 비어있으면 빌트인 디폴트(`claude`, `opencode`) 사용.
+- `agents[].command` 는 PATH 에서 찾을 실행 파일 이름. PATH 에 없는 항목은 `/health`
+  의 `agents` 목록에서 자동 제외되어 웹 UI 에 표시되지 않는다.
+- `args` 는 spawn 시 매번 추가되는 고정 인자, `env` 는 `KEY=VALUE` 형식의 추가 환경변수.
+- `webOrigin` 미설정 시 모든 브라우저 요청을 거부하고, `git.base` 미설정 시 clone 이 거부된다.
+- **SSO/CLI 토큰은 설정에 넣지 않는다** — 각 에이전트 CLI 가 첫 실행 시 자체 로그인하고
+  토큰을 로컬 홈에 저장한다.
 
 ## 빌드 / 실행
 

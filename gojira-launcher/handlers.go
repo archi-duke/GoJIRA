@@ -40,11 +40,12 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 // 포함한다. 브라우저는 Origin 을 위조할 수 없으므로 GoJIRA 웹만 토큰을 읽어 이후
 // /edit·/open 호출에 사용한다. (DNS-rebinding 은 잔여 리스크 — §6)
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	agents := availableAgents()
+	agents := s.availableAgents()
 	resp := map[string]any{
-		"version": version,
-		"agents":  agents,
-		"ready":   hasGit() && hasEditor() && len(agents) > 0,
+		"version":      version,
+		"agents":       agents,
+		"defaultAgent": s.cfg.DefaultAgent,
+		"ready":        hasGit() && hasEditor() && len(agents) > 0,
 	}
 	if s.originAllowed(r.Header.Get("Origin")) {
 		resp["token"] = s.cfg.Token
@@ -137,7 +138,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
 		return
 	}
-	agent, err := s.resolveAgent(req.Agent)
+	spec, err := s.resolveAgent(req.Agent)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -152,7 +153,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 		spawnDir = repoPath
 	}
-	sessionID, err := SpawnAgent(agent, spawnDir, s.agentEnv(spawnDir, req.User))
+	sessionID, err := s.SpawnAgent(spec, spawnDir, s.agentEnv(spawnDir, req.User))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -160,7 +161,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "ok",
 		"repoPath":  spawnDir,
-		"agent":     agent,
+		"agent":     spec.Name,
 		"sessionId": sessionID,
 	})
 }

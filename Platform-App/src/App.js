@@ -10,6 +10,7 @@ import { modalAlert, modalConfirm } from 'gojira-shared-web/components/AlertModa
 import appRegistry from './apps/registry';
 import config from './config';
 import { detectLauncher, requestChat } from './utils/launcher';
+import AgentSelectModal from './components/AgentSelectModal';
 import './App.css';
 
 const API_BASE = config.PLATFORM_API;
@@ -134,9 +135,18 @@ function App() {
     if (p === 'map') setMapResetCount(c => c + 1);
   }, []);
 
+  // 등록 agent 2개 이상이면 선택 모달을 띄우기 위해 보류한 chat 요청.
+  const [agentChooser, setAgentChooser] = useState(null); // { agents, code, token } | null
+
+  // spawn 실행 — agent 가 빈 문자열이면 런처가 defaultAgent 사용.
+  const spawnChat = useCallback(async ({ code, token, agent }) => {
+    const res = await requestChat({ code, user, agent, token });
+    if (!res.ok) modalAlert(res.error || '에이전트 실행에 실패했습니다.');
+  }, [user]);
+
   // 로고/타이틀 클릭 — 활성 프로젝트가 있으면 그 로컬 clone 에서, 없으면 일반 repoRoot 에서 에이전트 spawn.
   // 활성 프로젝트는 GoJIRA-App 이 진입 시 sessionStorage.gojira_project 에 저장 (같은 window 공유).
-  // 런처 /chat 이 code 가 오면 EnsureRepo 로 clone 없으면 생성한 뒤 그 디렉토리에서 띄운다.
+  // 등록 agent 가 2개 이상이면 선택 모달 → 사용자 선택 후 spawn. 1개거나 빈 경우는 default 로 즉시 spawn.
   const launchAgentChat = useCallback(async () => {
     const r = await detectLauncher();
     if (!r?.ready) {
@@ -148,9 +158,13 @@ function App() {
       const proj = JSON.parse(sessionStorage.getItem('gojira_project') || 'null');
       code = proj?.jiraCodes?.main?.jiraCode || '';
     } catch {}
-    const res = await requestChat({ code, user, token: r.token });
-    if (!res.ok) modalAlert(res.error || '에이전트 실행에 실패했습니다.');
-  }, [user]);
+    const agents = Array.isArray(r.agents) ? r.agents : [];
+    if (agents.length > 1) {
+      setAgentChooser({ agents, code, token: r.token });
+      return;
+    }
+    await spawnChat({ code, token: r.token, agent: '' });
+  }, [spawnChat]);
 
   // Agent 독립 창(GoJIRA-App :3001)에서 보낸 네비게이션 명령 수신
   useEffect(() => {
@@ -248,6 +262,17 @@ function App() {
       <div className="app-body">{content}</div>
       <NoticePopup user={user} />
       <AlertModal />
+      {agentChooser && (
+        <AgentSelectModal
+          agents={agentChooser.agents}
+          onCancel={() => setAgentChooser(null)}
+          onSelect={(agent) => {
+            const { code, token } = agentChooser;
+            setAgentChooser(null);
+            spawnChat({ code, token, agent });
+          }}
+        />
+      )}
     </div>
   );
 }

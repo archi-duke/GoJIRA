@@ -9,20 +9,13 @@ import (
 	"strings"
 )
 
-// 실행 명령 화이트리스트 (설계 §2.3) — 임의 명령 실행 경로를 만들지 않는다.
-//   - 에디터: "code" (VS Code) 고정
-//   - 에이전트 CLI: agentBins 의 키만 허용
-var agentBins = map[string]string{
-	"opencode": "opencode",
-	"claude":   "claude",
-}
-
-// availableAgents — PATH 에 존재하는 에이전트 CLI 목록(/health 용).
-func availableAgents() []string {
+// availableAgents — cfg.Agents 중 PATH 에 존재하는 것만 health 응답에 노출.
+// 등록은 됐지만 미설치인 CLI 는 클릭해도 spawn 실패하므로 미리 거른다.
+func (s *Server) availableAgents() []string {
 	out := []string{}
-	for name, bin := range agentBins {
-		if _, err := exec.LookPath(bin); err == nil {
-			out = append(out, name)
+	for _, a := range s.cfg.Agents {
+		if _, err := exec.LookPath(a.Command); err == nil {
+			out = append(out, a.Name)
 		}
 	}
 	return out
@@ -38,15 +31,21 @@ func hasGit() bool {
 	return err == nil
 }
 
-// resolveAgent — 요청 agent(빈값이면 기본값)를 화이트리스트로 검증.
-func (s *Server) resolveAgent(agent string) (string, error) {
-	if agent == "" {
-		agent = s.cfg.DefaultAgent
+// resolveAgent — 요청 agent(빈값이면 cfg.DefaultAgent)를 등록 목록에서 조회.
+// launcher.json 의 agents 가 화이트리스트.
+func (s *Server) resolveAgent(name string) (*AgentSpec, error) {
+	if name == "" {
+		name = s.cfg.DefaultAgent
 	}
-	if _, ok := agentBins[agent]; !ok {
-		return "", fmt.Errorf("허용되지 않은 agent: %q (opencode|claude)", agent)
+	a := findAgentSpec(s.cfg.Agents, name)
+	if a == nil {
+		known := make([]string, 0, len(s.cfg.Agents))
+		for _, sp := range s.cfg.Agents {
+			known = append(known, sp.Name)
+		}
+		return nil, fmt.Errorf("등록되지 않은 agent: %q (등록 목록: %s) — launcher.json 의 agents 에 추가하세요", name, strings.Join(known, ", "))
 	}
-	return agent, nil
+	return a, nil
 }
 
 // safeFilePath — file(상대경로)이 repoPath 밖으로 벗어나지 않는지 검증.
@@ -98,17 +97,15 @@ func (s *Server) agentEnv(repoPath, user string) []string {
 	return env
 }
 
-// SpawnAgent — 검증된 agent 를 repoPath 에서 새 터미널 창으로 띄운다.
+// SpawnAgent — 등록된 agent 를 repoPath 에서 새 터미널 창으로 띄운다.
 // CLI 는 대화형이므로 TTY 가 필요 → OS별 터미널로 감싼다. sessionId(=pid 문자열) 반환.
-// env 는 자식 CLI 가 로컬 clone/백엔드를 찾도록 주입된다(agentEnv).
-func SpawnAgent(agent, repoPath string, env []string) (string, error) {
-	bin, ok := agentBins[agent]
-	if !ok {
-		return "", fmt.Errorf("허용되지 않은 agent: %q", agent)
-	}
-	cmd := terminalCommand(bin, repoPath, env)
+// callerEnv 는 spawn 컨텍스트(repoRoot/user/backend) — AgentSpec.Env 와 병합돼 자식에게 주입.
+func (s *Server) SpawnAgent(spec *AgentSpec, repoPath string, callerEnv []string) (string, error) {
+	env := append([]string{}, spec.Env...)
+	env = append(env, callerEnv...)
+	cmd := terminalCommand(spec.Command, spec.Args, repoPath, env)
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("%s 실행 실패: %w", agent, err)
+		return "", fmt.Errorf("%s 실행 실패: %w", spec.Name, err)
 	}
 	pid := cmd.Process.Pid
 	// 좀비 방지: 백그라운드에서 회수.
@@ -118,7 +115,7 @@ func SpawnAgent(agent, repoPath string, env []string) (string, error) {
 
 // terminalCommand — OS별로 대화형 CLI 를 새 터미널에서 실행하는 명령을 만든다.
 // linux/fallback 은 cmd.Env 로 env 전파, mac/windows 는 셸 스크립트에 export/set 으로 주입.
-func terminalCommand(bin, dir string, env []string) *exec.Cmd {
+func terminalCommand(bin string, extraArgs []string, dir string, env []string) *exec.Cmd {
 	switch runtime.GOOS {
 	case "windows":
 		// 새 콘솔 창에서 실행. env 는 `set "K=V"&&` 로 선주입.
@@ -126,7 +123,11 @@ func terminalCommand(bin, dir string, env []string) *exec.Cmd {
 		for _, kv := range env {
 			prefix += "set \"" + kv + "\"&& "
 		}
-		c := exec.Command("cmd", "/c", "start", "", "cmd", "/k", prefix+bin)
+		full := bin
+		for _, a := range extraArgs {
+			full += " " + a
+		}
+		c := exec.Command("cmd", "/c", "start", "", "cmd", "/k", prefix+full)
 		c.Dir = dir
 		return c
 	case "darwin":
@@ -136,19 +137,24 @@ func terminalCommand(bin, dir string, env []string) *exec.Cmd {
 				exports += fmt.Sprintf("export %s='%s'; ", kv[:i], kv[i+1:])
 			}
 		}
-		script := fmt.Sprintf("tell app \"Terminal\" to do script \"cd %s && %s%s\"", dir, exports, bin)
+		argStr := bin
+		for _, a := range extraArgs {
+			argStr += " " + a
+		}
+		script := fmt.Sprintf("tell app \"Terminal\" to do script \"cd %s && %s%s\"", dir, exports, argStr)
 		return exec.Command("osascript", "-e", script)
 	default: // linux/기타 — 흔한 터미널 에뮬레이터를 순서대로 시도.
+		termArgs := append([]string{"-e", bin}, extraArgs...)
 		for _, term := range []string{"x-terminal-emulator", "gnome-terminal", "konsole", "xterm"} {
 			if _, err := exec.LookPath(term); err == nil {
-				c := exec.Command(term, "-e", bin)
+				c := exec.Command(term, termArgs...)
 				c.Dir = dir
 				c.Env = append(os.Environ(), env...)
 				return c
 			}
 		}
 		// 폴백: 터미널 없이 detached 실행(PoC — 비대화 환경).
-		c := exec.Command(bin)
+		c := exec.Command(bin, extraArgs...)
 		c.Dir = dir
 		c.Env = append(os.Environ(), env...)
 		return c

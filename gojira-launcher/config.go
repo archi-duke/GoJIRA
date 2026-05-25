@@ -11,18 +11,29 @@ import (
 
 // Config 는 ~/.gojira/launcher.json 에서 로드된다 (설계 §2.4).
 //
-// SSO/CLI 토큰은 여기에 넣지 않는다 — opencode/claude 가 첫 실행 시 자체 로그인하고
+// SSO/CLI 토큰은 여기에 넣지 않는다 — 등록된 CLI 가 첫 실행 시 자체 로그인하고
 // 토큰을 사용자 홈에 저장한다. 여기 Token 은 웹↔런처 핸드셰이크용 설치 토큰이며,
 // 설정에 없으면 첫 기동 시 자동 생성되어 token 파일에 영구 저장된다(§2.3).
 type Config struct {
-	DefaultAgent    string  `json:"defaultAgent"`    // opencode | claude
-	RepoRoot        string  `json:"repoRoot"`        // 로컬 clone 루트
-	Backend         Backend `json:"backend"`
-	Port            int     `json:"port"`
-	WebOrigin       string  `json:"webOrigin"`       // 허용할 웹 origin (CORS/Origin 검증)
-	Git             Git     `json:"git"`             // clone 대상 Gitea base + org
-	Token           string  `json:"token"`           // 설치 토큰(미설정 시 자동 생성)
-	SkillsSourceDir string  `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink (있으면). agent CLI 가 GoJIRA 스킬 호출 가능하도록.
+	DefaultAgent    string      `json:"defaultAgent"`    // Agents[].Name 중 하나. 비면 첫 등록 agent.
+	Agents          []AgentSpec `json:"agents"`          // 사용자 등록 CLI 목록. 비면 빌트인 디폴트(claude, opencode).
+	RepoRoot        string      `json:"repoRoot"`        // 로컬 clone 루트
+	Backend         Backend     `json:"backend"`
+	Port            int         `json:"port"`
+	WebOrigin       string      `json:"webOrigin"`       // 허용할 웹 origin (CORS/Origin 검증)
+	Git             Git         `json:"git"`             // clone 대상 Gitea base + org
+	Token           string      `json:"token"`           // 설치 토큰(미설정 시 자동 생성)
+	SkillsSourceDir string      `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink (있으면). agent CLI 가 GoJIRA 스킬 호출 가능하도록.
+}
+
+// AgentSpec — 사용자가 launcher.json 에 등록하는 CLI 에이전트 한 건.
+// Name 은 웹/내부 식별자(예: "claude", "aider"), Command 는 PATH 에서 찾을 실행 파일.
+// Args/Env 는 spawn 시 매번 추가 적용. launcher.json 자체가 화이트리스트 역할.
+type AgentSpec struct {
+	Name    string   `json:"name"`
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	Env     []string `json:"env,omitempty"` // "KEY=VALUE" 형식
 }
 
 type Backend struct {
@@ -40,11 +51,17 @@ type Git struct {
 
 const (
 	defaultPort         = 5599
-	defaultAgent        = "opencode"
 	defaultConfigSubdir = ".gojira"
 	configFileName      = "launcher.json"
 	tokenFileName       = "launcher-token"
 )
+
+// builtinAgents — launcher.json 에 agents 가 비어있을 때 채워주는 디폴트.
+// 기존 동작(claude/opencode 만 인식) 과의 하위 호환.
+var builtinAgents = []AgentSpec{
+	{Name: "claude", Command: "claude"},
+	{Name: "opencode", Command: "opencode"},
+}
 
 // gojiraDir 는 ~/.gojira 경로를 돌려준다.
 func gojiraDir() (string, error) {
@@ -90,14 +107,27 @@ func applyDefaults(cfg *Config) {
 	if cfg.Port == 0 {
 		cfg.Port = defaultPort
 	}
-	if cfg.DefaultAgent == "" {
-		cfg.DefaultAgent = defaultAgent
+	if len(cfg.Agents) == 0 {
+		cfg.Agents = append(cfg.Agents, builtinAgents...)
+	}
+	// DefaultAgent 가 등록된 이름이 아니면 첫 agent 로 폴백.
+	if cfg.DefaultAgent == "" || findAgentSpec(cfg.Agents, cfg.DefaultAgent) == nil {
+		cfg.DefaultAgent = cfg.Agents[0].Name
 	}
 	if cfg.RepoRoot == "" {
 		if home, err := os.UserHomeDir(); err == nil {
 			cfg.RepoRoot = filepath.Join(home, "GoJIRA-projects")
 		}
 	}
+}
+
+func findAgentSpec(list []AgentSpec, name string) *AgentSpec {
+	for i := range list {
+		if list[i].Name == name {
+			return &list[i]
+		}
+	}
+	return nil
 }
 
 // ensureToken 은 ~/.gojira/launcher-token 에서 토큰을 읽고, 없으면 생성한다.
