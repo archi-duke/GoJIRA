@@ -171,13 +171,6 @@ func toBsonM(v interface{}) bson.M {
 	return nil
 }
 
-// PullFromJira fetches issues from JIRA and upserts into MongoDB.
-// Only updates issues that are newer in JIRA (based on fields.updated).
-func PullFromJira(ctx context.Context) (int, error) {
-	count, _, err := PullFromJiraFiltered(ctx, "", nil)
-	return count, err
-}
-
 // PullFromJiraFiltered fetches issues from JIRA with optional project and issuetype filter,
 // transforms to cache_schema format, and upserts into MongoDB.
 // PullFromJiraFiltered pulls issues from JIRA and returns (count, pulledKeys, error)

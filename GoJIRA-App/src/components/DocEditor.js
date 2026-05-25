@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { modalAlert, modalConfirm } from './AlertModal';
+import { modalAlert, modalConfirm } from 'gojira-shared-web/components/AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
 import MermaidBlock from './MermaidBlock';

@@ -5,6 +5,9 @@
 # 를 생성해 window._env_ 로 노출. React (src/config.js) 가 1순위로 읽음.
 
 FROM node:lts-alpine AS builder
+# craco.config.js 가 ../gojira-shared-web 으로 alias → 작업디렉토리 /src 의
+# 상위(`/`) 에 공유 패키지를 복사. 컨텍스트는 레포 루트.
+COPY gojira-shared-web/ /gojira-shared-web/
 WORKDIR /src
 COPY GoJIRA-App/package.json GoJIRA-App/package-lock.json* ./
 RUN npm ci --no-audit --no-fund

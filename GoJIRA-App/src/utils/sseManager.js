@@ -8,15 +8,7 @@ function getState() {
   if (!window[WIN_KEY]) window[WIN_KEY] = {};
   const s = window[WIN_KEY];
   if (!s.listeners) s.listeners = {};
-  if (!s.statusCbs) s.statusCbs = new Set();
-  if (s.connected === undefined) s.connected = false;
   return s;
-}
-
-function notifyStatus(connected) {
-  const state = getState();
-  state.connected = connected;
-  state.statusCbs.forEach(cb => { try { cb(connected); } catch {} });
 }
 
 function ensureConnection() {
@@ -25,8 +17,6 @@ function ensureConnection() {
   if (state.ws && state.ws.readyState <= WebSocket.OPEN) return;
 
   const ws = new WebSocket(WS_URL);
-
-  ws.onopen = () => { notifyStatus(true); };
 
   ws.onmessage = (e) => {
     try {
@@ -41,12 +31,9 @@ function ensureConnection() {
   };
 
   ws.onclose = () => {
-    notifyStatus(false);
     state.ws = null;
     setTimeout(() => ensureConnection(), 3000);
   };
-
-  ws.onerror = () => { notifyStatus(false); };
 
   state.ws = ws;
 }
@@ -70,9 +57,3 @@ export function subscribe(event, callback) {
   };
 }
 
-export function onStatus(cb) {
-  const state = getState();
-  state.statusCbs.add(cb);
-  try { cb(state.connected); } catch {}
-  return () => { getState().statusCbs.delete(cb); };
-}

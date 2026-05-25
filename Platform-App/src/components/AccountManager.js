@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
-import { modalAlert } from './AlertModal';
+import { modalAlert } from 'gojira-shared-web/components/AlertModal';
 import './AccountManager.css';
 
-const API = config.API_BASE + '/Account';
+const API = config.PLATFORM_API + '/Account';
 
 const TABS = [
   { key: 'users', label: 'Users' },

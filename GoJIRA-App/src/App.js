@@ -4,8 +4,7 @@ import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
-import AlertModal from './components/AlertModal';
-import NoticePopup from './components/NoticePopup';
+import AlertModal from 'gojira-shared-web/components/AlertModal';
 import { getAuthUser } from './utils/auth';
 import config from './config';
 import './App.css';
@@ -114,7 +113,6 @@ function App() {
       </div>
       <div className="app-body">{content}</div>
       <AlertModal />
-      <NoticePopup />
     </div>
   );
 }

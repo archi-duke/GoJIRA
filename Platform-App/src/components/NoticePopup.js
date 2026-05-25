@@ -3,7 +3,7 @@ import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import './NoticePopup.css';
 
-const API = config.API_BASE + '/Notice';
+const API = config.PLATFORM_API + '/Notice';
 export default function NoticePopup({ user }) {
   const HIDE_KEY = `gojira_notice_hide_until_${user || 'anon'}`;
   const [notices, setNotices] = useState([]);

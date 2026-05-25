@@ -8,7 +8,7 @@ const pick = (key, fallback) =>
 
 const config = {
   // 공통 플랫폼 API (인증, 계정, 공지)
-  API_BASE: pick('REACT_APP_PLATFORM_API', 'http://localhost:9000/api/v2'),
+  PLATFORM_API: pick('REACT_APP_PLATFORM_API', 'http://localhost:9000/api/v2'),
   // GoJIRA 앱 API (이슈, 프로젝트)
   GOJIRA_API: pick('REACT_APP_GOJIRA_API', 'http://localhost:9001/api/v2'),
   // GoJIRA-App base URL — Module Federation remote 용.

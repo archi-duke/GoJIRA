@@ -54,21 +54,6 @@ export async function requestEdit({ code, user, file, token }) {
 }
 
 /**
- * "채팅" — 등록된 에이전트 CLI(opencode|claude)만 새 터미널로 spawn.
- *           VS Code 는 띄우지 않음 (필요하면 /edit 으로 분리 호출).
- */
-export async function requestChat({ code, user, agent, token }) {
-  return post('/chat', { code, user, agent }, token);
-}
-
-/**
- * "열기" — clone 보장 + VS Code 폴더 오픈 (특정 파일/CLI 없이).
- */
-export async function requestOpen({ code, user, token }) {
-  return post('/open', { code, user }, token);
-}
-
-/**
  * "push" — 로컬 docs/{user} 브랜치를 origin 으로 push (§5-3 push→PR).
  * @returns {Promise<{ok:boolean, data?:{pushed,commits,dirty,branch,message}, error?:string}>}
  */

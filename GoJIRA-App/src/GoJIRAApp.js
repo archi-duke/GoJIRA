@@ -4,7 +4,7 @@ import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
-import AlertModal from './components/AlertModal';
+import AlertModal from 'gojira-shared-web/components/AlertModal';
 import config from './config';
 
 // Platform-App의 sseManager/eventQueue가 없으면 noop
@@ -68,7 +68,7 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
   // minimal project 로 덮어쓰면 documents (repoName 등) 가 사라져 DocEditor 가 "저장소 없음" 으로 오판.
   // → 기존 state/sessionStorage 의 full project 와 merge, 없으면 API 에서 조회 후 navigate.
   useEffect(() => {
-    const API_BASE_URL = config.GOJIRA_API || config.API_BASE;
+    const API_BASE_URL = config.GOJIRA_API;
     async function resolveProject(projectCode, projectName) {
       const minimal = {
         name: projectName || projectCode,
@@ -123,8 +123,8 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
   }, [navigate, selectedProject]);
 
   const projectCode = selectedProject?.jiraCodes?.main?.jiraCode || '';
-  const PLATFORM_API = config.PLATFORM_API || config.API_BASE;
-  const GOJIRA_API = config.GOJIRA_API || config.API_BASE;
+  const PLATFORM_API = config.PLATFORM_API;
+  const GOJIRA_API = config.GOJIRA_API;
 
   useEffect(() => {
     if (!projectCode || page === 'map') { setProjectAlert(null); return; }

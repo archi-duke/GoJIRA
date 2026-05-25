@@ -368,8 +368,88 @@ func upsertIssueCacheFromDoc(ctx context.Context, key string, projectID interfac
 		}
 		cacheDoc[k] = v
 	}
+	// issueLinks 정규화 — 과거 어느 시점에 ordered-map 이 array-of-{key,value}
+	// 로 잘못 직렬화돼 캐시에 들어간 적이 있고, fetch→yaml→ingest 사이클을 돌
+	// 면서 self-perpetuate 됐다. 진입점(이 함수) 에서 한 번 normalize 해 차단.
+	if links, ok := cacheDoc["issueLinks"]; ok {
+		cacheDoc["issueLinks"] = normalizeValue(links)
+	}
 	cacheDoc["projectId"] = projectID
 	cacheDoc["_dirty"] = false
 	cacheDoc["_syncedAt"] = time.Now()
 	return db.UpsertIssue(ctx, key, cacheDoc)
+}
+
+// normalizeValue — 임의의 BSON/YAML 디코드 결과 안에 섞여있는
+// "[{key:K, value:V}, ...]" 형태의 ordered-map 인공물을 정상 {K:V, ...} 로 되돌린다.
+// 정상 데이터에는 no-op (모든 분기가 같은 값을 반환).
+func normalizeValue(v interface{}) interface{} {
+	switch x := v.(type) {
+	case bson.M:
+		out := bson.M{}
+		for k, vv := range x {
+			out[k] = normalizeValue(vv)
+		}
+		return out
+	case map[string]interface{}:
+		out := bson.M{}
+		for k, vv := range x {
+			out[k] = normalizeValue(vv)
+		}
+		return out
+	case bson.A:
+		if obj, ok := pairsToObject([]interface{}(x)); ok {
+			return obj
+		}
+		out := make(bson.A, len(x))
+		for i, e := range x {
+			out[i] = normalizeValue(e)
+		}
+		return out
+	case []interface{}:
+		if obj, ok := pairsToObject(x); ok {
+			return obj
+		}
+		out := make([]interface{}, len(x))
+		for i, e := range x {
+			out[i] = normalizeValue(e)
+		}
+		return out
+	default:
+		return x
+	}
+}
+
+// pairsToObject — slice 의 모든 요소가 정확히 {key, value} 두 필드 map 이면
+// 합쳐서 bson.M 반환. 하나라도 다르면 (nil, false). 빈 slice 도 false.
+func pairsToObject(arr []interface{}) (bson.M, bool) {
+	if len(arr) == 0 {
+		return nil, false
+	}
+	obj := bson.M{}
+	for _, e := range arr {
+		var m map[string]interface{}
+		switch t := e.(type) {
+		case bson.M:
+			m = map[string]interface{}(t)
+		case map[string]interface{}:
+			m = t
+		default:
+			return nil, false
+		}
+		if len(m) != 2 {
+			return nil, false
+		}
+		kk, hasK := m["key"]
+		vv, hasV := m["value"]
+		if !hasK || !hasV {
+			return nil, false
+		}
+		ks, ok := kk.(string)
+		if !ok {
+			return nil, false
+		}
+		obj[ks] = normalizeValue(vv)
+	}
+	return obj, true
 }

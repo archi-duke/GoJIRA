@@ -5,7 +5,7 @@ import { exportContent } from '../utils/exportUtils';
 import config from '../config';
 import './SATAM.css';
 
-const API_BASE = config.API_BASE;
+const API_BASE = config.GOJIRA_API;
 
 const SUBTYPE_COLORS = {
   VOS: '#70ad47', UC: '#ff9a1e', Feature: '#ff9a1e',

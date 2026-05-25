@@ -5,7 +5,7 @@ import { exportContent } from '../utils/exportUtils';
 import config from '../config';
 import './RelationMap.css';
 
-const API_BASE = config.API_BASE;
+const API_BASE = config.GOJIRA_API;
 
 const COLUMN_DEFS_BASE = [
   { id: 'vos', label: 'VOS', types: ['VOS'], addBtns: ['VOS'] },

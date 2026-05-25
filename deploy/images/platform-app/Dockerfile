@@ -6,6 +6,9 @@
 # → 폐쇄망에서 .env 만 바꾸고 docker compose up -d 하면 끝 (재빌드 불요).
 
 FROM node:lts-alpine AS builder
+# craco.config.js 가 ../gojira-shared-web 으로 alias → 작업디렉토리 /src 의
+# 상위(`/`) 에 공유 패키지를 복사. 컨텍스트는 레포 루트.
+COPY gojira-shared-web/ /gojira-shared-web/
 WORKDIR /src
 COPY Platform-App/package.json Platform-App/package-lock.json* ./
 RUN npm ci --no-audit --no-fund

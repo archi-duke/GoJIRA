@@ -1,5 +1,10 @@
 require('dotenv').config();
+const path = require('path');
 const { ModuleFederationPlugin } = require('webpack').container;
+
+// 양 앱(GoJIRA-App, Platform-App) 공유 UI 프리미티브. GoJIRA-App/craco.config.js
+// 와 동일한 설정 — alias + ModuleScopePlugin 제거 + babel-loader include 확장.
+const SHARED = path.resolve(__dirname, '../gojira-shared-web');
 
 // Module Federation remote URL 을 빌드시점에 inline 하지 않고 런타임 결정.
 //
@@ -37,6 +42,9 @@ const dynamicRemote = `promise new Promise(function(resolve){
 
 module.exports = {
   webpack: {
+    alias: {
+      'gojira-shared-web': SHARED,
+    },
     plugins: {
       add: [
         new ModuleFederationPlugin({
@@ -53,6 +61,19 @@ module.exports = {
     },
     configure: (webpackConfig) => {
       webpackConfig.output.publicPath = 'auto';
+      webpackConfig.resolve.plugins = (webpackConfig.resolve.plugins || []).filter(
+        (p) => p.constructor.name !== 'ModuleScopePlugin'
+      );
+      const oneOf = webpackConfig.module.rules.find((r) => Array.isArray(r.oneOf));
+      if (oneOf) {
+        const babelRule = oneOf.oneOf.find(
+          (r) => r.loader && r.loader.includes('babel-loader') && r.include
+        );
+        if (babelRule) {
+          const inc = Array.isArray(babelRule.include) ? babelRule.include : [babelRule.include];
+          babelRule.include = [...inc, SHARED];
+        }
+      }
       return webpackConfig;
     },
   },

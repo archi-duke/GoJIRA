@@ -2,10 +2,10 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from
 import './ProjectMap.css';
 import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
-import { modalAlert, modalPrompt } from './AlertModal';
+import { modalAlert, modalPrompt } from 'gojira-shared-web/components/AlertModal';
 import config from '../config';
 
-const API_BASE = config.API_BASE;
+const API_BASE = config.GOJIRA_API;
 const PLATFORM_API = config.PLATFORM_API;
 
 function getJiraCode(p) {

@@ -3,16 +3,16 @@ import AccountManager from './components/AccountManager';
 import NoticeManager from './components/NoticeManager';
 import NoticePopup from './components/NoticePopup';
 import DocManager from './components/DocManager';
-import AlertModal from './components/AlertModal';
+import AlertModal from 'gojira-shared-web/components/AlertModal';
 import { getAuthUser } from './utils/auth';
 import { subscribe, onStatus } from './utils/sseManager';
-import { modalAlert, modalConfirm } from './components/AlertModal';
+import { modalAlert, modalConfirm } from 'gojira-shared-web/components/AlertModal';
 import appRegistry from './apps/registry';
 import config from './config';
 import { detectLauncher, requestChat } from './utils/launcher';
 import './App.css';
 
-const API_BASE = config.API_BASE;
+const API_BASE = config.PLATFORM_API;
 
 class RemoteErrorBoundary extends Component {
   state = { hasError: false };

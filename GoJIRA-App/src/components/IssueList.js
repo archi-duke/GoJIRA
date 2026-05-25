@@ -4,7 +4,7 @@ import IssueDetailDialog from './IssueDetailDialog';
 import config from '../config';
 import './IssueList.css';
 
-const API_BASE = config.API_BASE;
+const API_BASE = config.GOJIRA_API;
 
 const STATUS_OPTIONS = ['To Do', 'In Progress', 'Done'];
 const PRIORITY_OPTIONS = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];

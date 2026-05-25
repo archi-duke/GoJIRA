@@ -142,10 +142,6 @@ func DeleteIssueByKey(ctx context.Context, key string) error {
 	return err
 }
 
-func FindDirtyIssues(ctx context.Context) ([]bson.M, error) {
-	return FindAllIssues(ctx, bson.M{"_dirty": true})
-}
-
 func ClearDirtyFlag(ctx context.Context, key string) error {
 	_, err := Issues().UpdateOne(ctx, bson.M{"key": key}, bson.M{
 		"$set": bson.M{"_dirty": false, "_syncedAt": time.Now()},
@@ -200,18 +196,6 @@ func RemoveIssueLink(ctx context.Context, linkID string) ([]string, error) {
 func InsertComment(ctx context.Context, doc bson.M) error {
 	_, err := Comments().InsertOne(ctx, doc)
 	return err
-}
-
-func FindCommentsByKey(ctx context.Context, issueKey string) ([]bson.M, error) {
-	cursor, err := Comments().Find(ctx, bson.M{"issueKey": issueKey})
-	if err != nil {
-		return nil, err
-	}
-	var results []bson.M
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, err
-	}
-	return results, nil
 }
 
 func UpdateComment(ctx context.Context, commentID string, body string) error {

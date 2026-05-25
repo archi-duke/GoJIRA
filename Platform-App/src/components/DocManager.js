@@ -3,10 +3,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
+import { modalAlert, modalConfirm, modalPrompt } from 'gojira-shared-web/components/AlertModal';
 import './DocManager.css';
 
-const API = config.API_BASE + '/DocRepo';
+const API = config.PLATFORM_API + '/DocRepo';
 
 export default function DocManager({ user }) {
   const [repos, setRepos] = useState([]);

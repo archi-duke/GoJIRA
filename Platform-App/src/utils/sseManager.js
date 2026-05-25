@@ -1,7 +1,7 @@
 import config from '../config';
 
 // SSE → WebSocket 전환 (HTTP/1.1 연결 한도 문제 해결)
-const WS_URL = config.API_BASE.replace(/^http/, 'ws') + '/Notice/ws';
+const WS_URL = config.PLATFORM_API.replace(/^http/, 'ws') + '/Notice/ws';
 const WIN_KEY = '__gojira_ws__';
 
 function getState() {

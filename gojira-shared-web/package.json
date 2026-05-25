@@ -1,0 +1,11 @@
+{
+  "name": "gojira-shared-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GoJIRA 웹 앱들 (GoJIRA-App, Platform-App) 간 공유하는 순수 UI 프리미티브. 외부 의존 없음(react 한정).",
+  "main": "index.js",
+  "peerDependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}

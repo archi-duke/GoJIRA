@@ -4,9 +4,12 @@ GoJIRA-App/build/
 
 # Go binary
 GoJIRA-API/gojira-api
+GoJIRA-API/gojira-cli
 GoJIRA-API/server
 Platform-API/platform-api
+gojira-cli/gojira-cli
 gojira-launcher/gojira-launcher
+gojira-launcher/gojira-launcher.darwin
 gojira-launcher/gojira-launcher.exe
 
 # Env
@@ -47,6 +50,7 @@ scripts/
 !Agent-Service/scripts/
 !deploy/scripts/
 package.json
+!gojira-shared-web/package.json
 package-lock.json
 
 # 미리 빌드된 런처 바이너리 (호스팅 dist) — 거대한 산출물, 커밋 X
