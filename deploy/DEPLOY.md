@@ -113,7 +113,6 @@ docker compose build
 docker images | grep -E "gojira|plantuml"
 # gojira/platform-api    latest
 # gojira/gojira-api      latest
-# gojira/agent-service   latest
 # gojira/jira-api        latest
 # gojira/platform-app    latest
 # gojira/gojira-app      latest
@@ -139,7 +138,6 @@ docker save \
   plantuml/plantuml-server:jetty \
   gojira/platform-api:latest \
   gojira/gojira-api:latest \
-  gojira/agent-service:latest \
   gojira/jira-api:latest \
   gojira/platform-app:latest \
   gojira/gojira-app:latest \
@@ -182,7 +180,7 @@ tar czf gojira-deploy-$(date +%F).tgz gojira-images.tar deploy/
 
 ```bash
 docker load -i ../gojira-images.tar
-docker images | grep -E "gojira|plantuml"   # 8개 확인
+docker images | grep -E "gojira|plantuml"   # 7개 확인
 ```
 
 ---
@@ -233,7 +231,7 @@ docker compose up -d
 docker compose ps
 ```
 
-8개 컨테이너가 `Up` 상태여야 한다.
+7개 컨테이너가 `Up` 상태여야 한다.
 
 ### 6-3. (재빌드 불요)
 
@@ -258,7 +256,6 @@ docker compose up -d
 source .env
 curl -sS http://localhost:${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT}}/                  # Platform-API → 404 OK
 curl -sS http://localhost:${GOJIRA_API_HOST_PORT:-${GOJIRA_API_PORT}}/                      # GoJIRA-API   → 404 OK
-curl -sS http://localhost:${AGENT_API_HOST_PORT:-${AGENT_API_PORT}}/docs                    # Agent-Service → HTTP 200
 curl -sS http://localhost:${JIRA_API_HOST_PORT:-8000}/rest/api/2/serverInfo                 # JIRA Mock    → JSON
 curl -sS http://localhost:${PLANTUML_HOST_PORT:-${PLANTUML_PORT}}/                          # PlantUML     → HTML
 curl -sS http://localhost:${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT}}/                  # Platform-App → HTML
@@ -271,10 +268,9 @@ curl -sS http://localhost:${PUMLEX_HOST_PORT:-${PUMLEX_PORT}}/                  
 ```bash
 docker compose logs platform-api  | head -30
 docker compose logs gojira-api    | head -30
-docker compose logs agent-service | head -30
 ```
 
-각 서비스 startup 로그에서 `MongoDB connected`, `OpenCode peer : <url>`, `Gitea : <url>` 가 정상 출력되면 OK.
+각 서비스 startup 로그에서 `MongoDB connected`, `Gitea : <url>` 가 정상 출력되면 OK.
 
 ### 7-3. 브라우저 통합 확인
 
@@ -287,68 +283,7 @@ http://${GOJIRA_APP_SERVER}:${GOJIRA_APP_PORT}       # GoJIRA-App (이슈/프로
 체크리스트:
 - [ ] Platform-App 로그인 / 프로젝트 목록 표시
 - [ ] GoJIRA-App 이슈 목록 / 다이어그램 (PlantUML) 렌더링
-- [ ] Platform-App 의 채팅 popup → 백엔드 Agent-Service → OpenCode → LLM 까지 SSE 응답 도착
 - [ ] Module Federation: Platform-App 화면에 GoJIRA-App 의 `remoteEntry.js` 로드 (DevTools Network 탭)
-
----
-
-## ⑦-1. (선택) 사용자별 OpenCode 인스턴스 등록
-
-> 단계 A 구현 완료, 단계 B (Agent-Service 라우팅 전환) 활성화 시 실제 사용됨. 지금 등록해두어도 무해.
-
-### 사전 준비
-
-```bash
-# 1) opencode 바이너리를 시스템 경로에 배치 (운영자 책임)
-sudo install -m 755 /path/to/opencode /usr/local/bin/opencode
-opencode --version
-
-# 2) mongosh CLI 설치 (등록 스크립트가 사용)
-sudo apt install -y mongodb-mongosh
-
-# 3) systemd template unit 설치
-sudo install -m 644 deploy/systemd/opencode@.service /etc/systemd/system/
-sudo systemctl daemon-reload
-
-# 4) 환경파일 디렉토리
-sudo install -d -m 755 /etc/gojira
-```
-
-### 사용자 추가
-
-```bash
-sudo ./deploy/scripts/gojira-user-add.sh batman
-# → /etc/gojira/opencode-batman.env 생성 (포트는 Mongo 의 최대값+1, 비어있으면 4096)
-# → Mongo opencodeInstances 에 {userId, host, port, status:'active'} upsert
-# → systemctl enable --now opencode@batman.service
-#
-# 옵션:
-#   --no-start          systemctl 호출 생략 (env + Mongo 등록만)
-#   GOJIRA_NODE_HOST=…  노드 분산 시 호스트 주소 명시 (default localhost)
-#   OPENCODE_BIN=…      opencode 바이너리 경로 override (default /usr/local/bin/opencode)
-```
-
-상태 확인:
-
-```bash
-systemctl status opencode@batman.service
-journalctl -u opencode@batman.service -f
-mongosh "${MONGO_URI}" --eval "db.getSiblingDB('gojira').opencodeInstances.find().pretty()"
-```
-
-### 사용자 제거
-
-```bash
-sudo ./deploy/scripts/gojira-user-remove.sh batman
-# → systemctl disable --now / env 파일 삭제 / Mongo 레코드 삭제
-# → worktree (${GOJIRA_REPOS_DIR}/.../worktrees/batman) 는 보존 — 명시적으로 삭제하려면 별도 절차
-```
-
-### 미적용 항목 (단계 B 에서)
-
-- Agent-Service 가 `OPENCODE_URL` env 가 아니라 `opencodeInstances` 컬렉션을 조회해 라우팅하도록 전환
-- 헬스체크 (cron 또는 Platform-API 의 백그라운드 goroutine) — status=down 자동 표시
-- 자세한 설계: `docs/refactor-skill-fs-direct.md` § 7
 
 ---
 
@@ -418,7 +353,6 @@ docker image prune                     # 옛 이미지 정리
 | 백엔드 startup 시 `MongoDB connect timeout` | `MONGODB_SERVER` / `MONGO_USER` / `MONGO_PASS` 확인. 비밀번호에 `@` / `:` / `/` 들어가면 URL encoding 필요 (`@` → `%40`) |
 | 브라우저 콘솔 `ERR_CONNECTION_REFUSED localhost` | env.js 가 생성되지 않았거나 비어있음. `docker compose exec platform-app cat /usr/share/nginx/html/env.js` 로 확인. `.env` 의 `*_SERVER`/`*_PORT` 값 검증 후 `docker compose up -d platform-app gojira-app` |
 | Module Federation `remoteEntry.js` 실패 | `GOJIRA_APP_SERVER` + `GOJIRA_APP_PORT` 가 브라우저 접근 가능한 endpoint 인지 확인 |
-| Agent-Service `/Agent/chat` 시 OpenCode 401 | `OPENCODE_SERVER_PASSWORD` 가 OpenCode 측과 일치하는지 |
 | LLM 호출 시 `unauthorized` | `OPENAI_API_KEY` / `PLATFORM_LLM_TICKET` 확인. `GOJIRA_ENC_KEY` 가 `ENC:` 값 암호화 시 사용한 키와 동일한지 |
 | `ENC:` 값 복호화 fail | 두 환경의 `GOJIRA_ENC_KEY` 가 다름. 양쪽 모두 미설정이면 코드 default key 가 동일하게 적용됨 |
 | PlantUML 한글/다이어그램 깨짐 | `docker compose restart plantuml-server` (JVM 폰트 캐시 이슈) |
