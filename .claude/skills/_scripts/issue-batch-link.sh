@@ -17,10 +17,14 @@
 # 재시도: 5xx → 최대 3회 지수 백오프
 set -euo pipefail
 
+# 트랙 E: 링크로 갱신된 양쪽 이슈 YAML 을 로컬 clone 에 기록 (X-Local-Write + localWrites).
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "${DIR}/_local-write.sh"
+
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
 SOURCE="${3:-}"
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:-${GOJIRA_API_URL:-http://10.211.55.3:44360/api/v2}}"
 
 INPUT=$(cat)
 COUNT=$(jq 'length' <<< "$INPUT")
@@ -46,7 +50,7 @@ for i in $(seq 0 $((COUNT - 1))); do
   for attempt in 1 2 3; do
     TMP=$(mktemp)
     STATUS=$(curl -s -o "$TMP" -w '%{http_code}' -X POST "${GOJIRA_API}/Issue/link" \
-      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "X-Local-Write: true" \
       --data-binary "$BODY" || echo 000)
     RESP=$(cat "$TMP")
     rm -f "$TMP"
@@ -62,6 +66,8 @@ for i in $(seq 0 $((COUNT - 1))); do
 
   if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
     CREATED=$((CREATED+1))
+    # 링크 갱신된 양쪽 이슈 YAML 을 로컬 clone 에 반영.
+    gj_apply_local_writes "$RESP"
   else
     FAILED=$((FAILED+1))
     ERRORS+=("$(jq -n --arg iw "$IW" --arg ow "$OW" --arg st "$STATUS" --arg e "$RESP" '{inward:$iw,outward:$ow,status:$st,error:$e}')")

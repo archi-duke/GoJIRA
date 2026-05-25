@@ -12,7 +12,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"gopkg.in/yaml.v3"
 
-	"gojira-api/clients"
 	"gojira-api/db"
 	"gojira-api/models"
 )
@@ -24,6 +23,19 @@ func issueYamlPath(subkey string) string {
 	safe := _subkeySafe.ReplaceAllString(subkey, "_")
 	return "data/issues/" + safe + ".yaml"
 }
+
+// localWrite — 로컬 쓰기 모드 응답에 동봉하는 파일 조작 지시.
+// CLI(로컬 clone 보유자)가 이 목록을 받아 repo root 기준으로 적용한다.
+//   - Content 있음 → 해당 경로에 본문 기록(생성/갱신)
+//   - Delete=true  → 해당 경로 삭제
+type localWrite struct {
+	Path    string `json:"path"`
+	Content string `json:"content,omitempty"`
+	Delete  bool   `json:"delete,omitempty"`
+}
+
+// 이슈 쓰기는 항상 로컬 모델(트랙 E): 서버는 fs 에 손대지 않고 YAML 본문을 localWrites 로
+// 돌려주며, 호출자(CLI/스킬/에이전트)가 로컬 clone 에 기록한다. 웹은 조회 전용.
 
 // POST /api/v{version}/Issue — 이슈 생성.
 //
@@ -119,27 +131,20 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4) YAML 커밋 (user 브랜치)
-	msg := fmt.Sprintf("[issue] %s %s", key, truncate(req.Summary, 40))
-	if err := clients.SaveFile(prjKey, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
-		respondError(w, http.StatusBadGateway, "YAML 저장 실패: "+err.Error())
-		return
+	// 4) YAML 영속화 — 로컬 clone 에 기록 (호출자가 응답 localWrites 적용). 서버는 fs 미접촉.
+	resp := map[string]interface{}{
+		"key":         key,
+		"subkey":      subkey,
+		"localWrites": []localWrite{{Path: issueYamlPath(subkey), Content: string(yamlBytes)}},
 	}
 
 	// 5) Mongo 캐시 upsert (실패해도 YAML 이 진실이므로 경고만)
-	cacheDoc := bson.M{}
-	for k, v := range doc {
-		cacheDoc[k] = v
-	}
-	cacheDoc["projectId"] = projectID
-	cacheDoc["_dirty"] = false
-	cacheDoc["_syncedAt"] = time.Now()
-	if err := db.UpsertIssue(ctx, key, cacheDoc); err != nil {
+	if err := upsertIssueCacheFromDoc(ctx, key, projectID, bson.M(doc)); err != nil {
 		log.Printf("cache upsert warn key=%s: %v", key, err)
 	}
 
 	log.Printf("created issue %s subkey=%s user=%s (YAML)", key, subkey, user)
-	respondJSON(w, http.StatusOK, map[string]string{"key": key, "subkey": subkey})
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // GET /api/v{version}/Issue — Mongo 캐시 read.
@@ -206,16 +211,15 @@ func IssueGetHandler(w http.ResponseWriter, r *http.Request) {
 
 // PUT /api/v{version}/Issue — 필드 업데이트.
 //
-// 동작: Mongo 캐시 문서 로드 → Data 병합 → YAML 재생성 → user 브랜치 커밋 → 캐시 업데이트.
-// JIRA 동기화는 제거. 추후 별도 push 플로우에서 처리.
+// 동작: Mongo 캐시 문서 로드 → Data 병합 → YAML 재생성 → localWrites 로 반환(호출자가 로컬
+// clone 에 기록) → 캐시 업데이트. 서버는 fs 미접촉. JIRA 동기화는 별도 push 플로우.
 func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	var req models.IssueUpdateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	user, ok := resolveUser(r, req.User)
-	if !ok {
+	if _, ok := resolveUser(r, req.User); !ok {
 		respondError(w, http.StatusForbidden, "user required")
 		return
 	}
@@ -263,19 +267,16 @@ func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg := fmt.Sprintf("[issue] update %s", req.Key)
-	if err := clients.SaveFile(code, issueYamlPath(subkey), string(yamlBytes), msg, user); err != nil {
-		respondError(w, http.StatusBadGateway, "YAML 저장 실패: "+err.Error())
-		return
+	resp := map[string]interface{}{
+		"key":         req.Key,
+		"localWrites": []localWrite{{Path: issueYamlPath(subkey), Content: string(yamlBytes)}},
 	}
 
-	merged["_dirty"] = false
-	merged["_syncedAt"] = time.Now()
-	if err := db.UpsertIssue(ctx, req.Key, merged); err != nil {
+	if err := upsertIssueCacheFromDoc(ctx, req.Key, merged["projectId"], merged); err != nil {
 		log.Printf("cache upsert warn key=%s: %v", req.Key, err)
 	}
 
-	respondJSON(w, http.StatusOK, "issue updated")
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // DELETE /api/v{version}/Issue — 이슈 삭제.
@@ -302,35 +303,40 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	if err := deleteIssueInternal(ctx, req.PrjID, req.Key, user); err != nil {
+	writes, err := deleteIssueInternal(ctx, req.PrjID, req.Key, user)
+	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	respondJSON(w, http.StatusOK, "issue deleted")
+	resp := map[string]interface{}{"key": req.Key}
+	if writes != nil {
+		resp["localWrites"] = writes
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // deleteIssueInternal encapsulates the full delete flow: Gitea YAML + Mongo issues.
 // Soft delete (2026-04-29 사고 후): mongo issue → issues_trash 컬렉션으로 이동, 3일 후
 // 자동 영구 삭제 (purgeOldTrashWorker). YAML 은 Gitea 에서 즉시 삭제 (git history 가
 // 자체 휴지통 역할). 복원 시 trash mongo doc 으로부터 yaml 재생성 가능.
-func deleteIssueInternal(ctx context.Context, code, key, user string) error {
+func deleteIssueInternal(ctx context.Context, code, key, user string) ([]localWrite, error) {
 	isOwnIssue := code != "" && strings.HasPrefix(key, code+"-")
 
+	var writes []localWrite
 	if isOwnIssue {
 		existing, _ := db.FindIssueByKey(ctx, key)
 		subkey, _ := existing["subkey"].(string)
 		if subkey != "" {
-			if err := clients.DeleteFile(code, issueYamlPath(subkey), fmt.Sprintf("[issue] delete %s", key), user); err != nil {
-				log.Printf("YAML delete warn key=%s: %v", key, err)
-			}
+			// 로컬 clone 의 YAML 삭제 지시 — 호출자가 적용. 서버는 fs 미접촉.
+			writes = append(writes, localWrite{Path: issueYamlPath(subkey), Delete: true})
 		}
 	}
 	// Mongo: issues → issues_trash (soft delete). 3일 후 자동 영구 삭제.
 	if err := db.MoveIssueToTrash(ctx, key, user, ""); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return writes, nil
 }
 
 // ── 유틸 ──
@@ -349,4 +355,21 @@ func keyToProjectCode(key string) string {
 		return ""
 	}
 	return key[:idx]
+}
+
+// upsertIssueCacheFromDoc — 이슈 YAML doc(map) 를 Mongo 캐시 형태로 변환해 upsert.
+// "YAML = 진실, Mongo = 캐시" 변환을 한 곳에 모은다 (create/update/ingest 공용).
+// 내부 필드(_id/_dirty/_syncedAt)는 제외하고, projectId·동기화 메타를 다시 채운다.
+func upsertIssueCacheFromDoc(ctx context.Context, key string, projectID interface{}, doc bson.M) error {
+	cacheDoc := bson.M{}
+	for k, v := range doc {
+		if k == "_id" || k == "_dirty" || k == "_syncedAt" {
+			continue
+		}
+		cacheDoc[k] = v
+	}
+	cacheDoc["projectId"] = projectID
+	cacheDoc["_dirty"] = false
+	cacheDoc["_syncedAt"] = time.Now()
+	return db.UpsertIssue(ctx, key, cacheDoc)
 }

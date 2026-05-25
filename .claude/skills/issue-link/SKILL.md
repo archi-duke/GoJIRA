@@ -32,10 +32,10 @@ export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 ## 링크 생성
 ```bash
-curl -s -X POST "${GOJIRA_API}/Issue/link" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg iw "$FROM" --arg ow "$TO" --arg lt "$TYPE" --arg u "$USER" \
-    '{prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u}')"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg iw "$FROM" --arg ow "$TO" --arg lt "$TYPE" --arg u "$USER" \
+    '{prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u}' \
+  | bash "${SCRIPTS}/issue-write.sh" POST /Issue/link
 ```
 
 결과를 사용자에게 보고. 실패 시 silent drop 금지.

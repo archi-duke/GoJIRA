@@ -1,42 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
+import { modalAlert, modalConfirm } from './AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
 import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
+import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite } from '../utils/launcher';
+import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
-
-/**
- * markdown 안에서 본문이 originalSource 와 일치하는 첫 ```plantuml/```puml fence 의
- * 본문을 newBody 로 교체. plantumlCounterRef + idx 매핑은 ReactMarkdown 의
- * components.code 호출 타이밍과 어긋나는 케이스가 있어, fence 본문 자체를 식별자로
- * 사용한다 (PexBlock 의 source prop 이 그대로 전달되므로 신뢰 가능).
- */
-function replacePlantumlFenceBySource(md, originalSource, newBody) {
-  const lines = (md || '').split('\n');
-  const fenceOpen = /^[ \t]*```\s*(plantuml|puml)\b/i;
-  const fenceClose = /^[ \t]*```\s*$/;
-  let openLine = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (openLine === -1) {
-      if (fenceOpen.test(lines[i])) openLine = i;
-    } else if (fenceClose.test(lines[i])) {
-      const body = lines.slice(openLine + 1, i).join('\n');
-      if (body === originalSource) {
-        const before = lines.slice(0, openLine + 1);
-        const after = lines.slice(i);
-        const bodyLines = (newBody || '').split('\n');
-        return [...before, ...bodyLines, ...after].join('\n');
-      }
-      openLine = -1;
-    }
-  }
-  return md; // 없으면 원본 반환
-}
 
 const API = config.PLATFORM_API + '/DocRepo';
 const PLATFORM_API = config.PLATFORM_API;
@@ -114,25 +88,23 @@ function renderYamlValue(v) {
   return <span className="de-yaml-value">{v}</span>;
 }
 
-export default function DocEditor({ project, user, authority, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
+export default function DocEditor({ project, user, onBack, currentPage, onNavigate, projectAlert, onDocStateChange }) {
   const projectCode = project?.jiraCodes?.main?.jiraCode || '';
   const hasRepo = !!project?.documents?.repoName;
 
   const [mainTree, setMainTree] = useState(null);
-  const [userTree, setUserTree] = useState(null);
+  const [localTree, setLocalTree] = useState(null);
   const [fileStatus, setFileStatus] = useState({}); // path → 'modified' | 'added' | 'deleted'
-  const [activeTab, setActiveTab] = useState('workspace'); // 'main' | 'workspace'
+  const [fileCommitted, setFileCommitted] = useState({}); // path → bool — true: 차이가 docs/{user} HEAD 에 커밋됨(+), false: 미커밋(-)
+  const [ahead, setAhead] = useState(0); // docs/{user} HEAD 가 upstream 대비 앞서 있는 commit 수. -1 = upstream 미설정(신규 브랜치).
+  const [activeTab, setActiveTab] = useState('local'); // 'main' | 'local'
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedMainOnly, setSelectedMainOnly] = useState(false);
   const [content, setContent] = useState('');
-  const [original, setOriginal] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [readOnly, setReadOnly] = useState(false);
-  const [conflictDiff, setConflictDiff] = useState(null);
-  const [pendingFiles, setPendingFiles] = useState(new Set());
-  const [globalEditMode, setGlobalEditMode] = useState(false);
+  const [launcher, setLauncher] = useState(null); // 로컬 런처 감지 결과 { ready, agents, token } | null
+  const [launching, setLaunching] = useState(false); // /edit 호출 진행 중
+  const [installOpen, setInstallOpen] = useState(false); // 설치 안내 모달
+  const [publishing, setPublishing] = useState(false); // 로컬 push→PR 진행 중
   const [showGraph, setShowGraph] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState(() => new Set());
   const toggleFolder = (path) => {
@@ -142,7 +114,11 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
       return next;
     });
   };
-  const [diffMode, setDiffMode] = useState(false);
+  const [viewMode, setViewMode] = useState('preview'); // 'preview' | 'raw' | 'diff' — 셋 중 하나만.
+  const diffMode = viewMode === 'diff'; // 기존 변수명을 유지해 하위 분기 안 깨지게.
+  const [editing, setEditing] = useState(false); // 인라인 편집 모드 여부.
+  const [editContent, setEditContent] = useState(''); // textarea 바인딩. 진입 시 content 로 프리필.
+  const [saving, setSaving] = useState(false);
   const [diffTab, setDiffTab] = useState('semantic');
   const [mainContent, setMainContent] = useState('');
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -175,112 +151,10 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
   };
-  const chatWinRef = React.useRef(null);
-  // 인터뷰 후 자동 이어서 AI 생성할 원본 요청 파일 (예: 'business/use-cases.md')
-  const pendingAIFileRef = React.useRef(null);
-  // handleAIGenerate 를 useEffect 내부에서 호출하기 위한 ref (정의 뒤 동기화)
-  const handleAIGenerateRef = React.useRef(null);
-
-  // AI 생성 버튼 노출 대상 — 워크플로우 스킬과 매핑된 문서만
-  const AI_ENABLED_FILES = {
-    'business/project-description.md': 'projdesc_generate',
-    'business/use-cases.md': 'usecase_analyze',
-    'business/requirements.md': 'requirement_refine',
-  };
-  const aiSkillForFile = selectedFile ? AI_ENABLED_FILES[selectedFile] : null;
-
-  // 채팅창에서 생성된 문서 수신 → 편집기에 반영 → 저장 확인
-  useEffect(() => {
-    function handleDocApply(e) {
-      if (e.data?.type !== 'gojira-doc-apply') return;
-      const { filePath, content: docContent } = e.data;
-      if (!filePath || !docContent) return;
-      setSelectedFile(filePath);
-      setContent(docContent);
-      setOriginal('');
-      setEditMode(true);
-      setSelectedMainOnly(false);
-      setTimeout(async () => {
-        const ok = await modalConfirm('AI가 문서를 생성했습니다.\n내용을 확인 후 저장하시겠습니까?');
-        if (ok) {
-          setSaving(true);
-          const res = await fetch(`${API}/${projectCode}/file`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-            body: JSON.stringify({ path: filePath, content: docContent, message: `${filePath} AI 생성` }),
-          });
-          setSaving(false);
-          if (res.ok) {
-            setOriginal(docContent);
-            setEditMode(false);
-            refreshDocState();
-
-            // 인터뷰를 통해 과제 설명을 완성한 경우, 원래 요청 문서로 자동 이어감
-            const pending = pendingAIFileRef.current;
-            pendingAIFileRef.current = null;
-            if (pending && pending !== filePath && AI_ENABLED_FILES[pending]) {
-              // 채팅 창이 열려있으면 그 안에서 이어감 (SSE 진행상황 노출)
-              if (chatWinRef.current && !chatWinRef.current.closed) {
-                try {
-                  chatWinRef.current.postMessage(
-                    { type: 'gojira-continue', target: pending, projectCode },
-                    '*'
-                  );
-                  chatWinRef.current.focus();
-                } catch {}
-                modalAlert('과제 설명 저장 완료. 채팅 창에서 이어진 작업을 확인하세요.');
-              } else {
-                modalAlert('저장 완료');
-              }
-            } else {
-              modalAlert('저장 완료');
-            }
-          } else {
-            modalAlert('저장 실패');
-          }
-        }
-      }, 300);
-    }
-    // 워크플로우 스킬이 docs/{user}에 직접 저장한 경우 — 편집기 새로고침
-    async function handleDocReload(e) {
-      if (e.data?.type !== 'gojira-doc-reload') return;
-      const { filePath } = e.data;
-      if (!filePath) return;
-      try {
-        const branch = `docs/${user}`;
-        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(filePath)}&ref=${encodeURIComponent(branch)}`);
-        if (!res.ok) return;
-        const d = await res.json();
-        const text = d.content ? decodeBase64(d.content) : '';
-        setSelectedFile(filePath);
-        setSelectedMainOnly(false);
-        setContent(text);
-        setOriginal(text);
-        setEditMode(false);
-        refreshDocState();
-      } catch {}
-    }
-    window.addEventListener('message', handleDocApply);
-    window.addEventListener('message', handleDocReload);
-    // BroadcastChannel: 같은 origin 다른 창(popup 채팅) → DocEditor 통지
-    let bc = null;
-    try {
-      bc = new BroadcastChannel('gojira-doc');
-      bc.onmessage = (e) => {
-        if (e.data?.type === 'gojira-doc-apply') handleDocApply({ data: e.data });
-        else if (e.data?.type === 'gojira-doc-reload') handleDocReload({ data: e.data });
-      };
-    } catch {}
-    return () => {
-      window.removeEventListener('message', handleDocApply);
-      window.removeEventListener('message', handleDocReload);
-      if (bc) bc.close();
-    };
-  }, [projectCode, user]); // eslint-disable-line
-
-  // 문서 상태 갱신 통합 함수 — 트리 로드 + fileStatus 재계산
+  // 문서 상태 갱신 — Main 은 서버 Gitea, Local 은 런처(로컬 clone working tree)에서 가져온다.
+  // 런처 미감지 시 localTree=null → Local 탭은 빈 상태 + 설치 안내(설계: 데이터소스 분리).
+  // fileStatus 는 main sha vs local sha 비교. sha 포맷이 동일한 git blob 해시라 그대로 매칭됨.
   async function refreshDocState(retry = 0) {
-    const branch = `docs/${user}`;
     try {
       const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
       if (!mRes.ok) throw new Error(`main tree ${mRes.status}`);
@@ -288,60 +162,87 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
       if (!mTree?.tree) throw new Error('invalid main tree');
       setMainTree(mTree);
 
-      const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`);
-      if (!uRes.ok) throw new Error('user tree failed');
-      const uTree = await uRes.json();
-      setUserTree(uTree);
+      let lTree = null;
+      if (launcher?.ready) {
+        const r = await requestFiles({ code: projectCode, user, token: launcher.token });
+        if (r.ok) lTree = r.data;
+      }
+      setLocalTree(lTree);
+      setAhead(lTree?.ahead ?? 0);
 
-      const mainShaMap = {};
-      const mainPathSet = new Set();
-      (mTree.tree || []).forEach(f => { mainShaMap[f.path] = f.sha; mainPathSet.add(f.path); });
-      const userPathSet = new Set();
-      const status = {};
-      (uTree.tree || []).forEach(f => {
-        userPathSet.add(f.path);
-        if (!mainPathSet.has(f.path)) status[f.path] = 'added';
-        else if (mainShaMap[f.path] !== f.sha) status[f.path] = 'modified';
+      if (!lTree) {
+        setFileStatus({});
+        setFileCommitted({});
+        if (onDocStateChange) onDocStateChange();
+        return;
+      }
+      // sha 맵 3개: main(서버) · wt(런처 working tree) · head(런처 HEAD).
+      const mainSha = {}, wtSha = {}, headSha = {};
+      const mainPaths = new Set(), wtPaths = new Set(), headPaths = new Set();
+      (mTree.tree || []).forEach(f => { mainSha[f.path] = f.sha; mainPaths.add(f.path); });
+      (lTree.tree || []).forEach(f => { wtSha[f.path] = f.sha; wtPaths.add(f.path); });
+      (lTree.headTree || []).forEach(f => { headSha[f.path] = f.sha; headPaths.add(f.path); });
+
+      // main vs working tree 차이 분류 + 그 차이가 HEAD 에 반영됐는지(=committed) 판정.
+      // committed = (현재 디스크의 내용이 HEAD 의 같은 path 와 동일) — 즉 사용자가 commit 까지 마쳤는지.
+      // added : path 가 wt 에만 → head 에도 있으면 +A (committed), 없으면 -A (untracked/uncommitted).
+      // modified : wt sha != main sha → wt sha == head sha 면 +M, 아니면 -M.
+      // deleted : path 가 main 에만 → head 에서도 빠졌으면 +D, head 에 있으면 -D (디스크에서만 지움, 아직 git rm/commit 안 함).
+      const status = {}, committed = {};
+      wtPaths.forEach(p => {
+        if (!mainPaths.has(p)) {
+          status[p] = 'added';
+          committed[p] = headPaths.has(p);
+        } else if (mainSha[p] !== wtSha[p]) {
+          status[p] = 'modified';
+          committed[p] = wtSha[p] === headSha[p];
+        }
       });
-      mainPathSet.forEach(p => { if (!userPathSet.has(p)) status[p] = 'deleted'; });
+      mainPaths.forEach(p => {
+        if (!wtPaths.has(p)) {
+          status[p] = 'deleted';
+          committed[p] = !headPaths.has(p);
+        }
+      });
       setFileStatus(status);
+      setFileCommitted(committed);
       if (onDocStateChange) onDocStateChange();
     } catch {
       if (retry < 1) setTimeout(() => refreshDocState(retry + 1), 1000);
-      else { setUserTree(null); setFileStatus({}); }
+      else { setLocalTree(null); setFileStatus({}); setFileCommitted({}); setAhead(0); }
     }
   }
 
-  // 외부 변경(SSE push) 으로 현재 열린 파일 재로드. 편집 중이면 건너뜀.
+  // 외부 변경(SSE push) 으로 현재 열린 파일 재로드 (웹은 조회 전용).
   // SSE 구독 콜백이 매 렌더의 state 를 참조하도록 ref 경유.
   const reloadRef = React.useRef(null);
   reloadRef.current = async () => {
     if (!selectedFile) return;
-    if (editMode && content !== original) return;
-    const ref = selectedMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
     try {
-      const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(ref)}`);
-      if (!res.ok) return;
-      const d = await res.json();
-      const text = d.content ? decodeBase64(d.content) : '';
-      if (text !== content) {
-        setContent(text);
-        setOriginal(text);
+      let text = '';
+      if (selectedMainOnly || activeTab === 'main') {
+        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
+        if (!res.ok) return;
+        const d = await res.json();
+        text = d.content ? decodeBase64(d.content) : '';
+      } else if (activeTab === 'local' && launcher?.ready) {
+        const r = await requestLocalFile({ code: projectCode, user, path: selectedFile, token: launcher.token });
+        if (!r.ok) return;
+        text = r.data?.content ? decodeBase64(r.data.content) : '';
+      } else {
+        return;
       }
+      if (text !== content) setContent(text);
     } catch {}
   };
   async function reloadSelectedFile() { return reloadRef.current && reloadRef.current(); }
 
-  // 진입 시 초기 파일 확인 → 사용자 브랜치 생성 → 트리 비교 (순차 실행)
+  // 진입 시 + 런처 ready 상태 변동 시 트리 상태 갱신.
+  // 런처는 비동기 감지되므로 처음엔 launcher=null → main 만 로드, ready 후 재호출되어 local 트리 채움.
   useEffect(() => {
     if (!hasRepo) return;
-    fetch(`${API}/${projectCode}/init-files`, { method: 'POST' })
-      .catch(() => {})
-      .then(() => fetch(`${API}/${projectCode}/ensure-branch`, {
-        method: 'POST', headers: { 'X-User-Id': user },
-      }).catch(() => {}))
-      .then(() => refreshDocState());
-  }, [projectCode, hasRepo, user]); // eslint-disable-line
+    refreshDocState();
+  }, [projectCode, hasRepo, user, launcher?.ready]); // eslint-disable-line
 
   // WebSocket 구독 — main 변경 시 실시간 트리 갱신
   useEffect(() => {
@@ -365,370 +266,107 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
     });
   }, [projectCode, hasRepo, user]); // eslint-disable-line
 
-  async function handleFileClick(path, isMainOnly) {
-    if (editMode && content !== original) {
-      if (!await modalConfirm('저장하지 않은 변경이 있습니다. 이동하시겠습니까?')) return;
-    }
-    // mainOnly 파일이면 main에서 조회
-    const ref = isMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
-    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
-    if (res.ok) {
-      const d = await res.json();
-      const text = d.content ? decodeBase64(d.content) : '';
-      setSelectedFile(path);
-      setSelectedMainOnly(!!isMainOnly);
-      setContent(text);
-      setOriginal(text);
-      setEditMode(false);
-    }
+  // 로컬 런처 감지 — 기동/설치돼 있으면 "로컬 수정" 버튼을 활성화 (local-agent-mvp §2.1).
+  // 마운트 시 + 창 포커스 복귀 시 재감지(런처를 나중에 켰을 수 있으므로).
+  useEffect(() => {
+    let alive = true;
+    const probe = () => detectLauncher().then((r) => { if (alive) setLauncher(r); });
+    probe();
+    window.addEventListener('focus', probe);
+    return () => { alive = false; window.removeEventListener('focus', probe); };
+  }, []);
+
+  // "편집" — 인라인 편집 모드 진입. 런처 미감지면 설치 모달.
+  // 런처는 디스크 write 만 담당 (commit/push 는 Local 탭 "등록" 으로).
+  function handleStartEdit() {
+    if (!selectedFile || selectedMainOnly) return;
+    if (!launcher?.ready) { setInstallOpen(true); return; }
+    setEditContent(content);
+    setEditing(true);
   }
 
-  async function handleSave() {
-    if (!await modalConfirm(`"${selectedFile}" 파일을 저장(커밋)하시겠습니까?`)) return;
+  // 편집 중 "저장" — 런처 /write 로 로컬 디스크에 쓰고 편집 종료. 변경 트리 재로드.
+  async function handleSaveEdit() {
+    if (!selectedFile || !launcher?.ready) return;
     setSaving(true);
-    const res = await fetch(`${API}/${projectCode}/file`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: selectedFile, content, message: `${selectedFile} 수정` }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      setOriginal(content);
-      setEditMode(false);
-      refreshDocState();
-      modalAlert('저장 완료');
-    } else {
-      const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || '저장 실패');
-    }
-  }
-
-  async function handleAIGenerate() {
-    const AGENT_API = config.AGENT_API || 'http://localhost:9002/api/v2';
-    const skill = aiSkillForFile;
-    if (!skill) {
-      modalAlert('이 문서는 AI 생성을 지원하지 않습니다.');
-      return;
-    }
-
-    // 워크플로우 스킬은 채팅 창에서 진행 (SSE 스트리밍으로 작업 과정 노출)
-    if (skill === 'usecase_analyze' || skill === 'requirement_refine') {
-      const skillLabel = skill === 'usecase_analyze' ? 'Use Case/Feature 분석' : 'Requirement 정제';
-      if (!await modalConfirm(`${skillLabel}을(를) 채팅 창에서 진행합니다.\n진행 상황은 채팅 창에서 확인할 수 있습니다.`)) return;
-      const docLabel = selectedFile === 'business/use-cases.md' ? '유즈케이스 문서'
-        : selectedFile === 'business/requirements.md' ? '요구사양서' : selectedFile;
-      const autoMsg = `${projectCode} 과제의 ${docLabel}를 작성해줘.`;
-      const chatW = 480, chatH = 720;
-      const left = window.screenX - chatW - 10;
-      const top = window.screenY;
-      chatWinRef.current = window.open(
-        `/?mode=agent&newSession=1&autoMessage=${encodeURIComponent(autoMsg)}`,
-        'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
-      );
-      return;
-    }
-
-    const promptMsg = 'AI가 문서를 분석하여 보강합니다.\n진행하시겠습니까?';
-    if (!await modalConfirm(promptMsg)) return;
-
-    // 생성 시작 — 편집 모드 해제(잠금)
-    setAiGenerating(true);
-    setEditMode(false);
     try {
-      const res = await fetch(`${AGENT_API}/Agent/doc/enrich`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-        body: JSON.stringify({ projectCode, filePath: selectedFile, content: content || '' }),
+      const r = await requestWrite({
+        code: projectCode, user, path: selectedFile,
+        content: editContent, token: launcher.token,
       });
-      if (!res.ok) {
-        modalAlert('AI 서비스 연결 실패');
-        return;
-      }
-      const data = await res.json();
-
-      // 문서 부족 → 인터뷰 안내 (project-description.md 전용)
-      if (data.needsInterview) {
-        setAiGenerating(false);
-        const ok = await modalConfirm(
-          `${data.reason || data.message}\n채팅 창에서 인터뷰를 진행할까요?`
-        );
-        if (ok) {
-          const chatW = 480, chatH = 720;
-          const left = window.screenX - chatW - 10;
-          const top = window.screenY;
-          chatWinRef.current = window.open(
-            `/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
-            'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
-          );
-        }
-        return;
-      }
-
-      // 워크플로우 스킬 — 백엔드가 파일을 이미 저장했으므로 재로드
-      if (data.refreshFile) {
-        // 선행 조건 미달(예: VOS 없음 / Feature 없음) — 사용자에게 자동 선행 실행 여부 확인
-        if (data.suggestSkill && (data.created?.length === 0 || data.createdCount === 0)) {
-          const prereqLabel = {
-            vos_collect: 'VOS 수집',
-            usecase_analyze: 'Use Case/Feature 분석',
-            projdesc_interview: '과제 설명 인터뷰',
-          }[data.suggestSkill] || data.suggestSkill;
-
-          // 과제 설명이 비어있음 → 인터뷰 채팅창 자동 오픈 (project-description.md AI 생성과 동일한 흐름)
-          if (data.suggestSkill === 'projdesc_interview') {
-            const ok = await modalConfirm(
-              `${data.message || '과제 설명이 부족합니다.'}\n채팅 창에서 인터뷰를 진행할까요?`
-            );
-            if (ok) {
-              // 인터뷰 완료 후 원래 문서(use-cases/requirements)로 이어갈 수 있도록 기록
-              pendingAIFileRef.current = selectedFile;
-              const chatW = 480, chatH = 720;
-              const left = window.screenX - chatW - 10;
-              const top = window.screenY;
-              chatWinRef.current = window.open(
-                `/?mode=agent&newSession=1&interview=${encodeURIComponent('project-description.md')}`,
-                'gojira-agent', `width=${chatW},height=${chatH},left=${left},top=${top}`
-              );
-            }
-            return;
-          }
-
-          const ok = await modalConfirm(`${prereqLabel}을(를) 먼저 진행할까요?`);
-          if (!ok) return;
-
-          // 같은 endpoint를 runPrerequisites=true로 재호출 (오버레이 유지)
-          try {
-            const res2 = await fetch(`${AGENT_API}/Agent/doc/enrich`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-              body: JSON.stringify({
-                projectCode,
-                filePath: selectedFile,
-                content: '',
-                runPrerequisites: true,
-              }),
-            });
-            if (!res2.ok) {
-              modalAlert('선행 스킬 실행 실패');
-              return;
-            }
-            const data2 = await res2.json();
-
-            // 선행 단계에서도 막혔으면 메시지 안내 (예: 과제 설명도 비어있음)
-            if (data2.suggestSkill && (data2.created?.length === 0 || data2.createdCount === 0)) {
-              modalAlert(data2.message || '실행 조건이 부족합니다.');
-              return;
-            }
-
-            // 정상 완료 → 파일 + 트리 재로드
-            try {
-              const branch = `docs/${user}`;
-              const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(branch)}`);
-              if (r.ok) {
-                const d = await r.json();
-                const text = d.content ? decodeBase64(d.content) : '';
-                setContent(text);
-                setOriginal(text);
-              }
-            } catch {}
-            await refreshDocState();
-
-            // 선행 단계 결과 + 본 단계 결과 모두 안내
-            const SKILL_LABEL = {
-              vos_collect: 'VOS 수집',
-              usecase_analyze: 'Use Case/Feature 분석',
-              requirement_refine: 'Requirement 정제',
-            };
-            const ranSummary = (data2.prerequisitesRan || [])
-              .map(p => `• ${SKILL_LABEL[p.skill] || p.skill}: ${p.message || `${p.createdCount}건`}`)
-              .join('\n');
-            modalAlert(
-              (ranSummary ? `[선행 단계]\n${ranSummary}\n\n` : '') +
-              (data2.message || 'AI 생성이 완료되었습니다.')
-            );
-          } catch (e) {
-            modalAlert('선행 스킬 실행 실패: ' + e.message);
-          }
-          return;
-        }
-
-        // 정상 완료 — 파일 재로드
-        try {
-          const branch = `docs/${user}`;
-          const r = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=${encodeURIComponent(branch)}`);
-          if (r.ok) {
-            const d = await r.json();
-            const text = d.content ? decodeBase64(d.content) : '';
-            setContent(text);
-            setOriginal(text);
-          }
-        } catch {}
-        await refreshDocState();
-        modalAlert(data.message || 'AI 생성이 완료되었습니다.');
-        return;
-      }
-
-      // 단일 보강 (project-description.md) — content를 편집기에 반영
-      if (data.content) {
-        setContent(data.content);
-        // 사용자가 보강된 내용을 검토 후 저장할 수 있도록 편집 모드 복귀
-        setEditMode(true);
-        modalAlert('AI 보강이 완료되었습니다. 내용을 확인 후 저장하세요.');
-      } else if (data.error) {
-        modalAlert(data.error);
-      }
-    } catch (e) {
-      modalAlert('AI 서비스 연결 실패: ' + e.message);
+      if (!r.ok) { modalAlert(r.error || '저장에 실패했습니다.'); return; }
+      setContent(editContent); // 미리보기/Raw 가 새 내용으로 반영되도록.
+      setEditing(false);
+      refreshDocState();
     } finally {
-      setAiGenerating(false);
+      setSaving(false);
     }
   }
 
-  // 인터뷰 → 과제 설명 저장 후 handleDocApply가 handleAIGenerate를 호출할 수 있도록 ref 동기화
-  handleAIGenerateRef.current = handleAIGenerate;
-
-  async function handleDelete() {
-    if (!await modalConfirm(`"${selectedFile}" 파일을 삭제하시겠습니까?`)) return;
-    const res = await fetch(`${API}/${projectCode}/file`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: selectedFile, message: `${selectedFile} 삭제` }),
-    });
-    if (res.ok) {
-      setSelectedFile(null);
-      setContent('');
-      setOriginal('');
-      setEditMode(false);
-      refreshDocState();
-      modalAlert('삭제 완료');
-    } else {
-      const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || '삭제 실패');
-    }
+  // 편집 중 "취소" — 변경 폐기 + 편집 종료.
+  function handleCancelEdit() {
+    setEditing(false);
+    setEditContent('');
   }
 
-  async function handleNewFile() {
-    const input = await modalPrompt('경로를 입력하세요\n(예: 파일명.md 또는 폴더명/파일명.md)', '');
-    if (!input || !input.trim()) return;
-    let filePath = input.trim().replace(/\\/g, '/');
-    // 폴더만 입력한 경우 (슬래시로 끝나거나 확장자 없음)
-    if (filePath.endsWith('/')) {
-      const folderFile = await modalPrompt(`"${filePath}" 폴더에 생성할 파일 이름`, '');
-      if (!folderFile || !folderFile.trim()) return;
-      let fn = folderFile.trim();
-      if (!fn.endsWith('.md')) fn += '.md';
-      filePath = filePath + fn;
-    } else if (!filePath.includes('.')) {
-      // 확장자 없고 슬래시도 없으면 폴더인지 파일인지 확인
-      const isFolder = await modalConfirm(`"${filePath}"을(를) 폴더로 생성하시겠습니까?\n(취소 시 파일로 생성)`);
-      if (isFolder) {
-        const folderFile = await modalPrompt(`"${filePath}/" 폴더에 생성할 파일 이름`, '');
-        if (!folderFile || !folderFile.trim()) return;
-        let fn = folderFile.trim();
-        if (!fn.endsWith('.md')) fn += '.md';
-        filePath = filePath + '/' + fn;
-      } else {
-        filePath += '.md';
+  // 편집 중 "VS Code" — 인라인 편집 내용을 먼저 disk 저장(보존)한 뒤 VS Code 띄움.
+  // 편집 모드 종료, 이후는 VS Code 가 책임.
+  async function handleOpenVSCode() {
+    if (!selectedFile || !launcher?.ready) return;
+    setLaunching(true);
+    try {
+      if (editing && editContent !== content) {
+        const w = await requestWrite({
+          code: projectCode, user, path: selectedFile,
+          content: editContent, token: launcher.token,
+        });
+        if (!w.ok) { modalAlert(w.error || '저장 실패 — VS Code 열기 중단'); return; }
+        setContent(editContent);
       }
-    } else if (!filePath.endsWith('.md')) {
-      filePath += '.md';
+      const res = await requestEdit({
+        code: projectCode, user, file: selectedFile, token: launcher.token,
+      });
+      if (!res.ok) modalAlert(res.error || '로컬 런처 호출에 실패했습니다.');
+      setEditing(false);
+      refreshDocState();
+    } finally {
+      setLaunching(false);
     }
-    // 중복 확인
-    if (items.some(i => i.path === filePath)) {
-      modalAlert(`"${filePath}" 파일이 이미 존재합니다.`);
+  }
+
+  // 설치 완료 후 "다시 시도" — 재감지 → 성공이면 모달 닫기.
+  async function handleInstallRetry() {
+    const r = await detectLauncher();
+    setLauncher(r);
+    if (r?.ready) setInstallOpen(false);
+  }
+
+  async function handleFileClick(path, isMainOnly) {
+    if (editing) {
+      const dirty = editContent !== content;
+      if (dirty && !await modalConfirm('편집 중인 변경사항이 있습니다. 폐기하고 다른 파일을 열까요?')) return;
+      setEditing(false);
+    }
+    let text = '';
+    if (isMainOnly || activeTab === 'main') {
+      const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
+      if (!res.ok) return;
+      const d = await res.json();
+      text = d.content ? decodeBase64(d.content) : '';
+    } else if (activeTab === 'local' && launcher?.ready) {
+      const r = await requestLocalFile({ code: projectCode, user, path, token: launcher.token });
+      if (!r.ok) return;
+      text = r.data?.content ? decodeBase64(r.data.content) : '';
+    } else {
       return;
     }
-    const baseName = filePath.split('/').pop().replace('.md', '');
-    const template = `# ${baseName}\n\n`;
-    const res = await fetch(`${API}/${projectCode}/file`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: filePath, content: template, message: `${filePath} 생성` }),
-    });
-    if (res.ok) {
-      refreshDocState();
-      setSelectedFile(filePath);
-      setContent(template);
-      setOriginal(template);
-      setEditMode(true);
-      setShowGraph(false);
-      setDiffMode(false);
-      modalAlert(`"${filePath}" 파일이 생성되었습니다.`);
-    } else {
-      const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || '파일 생성 실패');
-    }
-  }
-
-  async function handleRenameFile(oldPath) {
-    const ext = oldPath.endsWith('.md') ? '' : '.md';
-    const base = oldPath.replace(/\.md$/, '');
-    const newName = await modalPrompt('새 파일 이름 (폴더/파일명 가능)', base);
-    if (!newName || !newName.trim()) return;
-    let newPath = newName.trim();
-    if (!newPath.endsWith('.md')) newPath += '.md';
-    if (newPath === oldPath) return;
-    if (items.some(i => i.path === newPath)) {
-      modalAlert(`"${newPath}" 파일이 이미 존재합니다.`);
-      return;
-    }
-    // 기존 파일 내용 읽기
-    const ref = `docs/${user}`;
-    const getRes = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(oldPath)}&ref=${encodeURIComponent(ref)}`);
-    if (!getRes.ok) { modalAlert('파일 읽기 실패'); return; }
-    const fileData = await getRes.json();
-    const fileContent = fileData.content ? decodeBase64(fileData.content) : '';
-    // 새 파일 생성
-    const createRes = await fetch(`${API}/${projectCode}/file`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: newPath, content: fileContent, message: `${oldPath} → ${newPath} 이름 변경` }),
-    });
-    if (!createRes.ok) { modalAlert('파일 생성 실패'); return; }
-    // 기존 파일 삭제
-    await fetch(`${API}/${projectCode}/file`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: oldPath, message: `${oldPath} 삭제 (이름 변경)` }),
-    });
-    // 상태 갱신
-    setFileStatus(prev => {
-      const next = { ...prev };
-      delete next[oldPath];
-      next[newPath] = prev[oldPath] || 'added';
-      return next;
-    });
-    refreshDocState();
-    setSelectedFile(newPath);
-    setContent(fileContent);
-    setOriginal(fileContent);
-    modalAlert(`"${oldPath}" → "${newPath}" 이름 변경 완료`);
-  }
-
-  async function handleDeleteFile(path) {
-    if (!await modalConfirm(`"${path}" 파일을 삭제하시겠습니까?`)) return;
-    const res = await fetch(`${API}/${projectCode}/file`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path, message: `${path} 삭제` }),
-    });
-    if (res.ok) {
-      if (selectedFile === path) {
-        setSelectedFile(null);
-        setContent('');
-        setOriginal('');
-        setEditMode(false);
-      }
-      refreshDocState();
-      modalAlert('삭제 완료');
-    } else {
-      const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || '삭제 실패');
-    }
+    setSelectedFile(path);
+    setSelectedMainOnly(!!isMainOnly);
+    setContent(text);
   }
 
   async function handleDiffToggle() {
-    if (diffMode) { setDiffMode(false); return; }
+    if (diffMode) { setViewMode('preview'); return; }
     setLoadingDiff(true);
     try {
       const status = fileStatus[selectedFile];
@@ -741,7 +379,7 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
         }
       }
       setMainContent(mainText);
-      setDiffMode(true);
+      setViewMode('diff');
       setDiffTab('semantic');
     } catch (e) {
       modalAlert('Diff 로딩 실패');
@@ -749,78 +387,53 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
     setLoadingDiff(false);
   }
 
-  async function handleCreatePR() {
-    if (!await modalConfirm(`docs/${user} 브랜치의 변경사항을 발행 신청(PR)하시겠습니까?`)) return;
-    const res = await fetch(`${API}/${projectCode}/pr`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ title: `[${projectCode}] 설계문서 배포 요청`, head: `docs/${user}` }),
-    });
-    if (res.ok) {
-      modalAlert('발행 신청(PR)이 생성되었습니다.');
-    } else {
-      const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || 'PR 생성 실패');
+
+  // "등록" — 미커밋(dirty) 이거나 unpushed commit 이 있을 때 한 번에 origin 까지 올린다.
+  // 런처 /sync 가 dirty 면 git add -A + commit, 그 다음 push 수행. 완료 후 트리 재로드.
+  async function handleSync() {
+    if (!launcher || !launcher.token) return;
+    const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+    const msg = hasUncommitted && ahead !== 0
+      ? `미커밋 변경과 미푸시 커밋을 모두 origin 으로 등록하시겠습니까?`
+      : hasUncommitted
+      ? `미커밋 변경을 커밋·푸시하시겠습니까?`
+      : `미푸시 커밋을 push 하시겠습니까?`;
+    if (!await modalConfirm(msg)) return;
+    setPublishing(true);
+    try {
+      const r = await requestSync({ code: projectCode, user, token: launcher.token });
+      if (!r.ok) { modalAlert(r.error || '등록에 실패했습니다.'); return; }
+      refreshDocState();
+    } finally {
+      setPublishing(false);
     }
   }
 
-  async function handleGitPull() {
-    if (!await modalConfirm('main 브랜치의 최신 내용을 작업공간에 동기화하시겠습니까?\n(작업공간의 미커밋 변경사항은 초기화됩니다)')) return;
+  // "발행" — origin/docs/{user} 가 이미 origin/main 과 다를 때 (모두 커밋+푸시 완료된 상태)
+  // 서버에 PR 생성만 요청. /push 는 호출하지 않는다 (이미 동기화된 상태).
+  async function handleLocalPublish() {
+    if (!launcher || !launcher.token) return;
+    if (!await modalConfirm(`origin/docs/${user} 변경을 발행 신청(PR)하시겠습니까?`)) return;
+    setPublishing(true);
     try {
-      // sync-branch로 사용자 브랜치를 main HEAD로 동기화
-      const res = await fetch(`${API}/${projectCode}/sync-branch`, {
+      const res = await fetch(`${API}/${projectCode}/pr`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
+        body: JSON.stringify({
+          title: `[${projectCode}] 설계문서 배포 요청`,
+          head: `docs/${user}`,
+          skipAutoCommit: true,
+        }),
       });
       if (res.ok) {
-        await refreshDocState();
-        setSelectedMainOnly(false);
-        modalAlert('main 동기화 완료');
+        modalAlert('발행 신청(PR)을 생성했습니다.');
+        refreshDocState();
       } else {
         const err = await res.json().catch(() => ({}));
-        modalAlert(err.error || '동기화 실패');
+        modalAlert(err.error || 'PR 생성 실패');
       }
-    } catch (e) {
-      modalAlert('동기화 오류: ' + e.message);
-    }
-  }
-
-  async function handleEditModeChange(isEdit) {
-    setGlobalEditMode(isEdit);
-    if (isEdit && hasRepo) {
-      // 편집모드 진입 시 /edit/start 호출 (worktree 생성 + 세션 lock)
-      const res = await fetch(`${API}/${projectCode}/edit/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setReadOnly(!!data.readOnly);
-        if (data.conflict) {
-          setConflictDiff(data.diff);
-          modalAlert(data.conflictMessage || '충돌이 발생하여 main 기준으로 초기화되었습니다.');
-        }
-        // 미커밋 파일 목록 조회
-        fetch(`${API}/${projectCode}/edit/pending`, {
-          headers: { 'X-User-Id': user },
-        }).then(r => r.ok ? r.json() : []).then(files => setPendingFiles(new Set(files))).catch(() => {});
-      } else if (res.status === 409) {
-        const data = await res.json();
-        setReadOnly(true);
-        modalAlert(data.message || '다른 사용자가 편집 중입니다.');
-      } else {
-        modalAlert('편집 모드 시작 실패');
-        return;
-      }
-    } else if (!isEdit && hasRepo) {
-      // 편집모드 종료 시 세션 해제
-      fetch(`${API}/${projectCode}/edit/release`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      });
-      setReadOnly(false);
-      setConflictDiff(null);
-      setPendingFiles(new Set());
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -838,39 +451,13 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
     );
   }
 
-  const modified = content !== original;
-  const currentTree = activeTab === 'main' ? mainTree : (userTree || mainTree);
+  // Local 탭에서 런처 미감지 시 currentTree=null → 사이드바 비움 + 설치 안내(아래 헤더 영역).
+  const currentTree = activeTab === 'main' ? mainTree : localTree;
 
-  // PexBlock 의 ✓ 적용 콜백 — markdown 내 N번째 plantuml fence 본문을 newSource 로 replace.
-  // setContent → ReactMarkdown 자동 재렌더 → modified = true → 사용자가 저장 버튼 누르면 영속화.
-  // PexBlock 의 ✓ 적용 — markdown 의 해당 fence 본문을 newSource (메타 포함) 로 교체.
-  // 사용자 시나리오: 편집모드 ON → 다이어그램 편집 → ✓ 적용 시 디스크에도 자동 저장
-  // (textarea 모드의 handleSave 와 달리 modalConfirm 안 띄움 — 인라인 편집은 즉각 반영).
-  async function handlePlantumlCommit(originalSource, newSource) {
-    const next = replacePlantumlFenceBySource(content, originalSource, newSource);
-    if (next === content) return;
-    setContent(next);
-    try {
-      const res = await fetch(`${API}/${projectCode}/file`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-        body: JSON.stringify({ path: selectedFile, content: next, message: `${selectedFile} 다이어그램 편집` }),
-      });
-      if (res.ok) {
-        setOriginal(next);
-        refreshDocState();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        modalAlert(err.error || '다이어그램 자동 저장 실패');
-      }
-    } catch (e) {
-      modalAlert('다이어그램 자동 저장 오류: ' + e.message);
-    }
-  }
   const baseItems = (currentTree?.tree || []).filter(i => i.type !== 'tree');
-  // workspace 탭에서 main에만 있는 파일도 표시 (gray italic)
+  // Local 탭에서 main에만 있는 파일도 표시 (gray italic — Pull로 동기화 필요 표시).
   let items;
-  if (activeTab === 'workspace' && mainTree && userTree) {
+  if (activeTab === 'local' && mainTree && localTree) {
     const userPaths = new Set(baseItems.map(i => i.path));
     const mainOnly = (mainTree?.tree || [])
       .filter(i => i.type !== 'tree' && !userPaths.has(i.path))
@@ -891,60 +478,32 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
 
   const statusBadge = (path) => {
     const diffMain = fileStatus[path]; // main과 차이
-    const isPending = pendingFiles.has(path); // 미커밋
-
-    if (isPending && diffMain) {
-      // 둘 다: tomato ●
-      return <span className="de-file-badge de-badge-both">●</span>;
-    }
-    if (isPending) {
-      // 미커밋만: orange ●
-      return <span className="de-file-badge de-badge-pending">●</span>;
-    }
-    if (diffMain) {
-      // main과만 차이: M/A/D
-      const label = diffMain === 'added' ? 'A' : diffMain === 'deleted' ? 'D' : 'M';
-      const cls = `de-file-badge de-badge-${diffMain}`;
-      return <span className={cls}>{label}</span>;
-    }
-    return null;
+    if (!diffMain) return null;
+    // prefix: + = 차이가 docs/{user} HEAD 에 커밋된 상태(발행 시 PR 에 포함됨),
+    //         - = working tree 의 미커밋 변경(commit 전이라 PR 에 안 들어감).
+    const sign = fileCommitted[path] ? '+' : '-';
+    const letter = diffMain === 'added' ? 'A' : diffMain === 'deleted' ? 'D' : 'M';
+    const cls = `de-file-badge de-badge-${diffMain}${fileCommitted[path] ? '' : ' de-badge-uncommitted'}`;
+    return <span className={cls}>{sign}{letter}</span>;
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <CommonBar title={barTitle} onBack={onBack} nav={nav} onEditChange={handleEditModeChange}
-        onPull={handleGitPull}
-        pullIcon={<img src="/icons/git-fetch.svg" alt="Git Fetch" width="18" height="18" />}
-        projectAlert={projectAlert}
-      />
+      <CommonBar title={barTitle} onBack={onBack} nav={nav} projectAlert={projectAlert} />
+      {installOpen && (
+        <LauncherInstallModal
+          onClose={() => setInstallOpen(false)}
+          onRetry={handleInstallRetry}
+        />
+      )}
       <div className="de-editor">
         <div className="de-sidebar" style={{ width: sidebarWidth }}>
           <div className="de-sidebar-tabs">
             <button className={`de-sidebar-tab ${activeTab === 'main' ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setActiveTab('main'); setShowGraph(false); }}>Main</button>
-            <button className={`de-sidebar-tab ${activeTab === 'workspace' ? 'de-sidebar-tab-active' : ''}`}
-              onClick={() => { setActiveTab('workspace'); setShowGraph(false); }}>작업공간</button>
-            {(authority?.USR || 0) >= 15 && (
-              <button
-                className="de-sidebar-tab de-graph-btn"
-                onClick={async () => {
-                  try {
-                    const res = await fetch(`${API}/${projectCode}/open-folder`, {
-                      method: 'POST', headers: { 'X-User-Id': user || '' }
-                    });
-                    if (!res.ok) {
-                      const err = await res.json().catch(() => ({}));
-                      alert(err.error || '폴더 열기 실패');
-                    }
-                  } catch { alert('서버 연결 실패'); }
-                }}
-                title="작업공간 폴더 열기"
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M1 3.5A1.5 1.5 0 012.5 2h3.879a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 009.62 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z"/>
-                </svg>
-              </button>
-            )}
+            <button className={`de-sidebar-tab ${activeTab === 'local' ? 'de-sidebar-tab-active' : ''}`}
+              onClick={() => { setActiveTab('local'); setShowGraph(false); }}>Local</button>
+            {/* Local 탭의 데이터소스는 런처 /files (로컬 working tree). 런처 미감지 시 빈 상태 + 설치 안내. */}
             <button
               className={`de-sidebar-tab de-graph-btn ${showGraph ? 'de-sidebar-tab-active' : ''}`}
               onClick={() => { setShowGraph(!showGraph); if (!showGraph) setSelectedFile(null); }}
@@ -958,29 +517,39 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
             </button>
           </div>
           <div className="de-sidebar-header">
-            <span>{activeTab === 'main' ? 'main' : `docs/${user}`}</span>
-            {activeTab === 'workspace' && globalEditMode && (
-              <button
-                className="de-btn"
-                style={{ marginLeft: 'auto', padding: '3px 8px', fontSize: '11px' }}
-                onClick={handleNewFile}
-                title="새 파일 추가"
-              >+</button>
-            )}
-            {activeTab === 'workspace' && (
-              <button
-                className={`de-btn ${hasChanges ? 'de-btn-primary' : ''}`}
-                style={{ marginLeft: globalEditMode ? '4px' : 'auto', padding: '3px 10px', fontSize: '11px' }}
-                onClick={handleCreatePR}
-                disabled={!hasChanges}
-                title={hasChanges ? `${Object.keys(fileStatus).length}개 파일 변경됨` : '변경사항 없음'}
-              >
-                <img src="/icons/git-pull.svg" alt="" width="12" height="12" style={{marginRight:4,verticalAlign:'middle',filter:hasChanges?'invert(1)':'invert(0.6)'}} />
-                발행신청
-              </button>
-            )}
+            <span>{activeTab === 'main' ? 'main' : `local · docs/${user}`}</span>
+            {activeTab === 'local' && launcher?.ready && (() => {
+              // 미커밋(-) 또는 unpushed commit 이 하나라도 있으면 "등록" 모드.
+              // (ahead === -1 은 upstream 미설정 → 신규 브랜치라 push 필요로 간주.)
+              const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+              const hasUnpushed = ahead !== 0;
+              const needsRegister = hasUncommitted || hasUnpushed;
+              const label = publishing
+                ? (needsRegister ? '등록 중...' : '발행 중...')
+                : (needsRegister ? '등록' : '발행');
+              const title = needsRegister
+                ? '미커밋/미푸시 변경을 origin 으로 올립니다'
+                : 'origin/docs/{user} 변경을 발행 신청(PR)합니다';
+              return (
+                <button
+                  className="de-btn"
+                  style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
+                  onClick={needsRegister ? handleSync : handleLocalPublish}
+                  disabled={publishing}
+                  title={title}
+                >{label}</button>
+              );
+            })()}
           </div>
-          {activeTab === 'workspace' && !hasChanges && hasMainOnly && (
+          {activeTab === 'local' && !launcher?.ready && (
+            <div className="de-sync-notice">
+              로컬 런처가 감지되지 않았습니다.
+              <button className="de-btn"
+                style={{ marginLeft: 8, padding: '2px 8px', fontSize: 11 }}
+                onClick={() => setInstallOpen(true)}>런처 안내</button>
+            </div>
+          )}
+          {activeTab === 'local' && launcher?.ready && !hasChanges && hasMainOnly && (
             <div className="de-sync-notice">
               main에 새 파일이 추가되었습니다. Git Pull로 동기화 후 작업하세요.
             </div>
@@ -999,22 +568,16 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
               node.files.push({ ...item, _name: parts[parts.length - 1] });
             });
             const renderFile = (item) => {
-              const st = (activeTab === 'workspace' && !item._mainOnly) ? fileStatus[item.path] : null;
+              const st = (activeTab === 'local' && !item._mainOnly) ? fileStatus[item.path] : null;
               const isMainOnly = item._mainOnly;
               return (
                 <div key={item.path}
                   className={`de-file ${selectedFile === item.path ? 'de-file-active' : ''} ${st ? `de-file-${st}` : ''} ${isMainOnly ? 'de-file-main-only' : ''}`}
-                  onClick={() => { setShowGraph(false); setDiffMode(false); handleFileClick(item.path, item._mainOnly); }}>
-                  {activeTab === 'workspace' && (isMainOnly
+                  onClick={() => { setShowGraph(false); setViewMode('preview'); handleFileClick(item.path, item._mainOnly); }}>
+                  {activeTab === 'local' && (isMainOnly
                     ? <span className="de-file-badge de-badge-mainonly">M</span>
                     : statusBadge(item.path))}
                   <span className="de-file-name">{item._name || item.path}</span>
-                  {activeTab === 'workspace' && globalEditMode && (
-                    <span className="de-file-actions">
-                      <button className="de-file-act" title="이름 변경" onClick={e => { e.stopPropagation(); handleRenameFile(item.path); }}>✎</button>
-                      <button className="de-file-act de-file-act-del" title="삭제" onClick={e => { e.stopPropagation(); handleDeleteFile(item.path); }}>✕</button>
-                    </span>
-                  )}
                 </div>
               );
             };
@@ -1056,30 +619,29 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
             <>
               <div className="de-toolbar">
                 <span className="de-filename">
-                  {selectedFile} {modified && !selectedMainOnly && <span className="de-modified">●</span>}
+                  {selectedFile}
                   {selectedMainOnly && <span style={{fontSize:11,color:'#aaa',marginLeft:6}}>(main only — Pull로 동기화 필요)</span>}
                 </span>
                 <div className="de-actions">
                   {selectedMainOnly ? (
                     <button className="de-tab de-tab-active">미리보기</button>
-                  ) : aiGenerating ? (
+                  ) : editing ? (
                     <>
-                      <span className="de-ai-running">⏳ AI 생성 중... (편집 일시 비활성화)</span>
-                    </>
-                  ) : editMode ? (
-                    <>
-                      <button className="de-tab" onClick={() => setEditMode(false)}>미리보기</button>
-                      {aiSkillForFile && (
-                        <button className="de-btn de-btn-ai" onClick={handleAIGenerate} disabled={aiGenerating}>
-                          AI생성
-                        </button>
-                      )}
-                      <button className="de-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
+                      <button className="de-btn" onClick={handleCancelEdit} disabled={saving || launching}>취소</button>
+                      <button className="de-btn" onClick={handleOpenVSCode} disabled={saving || launching}
+                        title="현재 편집 내용을 저장한 뒤 VS Code 로 엽니다">
+                        {launching ? '여는 중...' : 'VS Code'}
+                      </button>
+                      <button className="de-btn de-btn-primary" onClick={handleSaveEdit} disabled={saving || launching}
+                        title="로컬 디스크에만 저장합니다 (커밋/푸시는 Local 탭의 '등록' 으로)">
+                        {saving ? '저장 중...' : '저장'}
+                      </button>
                     </>
                   ) : (
                     <>
-                      <button className={`de-tab ${!diffMode ? 'de-tab-active' : ''}`} onClick={() => setDiffMode(false)}>미리보기</button>
-                      {activeTab === 'workspace' && fileStatus[selectedFile] && (
+                      <button className={`de-tab ${viewMode === 'preview' ? 'de-tab-active' : ''}`} onClick={() => setViewMode('preview')}>미리보기</button>
+                      <button className={`de-tab ${viewMode === 'raw' ? 'de-tab-active' : ''}`} onClick={() => setViewMode('raw')}>Raw 보기</button>
+                      {activeTab === 'local' && fileStatus[selectedFile] && (
                         <button
                           className={`de-btn ${diffMode ? 'de-btn-primary' : ''}`}
                           onClick={handleDiffToggle}
@@ -1088,29 +650,30 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                           {loadingDiff ? '로딩...' : 'Diff 분석'}
                         </button>
                       )}
-                      {globalEditMode && <button className="de-btn" onClick={() => setEditMode(true)}>편집</button>}
-                      {globalEditMode && <button className="de-btn de-btn-danger" onClick={handleDelete}>삭제</button>}
+                      <button
+                        className="de-btn de-btn-primary"
+                        onClick={handleStartEdit}
+                        title={launcher?.ready
+                          ? '인라인 편집 모드로 진입합니다'
+                          : '로컬 런처가 감지되지 않았습니다 — 클릭하면 설치 안내'}
+                      >편집</button>
                     </>
                   )}
                 </div>
               </div>
               <div className="de-body" style={{ position: 'relative' }}>
-                {aiGenerating && (
-                  <div className="de-ai-overlay">
-                    <div className="de-ai-overlay-box">
-                      <div className="de-ai-spinner" />
-                      <div style={{ marginTop: 10, fontWeight: 600 }}>AI가 문서를 생성하는 중입니다…</div>
-                      <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
-                        편집은 완료 후 다시 활성화됩니다.
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {diffMode ? (
+                {editing ? (
+                  <textarea
+                    className="de-editor-textarea"
+                    value={editContent}
+                    onChange={e => setEditContent(e.target.value)}
+                    spellCheck={false}
+                    autoFocus
+                  />
+                ) : viewMode === 'diff' ? (
                   <DiffAnalysis oldText={mainContent} newText={content} fileName={selectedFile} activeTab={diffTab} onTabChange={setDiffTab} />
-                ) : editMode && !selectedMainOnly ? (
-                  <textarea className="de-textarea" value={content}
-                    onChange={e => setContent(e.target.value)} spellCheck={false} />
+                ) : viewMode === 'raw' ? (
+                  <pre className="de-raw">{content}</pre>
                 ) : (
                   <div className={`de-preview ${selectedMainOnly ? 'de-preview-mainonly' : ''}`}>
                     {/\.ya?ml$/i.test(selectedFile || '') ? (
@@ -1126,15 +689,9 @@ export default function DocEditor({ project, user, authority, onBack, currentPag
                             }
                             if (lang === 'plantuml' || lang === 'puml') {
                               const src = String(children).replace(/\n$/, '');
-                              // 편집모드 ON (globalEditMode) + textarea 가 아닌 preview 일 때만 인라인 편집 활성.
-                              // editMode (textarea) 에선 markdown 텍스트가 진실이므로 인라인 편집 비활성.
-                              const inlineEditable = globalEditMode && !editMode;
+                              // 웹은 조회 전용 — 인라인 편집은 로컬 pex-vscode 로 이전 (local-agent-mvp §4).
                               return (
-                                <PexBlock
-                                  source={src}
-                                  onCommit={inlineEditable ? handlePlantumlCommit : undefined}
-                                  readOnly={!inlineEditable}
-                                />
+                                <PexBlock source={src} readOnly />
                               );
                             }
                             return <code className={className} {...props}>{children}</code>;

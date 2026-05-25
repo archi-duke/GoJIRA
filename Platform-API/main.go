@@ -10,12 +10,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"context"
-	"time"
-
 	"platform-api/config"
 	"platform-api/db"
-	gitpkg "platform-api/github"
 	"platform-api/handlers"
 )
 
@@ -44,22 +40,8 @@ func main() {
 	db.InitAccountIndexes()
 	db.InitNoticeIndexes()
 	db.InitDocRepoIndexes()
-	db.InitEditSessionIndexes()
-	db.InitOpencodeInstanceIndexes()
 	db.InitNotificationIndexes()
 	db.SeedAccountData()
-
-	// OpenCode 인스턴스 헬스체크 — 5분 주기, status=active/down 갱신
-	go handlers.StartOpencodeHealthcheck(context.Background())
-
-	// Workspace TTL worker 시작
-	gitpkg.StartTTLWorker(func(owner, repo, userID string) bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// projectCode는 repo name과 동일하다고 가정 (docrepo 매핑)
-		session, err := db.FindActiveSessionByUser(ctx, repo, userID)
-		return err == nil && session != nil
-	})
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -75,9 +57,6 @@ func main() {
 
 	// Webhook (버전 없이)
 	r.Post("/webhook/github", handlers.GitHubWebhookHandler)
-
-	// 관리자 트리거 — 헬스체크 즉시 실행
-	r.Post("/admin/opencode-healthcheck", handlers.RunOpencodeHealthcheckHandler)
 
 	r.Route("/api/v{version}", func(r chi.Router) {
 		// Account 관리
@@ -134,6 +113,10 @@ func main() {
 		// LLM gateway — Platform-API 가 키/모델/엔드포인트를 단독 관리, 다른 서비스는 HTTP 호출
 		r.Post("/LLM/call", handlers.LLMCallHandler)
 
+		// Launcher 바이너리 호스팅 — 웹이 런처 미감지 상태에서 다운로드.
+		r.Get("/launcher/manifest", handlers.LauncherManifestHandler)
+		r.Get("/launcher/download/{os}", handlers.LauncherDownloadHandler)
+
 		// DocRepo — 문서 이력관리 (projectCode 기반)
 		r.Route("/DocRepo", func(r chi.Router) {
 			r.Get("/", handlers.DocRepoListHandler)
@@ -141,15 +124,8 @@ func main() {
 			r.Post("/{code}", handlers.DocRepoCreateHandler)
 			r.Delete("/{code}/purge", handlers.DocRepoPurgeHandler)
 			r.Delete("/{code}/github", handlers.DocRepoGHDeleteHandler)
-			r.Post("/{code}/init-files", handlers.DocRepoInitFilesHandler)
-			r.Post("/{code}/ensure-branch", handlers.DocRepoEnsureBranchHandler)
-			r.Get("/{code}/worktree-info", handlers.DocRepoWorktreeInfoHandler)
-			r.Post("/{code}/notify-change", handlers.DocRepoNotifyChangeHandler)
-			r.Post("/{code}/sync-branch", handlers.DocRepoSyncBranchHandler)
 			r.Get("/{code}/tree", handlers.DocRepoTreeHandler)
 			r.Get("/{code}/file", handlers.DocRepoFileHandler)
-			r.Put("/{code}/file", handlers.DocRepoFileUpdateHandler)
-			r.Delete("/{code}/file", handlers.DocRepoFileDeleteHandler)
 			r.Get("/{code}/commits", handlers.DocRepoCommitsHandler)
 			r.Get("/{code}/branches", handlers.DocRepoBranchesHandler)
 			r.Get("/{code}/graph", handlers.DocRepoGraphHandler)
@@ -158,21 +134,6 @@ func main() {
 			r.Post("/{code}/pr/{num}/review", handlers.DocRepoPRReviewHandler)
 			r.Post("/{code}/pr/{num}/merge", handlers.DocRepoPRMergeHandler)
 			r.Get("/{code}/pr/{num}/reviews", handlers.DocRepoPRReviewsHandler)
-			r.Post("/{code}/git/publish", handlers.DocRepoGitPublishHandler)
-			// 문서 편집 API
-			r.Post("/{code}/edit/start", handlers.DocRepoEditStartHandler)
-			r.Get("/{code}/edit/file", handlers.DocRepoEditFileHandler)
-			r.Put("/{code}/edit/file", handlers.DocRepoEditSaveHandler)
-			r.Post("/{code}/edit/commit", handlers.DocRepoEditCommitHandler)
-			r.Post("/{code}/edit/pr", handlers.DocRepoEditPRHandler)
-			r.Get("/{code}/edit/status", handlers.DocRepoEditStatusHandler)
-			r.Delete("/{code}/edit/discard", handlers.DocRepoEditDiscardHandler)
-			r.Get("/{code}/edit/pending", handlers.DocRepoEditPendingHandler)
-			r.Post("/{code}/edit/heartbeat", handlers.DocRepoEditHeartbeatHandler)
-			r.Post("/{code}/edit/release", handlers.DocRepoEditReleaseHandler)
-			r.Post("/{code}/edit/rebase", handlers.DocRepoEditRebaseHandler)
-			r.Post("/{code}/conflict-resolve", handlers.DocRepoConflictResolveHandler)
-			r.Post("/{code}/open-folder", handlers.DocRepoOpenFolderHandler)
 		})
 
 		// DocLink — 향후 구현

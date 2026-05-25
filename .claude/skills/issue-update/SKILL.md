@@ -31,16 +31,16 @@ export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 
 ## 업데이트 (빈 필드는 제외)
 ```bash
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 DATA=$(jq -n \
   --arg s "$STATUS" --arg sm "$SUMMARY" --arg p "$PRIORITY" '
   [ {status:$s}, {summary:$sm}, {priority:$p} ]
   | map(to_entries[] | select(.value != ""))
   | from_entries')
 
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson d "$DATA" \
-    '{prjID:$p, key:$k, user:$u, data:$d}')"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson d "$DATA" \
+    '{prjID:$p, key:$k, user:$u, data:$d}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 결과에서 `key` 와 변경된 필드를 사용자에게 보고합니다.

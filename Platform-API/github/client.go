@@ -683,6 +683,11 @@ func GetPR(owner, repo string, prNumber int) (map[string]interface{}, error) {
 
 // CreateReview PR에 리뷰(승인/반려)를 생성하고, 리뷰 ID를 반환한다.
 func CreateReview(owner, repo string, prNumber int, event, body string, userToken ...string) (int, error) {
+	// Gitea 1.25 는 event="APPROVE" 를 PENDING 으로 저장하는 버그 — 정확한 값은 state name "APPROVED".
+	// REQUEST_CHANGES 는 정상 동작. GitHub 호환을 위해 클라이언트는 "APPROVE" 를 그대로 보내고 여기서 변환.
+	if IsGitea() && event == "APPROVE" {
+		event = "APPROVED"
+	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, prNumber)
 	payload := map[string]string{"event": event, "body": body}
 	token := ""

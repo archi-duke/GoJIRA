@@ -28,7 +28,9 @@ const TYPE_FILTER = {
 export default function IssueList({ project, user, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  // 웹은 이슈 조회 전용 (local-agent-issue-model.md §3.3). 편집·생성·삭제는 로컬
+  // (런처→VS Code+CLI)로 이전 → editMode 는 항상 false, 편집 토글 미노출.
+  const [editMode] = useState(false);
   const [sortKey, setSortKey] = useState('key');
   const [sortAsc, setSortAsc] = useState(true);
   const [detailIssue, setDetailIssue] = useState(null);
@@ -186,7 +188,6 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
         title={barTitle}
         onBack={onBack}
         onPull={handlePull}
-        onEditChange={setEditMode}
         nav={nav}
         options={[
           { label: 'V', active: showV, handler: () => setShowV((v) => !v) },

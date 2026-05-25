@@ -201,11 +201,10 @@ cat /tmp/vos_result.json
 
 ### modify (기존 이슈 업데이트)
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "EXISTING_KEY" --arg u "$USER" \
-    '{prjID:$p, key:$k, user:$u, data:{summary:"...", description:"...", client:"..."}}')"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "EXISTING_KEY" --arg u "$USER" \
+    '{prjID:$p, key:$k, user:$u, data:{summary:"...", description:"...", client:"..."}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ### reuse / delete_mark

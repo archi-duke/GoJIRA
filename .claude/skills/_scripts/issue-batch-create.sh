@@ -24,9 +24,13 @@
 # 재시도 정책: 5xx / 422(already exists) / 네트워크 에러 → 최대 5회 지수 백오프 (0.2/0.4/0.8/1.6/3.2s)
 set -euo pipefail
 
+# 트랙 E: 서버 worktree 대신 로컬 clone 에 YAML 기록 (X-Local-Write + localWrites 적용).
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+source "${DIR}/_local-write.sh"
+
 CODE="${1:?projectCode required}"
 USER="${2:?user knoxID required}"
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:-${GOJIRA_API_URL:-http://10.211.55.3:44360/api/v2}}"
 
 INPUT=$(cat)
 COUNT=$(jq 'length' <<< "$INPUT")
@@ -49,7 +53,7 @@ for i in $(seq 0 $((COUNT - 1))); do
   for attempt in 1 2 3 4 5; do
     TMP=$(mktemp)
     STATUS=$(curl -s -o "$TMP" -w '%{http_code}' -X POST "${GOJIRA_API}/Issue" \
-      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "X-Local-Write: true" \
       --data-binary "$BODY" || echo 000)
     RESP=$(cat "$TMP")
     rm -f "$TMP"
@@ -74,6 +78,8 @@ for i in $(seq 0 $((COUNT - 1))); do
     fi
     CREATED=$((CREATED+1))
     KEYS+=("$KEY")
+    # 생성 YAML 을 로컬 clone 에 기록 (서버 worktree 미사용).
+    gj_apply_local_writes "$RESP"
 
     # 선택 필드 PUT 업데이트 — 공통 + Feature + NFR + Driver + ADSN/DDSN 필드 화이트리스트
     # 값이 빈 문자열이 아닌 것만 PUT 에 포함 (false, 0, [] 등은 유지)
@@ -120,10 +126,14 @@ for i in $(seq 0 $((COUNT - 1))); do
       bdiagram:          .bdiagram
     } | with_entries(select(.value != null and .value != ""))' <<< "$ITEM")
     if [[ "$(jq 'length' <<< "$EXTRA")" != "0" ]]; then
-      curl -s -o /dev/null -X PUT "${GOJIRA_API}/Issue" \
-        -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+      PTMP=$(mktemp)
+      curl -s -o "$PTMP" -X PUT "${GOJIRA_API}/Issue" \
+        -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "X-Local-Write: true" \
         --data-binary "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson d "$EXTRA" \
           '{prjID:$p, key:$k, user:$u, data:$d}')" || true
+      # PUT 후 갱신된 YAML 을 로컬 clone 에 반영.
+      gj_apply_local_writes "$(cat "$PTMP")"
+      rm -f "$PTMP"
     fi
   else
     FAILED=$((FAILED+1))

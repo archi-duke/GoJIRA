@@ -48,11 +48,9 @@ curl -s "${GOJIRA_API}/Issue" \
 
 ```bash
 GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 
-RESP=$(curl -s -X POST "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d @- <<EOF
+RESP=$(cat <<EOF | bash "${SCRIPTS}/issue-write.sh" POST /Issue
 {
   "prjID": "${CODE}",
   "issueType": "VOS",
@@ -71,12 +69,11 @@ echo "Created: $KEY ($SUBKEY)"
 `client` / `priority` / `assignee` 는 POST 가 직접 받지 않으므로 생성 후 PUT 으로 설정:
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --arg cl "$CLIENT" --arg pr "$PRIORITY" --arg as "$ASSIGNEE" \
-    '{prjID:$p, key:$k, user:$u, data:{client:$cl, priority:$pr, assignee:$as}}')"
+    '{prjID:$p, key:$k, user:$u, data:{client:$cl, priority:$pr, assignee:$as}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 ## 규칙

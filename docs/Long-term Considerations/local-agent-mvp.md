@@ -109,20 +109,58 @@ OpenCode 도 `.claude/skills/*/SKILL.md` 를 읽도록 돼 있어 **두 CLI 가 
 
 ## 5. 권장 구현 순서 (다음 세션)
 
-1. **런처 PoC** — `/health` `/open` `/edit` + 보안(127.0.0.1·Origin·토큰). opencode/claude spawn.
-2. **웹 "수정" 버튼** — 런처 감지(`/health`) → `/edit` 호출 → 상태 표시.
-3. **docs/{user} push→PR 흐름** 정착 + 웹 PR 리뷰 연동.
+1. ~~**런처 PoC** — `/health` `/open` `/edit` + 보안(127.0.0.1·Origin·토큰). opencode/claude spawn.~~
+   **✅ 완료 (2026-05-22)** — `gojira-launcher/` (Go, zero-dep stdlib, 단일 exe). `/health`
+   `/open` `/edit` `/status` + Origin 허용목록 + 설치 토큰(`~/.gojira/launcher-token`) +
+   명령/입력 화이트리스트(path traversal·agent 검증). clone→`docs/{user}` checkout→VS Code+CLI.
+   Windows 크로스컴파일 확인. 상세: [`gojira-launcher/README.md`](../../gojira-launcher/README.md).
+2. ~~**웹 "수정" 버튼** — 런처 감지(`/health`) → `/edit` 호출 → 상태 표시.~~
+   **✅ 완료 (2026-05-22)** — `GoJIRA-App`: `src/utils/launcher.js`(detect/requestEdit,
+   AbortController 타임아웃), `config.LAUNCHER_BASE`(기본 `http://127.0.0.1:5599`),
+   `DocEditor` 툴바에 "로컬 수정" 버튼(런처 `ready` 감지 시 노출, 포커스 복귀 시 재감지).
+   토큰 핸드셰이크(§6 해소안): 런처 `/health` 가 **Origin 일치 요청에만 `token` 반환** →
+   웹이 `/edit` 헤더로 전송. (DNS-rebinding 잔여 리스크는 §6 유지)
+3. ~~**docs/{user} push→PR 흐름** 정착 + 웹 PR 리뷰 연동.~~
+   **✅ 완료 (2026-05-22)** — 로컬 커밋이 사용자 PC 에 있으므로: ① 런처 `POST /push` 신설
+   (로컬 `docs/{user}` → origin, ahead 0 이면 생략·dirty 경고), ② Platform-API `/pr` 에
+   `skipAutoCommit` 플래그 추가(true 면 서버측 worktree commit 생략, 기본 false=기존 유지),
+   ③ `DocEditor` 에 "로컬 push & 발행" 버튼(런처 push → `/pr` skipAutoCommit). **PR 리뷰는
+   기존 `Platform-App/DocManager`의 `PRList`(Gitea-API 기반, worktree 비의존)를 그대로 재사용** —
+   추가 작업 불필요. E2E(로컬 bare origin) 검증: clone→checkout→commit→push→origin 반영 확인.
+   **잔여**: push 인증(git 자격증명 헬퍼/clone URL — §6).
 4. **server-side 제거** — Agent-Service/OpenCode 호스팅/EditSession write 단계적 제거(롤백 가능하게 마지막).
+   인벤토리 확정([`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md)). 트랙별 진행:
+   - **A. 호스팅 인프라 ✅ 완료 (2026-05-22)** — Agent-Service/OpenCode 호스팅/systemd/user 스크립트/
+     opencodeInstances + 배포 플러밍 제거. (프론트 AGENT_API 코드·docs 서술은 B/§6 로 보류)
+   - **B. 프론트 write UI ✅ 완료 (2026-05-22)** — B1 웹 채팅 폐기(818acc5) + B2 GoJIRA-App
+     DocEditor read-only(280593b) + B3 Platform-App read-only(03b67c9). 웹은 조회+리뷰 전용,
+     편집은 "로컬 수정", 발행은 "로컬 push & 발행"으로 일원화. (이슈/Relation/SATAM 편집은 유지)
+   - **C. Platform-API write 엔드포인트 — 부분완료 (2026-05-22, a960cb6)** — 잔여 호출자 0 인
+     write 엔드포인트 8개(sync-branch/git/publish/edit:file·commit·pr·discard·heartbeat·rebase) 제거.
+     나머지(`PUT /file`·`notify-change`·`edit/start·release` 등)는 **서버측 스킬 문서생성 경로라
+     트랙 D 와 한 묶음**으로 보존. go build 클린.
+   - **D. 스킬 write — 설계 확정 (2026-05-22)**: [`local-agent-skill-execution.md`](./local-agent-skill-execution.md).
+     스킬은 로컬 CLI 가 로컬 clone 에서 실행, `doc-save.sh`(단일 choke point, 8개 doc 스킬 공용)를
+     로컬 fs 직접 write 로 전환 → `_edit-acquire/_edit-release/_notify-change` 및 서버 EditSession/
+     worktree write/`PUT·DELETE /file`/`notify-change` 제거 가능. **실행 대기**(코드 수정 미수행).
 5. **Windows 패키지** — 런처 설치 + 부트스트랩.
 
 ## 6. 미해결 / 다음 세션에서 확정할 것
 
-- 제거 대상 **파일/엔드포인트 정확한 목록** (코드 기준 재확인).
-- 웹 채팅 UI 존치 여부 — 폐기(편집은 CLI/IDE) vs 로컬 `opencode serve` 직결(client-side 브리지 부활).
+- ~~제거 대상 **파일/엔드포인트 정확한 목록** (코드 기준 재확인).~~ → **인벤토리 확정 (2026-05-22)**:
+  [`local-agent-removal-inventory.md`](./local-agent-removal-inventory.md) — 4개 트랙(A 호스팅
+  인프라 / B 프론트 write UI / C Platform-API write / D 스킬 write)으로 결합도順 단계화. 삭제 미수행.
+- ~~웹 채팅 UI 존치 여부 — 폐기 vs 로컬 `opencode serve` 직결.~~ → **폐기 확정 (2026-05-22)**:
+  편집/문서생성은 로컬 런처(VS Code+CLI)로 일원화. AgentChat·AGENT_API 제거(트랙 B1 완료).
 - `agent-workflow-evolution.md` 의 **서버측 State Machine(jobState) 로드맵 재설계** (로컬 실행 전제와 충돌).
 - 비개발자 stakeholder 보완(코멘트/export) 범위.
-- 런처 ↔ 웹 토큰 핸드셰이크 구체 방식.
+- ~~런처 ↔ 웹 토큰 핸드셰이크 구체 방식.~~ → **PoC 채택 (2026-05-22)**: 런처가 첫 기동 시
+  토큰 생성(`~/.gojira/launcher-token`), `/health` 가 Origin 일치 요청에만 토큰을 반환,
+  웹이 이후 호출 헤더에 사용. **잔여**: DNS-rebinding 방어(Host 헤더 검증 등), 토큰 회전.
 - VS Code 확장(공식 OpenCode 확장 vs GoJIRA 전용) 채택 여부 — full pivot Phase 2 와 연계.
+- **런처 push 인증** — `git push origin docs/{user}` 가 Gitea 자격을 어떻게 얻을지
+  (clone URL 토큰 임베드 vs git 자격증명 헬퍼 vs SSH). Windows GCM 첫 push 대화형
+  프롬프트가 헤드리스에서 막힐 수 있음 — 부트스트랩 시 자격 사전 구성 필요(§5-5 패키지와 연계).
 
 ## 관련 문서
 - [`architecture-pivot-vscode.md`](./architecture-pivot-vscode.md) — 상위 방향/결정 로그

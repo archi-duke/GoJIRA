@@ -381,13 +381,13 @@ cat /tmp/req_result.json
 
 결과의 `keys` 배열에서 생성된 Requirement key 목록 확인. NFR 의 QAS 필드는 생성 후 PUT /Issue 로 업데이트:
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
     --arg qa "$QA" --arg src "$SRC" --arg stm "$STM" --arg env "$ENV" \
     --arg art "$ART" --arg resp "$RESP_F" --arg m "$MEASURE" --arg rs "$RSCEN" \
     --argjson auto $MEASURE_AUTO \
-    '{prjID:$p, key:$k, user:$u, data:{qa:$qa, source:$src, stimulus:$stm, environment:$env, artifact:$art, response:$resp, measure:$m, responseScenario:$rs, measureAuto:$auto}}')"
+    '{prjID:$p, key:$k, user:$u, data:{qa:$qa, source:$src, stimulus:$stm, environment:$env, artifact:$art, response:$resp, measure:$m, responseScenario:$rs, measureAuto:$auto}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 - modify: `PUT /Issue` 로 해당 key 필드 업데이트 + 변경 코멘트

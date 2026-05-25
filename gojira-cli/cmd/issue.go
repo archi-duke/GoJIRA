@@ -82,8 +82,11 @@ func issueCreate(args []string) {
 		"key": project, "issueType": issueType, "summary": summary,
 		"description": description, "priority": priority, "reqtype": reqType,
 	}
-	result, err := apiPost("/Issue", body)
+	result, err := apiWriteLocal("POST", "/Issue", body)
 	if err != nil {
+		fatal(err.Error())
+	}
+	if err := applyLocalWrites(result); err != nil {
 		fatal(err.Error())
 	}
 	outputJSON(result)
@@ -101,8 +104,11 @@ func issueUpdate(args []string) {
 			fields[f] = v
 		}
 	}
-	result, err := apiPut("/Issue", data)
+	result, err := apiWriteLocal("PUT", "/Issue", data)
 	if err != nil {
+		fatal(err.Error())
+	}
+	if err := applyLocalWrites(result); err != nil {
 		fatal(err.Error())
 	}
 	outputJSON(result)
@@ -113,8 +119,11 @@ func issueDelete(args []string) {
 	if key == "" {
 		fatal("--key is required")
 	}
-	result, err := apiDelete("/Issue", map[string]string{"key": key})
+	result, err := apiWriteLocal("DELETE", "/Issue", map[string]string{"key": key})
 	if err != nil {
+		fatal(err.Error())
+	}
+	if err := applyLocalWrites(result); err != nil {
 		fatal(err.Error())
 	}
 	outputJSON(result)
@@ -127,10 +136,13 @@ func issueLink(args []string) {
 	if from == "" || to == "" || linkType == "" {
 		fatal("--from, --to, --type are required")
 	}
-	result, err := apiPost("/Issue/link", map[string]string{
-		"fromKey": from, "toKey": to, "type": linkType,
+	result, err := apiWriteLocal("POST", "/Issue/link", map[string]string{
+		"inwardKey": from, "outwardKey": to, "linkType": linkType,
 	})
 	if err != nil {
+		fatal(err.Error())
+	}
+	if err := applyLocalWrites(result); err != nil {
 		fatal(err.Error())
 	}
 	outputJSON(result)

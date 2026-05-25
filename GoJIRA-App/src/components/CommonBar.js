@@ -120,10 +120,12 @@ export default function CommonBar({ title, onBack, onPull, pullIcon, onEditChang
         </button>
       )}
 
-      {/* 편집모드 */}
-      <button className={`cb-edit-toggle ${editMode ? 'cb-edit-active' : ''}`} onClick={handleEditToggle}>
-        {editMode ? '편집모드 ON' : '편집모드'}
-      </button>
+      {/* 편집모드 — onEditChange 를 넘기는 호출자가 있을 때만 노출 (웹 read-only 전환 후 미사용) */}
+      {onEditChange && (
+        <button className={`cb-edit-toggle ${editMode ? 'cb-edit-active' : ''}`} onClick={handleEditToggle}>
+          {editMode ? '편집모드 ON' : '편집모드'}
+        </button>
+      )}
 
       {(pulling || exporting) && <div className="cb-overlay"><div className="cb-spinner" /></div>}
     </div>

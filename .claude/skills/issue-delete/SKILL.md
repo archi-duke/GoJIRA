@@ -26,10 +26,9 @@ export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
 ⚠️ **`DELETE /Issue/{KEY}` path 방식 금지** — 404 발생. 반드시 body 에 JSON 으로 전달.
 
 ```bash
-curl -s -X DELETE "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: ${USER}" \
-  -d "{\"prjID\":\"${CODE}\",\"key\":\"${KEY}\",\"user\":\"${USER}\"}"
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+echo "{\"prjID\":\"${CODE}\",\"key\":\"${KEY}\",\"user\":\"${USER}\"}" \
+  | bash "${SCRIPTS}/issue-write.sh" DELETE /Issue
 ```
 
 결과(성공/실패)를 사용자에게 보고합니다.

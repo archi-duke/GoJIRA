@@ -128,221 +128,20 @@ export default function DocManager({ user }) {
             <div className="dm-toolbar">
               <span className="dm-repo-title">{selectedRepo.repoOwner}/{selectedRepo.repoName}</span>
               <div className="dm-view-tabs">
-                {['tree', 'edit', 'commits', 'prs', 'graph'].map(v => (
+                {['tree', 'commits', 'prs', 'graph'].map(v => (
                   <button key={v} className={`dm-tab ${view === v ? 'dm-tab-active' : ''}`} onClick={() => setView(v)}>
-                    {{tree:'Files', edit:'Edit', commits:'Commits', prs:'PRs', graph:'Graph'}[v]}
+                    {{tree:'Files', commits:'Commits', prs:'PRs', graph:'Graph'}[v]}
                   </button>
                 ))}
               </div>
             </div>
             {view === 'tree' && <DocTree repo={selectedRepo} />}
-            {view === 'edit' && <DocEditor repo={selectedRepo} user={user} />}
             {view === 'commits' && <CommitHistory repo={selectedRepo} />}
             {view === 'prs' && <PRList repo={selectedRepo} user={user} />}
             {view === 'graph' && <GitGraph repo={selectedRepo} />}
           </>
         ) : (
           <div className="dm-placeholder">Repository를 선택하세요</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// --- Doc Editor ---
-function DocEditor({ repo, user }) {
-  const [started, setStarted] = useState(false);
-  const [branch, setBranch] = useState('');
-  const [tree, setTree] = useState(null);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [content, setContent] = useState('');
-  const [original, setOriginal] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [previewMode, setPreviewMode] = useState(false);
-  const [hasPending, setHasPending] = useState(false);
-
-  // 미완료 작업 확인
-  useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/edit/status`, { headers: { 'X-User-Id': user } })
-      .then(r => r.json()).then(d => {
-        setHasPending(d.hasPending);
-        if (d.hasPending) setBranch(d.branch);
-      }).catch(() => {});
-  }, [repo, user]);
-
-  // 편집 시작
-  async function startEdit() {
-    const res = await fetch(`${API}/${repo.projectCode}/edit/start`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-    });
-    if (!res.ok) { modalAlert('작업 공간 생성 실패'); return; }
-    const d = await res.json();
-    setBranch(d.branch);
-    setStarted(true);
-    fetchTree();
-  }
-
-  // 이어서 작업
-  function resumeEdit() {
-    setStarted(true);
-    fetchTree();
-  }
-
-  // 작업 폐기
-  async function discardEdit() {
-    if (!await modalConfirm('작업 내용을 폐기하시겠습니까?')) return;
-    await fetch(`${API}/${repo.projectCode}/edit/discard`, {
-      method: 'DELETE', headers: { 'X-User-Id': user },
-    });
-    setHasPending(false);
-    setStarted(false);
-    setSelectedFile(null);
-    setContent('');
-  }
-
-  // 파일 트리 로드 (main 기준)
-  function fetchTree() {
-    fetch(`${API}/${repo.projectCode}/tree?ref=main`)
-      .then(r => r.json()).then(d => setTree(d)).catch(() => {});
-  }
-
-  // 파일 선택 → worktree에서 읽기
-  async function handleFileClick(path) {
-    if (content !== original && selectedFile) {
-      if (!await modalConfirm('저장하지 않은 변경이 있습니다. 이동하시겠습니까?')) return;
-    }
-    const res = await fetch(`${API}/${repo.projectCode}/edit/file?path=${encodeURIComponent(path)}`, {
-      headers: { 'X-User-Id': user },
-    });
-    if (res.ok) {
-      const d = await res.json();
-      setSelectedFile(path);
-      setContent(d.content);
-      setOriginal(d.content);
-      setPreviewMode(false);
-    } else {
-      // worktree에 아직 없으면 main에서 가져오기
-      const res2 = await fetch(`${API}/${repo.projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
-      if (res2.ok) {
-        const d = await res2.json();
-        const text = d.content ? atob(d.content) : '';
-        setSelectedFile(path);
-        setContent(text);
-        setOriginal(text);
-        setPreviewMode(false);
-      }
-    }
-  }
-
-  // 파일 저장 (worktree에만, 커밋 없이)
-  async function handleSave() {
-    setSaving(true);
-    await fetch(`${API}/${repo.projectCode}/edit/file`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ path: selectedFile, content }),
-    });
-    setOriginal(content);
-    setSaving(false);
-  }
-
-  // 커밋 + 푸시
-  async function handleCommit() {
-    const msg = await modalPrompt('커밋 메시지', `${selectedFile || '문서'} 수정`);
-    if (!msg) return;
-    // 미저장 변경이 있으면 먼저 저장
-    if (content !== original && selectedFile) await handleSave();
-    const res = await fetch(`${API}/${repo.projectCode}/edit/commit`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ message: msg }),
-    });
-    if (res.ok) {
-      modalAlert('커밋 완료');
-    } else {
-      const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || '커밋 실패');
-    }
-  }
-
-  // 배포(PR) 요청
-  async function handleCreatePR() {
-    const title = await modalPrompt('PR 제목', `[${repo.projectCode}] 설계문서 배포 요청`);
-    if (!title) return;
-    // 미저장 변경이 있으면 먼저 저장
-    if (content !== original && selectedFile) await handleSave();
-    const res = await fetch(`${API}/${repo.projectCode}/edit/pr`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
-      body: JSON.stringify({ title }),
-    });
-    if (res.ok) {
-      modalAlert('PR이 생성되었습니다. PRs 탭에서 확인하세요.');
-    } else {
-      const err = await res.json().catch(() => ({}));
-      modalAlert(err.error || 'PR 생성 실패');
-    }
-  }
-
-  const modified = content !== original;
-  const items = (tree?.tree || []).filter(i => i.type !== 'tree').sort((a, b) => a.path.localeCompare(b.path));
-
-  if (!started) {
-    return (
-      <div className="dm-editor-start">
-        {hasPending ? (
-          <div className="dm-pending-notice">
-            <p>이전에 작업하던 내용이 있습니다. ({branch})</p>
-            <button className="dm-btn" onClick={resumeEdit}>이어서 작업</button>
-            <button className="dm-btn dm-btn-danger" onClick={discardEdit}>폐기</button>
-          </div>
-        ) : (
-          <div>
-            <p>문서를 편집하려면 작업을 시작하세요.</p>
-            <button className="dm-btn dm-btn-primary" onClick={startEdit}>편집 시작</button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="dm-editor">
-      <div className="dm-editor-sidebar">
-        <div className="dm-editor-sidebar-header">
-          <span>{branch}</span>
-        </div>
-        {items.map(item => (
-          <div key={item.path}
-            className={`dm-editor-file ${selectedFile === item.path ? 'dm-editor-file-active' : ''}`}
-            onClick={() => handleFileClick(item.path)}>
-            {item.path}
-          </div>
-        ))}
-      </div>
-      <div className="dm-editor-main">
-        {selectedFile ? (
-          <>
-            <div className="dm-editor-toolbar">
-              <span className="dm-editor-filename">{selectedFile} {modified && <span className="dm-modified">●</span>}</span>
-              <div className="dm-editor-actions">
-                <button className={`dm-tab ${!previewMode ? 'dm-tab-active' : ''}`} onClick={() => setPreviewMode(false)}>편집</button>
-                <button className={`dm-tab ${previewMode ? 'dm-tab-active' : ''}`} onClick={() => setPreviewMode(true)}>미리보기</button>
-                <button className="dm-btn" onClick={handleSave} disabled={!modified || saving}>{saving ? '저장중...' : '저장'}</button>
-                <button className="dm-btn" onClick={handleCommit}>커밋/푸시</button>
-                <button className="dm-btn dm-btn-primary" onClick={handleCreatePR}>배포(PR) 요청</button>
-              </div>
-            </div>
-            <div className="dm-editor-body">
-              {previewMode ? (
-                <div className="dm-editor-preview">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-                </div>
-              ) : (
-                <textarea className="dm-editor-textarea" value={content}
-                  onChange={e => setContent(e.target.value)} spellCheck={false} />
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="dm-placeholder">파일을 선택하세요</div>
         )}
       </div>
     </div>
@@ -523,9 +322,12 @@ function PRList({ repo, user }) {
           fetch(`${API}/${repo.projectCode}/pr/${pr.number}/reviews`)
             .then(r => r.json()).then(reviews => {
               if (!Array.isArray(reviews)) return;
-              // 사용자별 최신 리뷰만 유지 (PENDING, REQUEST_REVIEW 제외)
+              // 사용자별 최신 리뷰만 유지 (PENDING, REQUEST_REVIEW, dismissed 제외).
+              // Gitea 1.25 는 반려 state 를 'REQUEST_CHANGES' 로 돌려주는데 본 코드는 'CHANGES_REQUESTED' 를 기대 — 정규화.
               const byUser = {};
               reviews.forEach(rv => {
+                if (rv.dismissed) return;
+                if (rv.state === 'REQUEST_CHANGES') rv.state = 'CHANGES_REQUESTED';
                 if (rv.state === 'PENDING' || rv.state === 'REQUEST_REVIEW') return;
                 byUser[rv.user?.login] = rv;
               });

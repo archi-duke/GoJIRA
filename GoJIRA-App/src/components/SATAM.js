@@ -580,7 +580,9 @@ const NAV_ITEMS = [
 export default function SATAM({ project, user, onBack, currentPage, onNavigate }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  // 웹은 조회 전용 (local-agent-issue-model.md §3.3). 편집/링크/생성/삭제는 로컬로
+  // 이전 → editMode 항상 false, 편집 토글 미노출(셀 클릭은 readonly 팝업).
+  const [editMode] = useState(false);
   const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_sa_A') === 'true');
   const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_sa_R') !== 'false');
   const [showFR, setShowFR] = useState(() => sessionStorage.getItem('gojira_sa_F') !== 'false');
@@ -846,7 +848,6 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           title={barTitle}
           onBack={onBack}
           onPull={handlePull}
-          onEditChange={setEditMode}
           nav={nav}
           options={[
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
@@ -867,7 +868,6 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         title={barTitle}
         onBack={onBack}
         onPull={handlePull}
-        onEditChange={(mode) => { setEditMode(mode); if (!mode) setEditCell(null); }}
         nav={nav}
         options={[
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
@@ -877,13 +877,6 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
         ]}
         onExport={editMode ? undefined : handleExport}
-        onAssist={() => {
-          const msg = `${project.name}(${projectCode}) 과제의 SATAM 분석해줘`;
-          const url = `/?mode=agent&autoMessage=${encodeURIComponent(msg)}&project=${encodeURIComponent(projectCode)}&newSession=1`;
-          window.open(url, 'gojira-agent', 'width=480,height=720');
-        }}
-        assistIcon={<svg width="20" height="20" viewBox="0 0 24 24" style={{filter:'grayscale(1)',verticalAlign:'middle',marginLeft:5,position:'relative',top:-1}}><text x="2" y="17" fontSize="14" fontWeight="bold" fontFamily="Arial" fill="#555">AI</text><circle cx="18" cy="4" r="1.5" fill="#999"/><circle cx="21" cy="8" r="1" fill="#999"/><circle cx="17" cy="10" r="1.2" fill="#999"/></svg>}
-        assistLabel="SATAM 분석"
       />
 
       <div className="satam-content" ref={contentRef}>

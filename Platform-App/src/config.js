@@ -11,15 +11,15 @@ const config = {
   API_BASE: pick('REACT_APP_PLATFORM_API', 'http://localhost:9000/api/v2'),
   // GoJIRA 앱 API (이슈, 프로젝트)
   GOJIRA_API: pick('REACT_APP_GOJIRA_API', 'http://localhost:9001/api/v2'),
-  // Agent Service (Python, 스트리밍)
-  AGENT_API: pick('REACT_APP_AGENT_API', 'http://localhost:9002/api/v2'),
-  // GoJIRA-App base URL — Module Federation remote 와 채팅 popup 용.
+  // GoJIRA-App base URL — Module Federation remote 용.
   // Promise-based dynamic remote (craco.config.js) 에서도 동일 값을 사용.
   GOJIRA_APP: pick('REACT_APP_GOJIRA_APP_REMOTE', 'http://localhost:3001'),
   // SSO 설정
   SSO_URL: pick('REACT_APP_SSO_URL', 'https://10.227.37.90:443'),
   USE_SSO: false,
   DEV_USER: 'duke.kimm',
+  // 로컬 런처 (사용자 PC) — 로고/타이틀 클릭 → /chat 으로 에이전트 spawn.
+  LAUNCHER_BASE: pick('REACT_APP_LAUNCHER_BASE', 'http://127.0.0.1:5599'),
 };
 
 export default config;

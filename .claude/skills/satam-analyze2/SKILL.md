@@ -516,13 +516,13 @@ Concerns:
 ### 5.2 PUT /Issue
 
 ```bash
-curl -s -X PUT "${GOJIRA_API}/Issue" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
-  -d "$(jq -n \
+SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
+jq -n \
     --arg p "$CODE" --arg k "$ADSN_KEY" --arg u "$USER" \
     --arg r "$RISK_YAML" --arg s "$SENS_YAML" \
     --arg m "$MITI_YAML" --arg c "$CONCERNS_YAML" \
-    '{prjID:$p, key:$k, user:$u, data:{risk:$r, sensitivity:$s, mitigation:$m, concerns:$c}}')"
+    '{prjID:$p, key:$k, user:$u, data:{risk:$r, sensitivity:$s, mitigation:$m, concerns:$c}}' \
+  | bash "${SCRIPTS}/issue-write.sh" PUT /Issue
 ```
 
 `concerns` 는 신규 필드. 값 없으면 빈 문자열 "" 로 PUT. 서버는 Mongo 에 그대로 저장 (schema-free).

@@ -27,6 +27,19 @@
   letter-spacing: 1px;
   margin-right: 16px;
 }
+/* 로고/타이틀 클릭 — 에이전트 spawn. 클릭 가능함을 시각적으로 표시. */
+.app-logo-clickable {
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.app-logo-icon.app-logo-clickable:hover {
+  opacity: 0.75;
+  transform: scale(1.05);
+}
+.app-logo.app-logo-clickable:hover {
+  color: #ffd166;
+  text-shadow: 0 0 8px rgba(255, 209, 102, 0.4);
+}
 
 .app-nav {
   display: flex;

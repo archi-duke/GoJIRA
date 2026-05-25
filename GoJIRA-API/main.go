@@ -83,6 +83,11 @@ func main() {
 		r.Put("/Issue", handlers.IssueUpdateHandler)
 		r.Delete("/Issue", handlers.IssueDeleteHandler)
 
+		// Issue ingest (트랙 E — 로컬 YAML → Mongo 캐시)
+		r.Post("/Issue/ingest", handlers.IssueIngestHandler)
+		r.Delete("/Issue/ingest", handlers.IssueIngestDeleteHandler)
+		r.Post("/Project/{jiraCode}/issues/ingest", handlers.ProjectIssuesIngestHandler)
+
 		// Label
 		r.Post("/Issue/label", handlers.LabelCreateHandler)
 		r.Delete("/Issue/label", handlers.LabelDeleteHandler)
