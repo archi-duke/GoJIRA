@@ -304,7 +304,9 @@ func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	user := r.URL.Query().Get("user")
-	repoPath, err := s.EnsureRepo(code, user)
+	// /files 는 read-only — 네트워크 fetch 생략 (느린 Gitea 환경에서 hang 방지).
+	// 신선한 origin/main 비교는 /pull 버튼이 책임짐.
+	repoPath, err := s.EnsureRepoLocal(code, user)
 	if err != nil {
 		log.Printf("/files 실패 code=%s user=%s: %v", code, user, err)
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -347,7 +349,8 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "path 누락")
 		return
 	}
-	repoPath, err := s.EnsureRepo(code, user)
+	// /file 도 read-only — 네트워크 fetch 생략.
+	repoPath, err := s.EnsureRepoLocal(code, user)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

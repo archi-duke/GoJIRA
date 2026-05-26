@@ -147,7 +147,18 @@ func (s *Server) resolveRepoName(code, user string) string {
 // EnsureRepo 는 로컬 clone 을 보장하고 docs/<user> 브랜치를 체크아웃한다.
 //   - 서버측 bare+worktree 모델과 달리 사용자 PC 의 일반 작업본 1개 (설계 §4: 브랜치 내부 충돌 0).
 //   - 이미 있으면 fetch 후 브랜치 정렬만 수행.
+//   - withFetch=false: 네트워크 호출 생략 (읽기 전용 /files 등에서 사용 — 느린 Gitea 환경에서 hang 방지).
 func (s *Server) EnsureRepo(code, user string) (string, error) {
+	return s.ensureRepoImpl(code, user, true)
+}
+
+// EnsureRepoLocal — EnsureRepo 의 no-network 변형. /files 처럼 단순 조회용 핸들러에서 사용.
+// 신규 clone 은 어쨌든 1회 네트워크가 필요하므로 첫 호출은 동일 비용. 이후 호출은 fetch 생략.
+func (s *Server) EnsureRepoLocal(code, user string) (string, error) {
+	return s.ensureRepoImpl(code, user, false)
+}
+
+func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, error) {
 	if err := validateName("code", code); err != nil {
 		return "", err
 	}
@@ -174,11 +185,11 @@ func (s *Server) EnsureRepo(code, user string) (string, error) {
 		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(repoName), code); err != nil {
 			return "", err
 		}
-	} else {
+	} else if withFetch {
 		gitCmd(path, "fetch", "origin")
 	}
 
-	if err := s.checkoutUserBranch(path, branch); err != nil {
+	if err := s.checkoutUserBranch(path, branch, withFetch); err != nil {
 		return "", err
 	}
 	s.ensureSkillsSymlink(path)
@@ -303,13 +314,15 @@ func copyTree(src, dst string) error {
 }
 
 // checkoutUserBranch — origin/<branch> 가 있으면 추적 체크아웃, 없으면 origin/main 기반 신규 생성.
-// 추가로: docs/{user} 가 origin/main 의 후행이고 미커밋 변경이 없으면 silently FF merge.
-// (신규 프로젝트에서 docs/{user} 가 빈 채 만들어진 케이스 + 그 외 단순 후행 케이스 자동 복구.)
-func (s *Server) checkoutUserBranch(path, branch string) error {
+// withFetch=true 일 때만 추가로: docs/{user} 가 origin/main 의 후행이고 미커밋 변경이 없으면 silently FF merge.
+// (withFetch=false 는 read-only 호출 — 네트워크 hang 방지를 위해 pull/merge 도 생략.)
+func (s *Server) checkoutUserBranch(path, branch string, withFetch bool) error {
 	// 이미 해당 브랜치면 끝.
 	if cur, err := gitCmd(path, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && cur == branch {
-		gitCmd(path, "pull", "--ff-only")
-		s.tryFFFromMain(path)
+		if withFetch {
+			gitCmd(path, "pull", "--ff-only")
+			s.tryFFFromMain(path)
+		}
 		return nil
 	}
 	// 원격에 존재하면 추적 체크아웃.
@@ -317,8 +330,10 @@ func (s *Server) checkoutUserBranch(path, branch string) error {
 		if _, err := gitCmd(path, "checkout", branch); err != nil {
 			return err
 		}
-		gitCmd(path, "pull", "--ff-only")
-		s.tryFFFromMain(path)
+		if withFetch {
+			gitCmd(path, "pull", "--ff-only")
+			s.tryFFFromMain(path)
+		}
 		return nil
 	}
 	// 없으면 origin/main 기반 새 브랜치.
