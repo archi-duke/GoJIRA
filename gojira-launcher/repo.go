@@ -455,11 +455,11 @@ type PullResult struct {
 	Message    string `json:"message,omitempty"`
 }
 
-// Pull — docs/<user> 에 origin/main 을 끌어온다.
-//   - dirty(미커밋) 면 자동 stash → pull → stash pop. pop 충돌 시 stash 보존 + 에러.
-//   - FF 가능: merge --ff-only (linear, 깔끔).
-//   - 비-FF (사용자 커밋이 main 위에 있음): pull --rebase origin main 으로 사용자 커밋을 main 위로 옮김.
-//   - rebase 충돌 시: 명확한 에러 + 호스트 git 으로 수동 해결 안내.
+// Pull — 로컬 docs/<user> 를 origin/main 으로 완전히 덮어쓴다 (destructive).
+//   - git fetch origin → git reset --hard origin/main
+//   - 사용자 커밋·미커밋 변경 모두 폐기. 사용자가 명시적으로 "main 으로 갱신" 의도일 때만 호출.
+//   - 강한 경고는 프론트엔드에서 confirm 으로 처리 (UI 책임).
+//   - 안전망: 직전 HEAD sha 를 응답에 포함해 사용자가 git reset --hard <prevSha> 로 복구 가능.
 func (s *Server) Pull(code, user string) (*PullResult, error) {
 	path, err := s.EnsureRepo(code, user)
 	if err != nil {
@@ -470,96 +470,55 @@ func (s *Server) Pull(code, user string) (*PullResult, error) {
 	defer mu.Unlock()
 
 	branch := "docs/" + user
-	res := &PullResult{Status: "ok", Branch: branch}
+	res := &PullResult{Status: "ok", Branch: branch, Strategy: "reset-hard"}
 
-	// dirty 면 자동 stash. pop 은 마지막에.
-	stashed := false
-	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
-		stashMsg := fmt.Sprintf("[gojira-launcher] auto-stash before Pull (%s)", time.Now().Format(time.RFC3339))
-		if _, err := gitCmd(path, "stash", "push", "-u", "-m", stashMsg); err != nil {
-			return nil, fmt.Errorf("자동 stash 실패: %w", err)
-		}
-		stashed = true
-	}
+	// 복구용 직전 HEAD 기록 (사용자가 실수로 눌렀을 때 git reset --hard <prevSha> 로 복원).
+	prevHead, _ := gitCmd(path, "rev-parse", "HEAD")
 
 	if _, err := gitCmd(path, "fetch", "origin"); err != nil {
-		if stashed {
-			gitCmd(path, "stash", "pop")
-		}
 		return nil, fmt.Errorf("fetch 실패: %w", err)
 	}
 	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
-		if stashed {
-			gitCmd(path, "stash", "pop")
-		}
 		return nil, fmt.Errorf("origin/main 이 없습니다 (clone 직후 상태?) — Gitea 의 main 브랜치를 먼저 확인하세요")
 	}
 
-	// origin/main 대비 ahead/behind 측정 (rev-list --left-right --count)
-	// 결과: "<behind>\t<ahead>" — main..HEAD ahead, HEAD..main behind.
-	behindMain, aheadMain := 0, 0
-	if counts, err := gitCmd(path, "rev-list", "--left-right", "--count", "origin/main...HEAD"); err == nil {
-		if f := strings.Fields(counts); len(f) == 2 {
-			behindMain, _ = strconv.Atoi(f[0])
-			aheadMain, _ = strconv.Atoi(f[1])
+	// 이미 main 과 동일한 HEAD 면 noop.
+	mainHead, _ := gitCmd(path, "rev-parse", "refs/remotes/origin/main")
+	curHead, _ := gitCmd(path, "rev-parse", "HEAD")
+	if mainHead != "" && mainHead == curHead {
+		// working tree 가 깔끔하면 정말 노옵, dirty 면 그래도 reset 해서 깨끗하게.
+		if porcelain, _ := gitCmd(path, "status", "--porcelain"); porcelain == "" {
+			res.Status = "noop"
+			res.Message = "이미 main 의 최신 내용과 동일합니다"
+			res.LastCommit = curHead
+			return res, nil
 		}
 	}
 
-	if behindMain == 0 {
-		res.Status = "noop"
-		res.Strategy = "ff"
-		res.Ahead = aheadMain
-		res.Message = "이미 main 의 최신 내용을 포함합니다"
-		if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
-			res.LastCommit = c
-		}
-		if stashed {
-			if _, err := gitCmd(path, "stash", "pop"); err != nil {
-				res.Message += " (자동 stash pop 충돌 — 호스트에서 git stash list / stash pop 으로 해결)"
-			}
-		}
-		return res, nil
+	// reset --hard origin/main — 로컬 커밋·미커밋 변경 모두 폐기.
+	if _, err := gitCmd(path, "reset", "--hard", "origin/main"); err != nil {
+		return nil, fmt.Errorf("reset --hard origin/main 실패: %w", err)
 	}
+	// untracked 파일은 reset --hard 가 안 지우므로 명시적으로 clean.
+	gitCmd(path, "clean", "-fd")
 
-	if aheadMain == 0 {
-		// FF 가능 — main 의 새 커밋만 끌어온다.
-		if _, err := gitCmd(path, "merge", "--ff-only", "origin/main"); err != nil {
-			if stashed {
-				gitCmd(path, "stash", "pop")
-			}
-			return nil, fmt.Errorf("FF merge 실패: %w", err)
-		}
-		res.Strategy = "ff"
-		res.Merged = behindMain
-	} else {
-		// 비-FF: 사용자 커밋을 main 위로 옮긴다.
-		if _, err := gitCmd(path, "pull", "--rebase", "origin", "main"); err != nil {
-			// 충돌 시 rebase 중단 후 에러.
-			gitCmd(path, "rebase", "--abort")
-			if stashed {
-				gitCmd(path, "stash", "pop")
-			}
-			return nil, fmt.Errorf("rebase 충돌 — 호스트 git 에서 수동 해결 필요 (cd %s && git rebase origin/main): %w", path, err)
-		}
-		res.Strategy = "rebase"
-		res.Merged = behindMain
-	}
-
-	if counts, err := gitCmd(path, "rev-list", "--count", "origin/main..HEAD"); err == nil {
-		res.Ahead, _ = strconv.Atoi(strings.TrimSpace(counts))
-	}
+	res.Merged = -1 // 적용 커밋 수는 의미 없음 (overwrite). frontend 는 strategy=reset-hard 로 분기.
 	if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
 		res.LastCommit = c
 	}
-	res.Message = fmt.Sprintf("main 의 %d 커밋을 %s 로 적용", res.Merged, res.Strategy)
-	if stashed {
-		if _, err := gitCmd(path, "stash", "pop"); err != nil {
-			res.Message += " — ⚠ 자동 stash pop 충돌. 변경은 git stash 에 보존됨 (cd " + path + " && git stash list / git stash pop 으로 해결)"
-		} else {
-			res.Message += " (미커밋 변경은 자동 stash → pop 으로 복원)"
-		}
+	if prevHead != "" {
+		res.Message = fmt.Sprintf("로컬 docs/%s 를 main 으로 완전 덮어씌움 (직전 HEAD: %s — 실수면 cd %s && git reset --hard %s 로 복구)", user, prevHead[:min(8, len(prevHead))], path, prevHead[:min(8, len(prevHead))])
+	} else {
+		res.Message = fmt.Sprintf("로컬 docs/%s 를 main 으로 완전 덮어씌움", user)
 	}
 	return res, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // RepoStatus — /status 응답용 (브랜치/ahead·behind/dirty/마지막 커밋).

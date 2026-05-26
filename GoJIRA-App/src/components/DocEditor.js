@@ -409,24 +409,24 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
-  // "Pull" — origin/main 의 새 내용을 로컬 docs/{user} 로 끌어온다.
-  // dirty(미커밋) 이면 경고 후 진행 — 서버가 자동 stash → pull → stash pop 처리.
+  // "Pull" — 로컬 docs/{user} 를 origin/main 으로 완전히 덮어씌운다 (destructive).
+  // 사용자 커밋·미커밋 변경 모두 폐기. 강한 confirm 필수.
   async function handlePullFromMain() {
     if (!launcher || !launcher.token) return;
     const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
-    const msg = hasUncommitted
-      ? `⚠ 미커밋 변경이 있습니다.\n\nPull 진행 시 자동으로 stash → main 끌어오기 → stash pop 됩니다. 만약 stash pop 충돌이 나면 변경은 git stash 에 보존되며 호스트에서 수동 해결 필요합니다.\n\n계속하시겠습니까?`
-      : `main 의 최신 내용을 로컬 docs/${user} 로 끌어오시겠습니까?`;
-    if (!await modalConfirm(msg)) return;
+    const warn = hasUncommitted
+      ? `⚠ 로컬 docs/${user} 의 변경이 모두 폐기됩니다.\n\n• 미커밋 변경 (있음): 사라집니다\n• 로컬 커밋: 사라집니다\n• 결과: main 과 완전히 동일한 상태\n\n복구는 직전 HEAD sha 로 git reset --hard 만 가능 (응답에 표시됨). 계속하시겠습니까?`
+      : `로컬 docs/${user} 를 main 의 내용으로 완전히 덮어씌웁니다.\n\n• 사용자 push 안 한 로컬 커밋이 있다면 사라집니다\n• 결과: main 과 완전히 동일한 상태\n\n계속하시겠습니까?`;
+    if (!await modalConfirm(warn)) return;
     setPublishing(true);
     try {
       const r = await requestPullFromMain({ code: projectCode, user, token: launcher.token });
       if (!r.ok) { modalAlert(r.error || 'Pull 실패'); return; }
       const d = r.data || {};
       if (d.status === 'noop') {
-        modalAlert(d.message || '이미 main 의 최신 내용을 포함합니다.');
+        modalAlert(d.message || '이미 main 의 최신 내용과 동일합니다.');
       } else {
-        modalAlert(d.message || `main 의 ${d.merged ?? 0} 커밋을 ${d.strategy || ''} 로 적용했습니다.`);
+        modalAlert(d.message || 'main 의 내용으로 덮어씌움 완료');
       }
       refreshDocState();
     } finally {
