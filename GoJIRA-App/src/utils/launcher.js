@@ -85,6 +85,15 @@ export async function requestSync({ code, user, message, token }) {
 }
 
 /**
+ * "Pull" — origin/main 의 새 내용을 로컬 docs/{user} 로 끌어온다.
+ * FF 가능하면 fast-forward, 사용자 커밋이 있으면 rebase. dirty 면 거부.
+ * @returns {Promise<{ok:boolean, data?:{status, strategy, merged, ahead, branch, message, lastCommit}, error?:string}>}
+ */
+export async function requestPullFromMain({ code, user, token }) {
+  return post('/pull', { code, user }, token);
+}
+
+/**
  * 인라인 편집 저장 — 로컬 working tree 의 단일 파일에 raw text 쓰기. commit/push 안 함.
  */
 export async function requestWrite({ code, user, path, content, token }) {
@@ -109,11 +118,15 @@ export async function requestLocalFile({ code, user, path, token }) {
   return get(`/file?${q}`, token);
 }
 
+// 30s — 사용자 PC ↔ Gitea 네트워크 RTT 가 느린 환경에서 git fetch/clone/merge 가
+// 2.5s 안에 안 끝나는 케이스 (사내 폐쇄망 등) 대비. health 만 짧게 (별도 호출).
+const LAUNCHER_OP_TIMEOUT_MS = 30000;
+
 async function get(path, token) {
   try {
     const headers = {};
     if (token) headers[TOKEN_HEADER] = token;
-    const res = await fetchWithTimeout(`${BASE}${path}`, { method: 'GET', headers });
+    const res = await fetchWithTimeout(`${BASE}${path}`, { method: 'GET', headers }, LAUNCHER_OP_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
     return { ok: true, data };
@@ -130,7 +143,7 @@ async function post(path, body, token) {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-    });
+    }, LAUNCHER_OP_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };

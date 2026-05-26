@@ -374,7 +374,16 @@ func DocRepoTreeHandler(w http.ResponseWriter, r *http.Request) {
 		// Gitea 미가동 시 로컬 bare repo 에서 git ls-tree 로 대체
 		entries, lsErr := buildBareTree(owner, name, ref)
 		if lsErr != nil {
-			respondError(w, http.StatusBadGateway, err.Error())
+			// 둘 다 실패 — ref 가 아직 없는 케이스 (사용자가 /sync 한 적 없어 docs/{user} 미존재)
+			// 는 정상 흐름이므로 빈 트리 + 200 으로 응답해 클라이언트 console noise 제거.
+			// 진짜 backend 장애와 구분되지 않지만 클라이언트(branchDiff 체크 등)는 빈 트리로 graceful 처리 가능.
+			respondJSON(w, http.StatusOK, map[string]interface{}{
+				"tree":        []interface{}{},
+				"total_count": 0,
+				"source":      "empty",
+				"notFound":    true,
+				"ref":         ref,
+			})
 			return
 		}
 		respondJSON(w, http.StatusOK, map[string]interface{}{

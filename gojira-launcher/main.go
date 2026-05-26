@@ -27,6 +27,8 @@ func main() {
 	mux.HandleFunc("OPTIONS /chat", srv.secure(true, srv.handleChat))
 	mux.HandleFunc("POST /push", srv.secure(true, srv.handlePush))
 	mux.HandleFunc("OPTIONS /push", srv.secure(true, srv.handlePush))
+	mux.HandleFunc("POST /pull", srv.secure(true, srv.handlePull))
+	mux.HandleFunc("OPTIONS /pull", srv.secure(true, srv.handlePull))
 	mux.HandleFunc("POST /sync", srv.secure(true, srv.handleSync))
 	mux.HandleFunc("OPTIONS /sync", srv.secure(true, srv.handleSync))
 	mux.HandleFunc("POST /write", srv.secure(true, srv.handleWrite))

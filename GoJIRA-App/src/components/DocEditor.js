@@ -8,7 +8,7 @@ import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite } from '../utils/launcher';
+import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite, requestPullFromMain } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
 
@@ -409,6 +409,31 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  // "Pull" — 로컬 docs/{user} 를 origin/main 으로 완전히 덮어씌운다 (destructive).
+  // 사용자 커밋·미커밋 변경 모두 폐기. 강한 confirm 필수.
+  async function handlePullFromMain() {
+    if (!launcher || !launcher.token) return;
+    const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+    const warn = hasUncommitted
+      ? `⚠ 로컬 docs/${user} 의 변경이 모두 폐기됩니다.\n\n• 미커밋 변경 (있음): 사라집니다\n• 로컬 커밋: 사라집니다\n• 결과: main 과 완전히 동일한 상태\n\n복구는 직전 HEAD sha 로 git reset --hard 만 가능 (응답에 표시됨). 계속하시겠습니까?`
+      : `로컬 docs/${user} 를 main 의 내용으로 완전히 덮어씌웁니다.\n\n• 사용자 push 안 한 로컬 커밋이 있다면 사라집니다\n• 결과: main 과 완전히 동일한 상태\n\n계속하시겠습니까?`;
+    if (!await modalConfirm(warn)) return;
+    setPublishing(true);
+    try {
+      const r = await requestPullFromMain({ code: projectCode, user, token: launcher.token });
+      if (!r.ok) { modalAlert(r.error || 'Pull 실패'); return; }
+      const d = r.data || {};
+      if (d.status === 'noop') {
+        modalAlert(d.message || '이미 main 의 최신 내용과 동일합니다.');
+      } else {
+        modalAlert(d.message || 'main 의 내용으로 덮어씌움 완료');
+      }
+      refreshDocState();
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   // "발행" — origin/docs/{user} 가 이미 origin/main 과 다를 때 (모두 커밋+푸시 완료된 상태)
   // 서버에 PR 생성만 요청. /push 는 호출하지 않는다 (이미 동기화된 상태).
   async function handleLocalPublish() {
@@ -518,6 +543,31 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           </div>
           <div className="de-sidebar-header">
             <span>{activeTab === 'main' ? 'main' : `local · docs/${user}`}</span>
+            {activeTab === 'main' && launcher?.ready && (() => {
+              // Main 탭의 Pull 버튼 — 항상 활성. dirty 면 클릭 시 경고 confirm 후 진행
+              // (서버가 자동 stash → pull → stash pop 처리).
+              const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+              const showPullHint = hasMainOnly && !hasUncommitted;
+              return (
+                <button
+                  className="de-btn"
+                  style={{
+                    marginLeft: 'auto',
+                    padding: '3px 10px',
+                    fontSize: '11px',
+                    background: showPullHint ? '#2563eb' : undefined,
+                    color: showPullHint ? '#fff' : undefined,
+                  }}
+                  onClick={handlePullFromMain}
+                  disabled={publishing}
+                  title={
+                    hasUncommitted
+                      ? 'main 의 최신 내용을 끌어옵니다 (미커밋 변경은 자동 stash → pop)'
+                      : 'main 의 최신 내용을 내 로컬 docs/{user} 로 끌어옵니다'
+                  }
+                >Pull</button>
+              );
+            })()}
             {activeTab === 'local' && launcher?.ready && (() => {
               // 미커밋(-) 또는 unpushed commit 이 하나라도 있으면 "등록" 모드.
               // (ahead === -1 은 upstream 미설정 → 신규 브랜치라 push 필요로 간주.)
@@ -551,7 +601,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           )}
           {activeTab === 'local' && launcher?.ready && !hasChanges && hasMainOnly && (
             <div className="de-sync-notice">
-              main에 새 파일이 추가되었습니다. Git Pull로 동기화 후 작업하세요.
+              main 에 새 파일이 있습니다. <b>Main</b> 탭의 <b>Pull</b> 버튼으로 동기화하세요.
             </div>
           )}
           {(() => {

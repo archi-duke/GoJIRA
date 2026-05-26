@@ -147,7 +147,18 @@ func (s *Server) resolveRepoName(code, user string) string {
 // EnsureRepo 는 로컬 clone 을 보장하고 docs/<user> 브랜치를 체크아웃한다.
 //   - 서버측 bare+worktree 모델과 달리 사용자 PC 의 일반 작업본 1개 (설계 §4: 브랜치 내부 충돌 0).
 //   - 이미 있으면 fetch 후 브랜치 정렬만 수행.
+//   - withFetch=false: 네트워크 호출 생략 (읽기 전용 /files 등에서 사용 — 느린 Gitea 환경에서 hang 방지).
 func (s *Server) EnsureRepo(code, user string) (string, error) {
+	return s.ensureRepoImpl(code, user, true)
+}
+
+// EnsureRepoLocal — EnsureRepo 의 no-network 변형. /files 처럼 단순 조회용 핸들러에서 사용.
+// 신규 clone 은 어쨌든 1회 네트워크가 필요하므로 첫 호출은 동일 비용. 이후 호출은 fetch 생략.
+func (s *Server) EnsureRepoLocal(code, user string) (string, error) {
+	return s.ensureRepoImpl(code, user, false)
+}
+
+func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, error) {
 	if err := validateName("code", code); err != nil {
 		return "", err
 	}
@@ -174,11 +185,11 @@ func (s *Server) EnsureRepo(code, user string) (string, error) {
 		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(repoName), code); err != nil {
 			return "", err
 		}
-	} else {
+	} else if withFetch {
 		gitCmd(path, "fetch", "origin")
 	}
 
-	if err := s.checkoutUserBranch(path, branch); err != nil {
+	if err := s.checkoutUserBranch(path, branch, withFetch); err != nil {
 		return "", err
 	}
 	s.ensureSkillsSymlink(path)
@@ -303,10 +314,18 @@ func copyTree(src, dst string) error {
 }
 
 // checkoutUserBranch — origin/<branch> 가 있으면 추적 체크아웃, 없으면 origin/main 기반 신규 생성.
-func (s *Server) checkoutUserBranch(path, branch string) error {
+// withFetch=true 일 때만 추가로: docs/{user} 가 origin/main 의 후행이고 미커밋 변경이 없으면 silently FF merge.
+// (withFetch=false 는 read-only 호출 — 네트워크 hang 방지를 위해 pull/merge 도 생략.)
+//
+// 빈 clone (unborn HEAD) 자동 복구: origin/main 도 없으면 read-only 라도 1회 fetch 시도.
+// (옛날 stale 빈 clone 이 남아있다가 후에 main 에 content 가 올라온 케이스 자동 회복.)
+func (s *Server) checkoutUserBranch(path, branch string, withFetch bool) error {
 	// 이미 해당 브랜치면 끝.
 	if cur, err := gitCmd(path, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && cur == branch {
-		gitCmd(path, "pull", "--ff-only")
+		if withFetch {
+			gitCmd(path, "pull", "--ff-only")
+			s.tryFFFromMain(path)
+		}
 		return nil
 	}
 	// 원격에 존재하면 추적 체크아웃.
@@ -314,20 +333,41 @@ func (s *Server) checkoutUserBranch(path, branch string) error {
 		if _, err := gitCmd(path, "checkout", branch); err != nil {
 			return err
 		}
-		gitCmd(path, "pull", "--ff-only")
+		if withFetch {
+			gitCmd(path, "pull", "--ff-only")
+			s.tryFFFromMain(path)
+		}
 		return nil
 	}
 	// 없으면 origin/main 기반 새 브랜치.
 	base := "origin/main"
 	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
-		base = "" // main 도 없으면 현재 HEAD 기반
+		// origin/main 도 없음 — 빈 clone 의증. read-only 라도 1회 fetch 시도.
+		log.Printf("checkoutUserBranch: origin/main 없음 — fetch 시도 (%s)", path)
+		gitCmd(path, "fetch", "origin")
+		if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
+			// fetch 후에도 main 없으면 진짜 빈 Gitea repo. 명확한 에러로 안내.
+			return fmt.Errorf("Gitea 의 main 브랜치가 비어있습니다 — 프로젝트 초기화 필요 (%s)", path)
+		}
 	}
-	args := []string{"checkout", "-b", branch}
-	if base != "" {
-		args = append(args, base)
-	}
+	args := []string{"checkout", "-b", branch, base}
 	_, err := gitCmd(path, args...)
 	return err
+}
+
+// tryFFFromMain — docs/{user} 가 origin/main 의 후행이면 silently FF merge.
+// 미커밋 dirty 거나, diverged, 또는 ahead 면 그대로 둔다 (사용자가 Pull 버튼으로 명시적 해결).
+func (s *Server) tryFFFromMain(path string) {
+	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
+		return // main 없음
+	}
+	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
+		return // dirty
+	}
+	if _, err := gitCmd(path, "merge", "--ff-only", "origin/main"); err != nil {
+		// FF 불가 (diverged or ahead) — 정상 케이스. 로그만 남김.
+		log.Printf("tryFFFromMain skipped (FF 불가) at %s: %v", path, err)
+	}
 }
 
 // PushResult — /push 응답용.
@@ -402,6 +442,83 @@ func (s *Server) Push(code, user string) (*PushResult, error) {
 		res.Message = "push 완료 (단, 미커밋 변경이 남아있습니다)"
 	}
 	return res, nil
+}
+
+// PullResult — /pull 응답용.
+type PullResult struct {
+	Status     string `json:"status"`              // "ok" | "noop"
+	Branch     string `json:"branch"`              // 사용자 브랜치 (docs/<user>)
+	Strategy   string `json:"strategy"`            // "ff" | "rebase"
+	Merged     int    `json:"merged"`              // FF 로 끌어온 main 커밋 수
+	Ahead      int    `json:"ahead"`               // pull 후 docs/<user> 가 main 보다 ahead 인 수
+	LastCommit string `json:"lastCommit,omitempty"`
+	Message    string `json:"message,omitempty"`
+}
+
+// Pull — 로컬 docs/<user> 를 origin/main 으로 완전히 덮어쓴다 (destructive).
+//   - git fetch origin → git reset --hard origin/main
+//   - 사용자 커밋·미커밋 변경 모두 폐기. 사용자가 명시적으로 "main 으로 갱신" 의도일 때만 호출.
+//   - 강한 경고는 프론트엔드에서 confirm 으로 처리 (UI 책임).
+//   - 안전망: 직전 HEAD sha 를 응답에 포함해 사용자가 git reset --hard <prevSha> 로 복구 가능.
+func (s *Server) Pull(code, user string) (*PullResult, error) {
+	path, err := s.EnsureRepo(code, user)
+	if err != nil {
+		return nil, err
+	}
+	mu := getRepoLock(code)
+	mu.Lock()
+	defer mu.Unlock()
+
+	branch := "docs/" + user
+	res := &PullResult{Status: "ok", Branch: branch, Strategy: "reset-hard"}
+
+	// 복구용 직전 HEAD 기록 (사용자가 실수로 눌렀을 때 git reset --hard <prevSha> 로 복원).
+	prevHead, _ := gitCmd(path, "rev-parse", "HEAD")
+
+	if _, err := gitCmd(path, "fetch", "origin"); err != nil {
+		return nil, fmt.Errorf("fetch 실패: %w", err)
+	}
+	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
+		return nil, fmt.Errorf("origin/main 이 없습니다 (clone 직후 상태?) — Gitea 의 main 브랜치를 먼저 확인하세요")
+	}
+
+	// 이미 main 과 동일한 HEAD 면 noop.
+	mainHead, _ := gitCmd(path, "rev-parse", "refs/remotes/origin/main")
+	curHead, _ := gitCmd(path, "rev-parse", "HEAD")
+	if mainHead != "" && mainHead == curHead {
+		// working tree 가 깔끔하면 정말 노옵, dirty 면 그래도 reset 해서 깨끗하게.
+		if porcelain, _ := gitCmd(path, "status", "--porcelain"); porcelain == "" {
+			res.Status = "noop"
+			res.Message = "이미 main 의 최신 내용과 동일합니다"
+			res.LastCommit = curHead
+			return res, nil
+		}
+	}
+
+	// reset --hard origin/main — 로컬 커밋·미커밋 변경 모두 폐기.
+	if _, err := gitCmd(path, "reset", "--hard", "origin/main"); err != nil {
+		return nil, fmt.Errorf("reset --hard origin/main 실패: %w", err)
+	}
+	// untracked 파일은 reset --hard 가 안 지우므로 명시적으로 clean.
+	gitCmd(path, "clean", "-fd")
+
+	res.Merged = -1 // 적용 커밋 수는 의미 없음 (overwrite). frontend 는 strategy=reset-hard 로 분기.
+	if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
+		res.LastCommit = c
+	}
+	if prevHead != "" {
+		res.Message = fmt.Sprintf("로컬 docs/%s 를 main 으로 완전 덮어씌움 (직전 HEAD: %s — 실수면 cd %s && git reset --hard %s 로 복구)", user, prevHead[:min(8, len(prevHead))], path, prevHead[:min(8, len(prevHead))])
+	} else {
+		res.Message = fmt.Sprintf("로컬 docs/%s 를 main 으로 완전 덮어씌움", user)
+	}
+	return res, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // RepoStatus — /status 응답용 (브랜치/ahead·behind/dirty/마지막 커밋).
