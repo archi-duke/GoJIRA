@@ -456,10 +456,10 @@ type PullResult struct {
 }
 
 // Pull — docs/<user> 에 origin/main 을 끌어온다.
-//   - 미커밋 변경(dirty) 이면 거부 — 사용자가 먼저 등록/스태시해야 안전.
+//   - dirty(미커밋) 면 자동 stash → pull → stash pop. pop 충돌 시 stash 보존 + 에러.
 //   - FF 가능: merge --ff-only (linear, 깔끔).
 //   - 비-FF (사용자 커밋이 main 위에 있음): pull --rebase origin main 으로 사용자 커밋을 main 위로 옮김.
-//   - 충돌 시: 명확한 에러 + 호스트 git 으로 수동 해결 안내.
+//   - rebase 충돌 시: 명확한 에러 + 호스트 git 으로 수동 해결 안내.
 func (s *Server) Pull(code, user string) (*PullResult, error) {
 	path, err := s.EnsureRepo(code, user)
 	if err != nil {
@@ -472,14 +472,26 @@ func (s *Server) Pull(code, user string) (*PullResult, error) {
 	branch := "docs/" + user
 	res := &PullResult{Status: "ok", Branch: branch}
 
+	// dirty 면 자동 stash. pop 은 마지막에.
+	stashed := false
 	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
-		return nil, fmt.Errorf("미커밋 변경이 있어 Pull 거부 — 먼저 '등록'(commit+push) 또는 stash 후 다시 시도하세요")
+		stashMsg := fmt.Sprintf("[gojira-launcher] auto-stash before Pull (%s)", time.Now().Format(time.RFC3339))
+		if _, err := gitCmd(path, "stash", "push", "-u", "-m", stashMsg); err != nil {
+			return nil, fmt.Errorf("자동 stash 실패: %w", err)
+		}
+		stashed = true
 	}
 
 	if _, err := gitCmd(path, "fetch", "origin"); err != nil {
+		if stashed {
+			gitCmd(path, "stash", "pop")
+		}
 		return nil, fmt.Errorf("fetch 실패: %w", err)
 	}
 	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
+		if stashed {
+			gitCmd(path, "stash", "pop")
+		}
 		return nil, fmt.Errorf("origin/main 이 없습니다 (clone 직후 상태?) — Gitea 의 main 브랜치를 먼저 확인하세요")
 	}
 
@@ -501,12 +513,20 @@ func (s *Server) Pull(code, user string) (*PullResult, error) {
 		if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
 			res.LastCommit = c
 		}
+		if stashed {
+			if _, err := gitCmd(path, "stash", "pop"); err != nil {
+				res.Message += " (자동 stash pop 충돌 — 호스트에서 git stash list / stash pop 으로 해결)"
+			}
+		}
 		return res, nil
 	}
 
 	if aheadMain == 0 {
 		// FF 가능 — main 의 새 커밋만 끌어온다.
 		if _, err := gitCmd(path, "merge", "--ff-only", "origin/main"); err != nil {
+			if stashed {
+				gitCmd(path, "stash", "pop")
+			}
 			return nil, fmt.Errorf("FF merge 실패: %w", err)
 		}
 		res.Strategy = "ff"
@@ -514,8 +534,11 @@ func (s *Server) Pull(code, user string) (*PullResult, error) {
 	} else {
 		// 비-FF: 사용자 커밋을 main 위로 옮긴다.
 		if _, err := gitCmd(path, "pull", "--rebase", "origin", "main"); err != nil {
-			// 충돌 시 rebase 중단 후 에러 (이미 rebase 진행 중 상태일 수 있어 abort 시도).
+			// 충돌 시 rebase 중단 후 에러.
 			gitCmd(path, "rebase", "--abort")
+			if stashed {
+				gitCmd(path, "stash", "pop")
+			}
 			return nil, fmt.Errorf("rebase 충돌 — 호스트 git 에서 수동 해결 필요 (cd %s && git rebase origin/main): %w", path, err)
 		}
 		res.Strategy = "rebase"
@@ -529,6 +552,13 @@ func (s *Server) Pull(code, user string) (*PullResult, error) {
 		res.LastCommit = c
 	}
 	res.Message = fmt.Sprintf("main 의 %d 커밋을 %s 로 적용", res.Merged, res.Strategy)
+	if stashed {
+		if _, err := gitCmd(path, "stash", "pop"); err != nil {
+			res.Message += " — ⚠ 자동 stash pop 충돌. 변경은 git stash 에 보존됨 (cd " + path + " && git stash list / git stash pop 으로 해결)"
+		} else {
+			res.Message += " (미커밋 변경은 자동 stash → pop 으로 복원)"
+		}
+	}
 	return res, nil
 }
 

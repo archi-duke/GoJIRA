@@ -410,15 +410,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   }
 
   // "Pull" — origin/main 의 새 내용을 로컬 docs/{user} 로 끌어온다.
-  // dirty(미커밋) 이면 거부 — 사용자가 먼저 "등록" 으로 commit/push 해야 안전.
+  // dirty(미커밋) 이면 경고 후 진행 — 서버가 자동 stash → pull → stash pop 처리.
   async function handlePullFromMain() {
     if (!launcher || !launcher.token) return;
     const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
-    if (hasUncommitted) {
-      modalAlert('미커밋 변경이 있어 Pull 할 수 없습니다. 먼저 "등록" 으로 커밋·푸시 해주세요.');
-      return;
-    }
-    if (!await modalConfirm(`main 의 최신 내용을 로컬 docs/${user} 로 끌어오시겠습니까?`)) return;
+    const msg = hasUncommitted
+      ? `⚠ 미커밋 변경이 있습니다.\n\nPull 진행 시 자동으로 stash → main 끌어오기 → stash pop 됩니다. 만약 stash pop 충돌이 나면 변경은 git stash 에 보존되며 호스트에서 수동 해결 필요합니다.\n\n계속하시겠습니까?`
+      : `main 의 최신 내용을 로컬 docs/${user} 로 끌어오시겠습니까?`;
+    if (!await modalConfirm(msg)) return;
     setPublishing(true);
     try {
       const r = await requestPullFromMain({ code: projectCode, user, token: launcher.token });
@@ -545,9 +544,8 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           <div className="de-sidebar-header">
             <span>{activeTab === 'main' ? 'main' : `local · docs/${user}`}</span>
             {activeTab === 'main' && launcher?.ready && (() => {
-              // Main 탭의 Pull 버튼 — "이 main 내용을 내 로컬로 끌어온다" 직관적 진입.
-              // - hasMainOnly (로컬에 없는 main 파일 있음) → 파란색 강조
-              // - 미커밋 변경 있으면 disabled (먼저 Local 탭에서 등록)
+              // Main 탭의 Pull 버튼 — 항상 활성. dirty 면 클릭 시 경고 confirm 후 진행
+              // (서버가 자동 stash → pull → stash pop 처리).
               const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
               const showPullHint = hasMainOnly && !hasUncommitted;
               return (
@@ -561,10 +559,10 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                     color: showPullHint ? '#fff' : undefined,
                   }}
                   onClick={handlePullFromMain}
-                  disabled={publishing || hasUncommitted}
+                  disabled={publishing}
                   title={
                     hasUncommitted
-                      ? '미커밋 변경이 있어 Pull 할 수 없습니다 — Local 탭에서 "등록" 먼저 해주세요'
+                      ? 'main 의 최신 내용을 끌어옵니다 (미커밋 변경은 자동 stash → pop)'
                       : 'main 의 최신 내용을 내 로컬 docs/{user} 로 끌어옵니다'
                   }
                 >Pull</button>
