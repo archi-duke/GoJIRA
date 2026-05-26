@@ -303,10 +303,13 @@ func copyTree(src, dst string) error {
 }
 
 // checkoutUserBranch — origin/<branch> 가 있으면 추적 체크아웃, 없으면 origin/main 기반 신규 생성.
+// 추가로: docs/{user} 가 origin/main 의 후행이고 미커밋 변경이 없으면 silently FF merge.
+// (신규 프로젝트에서 docs/{user} 가 빈 채 만들어진 케이스 + 그 외 단순 후행 케이스 자동 복구.)
 func (s *Server) checkoutUserBranch(path, branch string) error {
 	// 이미 해당 브랜치면 끝.
 	if cur, err := gitCmd(path, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && cur == branch {
 		gitCmd(path, "pull", "--ff-only")
+		s.tryFFFromMain(path)
 		return nil
 	}
 	// 원격에 존재하면 추적 체크아웃.
@@ -315,6 +318,7 @@ func (s *Server) checkoutUserBranch(path, branch string) error {
 			return err
 		}
 		gitCmd(path, "pull", "--ff-only")
+		s.tryFFFromMain(path)
 		return nil
 	}
 	// 없으면 origin/main 기반 새 브랜치.
@@ -328,6 +332,21 @@ func (s *Server) checkoutUserBranch(path, branch string) error {
 	}
 	_, err := gitCmd(path, args...)
 	return err
+}
+
+// tryFFFromMain — docs/{user} 가 origin/main 의 후행이면 silently FF merge.
+// 미커밋 dirty 거나, diverged, 또는 ahead 면 그대로 둔다 (사용자가 Pull 버튼으로 명시적 해결).
+func (s *Server) tryFFFromMain(path string) {
+	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
+		return // main 없음
+	}
+	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
+		return // dirty
+	}
+	if _, err := gitCmd(path, "merge", "--ff-only", "origin/main"); err != nil {
+		// FF 불가 (diverged or ahead) — 정상 케이스. 로그만 남김.
+		log.Printf("tryFFFromMain skipped (FF 불가) at %s: %v", path, err)
+	}
 }
 
 // PushResult — /push 응답용.
@@ -401,6 +420,94 @@ func (s *Server) Push(code, user string) (*PushResult, error) {
 	if res.Dirty {
 		res.Message = "push 완료 (단, 미커밋 변경이 남아있습니다)"
 	}
+	return res, nil
+}
+
+// PullResult — /pull 응답용.
+type PullResult struct {
+	Status     string `json:"status"`              // "ok" | "noop"
+	Branch     string `json:"branch"`              // 사용자 브랜치 (docs/<user>)
+	Strategy   string `json:"strategy"`            // "ff" | "rebase"
+	Merged     int    `json:"merged"`              // FF 로 끌어온 main 커밋 수
+	Ahead      int    `json:"ahead"`               // pull 후 docs/<user> 가 main 보다 ahead 인 수
+	LastCommit string `json:"lastCommit,omitempty"`
+	Message    string `json:"message,omitempty"`
+}
+
+// Pull — docs/<user> 에 origin/main 을 끌어온다.
+//   - 미커밋 변경(dirty) 이면 거부 — 사용자가 먼저 등록/스태시해야 안전.
+//   - FF 가능: merge --ff-only (linear, 깔끔).
+//   - 비-FF (사용자 커밋이 main 위에 있음): pull --rebase origin main 으로 사용자 커밋을 main 위로 옮김.
+//   - 충돌 시: 명확한 에러 + 호스트 git 으로 수동 해결 안내.
+func (s *Server) Pull(code, user string) (*PullResult, error) {
+	path, err := s.EnsureRepo(code, user)
+	if err != nil {
+		return nil, err
+	}
+	mu := getRepoLock(code)
+	mu.Lock()
+	defer mu.Unlock()
+
+	branch := "docs/" + user
+	res := &PullResult{Status: "ok", Branch: branch}
+
+	if porcelain, err := gitCmd(path, "status", "--porcelain"); err == nil && porcelain != "" {
+		return nil, fmt.Errorf("미커밋 변경이 있어 Pull 거부 — 먼저 '등록'(commit+push) 또는 stash 후 다시 시도하세요")
+	}
+
+	if _, err := gitCmd(path, "fetch", "origin"); err != nil {
+		return nil, fmt.Errorf("fetch 실패: %w", err)
+	}
+	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
+		return nil, fmt.Errorf("origin/main 이 없습니다 (clone 직후 상태?) — Gitea 의 main 브랜치를 먼저 확인하세요")
+	}
+
+	// origin/main 대비 ahead/behind 측정 (rev-list --left-right --count)
+	// 결과: "<behind>\t<ahead>" — main..HEAD ahead, HEAD..main behind.
+	behindMain, aheadMain := 0, 0
+	if counts, err := gitCmd(path, "rev-list", "--left-right", "--count", "origin/main...HEAD"); err == nil {
+		if f := strings.Fields(counts); len(f) == 2 {
+			behindMain, _ = strconv.Atoi(f[0])
+			aheadMain, _ = strconv.Atoi(f[1])
+		}
+	}
+
+	if behindMain == 0 {
+		res.Status = "noop"
+		res.Strategy = "ff"
+		res.Ahead = aheadMain
+		res.Message = "이미 main 의 최신 내용을 포함합니다"
+		if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
+			res.LastCommit = c
+		}
+		return res, nil
+	}
+
+	if aheadMain == 0 {
+		// FF 가능 — main 의 새 커밋만 끌어온다.
+		if _, err := gitCmd(path, "merge", "--ff-only", "origin/main"); err != nil {
+			return nil, fmt.Errorf("FF merge 실패: %w", err)
+		}
+		res.Strategy = "ff"
+		res.Merged = behindMain
+	} else {
+		// 비-FF: 사용자 커밋을 main 위로 옮긴다.
+		if _, err := gitCmd(path, "pull", "--rebase", "origin", "main"); err != nil {
+			// 충돌 시 rebase 중단 후 에러 (이미 rebase 진행 중 상태일 수 있어 abort 시도).
+			gitCmd(path, "rebase", "--abort")
+			return nil, fmt.Errorf("rebase 충돌 — 호스트 git 에서 수동 해결 필요 (cd %s && git rebase origin/main): %w", path, err)
+		}
+		res.Strategy = "rebase"
+		res.Merged = behindMain
+	}
+
+	if counts, err := gitCmd(path, "rev-list", "--count", "origin/main..HEAD"); err == nil {
+		res.Ahead, _ = strconv.Atoi(strings.TrimSpace(counts))
+	}
+	if c, err := gitCmd(path, "log", "-1", "--format=%h %s"); err == nil {
+		res.LastCommit = c
+	}
+	res.Message = fmt.Sprintf("main 의 %d 커밋을 %s 로 적용", res.Merged, res.Strategy)
 	return res, nil
 }
 

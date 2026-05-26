@@ -230,6 +230,23 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// POST /pull — origin/main 의 새 내용을 로컬 docs/{user} 로 끌어온다.
+// FF 가능하면 fast-forward, 사용자 커밋이 있으면 rebase. dirty 면 거부.
+func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
+	var req openReq // {code, user}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	res, err := s.Pull(req.Code, req.User)
+	if err != nil {
+		log.Printf("/pull 실패 code=%s user=%s: %v", req.Code, req.User, err)
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 type writeReq struct {
 	Code    string `json:"code"`
 	User    string `json:"user"`

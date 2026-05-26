@@ -8,7 +8,7 @@ import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite } from '../utils/launcher';
+import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite, requestPullFromMain } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
 
@@ -409,6 +409,32 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  // "Pull" — origin/main 의 새 내용을 로컬 docs/{user} 로 끌어온다.
+  // dirty(미커밋) 이면 거부 — 사용자가 먼저 "등록" 으로 commit/push 해야 안전.
+  async function handlePullFromMain() {
+    if (!launcher || !launcher.token) return;
+    const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+    if (hasUncommitted) {
+      modalAlert('미커밋 변경이 있어 Pull 할 수 없습니다. 먼저 "등록" 으로 커밋·푸시 해주세요.');
+      return;
+    }
+    if (!await modalConfirm(`main 의 최신 내용을 로컬 docs/${user} 로 끌어오시겠습니까?`)) return;
+    setPublishing(true);
+    try {
+      const r = await requestPullFromMain({ code: projectCode, user, token: launcher.token });
+      if (!r.ok) { modalAlert(r.error || 'Pull 실패'); return; }
+      const d = r.data || {};
+      if (d.status === 'noop') {
+        modalAlert(d.message || '이미 main 의 최신 내용을 포함합니다.');
+      } else {
+        modalAlert(d.message || `main 의 ${d.merged ?? 0} 커밋을 ${d.strategy || ''} 로 적용했습니다.`);
+      }
+      refreshDocState();
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   // "발행" — origin/docs/{user} 가 이미 origin/main 과 다를 때 (모두 커밋+푸시 완료된 상태)
   // 서버에 PR 생성만 요청. /push 는 호출하지 않는다 (이미 동기화된 상태).
   async function handleLocalPublish() {
@@ -531,13 +557,24 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                 ? '미커밋/미푸시 변경을 origin 으로 올립니다'
                 : 'origin/docs/{user} 변경을 발행 신청(PR)합니다';
               return (
-                <button
-                  className="de-btn"
-                  style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
-                  onClick={needsRegister ? handleSync : handleLocalPublish}
-                  disabled={publishing}
-                  title={title}
-                >{label}</button>
+                <>
+                  {hasMainOnly && !hasUncommitted && (
+                    <button
+                      className="de-btn"
+                      style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
+                      onClick={handlePullFromMain}
+                      disabled={publishing}
+                      title="main 의 최신 내용을 로컬 docs/{user} 로 끌어옵니다"
+                    >Pull</button>
+                  )}
+                  <button
+                    className="de-btn"
+                    style={{ marginLeft: hasMainOnly && !hasUncommitted ? '6px' : 'auto', padding: '3px 10px', fontSize: '11px' }}
+                    onClick={needsRegister ? handleSync : handleLocalPublish}
+                    disabled={publishing}
+                    title={title}
+                  >{label}</button>
+                </>
               );
             })()}
           </div>
@@ -551,7 +588,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           )}
           {activeTab === 'local' && launcher?.ready && !hasChanges && hasMainOnly && (
             <div className="de-sync-notice">
-              main에 새 파일이 추가되었습니다. Git Pull로 동기화 후 작업하세요.
+              main 에 새 파일이 있습니다. 위 <b>Pull</b> 버튼으로 동기화하세요.
             </div>
           )}
           {(() => {

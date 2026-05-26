@@ -85,6 +85,15 @@ export async function requestSync({ code, user, message, token }) {
 }
 
 /**
+ * "Pull" — origin/main 의 새 내용을 로컬 docs/{user} 로 끌어온다.
+ * FF 가능하면 fast-forward, 사용자 커밋이 있으면 rebase. dirty 면 거부.
+ * @returns {Promise<{ok:boolean, data?:{status, strategy, merged, ahead, branch, message, lastCommit}, error?:string}>}
+ */
+export async function requestPullFromMain({ code, user, token }) {
+  return post('/pull', { code, user }, token);
+}
+
+/**
  * 인라인 편집 저장 — 로컬 working tree 의 단일 파일에 raw text 쓰기. commit/push 안 함.
  */
 export async function requestWrite({ code, user, path, content, token }) {
