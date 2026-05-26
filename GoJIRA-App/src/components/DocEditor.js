@@ -544,6 +544,32 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           </div>
           <div className="de-sidebar-header">
             <span>{activeTab === 'main' ? 'main' : `local · docs/${user}`}</span>
+            {activeTab === 'main' && launcher?.ready && (() => {
+              // Main 탭의 Pull 버튼 — "이 main 내용을 내 로컬로 끌어온다" 직관적 진입.
+              // - hasMainOnly (로컬에 없는 main 파일 있음) → 파란색 강조
+              // - 미커밋 변경 있으면 disabled (먼저 Local 탭에서 등록)
+              const hasUncommitted = Object.values(fileCommitted).some(v => v === false);
+              const showPullHint = hasMainOnly && !hasUncommitted;
+              return (
+                <button
+                  className="de-btn"
+                  style={{
+                    marginLeft: 'auto',
+                    padding: '3px 10px',
+                    fontSize: '11px',
+                    background: showPullHint ? '#2563eb' : undefined,
+                    color: showPullHint ? '#fff' : undefined,
+                  }}
+                  onClick={handlePullFromMain}
+                  disabled={publishing || hasUncommitted}
+                  title={
+                    hasUncommitted
+                      ? '미커밋 변경이 있어 Pull 할 수 없습니다 — Local 탭에서 "등록" 먼저 해주세요'
+                      : 'main 의 최신 내용을 내 로컬 docs/{user} 로 끌어옵니다'
+                  }
+                >Pull</button>
+              );
+            })()}
             {activeTab === 'local' && launcher?.ready && (() => {
               // 미커밋(-) 또는 unpushed commit 이 하나라도 있으면 "등록" 모드.
               // (ahead === -1 은 upstream 미설정 → 신규 브랜치라 push 필요로 간주.)
@@ -556,37 +582,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
               const title = needsRegister
                 ? '미커밋/미푸시 변경을 origin 으로 올립니다'
                 : 'origin/docs/{user} 변경을 발행 신청(PR)합니다';
-              // Pull 버튼은 Local 탭이면 항상 노출.
-              // - hasMainOnly 일 때 hint 색상(primary) 으로 강조
-              // - 미커밋 변경이 있으면 disabled (먼저 등록하세요)
-              const showPullHint = hasMainOnly && !hasUncommitted;
               return (
-                <>
-                  <button
-                    className="de-btn"
-                    style={{
-                      marginLeft: 'auto',
-                      padding: '3px 10px',
-                      fontSize: '11px',
-                      background: showPullHint ? '#2563eb' : undefined,
-                      color: showPullHint ? '#fff' : undefined,
-                    }}
-                    onClick={handlePullFromMain}
-                    disabled={publishing || hasUncommitted}
-                    title={
-                      hasUncommitted
-                        ? '미커밋 변경이 있어 Pull 할 수 없습니다 — 먼저 "등록" 해주세요'
-                        : 'main 의 최신 내용을 로컬 docs/{user} 로 끌어옵니다'
-                    }
-                  >Pull</button>
-                  <button
-                    className="de-btn"
-                    style={{ marginLeft: '6px', padding: '3px 10px', fontSize: '11px' }}
-                    onClick={needsRegister ? handleSync : handleLocalPublish}
-                    disabled={publishing}
-                    title={title}
-                  >{label}</button>
-                </>
+                <button
+                  className="de-btn"
+                  style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
+                  onClick={needsRegister ? handleSync : handleLocalPublish}
+                  disabled={publishing}
+                  title={title}
+                >{label}</button>
               );
             })()}
           </div>
@@ -600,7 +603,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           )}
           {activeTab === 'local' && launcher?.ready && !hasChanges && hasMainOnly && (
             <div className="de-sync-notice">
-              main 에 새 파일이 있습니다. 위 <b>Pull</b> 버튼으로 동기화하세요.
+              main 에 새 파일이 있습니다. <b>Main</b> 탭의 <b>Pull</b> 버튼으로 동기화하세요.
             </div>
           )}
           {(() => {
