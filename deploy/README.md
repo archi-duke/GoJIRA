@@ -17,14 +17,11 @@ deploy/
 │   ├── build-images.sh         # 외부망: pull baseline + docker compose build
 │   ├── save-images.sh          # 외부망: 전체 이미지 → gojira-images.tar
 │   ├── load-images.sh          # 폐쇄망: tar → docker, 적재 검증
-│   ├── preflight.sh            # 폐쇄망: .env/권한/TCP/compose/이미지 사전 검증
-│   ├── gojira-user-add.sh      # OpenCode 사용자 추가 (systemd)
-│   └── gojira-user-remove.sh   # OpenCode 사용자 제거
+│   └── preflight.sh            # 폐쇄망: .env/권한/TCP/compose/이미지 사전 검증
 └── images/
     ├── platform-api/Dockerfile      # multi-stage: go 1.26 → alpine + git
     ├── gojira-api/Dockerfile        # multi-stage: go 1.26 → alpine
-    ├── agent-service/Dockerfile     # python:3.12-slim + wheelhouse
-    ├── jira-api/Dockerfile          # 동일
+    ├── jira-api/Dockerfile          # python:3.12-slim + wheelhouse
     ├── platform-app/Dockerfile      # node:lts build → nginx:alpine
     │   └── nginx.conf
     ├── gojira-app/Dockerfile        # 동일
@@ -95,7 +92,6 @@ docker save \
   plantuml/plantuml-server:jetty \
   gojira/platform-api:latest \
   gojira/gojira-api:latest \
-  gojira/agent-service:latest \
   gojira/jira-api:latest \
   gojira/platform-app:latest \
   gojira/gojira-app:latest \
@@ -127,7 +123,6 @@ docker compose up -d
 # 헬스 체크
 curl -sS http://localhost:9000/                    # Platform-API
 curl -sS http://localhost:9001/                    # GoJIRA-API
-curl -sS http://localhost:9002/docs                # Agent-Service
 curl -sS http://localhost:8000/rest/api/2/serverInfo  # JIRA Mock
 curl -sS http://localhost:8080/                    # PlantUML
 curl -sS http://localhost:3000/                    # Platform-App
@@ -162,7 +157,6 @@ curl -sS http://localhost:3030/                    # pumlex (plantumlEx 렌더�
 | Module Federation `remoteEntry.js` 실패 | `REACT_APP_GOJIRA_APP_REMOTE` 가 브라우저에서 접근 가능한 URL 인지 확인 |
 | PlantUML 블록이 `렌더링 오류` / `fetch failed` | pumlex-server 가 plantuml-server 도달 못함. `docker compose logs pumlex-server` 확인. compose 내부 `PLANTUML_URL=http://plantuml-server:8080` 고정이므로 보통 plantuml 컨테이너 미기동이 원인 |
 | PlantUML 블록이 빈 화면 / CORS | 브라우저가 `REACT_APP_PUMLEX_SERVER` (`PUMLEX_SERVER:PUMLEX_PORT`) 에 도달 가능한지 확인. env.js 값 점검: `docker compose exec gojira-app cat /usr/share/nginx/html/env.js` |
-| Agent-Service `/Agent/chat` 시 OpenCode 401 | `OPENCODE_SERVER_PASSWORD` 가 OpenCode 측 설정과 일치하는지 |
 | LLM 호출 시 `unauthorized` | `OPENAI_API_KEY` (외부) 또는 `PLATFORM_LLM_TICKET` (사내) 확인. `GOJIRA_ENC_KEY` 가 ENC: 값들을 암호화한 키와 동일한지 |
 
 ## 관련 문서
