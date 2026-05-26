@@ -556,20 +556,32 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
               const title = needsRegister
                 ? '미커밋/미푸시 변경을 origin 으로 올립니다'
                 : 'origin/docs/{user} 변경을 발행 신청(PR)합니다';
+              // Pull 버튼은 Local 탭이면 항상 노출.
+              // - hasMainOnly 일 때 hint 색상(primary) 으로 강조
+              // - 미커밋 변경이 있으면 disabled (먼저 등록하세요)
+              const showPullHint = hasMainOnly && !hasUncommitted;
               return (
                 <>
-                  {hasMainOnly && !hasUncommitted && (
-                    <button
-                      className="de-btn"
-                      style={{ marginLeft: 'auto', padding: '3px 10px', fontSize: '11px' }}
-                      onClick={handlePullFromMain}
-                      disabled={publishing}
-                      title="main 의 최신 내용을 로컬 docs/{user} 로 끌어옵니다"
-                    >Pull</button>
-                  )}
                   <button
                     className="de-btn"
-                    style={{ marginLeft: hasMainOnly && !hasUncommitted ? '6px' : 'auto', padding: '3px 10px', fontSize: '11px' }}
+                    style={{
+                      marginLeft: 'auto',
+                      padding: '3px 10px',
+                      fontSize: '11px',
+                      background: showPullHint ? '#2563eb' : undefined,
+                      color: showPullHint ? '#fff' : undefined,
+                    }}
+                    onClick={handlePullFromMain}
+                    disabled={publishing || hasUncommitted}
+                    title={
+                      hasUncommitted
+                        ? '미커밋 변경이 있어 Pull 할 수 없습니다 — 먼저 "등록" 해주세요'
+                        : 'main 의 최신 내용을 로컬 docs/{user} 로 끌어옵니다'
+                    }
+                  >Pull</button>
+                  <button
+                    className="de-btn"
+                    style={{ marginLeft: '6px', padding: '3px 10px', fontSize: '11px' }}
                     onClick={needsRegister ? handleSync : handleLocalPublish}
                     disabled={publishing}
                     title={title}
