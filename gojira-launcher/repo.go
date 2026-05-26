@@ -316,6 +316,9 @@ func copyTree(src, dst string) error {
 // checkoutUserBranch — origin/<branch> 가 있으면 추적 체크아웃, 없으면 origin/main 기반 신규 생성.
 // withFetch=true 일 때만 추가로: docs/{user} 가 origin/main 의 후행이고 미커밋 변경이 없으면 silently FF merge.
 // (withFetch=false 는 read-only 호출 — 네트워크 hang 방지를 위해 pull/merge 도 생략.)
+//
+// 빈 clone (unborn HEAD) 자동 복구: origin/main 도 없으면 read-only 라도 1회 fetch 시도.
+// (옛날 stale 빈 clone 이 남아있다가 후에 main 에 content 가 올라온 케이스 자동 회복.)
 func (s *Server) checkoutUserBranch(path, branch string, withFetch bool) error {
 	// 이미 해당 브랜치면 끝.
 	if cur, err := gitCmd(path, "rev-parse", "--abbrev-ref", "HEAD"); err == nil && cur == branch {
@@ -339,12 +342,15 @@ func (s *Server) checkoutUserBranch(path, branch string, withFetch bool) error {
 	// 없으면 origin/main 기반 새 브랜치.
 	base := "origin/main"
 	if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
-		base = "" // main 도 없으면 현재 HEAD 기반
+		// origin/main 도 없음 — 빈 clone 의증. read-only 라도 1회 fetch 시도.
+		log.Printf("checkoutUserBranch: origin/main 없음 — fetch 시도 (%s)", path)
+		gitCmd(path, "fetch", "origin")
+		if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
+			// fetch 후에도 main 없으면 진짜 빈 Gitea repo. 명확한 에러로 안내.
+			return fmt.Errorf("Gitea 의 main 브랜치가 비어있습니다 — 프로젝트 초기화 필요 (%s)", path)
+		}
 	}
-	args := []string{"checkout", "-b", branch}
-	if base != "" {
-		args = append(args, base)
-	}
+	args := []string{"checkout", "-b", branch, base}
 	_, err := gitCmd(path, args...)
 	return err
 }
