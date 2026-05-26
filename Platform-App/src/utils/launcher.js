@@ -31,6 +31,9 @@ export async function detectLauncher() {
   }
 }
 
+// 30s — git fetch/clone 가 느린 네트워크(폐쇄망 등) 에서 2.5s 안에 안 끝나는 케이스 대비.
+const LAUNCHER_OP_TIMEOUT_MS = 30000;
+
 export async function requestChat({ code, user, agent, token }) {
   try {
     const headers = { 'Content-Type': 'application/json' };
@@ -39,7 +42,7 @@ export async function requestChat({ code, user, agent, token }) {
       method: 'POST',
       headers,
       body: JSON.stringify({ code: code || '', user, agent }),
-    });
+    }, LAUNCHER_OP_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
     return { ok: true, data };

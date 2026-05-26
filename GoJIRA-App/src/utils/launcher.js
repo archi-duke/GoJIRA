@@ -118,11 +118,15 @@ export async function requestLocalFile({ code, user, path, token }) {
   return get(`/file?${q}`, token);
 }
 
+// 30s — 사용자 PC ↔ Gitea 네트워크 RTT 가 느린 환경에서 git fetch/clone/merge 가
+// 2.5s 안에 안 끝나는 케이스 (사내 폐쇄망 등) 대비. health 만 짧게 (별도 호출).
+const LAUNCHER_OP_TIMEOUT_MS = 30000;
+
 async function get(path, token) {
   try {
     const headers = {};
     if (token) headers[TOKEN_HEADER] = token;
-    const res = await fetchWithTimeout(`${BASE}${path}`, { method: 'GET', headers });
+    const res = await fetchWithTimeout(`${BASE}${path}`, { method: 'GET', headers }, LAUNCHER_OP_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
     return { ok: true, data };
@@ -139,7 +143,7 @@ async function post(path, body, token) {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-    });
+    }, LAUNCHER_OP_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
