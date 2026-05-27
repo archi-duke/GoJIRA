@@ -126,6 +126,17 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 			[]string{"pull_request", "pull_request_review", "push"})
 	}
 
+	// auto_init + default_branch=main 으로 만들어졌어야 하지만, Gitea 버전/설정에
+	// 따라 default_branch 가 master 로 떨어지는 사례가 있어 명시적으로 검증한다.
+	// main 이 없으면 빈 clone 상태가 되어 launcher /files 가 "origin/main 없음" 으로
+	// 실패한다. 여기서 fail-fast 해 호출자(GoJIRA-API)가 502 + project doc 미생성으로
+	// 롤백하도록 한다.
+	if _, err := github.GetBranchRef(owner, req.RepoName, "main"); err != nil {
+		respondError(w, http.StatusBadGateway,
+			"repo 생성 직후 main 브랜치 미존재 — Gitea 의 [repository] DEFAULT_BRANCH=main 또는 token 의 default_branch 적용 여부 확인 필요: "+err.Error())
+		return
+	}
+
 	// 기본 폴더 구조 및 초기 파일 생성 (브랜치 보호 전에 main에 직접 커밋)
 	initialFiles := map[string]string{
 		"business/project-description.md": "# Project Description\n\n" +
@@ -152,11 +163,18 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 			"## Integrated Design Views\n\n(작성 필요)\n\n" +
 			"## SATAM (Sensitivity, Architecture Tradeoff Analysis)\n\n(작성 필요)\n",
 	}
+	var initErrs []string
 	for path, content := range initialFiles {
 		encoded := base64.StdEncoding.EncodeToString([]byte(content))
 		if _, err := github.CreateFile(owner, req.RepoName, path, encoded, path+" 초기 생성", "main"); err != nil {
-			log.Printf("초기 파일 생성 실패 (%s): %v", path, err)
+			initErrs = append(initErrs, fmt.Sprintf("%s: %v", path, err))
 		}
+	}
+	if len(initErrs) > 0 {
+		// 초기 파일이 하나라도 실패 = 사용자가 받게 될 launcher /files 응답에 누락. 즉시 알린다.
+		respondError(w, http.StatusBadGateway,
+			"초기 파일 생성 실패: "+strings.Join(initErrs, "; "))
+		return
 	}
 
 	// Branch protection: 모든 리뷰 완료 전 머지 불가
