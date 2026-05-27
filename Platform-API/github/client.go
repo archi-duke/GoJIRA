@@ -223,10 +223,11 @@ func CreateUserToken(username, password string) (string, error) {
 
 func CreateRepo(name, description string, isPrivate bool) (map[string]interface{}, error) {
 	body := map[string]interface{}{
-		"name":        name,
-		"description": description,
-		"private":     isPrivate,
-		"auto_init":   true,
+		"name":           name,
+		"description":    description,
+		"private":        isPrivate,
+		"auto_init":      true,
+		"default_branch": "main",
 	}
 
 	// 조직으로 먼저 시도, 실패하면 개인 계정으로 fallback
