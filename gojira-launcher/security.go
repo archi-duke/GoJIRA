@@ -39,7 +39,7 @@ func (s *Server) secure(requireToken bool, next http.HandlerFunc) http.HandlerFu
 		// 브라우저發(Origin 존재) 요청은 허용목록과 일치해야 한다.
 		if origin != "" {
 			if !s.originAllowed(origin) {
-				log.Printf("거부: origin=%q (허용=%q)", origin, s.cfg.WebOrigin)
+				log.Printf("거부: origin=%q (허용 webOrigin=%q webOrigins=%v)", origin, s.cfg.WebOrigin, s.cfg.WebOrigins)
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
 			}
@@ -59,12 +59,17 @@ func (s *Server) originAllowed(origin string) bool {
 	if origin == "" {
 		return false
 	}
-	want := strings.TrimRight(s.cfg.WebOrigin, "/")
-	if want == "" {
-		// webOrigin 미설정 PoC: 안전하게 모두 거부(설정 강제).
-		return false
+	got := strings.TrimRight(origin, "/")
+	if want := strings.TrimRight(s.cfg.WebOrigin, "/"); want != "" && got == want {
+		return true
 	}
-	return strings.TrimRight(origin, "/") == want
+	for _, w := range s.cfg.WebOrigins {
+		if want := strings.TrimRight(w, "/"); want != "" && got == want {
+			return true
+		}
+	}
+	// webOrigin/webOrigins 미설정 또는 매치 없음: 안전하게 거부.
+	return false
 }
 
 func (s *Server) writeCORS(w http.ResponseWriter, origin string) {

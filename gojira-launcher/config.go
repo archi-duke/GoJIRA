@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config 는 ~/.gojira/launcher.json 에서 로드된다 (설계 §2.4).
@@ -15,14 +16,15 @@ import (
 // 토큰을 사용자 홈에 저장한다. 여기 Token 은 웹↔런처 핸드셰이크용 설치 토큰이며,
 // 설정에 없으면 첫 기동 시 자동 생성되어 token 파일에 영구 저장된다(§2.3).
 type Config struct {
-	DefaultAgent    string  `json:"defaultAgent"`    // opencode | claude
-	RepoRoot        string  `json:"repoRoot"`        // 로컬 clone 루트
-	Backend         Backend `json:"backend"`
-	Port            int     `json:"port"`
-	WebOrigin       string  `json:"webOrigin"`       // 허용할 웹 origin (CORS/Origin 검증)
-	Git             Git     `json:"git"`             // clone 대상 Gitea base + org
-	Token           string  `json:"token"`           // 설치 토큰(미설정 시 자동 생성)
-	SkillsSourceDir string  `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink (있으면). agent CLI 가 GoJIRA 스킬 호출 가능하도록.
+	DefaultAgent    string   `json:"defaultAgent"`    // opencode | claude
+	RepoRoot        string   `json:"repoRoot"`        // 로컬 clone 루트
+	Backend         Backend  `json:"backend"`
+	Port            int      `json:"port"`
+	WebOrigin       string   `json:"webOrigin"`       // (legacy) 허용할 웹 origin 단일값
+	WebOrigins      []string `json:"webOrigins"`      // 허용할 웹 origin 목록 (Module Federation host + remote 등 다중 origin)
+	Git             Git      `json:"git"`             // clone 대상 Gitea base + org
+	Token           string   `json:"token"`           // 설치 토큰(미설정 시 자동 생성)
+	SkillsSourceDir string   `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink (있으면). agent CLI 가 GoJIRA 스킬 호출 가능하도록.
 }
 
 type Backend struct {
@@ -98,6 +100,35 @@ func applyDefaults(cfg *Config) {
 			cfg.RepoRoot = filepath.Join(home, "GoJIRA-projects")
 		}
 	}
+	cfg.RepoRoot = expandHome(cfg.RepoRoot)
+	cfg.SkillsSourceDir = expandHome(cfg.SkillsSourceDir)
+}
+
+// expandHome — 경로 선두의 `~` 를 사용자 home 으로 치환한다. Go 의 filepath.Join 은
+// `~` 를 literal 디렉터리로 취급하므로 명시적 확장이 없으면 launcher 가
+// `<cwd>/~/GoJIRA-projects/...` 같은 엉뚱한 곳에 clone 한다.
+//
+// 처리 규칙:
+//   - `~` 단독         → home
+//   - `~/...` / `~\...` → home + 나머지
+//   - 그 외(`~user` 등) → 미지원, 원본 그대로 (확장 안전 보장)
+//   - 빈 문자열        → 빈 문자열
+//   - home 조회 실패   → 원본 그대로 (호환성)
+func expandHome(p string) string {
+	if p == "" || p[0] != '~' {
+		return p
+	}
+	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, `~\`) {
+		return p // ~user 형식 등은 미지원
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	return filepath.Join(home, p[2:])
 }
 
 // ensureToken 은 ~/.gojira/launcher-token 에서 토큰을 읽고, 없으면 생성한다.

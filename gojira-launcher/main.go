@@ -43,7 +43,7 @@ func main() {
 	// 127.0.0.1 전용 bind — 외부 인터페이스 노출 금지 (§2.3).
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	log.Printf("gojira-launcher v%s — http://%s", version, addr)
-	log.Printf("  defaultAgent=%s repoRoot=%s webOrigin=%s", cfg.DefaultAgent, cfg.RepoRoot, cfg.WebOrigin)
+	log.Printf("  defaultAgent=%s repoRoot=%s webOrigin=%s webOrigins=%v", cfg.DefaultAgent, cfg.RepoRoot, cfg.WebOrigin, cfg.WebOrigins)
 	log.Printf("  설치 토큰: ~/.gojira/%s (웹은 %s 헤더로 전송)", tokenFileName, tokenHeader)
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
