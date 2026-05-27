@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -380,10 +382,17 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 
 // listLocalTree — repoPath 하위 모든 파일을 git blob 해시와 함께 평면 리스트로 반환.
 // .git / .claude(skills symlink) / 디렉터리 본체는 제외 (blob 만). 정렬은 path 사전순.
-// 큰 파일이 많은 레포에서는 비용이 들 수 있으나 (수만 fork→0, sha1 read once),
-// 설계문서 레포(수십~수백 파일) 기준 충분히 빠르다.
+//
+// SHA 는 `git hash-object --stdin-paths` 로 1회 batch 계산한다. 디스크 raw bytes 가
+// 아닌 git attribute 필터(autocrlf 등) 통과 후 해시이므로 `git ls-tree HEAD` 의 blob
+// SHA 와 직접 비교 가능 — Windows CRLF 환경에서 모든 파일을 "수정됨" 으로 오인식하던
+// false positive 가 사라진다.
 func listLocalTree(repoPath string) ([]map[string]any, error) {
-	var entries []map[string]any
+	type fileInfo struct {
+		rel  string
+		size int64
+	}
+	var files []fileInfo
 	err := filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -407,25 +416,80 @@ func listLocalTree(repoPath string) ([]map[string]any, error) {
 		if err != nil {
 			return nil // 한 파일 stat 실패는 무시 — 트리는 계속.
 		}
-		sha, err := blobSha(path, info.Size())
-		if err != nil {
-			return nil
-		}
-		entries = append(entries, map[string]any{
-			"path": filepath.ToSlash(rel),
-			"type": "blob",
-			"sha":  sha,
-			"size": info.Size(),
-		})
+		files = append(files, fileInfo{rel: filepath.ToSlash(rel), size: info.Size()})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.rel
+	}
+	shas, _ := hashObjectsBatch(repoPath, paths) // 실패 시 빈 map — 아래에서 fallback.
+
+	entries := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		sha := shas[f.rel]
+		if sha == "" {
+			// fallback: batch 실패 시 디스크 raw 해시(이전 동작). UI 가 가짜 dirty 로 보일 수
+			// 있지만 응답 자체는 유지.
+			if s, err := blobShaRaw(filepath.Join(repoPath, filepath.FromSlash(f.rel)), f.size); err == nil {
+				sha = s
+			} else {
+				continue
+			}
+		}
+		entries = append(entries, map[string]any{
+			"path": f.rel,
+			"type": "blob",
+			"sha":  sha,
+			"size": f.size,
+		})
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i]["path"].(string) < entries[j]["path"].(string)
 	})
 	return entries, nil
+}
+
+// hashObjectsBatch — `git hash-object --stdin-paths` 로 여러 파일의 blob SHA 를 한 번에
+// 계산한다. paths 는 repoPath 기준 forward-slash 상대경로. git 의 모든 attribute
+// (text/eol/autocrlf 등)을 거치므로 `git ls-tree HEAD` 결과와 직접 비교 가능.
+//
+// 결과 map[path]sha. paths 가 비어있으면 빈 map. git 실행 자체가 실패하면 error
+// (호출 측이 raw fallback 으로 진행).
+func hashObjectsBatch(repoPath string, paths []string) (map[string]string, error) {
+	result := make(map[string]string, len(paths))
+	if len(paths) == 0 {
+		return result, nil
+	}
+	cmd := exec.Command("git", "hash-object", "--stdin-paths")
+	cmd.Dir = repoPath
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var stdinBuf bytes.Buffer
+	for _, p := range paths {
+		// stdin-paths 는 줄 단위 — 경로에 newline 이 들어가는 케이스는 거부.
+		if strings.ContainsAny(p, "\n\r") {
+			return nil, fmt.Errorf("path 에 newline 포함 — 거부: %q", p)
+		}
+		stdinBuf.WriteString(p)
+		stdinBuf.WriteByte('\n')
+	}
+	cmd.Stdin = &stdinBuf
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git hash-object --stdin-paths 실패: %w", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) != len(paths) {
+		return nil, fmt.Errorf("hash-object 출력 행수(%d) ≠ 입력 path(%d)", len(lines), len(paths))
+	}
+	for i, p := range paths {
+		result[p] = strings.TrimSpace(lines[i])
+	}
+	return result, nil
 }
 
 // listHeadTree — `git ls-tree -r HEAD` 결과를 파싱해 평면 리스트로 반환.
@@ -458,9 +522,10 @@ func listHeadTree(repoPath string) ([]map[string]any, error) {
 	return entries, nil
 }
 
-// blobSha — 파일 한 개의 git blob sha1 ("blob <size>\0<content>") 을 계산한다.
-// 서버 main 트리의 sha 와 동일 포맷이라 그대로 비교(modified/unchanged 판단)에 사용 가능.
-func blobSha(path string, size int64) (string, error) {
+// blobShaRaw — 파일의 raw 디스크 내용으로 git blob sha1 ("blob <size>\0<content>") 계산.
+// `hashObjectsBatch` 실패 시 fallback 으로만 사용. autocrlf 필터 미적용이라 Windows
+// CRLF 체크아웃 파일은 `git ls-tree HEAD` 의 SHA 와 다를 수 있음(가짜 dirty).
+func blobShaRaw(path string, size int64) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
