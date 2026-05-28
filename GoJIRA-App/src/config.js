@@ -11,8 +11,7 @@ const config = {
   PLATFORM_API: pick('REACT_APP_PLATFORM_API', 'http://localhost:9000/api/v2'),
   // GoJIRA 앱 API (이슈, 프로젝트)
   API_BASE: pick('REACT_APP_GOJIRA_API', 'http://localhost:9001/api/v2'),
-  PLANTUML_SERVER: pick('REACT_APP_PLANTUML_SERVER', 'http://localhost:8080/svg/'),
-  // pumlex (plantumlEx) 서버 — 인라인 메타 편집 + /render-with-layout
+  // pumlex (plantumlEx) 서버 — 인라인 메타 편집 + /render-with-layout (내부에서 plantuml-server:8080 호출)
   PUMLEX_SERVER: pick('REACT_APP_PUMLEX_SERVER', 'http://localhost:3030'),
   // 로컬 런처 (gojira-launcher) — 사용자 PC 의 127.0.0.1 데몬. "수정" 버튼이
   // VS Code + CLI(opencode|claude) 를 소환 (local-agent-mvp §2).

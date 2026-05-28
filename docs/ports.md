@@ -41,7 +41,6 @@ OpenCode 는 어디서든 띄울 수 있다 (단일 호스트 / 게스트→호�
 | 9002 | **44370** | `AGENT_API_PORT` (or `AGENT_API_HOST_PORT`) |
 | 3000 | 44300 | `PLATFORM_APP_PORT` (or `PLATFORM_APP_HOST_PORT`) |
 | 3001 | 44301 | `GOJIRA_APP_PORT` (or `GOJIRA_APP_HOST_PORT`) |
-| 8080 | 44351 | `PLANTUML_PORT` (or `PLANTUML_HOST_PORT`) |
 | 8000 | 8000 | `JIRA_API_HOST_PORT` |
 | 4096 | 4096 | OpenCode (host native, 컨테이너 외부) |
 
