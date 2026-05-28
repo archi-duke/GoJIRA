@@ -275,6 +275,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
     };
     return {
       name: '',
+      repoName: '',
       jiraCodes: { main: { jiraCode: '' } },
       status: 'In Progress',
       devTeam: '',

@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/github"
-	"platform-api/llm"
 )
 
 // GET /DocRepo/git-users — Git 플랫폼 사용자 목록
@@ -37,6 +35,43 @@ func GitUsersHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- 프로젝트 코드 기반 repo 관리 ---
+
+// GET /DocRepo/check?name=<raw> — 사용자가 입력한 Gitea repo 이름이 사용 가능한지 검사.
+//
+// 응답: { name, slug, exists, suggestion, valid }
+//   - slug:       slugify 결과 (소문자 영문/숫자/하이픈만). 빈 문자열이면 valid=false.
+//   - exists:     같은 owner(config.GitHubOrg) 아래 동일 이름 repo 존재 여부.
+//   - suggestion: exists=true 일 때 다음 가용한 이름 (slug-2, slug-3, ...). 없으면 빈 문자열.
+//   - valid:      slug 가 비지 않았고, 입력 자체가 유효한 형태(영문/숫자/하이픈)일 때 true.
+//
+// 사용 흐름: ProjectDialog blur 시 호출 → exists=true 면 suggestion 으로 안내.
+func DocRepoCheckHandler(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("name")
+	slug := slugifyRepoName(raw)
+	resp := map[string]interface{}{
+		"name":       raw,
+		"slug":       slug,
+		"exists":     false,
+		"suggestion": "",
+		"valid":      slug != "",
+	}
+	if slug == "" {
+		respondJSON(w, http.StatusOK, resp)
+		return
+	}
+	exists, err := github.RepoExists(config.GitHubOrg, slug)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "repo 중복 검사 실패: "+err.Error())
+		return
+	}
+	resp["exists"] = exists
+	if exists {
+		if uniq, err := uniqueRepoSlug(slug); err == nil && uniq != slug {
+			resp["suggestion"] = uniq
+		}
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
 
 // POST /DocRepo/{code} — repo 생성 (project.documents에 저장)
 func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
@@ -60,37 +95,35 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ProjectName string `json:"projectName"` // doc 없을 때 LLM 호출 / Description 에 사용
-		RepoName    string `json:"repoName"`
+		ProjectName string `json:"projectName"` // Description 에 사용 (없으면 doc 의 name)
+		RepoName    string `json:"repoName"`    // 필수 — 사용자가 입력한 Gitea repo 이름
 		Description string `json:"description"`
 	}
 	decodeJSON(r, &req)
 
-	// projectName 결정: 명시 입력 > doc 의 name > 빈값
+	// projectName: 명시 입력 > doc 의 name > 빈값 (Description fallback 용)
 	projectName := req.ProjectName
 	if projectName == "" && hasDoc {
 		projectName, _ = prj["name"].(string)
 	}
 
-	if req.RepoName == "" {
-		if projectName == "" {
-			respondError(w, http.StatusBadRequest, "projectName 또는 repoName 필요")
-			return
-		}
-		slug, err := translateRepoName(ctx, projectName)
-		if err != nil {
-			respondError(w, http.StatusBadGateway, "repo 이름 LLM 번역 실패: "+err.Error())
-			return
-		}
-		// 중복 회피: 같은 slug 의 repo 가 이미 있으면 -2, -3, ... 접미사로 회피.
-		// owner 결정은 CreateRepo 호출 후에야 가능하지만, 검사용으로 GitHubOrg 우선 사용.
-		uniqueSlug, suffixErr := uniqueRepoSlug(slug)
-		if suffixErr != nil {
-			respondError(w, http.StatusBadGateway, "고유 repo 이름 생성 실패: "+suffixErr.Error())
-			return
-		}
-		req.RepoName = uniqueSlug
+	// repoName 은 사용자 입력 필수. slugify 후 빈 문자열이면 거부.
+	cleanName := slugifyRepoName(req.RepoName)
+	if cleanName == "" {
+		respondError(w, http.StatusBadRequest,
+			"repoName 필요 — 영문/숫자/하이픈 1자 이상 (입력값: "+req.RepoName+")")
+		return
 	}
+	// 사용자가 입력한 이름이 이미 존재하면 409 — 호출자가 다른 이름 받아 재요청.
+	if exists, err := github.RepoExists(config.GitHubOrg, cleanName); err != nil {
+		respondError(w, http.StatusBadGateway, "repo 중복 검사 실패: "+err.Error())
+		return
+	} else if exists {
+		respondError(w, http.StatusConflict, fmt.Sprintf("repo '%s' 이미 존재", cleanName))
+		return
+	}
+	req.RepoName = cleanName
+
 	if req.Description == "" && projectName != "" {
 		req.Description = fmt.Sprintf("%s의 설계 문서", projectName)
 	}
@@ -1040,67 +1073,6 @@ func toStringSlice(v interface{}) []string {
 		return t
 	}
 	return nil
-}
-
-// translateRepoName: 과제명을 LLM 으로 영문 slug 로 번역.
-// llm.json (config.LLM) 기반 호출 — 모델/엔드포인트는 설정에서 결정.
-// 호출 자체에 특화된 옵션(max_tokens=20, temperature=0)은 Options 로 override.
-//
-// 실패 시 error 반환. 호출자는 폴백하지 않고 작업 실패로 처리해야 한다.
-// LLM 응답은 한 번 더 slugifyRepoName 으로 sanitize 해 영문/숫자/하이픈만 보존.
-func translateRepoName(ctx context.Context, name string) (string, error) {
-	if config.LLM == nil {
-		return "", fmt.Errorf("LLM 설정 미로드")
-	}
-	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("프로젝트명이 비어 있어 LLM 호출 불가")
-	}
-
-systemPrompt := config.LLM.SystemPrompt
-if systemPrompt == "" {
-	systemPrompt = "Convert Korean project titles to English GitHub repo slugs. Rules: lowercase, alphanumeric/hyphens only, preserve meaning faithfully. Examples: 'SW 설계 개발'→'sw-design-development', '보안강화프로젝트'→'security-enhancement-project', '클라우드 마이그레이션'→'cloud-migration'. Output ONLY JSON: {\"result\":\"slug\",\"status\":\"ok\"}."
-}
-messages := []llm.Message{
-	{Role: "system", Content: systemPrompt},
-	{Role: "user", Content: name},
-}
-temp := 0.0
-maxTokens := config.LLM.MaxTokens
-if maxTokens <= 0 {
-	maxTokens = 500
-}
-log.Printf("translateRepoName: LLM config maxTokens=%d, using %d", config.LLM.MaxTokens, maxTokens)
-opts := &llm.Options{
-	MaxTokens:   maxTokens,
-	Temperature: &temp,
-	Timeout:     10 * time.Second,
-	Ctx:         ctx,
-}
-
-text, err := llm.Call(config.LLM, messages, opts)
-log.Printf("translateRepoName: LLM response raw=[%s], err=%v", text, err)
-if err != nil {
-	return "", fmt.Errorf("LLM 호출 실패: %w", err)
-}
-
-// JSON 응답 파싱: {"result":"sw-design-development", "status":"ok"}
-var jsonResp struct {
-	Result string `json:"result"`
-	Status string `json:"status"`
-}
-if err := json.Unmarshal([]byte(text), &jsonResp); err == nil && jsonResp.Result != "" {
-	slug := slugifyRepoName(jsonResp.Result)
-	log.Printf("translateRepoName: '%s' -> '%s' (via JSON)", name, slug)
-	return slug, nil
-}
-
-// Fallback: 일반 텍스트 응답
-slug := slugifyRepoName(text)
-log.Printf("translateRepoName: '%s' -> '%s' (fallback)", name, slug)
-if slug == "" {
-	return "", fmt.Errorf("LLM 응답에서 유효한 slug 추출 실패 (raw=%q)", text)
-}
-return slug, nil
 }
 
 // uniqueRepoSlug 는 base slug 가 이미 존재하면 "-N" 접미사를 붙여 고유한 이름을 찾는다.
