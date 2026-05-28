@@ -44,14 +44,18 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "name and jiraCodes.main.jiraCode are required")
 		return
 	}
+	if req.RepoName == "" {
+		respondError(w, http.StatusBadRequest, "repoName is required (Gitea repo 이름은 사용자가 입력해야 합니다)")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// 1) Platform-API 에 repo 먼저 생성 — LLM 번역 + Gitea repo + 초기파일 + 브랜치 보호.
+	// 1) Platform-API 에 repo 먼저 생성 — Gitea repo + 초기파일 + 브랜치 보호.
 	//    실패 시 doc 자체를 만들지 않고 502 반환 → 절반만 만들어진 상태 방지.
 	repoRes, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", code),
-		map[string]string{"projectName": req.Name})
+		map[string]string{"projectName": req.Name, "repoName": req.RepoName})
 	if sc >= 400 {
 		errMsg := fmt.Sprintf("DocRepo 생성 실패 (status=%d)", sc)
 		if m, ok := repoRes.(map[string]interface{}); ok {
@@ -140,9 +144,10 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("deleteDocRepo: %s repo 삭제 완료", code)
 			}
 		}()
-	} else {
-		// 설계문서 저장소 자동 생성 (없으면) — 실패 시 502 로 에러 명시
-		if err := ensureDocRepo(code, req.Name); err != nil {
+	} else if req.RepoName != "" {
+		// PUT 에서 repoName 이 명시된 경우에만 ensureDocRepo 실행.
+		// 자동 LLM 번역은 폐기됨 — 사용자가 입력하지 않으면 자동 생성 시도 자체를 하지 않는다.
+		if err := ensureDocRepo(code, req.Name, req.RepoName); err != nil {
 			respondError(w, http.StatusBadGateway, "DocRepo 생성 실패: "+err.Error())
 			return
 		}
@@ -447,10 +452,10 @@ func getDocRepoName(prj bson.M) string {
 	return bsonGetStr(bsonGetDoc(prj, "documents"), "repoName")
 }
 
-// ensureDocRepo 프로젝트에 repo가 없으면 Platform-API로 자동 생성.
-// LLM 기반 repo 이름 번역이 실패하면 error 를 반환하고, 호출자가 작업 실패로 처리한다.
+// ensureDocRepo 프로젝트에 repo가 없으면 Platform-API로 생성.
+// repoName 은 사용자 입력 필수 (자동 LLM 번역은 폐기됨).
 // (이미 repo 가 있거나 프로젝트 doc 가 없으면 nil — no-op)
-func ensureDocRepo(jiraCode, projectName string) error {
+func ensureDocRepo(jiraCode, projectName, repoName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -461,9 +466,13 @@ func ensureDocRepo(jiraCode, projectName string) error {
 	if getDocRepoName(prj) != "" {
 		return nil // 이미 repo 있음
 	}
+	if repoName == "" {
+		return fmt.Errorf("repoName 미지정 — DocRepo 생성을 건너뜀")
+	}
 
-	log.Printf("ensureDocRepo: creating repo for %s", jiraCode)
-	res, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", jiraCode), nil)
+	log.Printf("ensureDocRepo: creating repo for %s (name=%s)", jiraCode, repoName)
+	res, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", jiraCode),
+		map[string]string{"projectName": projectName, "repoName": repoName})
 	if sc >= 400 {
 		errMsg := fmt.Sprintf("Platform-API DocRepo 생성 실패 (status=%d)", sc)
 		if m, ok := res.(map[string]interface{}); ok {

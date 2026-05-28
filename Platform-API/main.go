@@ -120,6 +120,7 @@ func main() {
 		// DocRepo — 문서 이력관리 (projectCode 기반)
 		r.Route("/DocRepo", func(r chi.Router) {
 			r.Get("/", handlers.DocRepoListHandler)
+			r.Get("/check", handlers.DocRepoCheckHandler)
 			r.Post("/sync", handlers.DocRepoSyncHandler)
 			r.Post("/{code}", handlers.DocRepoCreateHandler)
 			r.Delete("/{code}/purge", handlers.DocRepoPurgeHandler)

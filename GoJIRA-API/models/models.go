@@ -107,6 +107,7 @@ type JiraCodes struct {
 
 type ProjectRequest struct {
 	Name       string                 `json:"name"`
+	RepoName   string                 `json:"repoName,omitempty"` // 신규 생성 시 Gitea repo 이름 (사용자 입력, 필수)
 	JiraCodes  JiraCodes              `json:"jiraCodes"`
 	Schedules  []map[string]string    `json:"schedules,omitempty"`
 	Feature    string                 `json:"feature,omitempty"`

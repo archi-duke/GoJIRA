@@ -30,10 +30,14 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
   const [orgUnits, setOrgUnits] = useState([]);
   const [users, setUsers] = useState([]);
   const [selectedMsIdx, setSelectedMsIdx] = useState(null);
+  // Gitea repo 이름 중복/유효성 검사 상태 — 신규 과제에서만 사용
+  // status: idle | checking | ok | duplicate | invalid | error
+  const [repoCheck, setRepoCheck] = useState({ status: 'idle', slug: '', suggestion: '', message: '' });
 
   useEffect(() => {
     if (project) {
       setForm({ ...project });
+      setRepoCheck({ status: 'idle', slug: '', suggestion: '', message: '' });
     }
   }, [project]);
 
@@ -51,7 +55,40 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
   if (!project) return null;
 
   const isEdit = mode === 'edit';
+  const isNew = isEdit && !form._id;
   const title = isEdit ? '과제 편집' : '과제 상세정보';
+
+  async function checkRepoName(raw) {
+    if (!raw || !raw.trim()) {
+      setRepoCheck({ status: 'idle', slug: '', suggestion: '', message: '' });
+      return;
+    }
+    setRepoCheck({ status: 'checking', slug: '', suggestion: '', message: '확인 중...' });
+    try {
+      const res = await fetch(`${PLATFORM_API}/DocRepo/check?name=${encodeURIComponent(raw)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setRepoCheck({ status: 'error', slug: '', suggestion: '', message: data.error || '검사 실패' });
+        return;
+      }
+      if (!data.valid) {
+        setRepoCheck({ status: 'invalid', slug: '', suggestion: '', message: '영문/숫자/하이픈 1자 이상 필요' });
+        return;
+      }
+      if (data.exists) {
+        setRepoCheck({
+          status: 'duplicate',
+          slug: data.slug,
+          suggestion: data.suggestion || '',
+          message: `'${data.slug}' 이미 존재`,
+        });
+        return;
+      }
+      setRepoCheck({ status: 'ok', slug: data.slug, suggestion: '', message: `사용 가능 (${data.slug})` });
+    } catch (e) {
+      setRepoCheck({ status: 'error', slug: '', suggestion: '', message: '검사 실패: ' + (e.message || e) });
+    }
+  }
 
   const teamUnits = orgUnits.filter((u) => u.type === 'team');
   const groupUnits = orgUnits.filter((u) => u.type === 'group');
@@ -95,6 +132,27 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
   }
 
   async function handleSubmit() {
+    // 신규 과제는 Gitea repo 이름 입력 + 중복 통과 필수
+    if (isNew) {
+      const raw = (form.repoName || '').trim();
+      if (!raw) {
+        alert('Doc Repo 이름을 입력하세요.');
+        return;
+      }
+      if (repoCheck.status === 'duplicate') {
+        alert(`이미 존재하는 repo 이름입니다${repoCheck.suggestion ? ` (제안: ${repoCheck.suggestion})` : ''}.`);
+        return;
+      }
+      if (repoCheck.status === 'invalid') {
+        alert('Doc Repo 이름은 영문/숫자/하이픈 1자 이상이어야 합니다.');
+        return;
+      }
+      if (repoCheck.status !== 'ok') {
+        // blur 안 한 채 저장 누른 경우 — 한 번 더 확인
+        await checkRepoName(raw);
+        return; // state 반영 후 사용자가 다시 저장 눌러야 안전
+      }
+    }
     if (form.devTeam) {
       await ensureOrgUnit(form.devTeam, 'team');
     }
@@ -171,11 +229,27 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
           {/* 설계문서 저장소 */}
           <div className="dlg-section">설계문서</div>
           <div className="dlg-grid">
-            <Field label="Doc Repo" value={
-              form.documents?.repoName
-                ? `${form.documents.repoOwner || ''}/${form.documents.repoName}`
-                : isEdit ? '(설계문서 생성 시 자동 등록)' : '(미등록)'
-            } editable={false} />
+            {isNew ? (
+              <RepoNameField
+                value={form.repoName || ''}
+                onChange={(v) => {
+                  handleChange('repoName', v);
+                  setRepoCheck({ status: 'idle', slug: '', suggestion: '', message: '' });
+                }}
+                onBlur={() => checkRepoName(form.repoName)}
+                check={repoCheck}
+                onApplySuggestion={() => {
+                  handleChange('repoName', repoCheck.suggestion);
+                  checkRepoName(repoCheck.suggestion);
+                }}
+              />
+            ) : (
+              <Field label="Doc Repo" value={
+                form.documents?.repoName
+                  ? `${form.documents.repoOwner || ''}/${form.documents.repoName}`
+                  : '(미등록)'
+              } editable={false} />
+            )}
           </div>
         </div>
 
@@ -190,6 +264,51 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RepoNameField({ value, onChange, onBlur, check, onApplySuggestion }) {
+  const status = check.status;
+  let hintColor = '#888';
+  if (status === 'ok') hintColor = '#1a7f37';
+  else if (status === 'duplicate' || status === 'invalid' || status === 'error') hintColor = '#cf222e';
+
+  return (
+    <div className="dlg-field" style={{ gridColumn: '1 / -1' }}>
+      <label className="dlg-label">
+        Doc Repo 이름 <span style={{ color: '#cf222e' }}>*</span>
+      </label>
+      <input
+        className="dlg-input"
+        value={value}
+        placeholder="영문/숫자/하이픈 (예: my-project)"
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+      />
+      {check.message && (
+        <div style={{ fontSize: 12, color: hintColor, marginTop: 4 }}>
+          {check.message}
+          {status === 'duplicate' && check.suggestion && (
+            <button
+              type="button"
+              onClick={onApplySuggestion}
+              style={{
+                marginLeft: 8,
+                padding: '2px 8px',
+                fontSize: 12,
+                cursor: 'pointer',
+                border: '1px solid #1a7f37',
+                background: '#fff',
+                color: '#1a7f37',
+                borderRadius: 3,
+              }}
+            >
+              제안: {check.suggestion} 사용
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
