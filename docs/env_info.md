@@ -176,8 +176,7 @@ CRA 가 빌드 시점에 `REACT_APP_*` 변수를 번들에 inline. 미설정 시
 | REACT_APP_GOJIRA_API | 선택 | `http://localhost:9001/api/v2` | GoJIRA-API (GoJIRA-App 용) |
 | REACT_APP_GOJIRA_API | 선택 | `http://localhost:9001/api/v2` | GoJIRA-API (Platform-App 용) |
 | REACT_APP_AGENT_API | 선택 | `http://localhost:9002/api/v2` | Agent-Service |
-| REACT_APP_PLANTUML_SERVER | 선택 | `http://localhost:8080/svg/` | PlantUML 렌더링 서버 (GoJIRA-App) |
-| REACT_APP_PUMLEX_SERVER | 선택 | `http://localhost:3030` | pumlex 인라인 편집 서버 (GoJIRA-App) |
+| REACT_APP_PUMLEX_SERVER | 선택 | `http://localhost:3030` | pumlex 인라인 편집/PlantUML 렌더 서버 (GoJIRA-App) |
 | REACT_APP_SSO_URL | 선택 | `https://10.227.37.90:443` | SSO endpoint |
 
 > 운영 빌드 시 (`npm run build`) 호스트 다른 백엔드를 보게 하려면 빌드 직전에 `REACT_APP_*` 를 환경변수로 export 해서 webpack 이 inline 하도록 해야 함.

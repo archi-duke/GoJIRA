@@ -72,7 +72,6 @@ cp .env.example .env
 # 조합된 URL (MONGO_URI / GOJIRA_API_URL / REACT_APP_*) 은 자동 생성.
 #   - MONGODB_SERVER, MONGO_USER, MONGO_PASS  (host:port 한 줄 + 인증)
 #   - GITEA_SERVER, PLATFORM_GITHUB_TOKEN, PLATFORM_GITHUB_ORG
-#   - OPENCODE_SERVER + OPENCODE_PORT
 #   - *_SERVER + *_PORT (사내 GoJIRA 서비스 6종 — 브라우저 access endpoint)
 #   - 시크릿 (선택): GOJIRA_ENC_KEY / OPENAI_API_KEY / SMTP_* / JIRA_USER 등
 
@@ -124,7 +123,6 @@ docker compose up -d
 curl -sS http://localhost:9000/                    # Platform-API
 curl -sS http://localhost:9001/                    # GoJIRA-API
 curl -sS http://localhost:8000/rest/api/2/serverInfo  # JIRA Mock
-curl -sS http://localhost:8080/                    # PlantUML
 curl -sS http://localhost:3000/                    # Platform-App
 curl -sS http://localhost:3001/                    # GoJIRA-App
 curl -sS http://localhost:3030/                    # pumlex (plantumlEx 렌더러)

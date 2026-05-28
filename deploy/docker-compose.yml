@@ -19,18 +19,19 @@ x-react-env: &react-env
   REACT_APP_PLATFORM_API: "http://${PLATFORM_API_SERVER:?required}:${PLATFORM_API_PORT:?required}/api/v2"
   REACT_APP_GOJIRA_API: "http://${GOJIRA_API_SERVER:?required}:${GOJIRA_API_PORT:?required}/api/v2"
   REACT_APP_GOJIRA_APP_REMOTE: "http://${GOJIRA_APP_SERVER:?required}:${GOJIRA_APP_PORT:?required}"
-  REACT_APP_PLANTUML_SERVER: "http://${PLANTUML_SERVER:?required}:${PLANTUML_PORT:?required}/svg/"
   REACT_APP_PUMLEX_SERVER: "http://${PUMLEX_SERVER:?required}:${PUMLEX_PORT:?required}"
   REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
 
 services:
 
   # ── 외부 도구: PlantUML 렌더링 서버 ───────────────────────────────────────
+  # pumlex-server 가 compose-internal DNS (plantuml-server:8080) 로 호출.
+  # 브라우저에서 직접 호출하지 않으므로 호스트 포트 노출 없음.
   plantuml-server:
     image: plantuml/plantuml-server:jetty
     restart: unless-stopped
-    ports:
-      - "${PLANTUML_HOST_PORT:-${PLANTUML_PORT:-8080}}:8080"
+    expose:
+      - "8080"
 
   # ── 외부 도구: pumlex (plantumlEx) 렌더러 ─────────────────────────────────
   # GoJIRA-App PexBlock 이 런타임에 /render-with-layout 호출. 내부적으로

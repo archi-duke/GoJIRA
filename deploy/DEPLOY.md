@@ -57,8 +57,7 @@ cp .env.example .env
 | | `PLATFORM_GITHUB_ORG` | Gitea organization 이름 |
 | 호스트 파일시스템 | `GOJIRA_REPOS_DIR` | Platform-API 의 bare clone + worktree 저장 경로 (호스트 측). 폐쇄망은 절대경로 권장 — 예: `/var/lib/gojira/repos` |
 | | `UID` / `GID` | 컨테이너가 호스트 사용자 권한으로 실행되도록 매핑. 보통 `id -u` / `id -g` 값. bind mount fs 권한 일치 목적 |
-| OpenCode | `OPENCODE_SERVER` + `OPENCODE_PORT` | 사내 OpenCode serve host + port |
-| GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 7종 | 브라우저가 접근하는 host + port (Platform/GoJIRA/Agent API + Platform/GoJIRA App + PlantUML + pumlex). React 에 **런타임** 주입 (env.js) — 재빌드 불요 |
+| GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 6종 | 브라우저가 접근하는 host + port (Platform/GoJIRA API + Platform/GoJIRA App + PlantUML + pumlex). React 에 **런타임** 주입 (env.js) — 재빌드 불요 |
 | 컨테이너 노출 port<br>(선택) | `*_HOST_PORT` | nginx reverse proxy 환경에서 컨테이너 외부 노출 port 가 사용자 access port 와 다를 때만 |
 
 ### 2-2. 선택 값
@@ -215,13 +214,12 @@ sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}
 
 ```bash
 # compose 가 조합한 최종 URL 미리보기 (시크릿도 함께 출력되니 주의)
-docker compose config | grep -E "MONGO_URI|GITHUB_URL|OPENCODE_SERVER_URL|REACT_APP_" | sort -u
+docker compose config | grep -E "MONGO_URI|GITHUB_URL|REACT_APP_" | sort -u
 
 # 사내 인프라 도달 확인 (.env 의 값으로 직접 호출)
 source .env
 nc -zv ${MONGODB_SERVER%%:*} ${MONGODB_SERVER##*:}      # Mongo TCP 도달
 curl -sS http://${GITEA_SERVER}/                        # Gitea 응답
-curl -sS http://${OPENCODE_SERVER}:${OPENCODE_PORT}/    # OpenCode 응답
 ```
 
 ### 6-2. 기동
@@ -257,7 +255,6 @@ source .env
 curl -sS http://localhost:${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT}}/                  # Platform-API → 404 OK
 curl -sS http://localhost:${GOJIRA_API_HOST_PORT:-${GOJIRA_API_PORT}}/                      # GoJIRA-API   → 404 OK
 curl -sS http://localhost:${JIRA_API_HOST_PORT:-8000}/rest/api/2/serverInfo                 # JIRA Mock    → JSON
-curl -sS http://localhost:${PLANTUML_HOST_PORT:-${PLANTUML_PORT}}/                          # PlantUML     → HTML
 curl -sS http://localhost:${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT}}/                  # Platform-App → HTML
 curl -sS http://localhost:${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT}}/                      # GoJIRA-App   → HTML
 curl -sS http://localhost:${PUMLEX_HOST_PORT:-${PUMLEX_PORT}}/                              # pumlex       → HTML
