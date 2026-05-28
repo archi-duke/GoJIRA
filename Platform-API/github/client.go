@@ -520,7 +520,10 @@ func DeleteFileAs(owner, repo, filePath, message, branch, sha, userToken string)
 
 // GetBranchRef gets the SHA of a branch.
 func GetBranchRef(owner, repo, branch string) (string, error) {
-	path := fmt.Sprintf("/repos/%s/%s/git/ref/heads/%s", owner, repo, branch)
+	// Gitea API 는 `/git/refs/heads/{branch}` (복수형 refs) 만 지원한다.
+	// 단수형 `/git/ref/...` 는 404 → 정확 매칭 시 GitHub 와 달리 Gitea 는
+	// 항상 배열을 반환하므로 배열에서 정확 매칭되는 ref 의 sha 를 꺼낸다.
+	path := fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, branch)
 	data, status, err := doRequest("GET", path, nil)
 	if err != nil {
 		return "", err
@@ -528,11 +531,19 @@ func GetBranchRef(owner, repo, branch string) (string, error) {
 	if status >= 400 {
 		return "", fmt.Errorf("get branch ref failed (%d)", status)
 	}
-	var result map[string]interface{}
-	json.Unmarshal(data, &result)
-	obj, _ := result["object"].(map[string]interface{})
-	sha, _ := obj["sha"].(string)
-	return sha, nil
+	var arr []map[string]interface{}
+	if err := json.Unmarshal(data, &arr); err != nil {
+		return "", fmt.Errorf("get branch ref parse failed: %w", err)
+	}
+	for _, r := range arr {
+		refStr, _ := r["ref"].(string)
+		if refStr == "refs/heads/"+branch {
+			obj, _ := r["object"].(map[string]interface{})
+			sha, _ := obj["sha"].(string)
+			return sha, nil
+		}
+	}
+	return "", fmt.Errorf("branch %q not found", branch)
 }
 
 // CreateBranch creates a new branch from a source branch SHA.
