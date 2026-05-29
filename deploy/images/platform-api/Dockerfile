@@ -1,16 +1,16 @@
-### Platform-API 빌드 (go.work 포함 — repo root 가 build context)
-# build context: 레포 루트 (deploy/ 의 부모). docker-compose.yml 의 context: .. 와 일치.
+### Platform-API 빌드
+#
+# Builder base = gojira/build-cache-go — go.work / go.mod 골격 + /go/pkg/mod 캐시가
+# 미리 들어있어 외부 호출 없이 go build 가 가능 (폐쇄망 자체 빌드용).
+# 외부망에서도 동일 동작 — 캐시에 있는 모듈을 그대로 사용한다.
+#
+# build context: 레포 루트.
 
-FROM golang:1.26-alpine AS builder
-RUN apk add --no-cache git
+FROM gojira/build-cache-go:latest AS builder
 WORKDIR /src
-# 모듈 캐시 친화 — go.* 와 모든 사용 모듈의 go.mod 만 먼저
-COPY go.work go.work.sum* ./
-COPY Platform-API/go.mod Platform-API/go.sum Platform-API/
-COPY GoJIRA-API/go.mod GoJIRA-API/go.sum GoJIRA-API/
-COPY gojira-shared/go.mod gojira-shared/
-RUN cd Platform-API && go mod download
-# 소스 전체
+# 캐시 이미지의 go.work / 모듈 골격 복사 — 의존성 download 가 끝난 상태.
+RUN cp -r /cache/. /src/
+# 소스 전체 (덮어쓰기)
 COPY Platform-API/ Platform-API/
 COPY gojira-shared/ gojira-shared/
 COPY GoJIRA-API/ GoJIRA-API/
