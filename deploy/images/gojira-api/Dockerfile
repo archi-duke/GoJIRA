@@ -1,13 +1,11 @@
 ### GoJIRA-API 빌드
+#
+# Builder base = gojira/build-cache-go (의존성 캐시 포함). 폐쇄망 외부 호출 0회.
+# build context: 레포 루트.
 
-FROM golang:1.26-alpine AS builder
-RUN apk add --no-cache git
+FROM gojira/build-cache-go:latest AS builder
 WORKDIR /src
-COPY go.work go.work.sum* ./
-COPY Platform-API/go.mod Platform-API/go.sum Platform-API/
-COPY GoJIRA-API/go.mod GoJIRA-API/go.sum GoJIRA-API/
-COPY gojira-shared/go.mod gojira-shared/
-RUN cd GoJIRA-API && go mod download
+RUN cp -r /cache/. /src/
 COPY GoJIRA-API/ GoJIRA-API/
 COPY gojira-shared/ gojira-shared/
 COPY Platform-API/ Platform-API/

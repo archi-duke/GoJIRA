@@ -4,11 +4,14 @@
 # nginx 컨테이너 startup 시 entrypoint.sh 가 env → /usr/share/nginx/html/env.js
 # 를 생성해 window._env_ 로 노출. React (src/config.js) 가 1순위로 읽음.
 # → 폐쇄망에서 .env 만 바꾸고 docker compose up -d 하면 끝 (재빌드 불요).
+#
+# Builder base = gojira/build-cache-node — node_modules 캐시 포함, 외부 npm 불필요.
 
-FROM node:lts-alpine AS builder
+FROM gojira/build-cache-node:latest AS builder
 WORKDIR /src
-COPY Platform-App/package.json Platform-App/package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+RUN cp -r /cache/Platform-App/node_modules ./node_modules && \
+    cp /cache/Platform-App/package.json ./package.json && \
+    cp /cache/Platform-App/package-lock.json* ./ 2>/dev/null || true
 COPY Platform-App/ ./
 RUN npm run build
 
