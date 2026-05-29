@@ -159,7 +159,12 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
     if (form.devGroup) {
       await ensureOrgUnit(form.devGroup, 'group', form.devTeam);
     }
-    if (onSave) onSave(form);
+    if (onSave) {
+      const result = await onSave(form);
+      // onSave 가 false 를 명시 반환하면 다이얼로그를 닫지 않는다 — 신규 과제 생성 시
+      // 런처가 동작하지 않아 게이트에서 막힌 경우 등. 다른 반환값(undefined 포함)은 OK.
+      if (result === false) return;
+    }
     onClose();
   }
 

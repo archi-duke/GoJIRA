@@ -34,12 +34,16 @@ var archSettingsAllowedKeys = map[string]struct{}{
 
 // POST /api/v{version}/Project
 func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[TEMP-DEBUG] ProjectCreateHandler ENTRY")
 	var req models.ProjectRequest
 	if err := decodeJSON(r, &req); err != nil {
+		log.Printf("[TEMP-DEBUG] ProjectCreateHandler decodeJSON err=%v", err)
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	code := req.MainJiraCode()
+	log.Printf("[TEMP-DEBUG] ProjectCreateHandler name=%q jiraCode=%q repoName=%q devTeam=%q members=%d auditors=%d",
+		req.Name, code, req.RepoName, req.DevTeam, len(req.Members), len(req.Auditors))
 	if req.Name == "" || code == "" {
 		respondError(w, http.StatusBadRequest, "name and jiraCodes.main.jiraCode are required")
 		return
@@ -54,8 +58,10 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 1) Platform-API 에 repo 먼저 생성 — Gitea repo + 초기파일 + 브랜치 보호.
 	//    실패 시 doc 자체를 만들지 않고 502 반환 → 절반만 만들어진 상태 방지.
+	log.Printf("[TEMP-DEBUG] ProjectCreateHandler calling Platform-API POST /DocRepo/%s repoName=%q", code, req.RepoName)
 	repoRes, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s", code),
 		map[string]string{"projectName": req.Name, "repoName": req.RepoName})
+	log.Printf("[TEMP-DEBUG] ProjectCreateHandler Platform-API responded status=%d", sc)
 	if sc >= 400 {
 		errMsg := fmt.Sprintf("DocRepo 생성 실패 (status=%d)", sc)
 		if m, ok := repoRes.(map[string]interface{}); ok {
@@ -63,14 +69,18 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 				errMsg = e
 			}
 		}
+		log.Printf("[TEMP-DEBUG] ProjectCreateHandler DocRepo FAIL: %s", errMsg)
 		respondError(w, http.StatusBadGateway, errMsg)
 		return
 	}
 	repoMap, ok := repoRes.(map[string]interface{})
 	if !ok {
+		log.Printf("[TEMP-DEBUG] ProjectCreateHandler unexpected response type %T", repoRes)
 		respondError(w, http.StatusBadGateway, "DocRepo 응답 형식 오류")
 		return
 	}
+	log.Printf("[TEMP-DEBUG] ProjectCreateHandler DocRepo OK repoName=%v repoOwner=%v",
+		repoMap["repoName"], repoMap["repoOwner"])
 
 	// 2) repo 정보가 채워진 doc 으로 Mongo 생성 — repo 가 성공한 후에만 doc 이 생긴다.
 	doc := buildProjectDoc(req)
@@ -82,9 +92,11 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 		"repoUrl":       repoMap["repoUrl"],
 	}
 	if err := db.UpsertProject(ctx, code, doc); err != nil {
+		log.Printf("[TEMP-DEBUG] ProjectCreateHandler UpsertProject err=%v", err)
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	log.Printf("[TEMP-DEBUG] ProjectCreateHandler SUCCESS code=%q", code)
 
 	projects, _ := db.FindAllProjects(ctx, nil)
 	respondJSON(w, http.StatusOK, projects)

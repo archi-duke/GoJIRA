@@ -39,8 +39,26 @@ func doRequestWithToken(method, path string, body interface{}, token string) ([]
 	}
 
 	u := config.GitHubAPI + path
+	// [TEMP-DEBUG] 토큰은 prefix 8 자만 마스킹 노출. 본문은 길이만.
+	tokPrefix := ""
+	if len(token) >= 8 {
+		tokPrefix = token[:8]
+	} else if token != "" {
+		tokPrefix = "(short)"
+	} else {
+		tokPrefix = "(empty)"
+	}
+	bodyLen := 0
+	if body != nil {
+		if b, err := json.Marshal(body); err == nil {
+			bodyLen = len(b)
+		}
+	}
+	log.Printf("[TEMP-DEBUG] doRequest %s %s token=%s... bodyLen=%d", method, u, tokPrefix, bodyLen)
+
 	req, err := http.NewRequest(method, u, reqBody)
 	if err != nil {
+		log.Printf("[TEMP-DEBUG] doRequest NewRequest err=%v", err)
 		return nil, 0, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -51,10 +69,17 @@ func doRequestWithToken(method, path string, body interface{}, token string) ([]
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		log.Printf("[TEMP-DEBUG] doRequest %s %s NET ERR: %v", method, u, err)
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
+	// 응답 본문은 200 자까지만 — 큰 응답이 로그를 채우지 않도록.
+	preview := string(data)
+	if len(preview) > 200 {
+		preview = preview[:200] + "...(truncated)"
+	}
+	log.Printf("[TEMP-DEBUG] doRequest %s %s → status=%d respLen=%d resp=%s", method, u, resp.StatusCode, len(data), preview)
 	return data, resp.StatusCode, nil
 }
 
@@ -222,6 +247,7 @@ func CreateUserToken(username, password string) (string, error) {
 // --- Repo ---
 
 func CreateRepo(name, description string, isPrivate bool) (map[string]interface{}, error) {
+	log.Printf("[TEMP-DEBUG] CreateRepo ENTRY name=%q private=%v org=%q", name, isPrivate, config.GitHubOrg)
 	body := map[string]interface{}{
 		"name":           name,
 		"description":    description,
@@ -234,20 +260,25 @@ func CreateRepo(name, description string, isPrivate bool) (map[string]interface{
 	if config.GitHubOrg != "" {
 		data, status, err := doRequest("POST", "/orgs/"+config.GitHubOrg+"/repos", body)
 		if err != nil {
+			log.Printf("[TEMP-DEBUG] CreateRepo org branch err=%v", err)
 			return nil, err
 		}
+		log.Printf("[TEMP-DEBUG] CreateRepo org branch status=%d", status)
 		if status < 400 {
 			result := map[string]interface{}{}
 			json.Unmarshal(data, &result)
 			return result, nil
 		}
+		log.Printf("[TEMP-DEBUG] CreateRepo org branch fallback to /user/repos (status=%d)", status)
 	}
 
 	// 개인 계정
 	data, status, err := doRequest("POST", "/user/repos", body)
 	if err != nil {
+		log.Printf("[TEMP-DEBUG] CreateRepo /user/repos err=%v", err)
 		return nil, err
 	}
+	log.Printf("[TEMP-DEBUG] CreateRepo /user/repos status=%d", status)
 	if status >= 400 {
 		return nil, fmt.Errorf("create repo failed (%d): %s", status, string(data))
 	}
@@ -283,7 +314,9 @@ func GetRepo(owner, repo string) (map[string]interface{}, error) {
 // RepoExists 는 owner/repo 가 Gitea/GitHub 에 존재하는지 확인한다.
 // 200 → true, 404 → false, 그 외 (네트워크 오류 등) → error 반환.
 func RepoExists(owner, repo string) (bool, error) {
+	log.Printf("[TEMP-DEBUG] RepoExists ENTRY owner=%q repo=%q", owner, repo)
 	_, status, err := doRequest("GET", "/repos/"+owner+"/"+repo, nil)
+	log.Printf("[TEMP-DEBUG] RepoExists status=%d err=%v", status, err)
 	if err != nil {
 		return false, err
 	}
@@ -520,19 +553,35 @@ func DeleteFileAs(owner, repo, filePath, message, branch, sha, userToken string)
 
 // GetBranchRef gets the SHA of a branch.
 func GetBranchRef(owner, repo, branch string) (string, error) {
-	path := fmt.Sprintf("/repos/%s/%s/git/ref/heads/%s", owner, repo, branch)
+	log.Printf("[TEMP-DEBUG] GetBranchRef ENTRY owner=%q repo=%q branch=%q", owner, repo, branch)
+	// Gitea API 는 `/git/refs/heads/{branch}` (복수형 refs) 만 지원한다.
+	// 단수형 `/git/ref/...` 는 404 → 정확 매칭 시 GitHub 와 달리 Gitea 는
+	// 항상 배열을 반환하므로 배열에서 정확 매칭되는 ref 의 sha 를 꺼낸다.
+	path := fmt.Sprintf("/repos/%s/%s/git/refs/heads/%s", owner, repo, branch)
 	data, status, err := doRequest("GET", path, nil)
+	log.Printf("[TEMP-DEBUG] GetBranchRef path=%s status=%d err=%v dataLen=%d", path, status, err, len(data))
 	if err != nil {
 		return "", err
 	}
 	if status >= 400 {
 		return "", fmt.Errorf("get branch ref failed (%d)", status)
 	}
-	var result map[string]interface{}
-	json.Unmarshal(data, &result)
-	obj, _ := result["object"].(map[string]interface{})
-	sha, _ := obj["sha"].(string)
-	return sha, nil
+	var arr []map[string]interface{}
+	if err := json.Unmarshal(data, &arr); err != nil {
+		log.Printf("[TEMP-DEBUG] GetBranchRef unmarshal err=%v raw=%s", err, string(data))
+		return "", fmt.Errorf("get branch ref parse failed: %w", err)
+	}
+	log.Printf("[TEMP-DEBUG] GetBranchRef parsed arr len=%d", len(arr))
+	for _, r := range arr {
+		refStr, _ := r["ref"].(string)
+		log.Printf("[TEMP-DEBUG] GetBranchRef inspect ref=%q (looking for refs/heads/%s)", refStr, branch)
+		if refStr == "refs/heads/"+branch {
+			obj, _ := r["object"].(map[string]interface{})
+			sha, _ := obj["sha"].(string)
+			return sha, nil
+		}
+	}
+	return "", fmt.Errorf("branch %q not found", branch)
 }
 
 // CreateBranch creates a new branch from a source branch SHA.

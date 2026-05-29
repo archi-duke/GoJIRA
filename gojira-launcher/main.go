@@ -25,6 +25,8 @@ func main() {
 	mux.HandleFunc("OPTIONS /edit", srv.secure(true, srv.handleEdit))
 	mux.HandleFunc("POST /chat", srv.secure(true, srv.handleChat))
 	mux.HandleFunc("OPTIONS /chat", srv.secure(true, srv.handleChat))
+	mux.HandleFunc("POST /prewarm", srv.secure(true, srv.handlePrewarm))
+	mux.HandleFunc("OPTIONS /prewarm", srv.secure(true, srv.handlePrewarm))
 	mux.HandleFunc("POST /push", srv.secure(true, srv.handlePush))
 	mux.HandleFunc("OPTIONS /push", srv.secure(true, srv.handlePush))
 	mux.HandleFunc("POST /pull", srv.secure(true, srv.handlePull))
@@ -45,6 +47,7 @@ func main() {
 	log.Printf("gojira-launcher v%s — http://%s", version, addr)
 	log.Printf("  defaultAgent=%s repoRoot=%s webOrigin=%s webOrigins=%v", cfg.DefaultAgent, cfg.RepoRoot, cfg.WebOrigin, cfg.WebOrigins)
 	log.Printf("  설치 토큰: ~/.gojira/%s (웹은 %s 헤더로 전송)", tokenFileName, tokenHeader)
+	log.Printf("  %s", cfg.gitAuthSummary())
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("서버 종료: %v", err)

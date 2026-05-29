@@ -48,6 +48,7 @@ func GitUsersHandler(w http.ResponseWriter, r *http.Request) {
 func DocRepoCheckHandler(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("name")
 	slug := slugifyRepoName(raw)
+	log.Printf("[TEMP-DEBUG] DocRepoCheckHandler raw=%q slug=%q org=%q", raw, slug, config.GitHubOrg)
 	resp := map[string]interface{}{
 		"name":       raw,
 		"slug":       slug,
@@ -56,10 +57,12 @@ func DocRepoCheckHandler(w http.ResponseWriter, r *http.Request) {
 		"valid":      slug != "",
 	}
 	if slug == "" {
+		log.Printf("[TEMP-DEBUG] DocRepoCheckHandler invalid slug — early return")
 		respondJSON(w, http.StatusOK, resp)
 		return
 	}
 	exists, err := github.RepoExists(config.GitHubOrg, slug)
+	log.Printf("[TEMP-DEBUG] DocRepoCheckHandler RepoExists(%q, %q) → exists=%v err=%v", config.GitHubOrg, slug, exists, err)
 	if err != nil {
 		respondError(w, http.StatusBadGateway, "repo 중복 검사 실패: "+err.Error())
 		return
@@ -68,6 +71,7 @@ func DocRepoCheckHandler(w http.ResponseWriter, r *http.Request) {
 	if exists {
 		if uniq, err := uniqueRepoSlug(slug); err == nil && uniq != slug {
 			resp["suggestion"] = uniq
+			log.Printf("[TEMP-DEBUG] DocRepoCheckHandler suggestion=%q", uniq)
 		}
 	}
 	respondJSON(w, http.StatusOK, resp)
@@ -76,6 +80,7 @@ func DocRepoCheckHandler(w http.ResponseWriter, r *http.Request) {
 // POST /DocRepo/{code} — repo 생성 (project.documents에 저장)
 func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler ENTRY code=%q", code)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
@@ -85,10 +90,12 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	//   - doc 없음: request body 의 projectName 사용, DB 갱신 없이 결과만 반환
 	prj, _ := db.FindProjectByCode(ctx, code) // not found 도 OK
 	hasDoc := prj != nil
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler code=%q hasDoc=%v", code, hasDoc)
 
 	if hasDoc {
 		docs := db.BsonGetDoc(prj, "documents")
 		if db.BsonGetStr(docs, "repoName") != "" {
+			log.Printf("[TEMP-DEBUG] DocRepoCreateHandler code=%q repo already exists in doc — skip", code)
 			respondJSON(w, http.StatusOK, docs)
 			return
 		}
@@ -100,6 +107,7 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 		Description string `json:"description"`
 	}
 	decodeJSON(r, &req)
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler req projectName=%q repoName=%q desc=%q", req.ProjectName, req.RepoName, req.Description)
 
 	// projectName: 명시 입력 > doc 의 name > 빈값 (Description fallback 용)
 	projectName := req.ProjectName
@@ -109,14 +117,17 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// repoName 은 사용자 입력 필수. slugify 후 빈 문자열이면 거부.
 	cleanName := slugifyRepoName(req.RepoName)
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler slugify %q → %q", req.RepoName, cleanName)
 	if cleanName == "" {
 		respondError(w, http.StatusBadRequest,
 			"repoName 필요 — 영문/숫자/하이픈 1자 이상 (입력값: "+req.RepoName+")")
 		return
 	}
 	// 사용자가 입력한 이름이 이미 존재하면 409 — 호출자가 다른 이름 받아 재요청.
-	if exists, err := github.RepoExists(config.GitHubOrg, cleanName); err != nil {
-		respondError(w, http.StatusBadGateway, "repo 중복 검사 실패: "+err.Error())
+	exists, repoExistsErr := github.RepoExists(config.GitHubOrg, cleanName)
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler RepoExists(%q, %q) → exists=%v err=%v", config.GitHubOrg, cleanName, exists, repoExistsErr)
+	if repoExistsErr != nil {
+		respondError(w, http.StatusBadGateway, "repo 중복 검사 실패: "+repoExistsErr.Error())
 		return
 	} else if exists {
 		respondError(w, http.StatusConflict, fmt.Sprintf("repo '%s' 이미 존재", cleanName))
@@ -128,11 +139,14 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 		req.Description = fmt.Sprintf("%s의 설계 문서", projectName)
 	}
 
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler calling CreateRepo(%q, %q, private=true)", req.RepoName, req.Description)
 	ghRepo, err := github.CreateRepo(req.RepoName, req.Description, true)
 	if err != nil {
+		log.Printf("[TEMP-DEBUG] DocRepoCreateHandler CreateRepo FAIL: %v", err)
 		respondError(w, http.StatusBadGateway, "GitHub repo 생성 실패: "+err.Error())
 		return
 	}
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler CreateRepo OK keys=%v", mapKeys(ghRepo))
 
 	owner := config.GitHubOrg
 	if owner == "" {
@@ -141,6 +155,7 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	repoURL, _ := ghRepo["html_url"].(string)
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler resolved owner=%q repoURL=%q default_branch_from_resp=%v", owner, repoURL, ghRepo["default_branch"])
 
 	// doc 가 이미 있을 때만 documents 필드 갱신.
 	// 없으면 호출자(GoJIRA-API)가 응답을 받아 doc 만들 때 documents 필드를 직접 채운다.
@@ -164,9 +179,11 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	// main 이 없으면 빈 clone 상태가 되어 launcher /files 가 "origin/main 없음" 으로
 	// 실패한다. 여기서 fail-fast 해 호출자(GoJIRA-API)가 502 + project doc 미생성으로
 	// 롤백하도록 한다.
-	if _, err := github.GetBranchRef(owner, req.RepoName, "main"); err != nil {
+	branchSha, branchErr := github.GetBranchRef(owner, req.RepoName, "main")
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler GetBranchRef(%q, %q, main) → sha=%q err=%v", owner, req.RepoName, branchSha, branchErr)
+	if branchErr != nil {
 		respondError(w, http.StatusBadGateway,
-			"repo 생성 직후 main 브랜치 미존재 — Gitea 의 [repository] DEFAULT_BRANCH=main 또는 token 의 default_branch 적용 여부 확인 필요: "+err.Error())
+			"repo 생성 직후 main 브랜치 미존재 — Gitea 의 [repository] DEFAULT_BRANCH=main 또는 token 의 default_branch 적용 여부 확인 필요: "+branchErr.Error())
 		return
 	}
 
@@ -200,7 +217,10 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 	for path, content := range initialFiles {
 		encoded := base64.StdEncoding.EncodeToString([]byte(content))
 		if _, err := github.CreateFile(owner, req.RepoName, path, encoded, path+" 초기 생성", "main"); err != nil {
+			log.Printf("[TEMP-DEBUG] DocRepoCreateHandler CreateFile FAIL path=%q err=%v", path, err)
 			initErrs = append(initErrs, fmt.Sprintf("%s: %v", path, err))
+		} else {
+			log.Printf("[TEMP-DEBUG] DocRepoCreateHandler CreateFile OK path=%q", path)
 		}
 	}
 	if len(initErrs) > 0 {
@@ -209,6 +229,7 @@ func DocRepoCreateHandler(w http.ResponseWriter, r *http.Request) {
 			"초기 파일 생성 실패: "+strings.Join(initErrs, "; "))
 		return
 	}
+	log.Printf("[TEMP-DEBUG] DocRepoCreateHandler all %d initial files created", len(initialFiles))
 
 	// Branch protection: 모든 리뷰 완료 전 머지 불가
 	reviewCount := 1
@@ -1027,6 +1048,15 @@ func DocRepoPRReviewsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, reviews)
+}
+
+// [TEMP-DEBUG] mapKeys — debug 로그용 helper. 정리 시점에 사용처와 함께 삭제.
+func mapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func hasRef(refs []string, name string) bool {

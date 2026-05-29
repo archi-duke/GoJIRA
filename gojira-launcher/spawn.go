@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,15 +103,21 @@ func (s *Server) agentEnv(repoPath, user string) []string {
 // CLI 는 대화형이므로 TTY 가 필요 → OS별 터미널로 감싼다. sessionId(=pid 문자열) 반환.
 // env 는 자식 CLI 가 로컬 clone/백엔드를 찾도록 주입된다(agentEnv).
 func SpawnAgent(agent, repoPath string, env []string) (string, error) {
+	log.Printf("[TEMP-DEBUG] SpawnAgent ENTRY agent=%q repoPath=%q envCount=%d goos=%s", agent, repoPath, len(env), runtime.GOOS)
 	bin, ok := agentBins[agent]
 	if !ok {
+		log.Printf("[TEMP-DEBUG] SpawnAgent rejected agent=%q (not in allowlist)", agent)
 		return "", fmt.Errorf("허용되지 않은 agent: %q", agent)
 	}
+	log.Printf("[TEMP-DEBUG] SpawnAgent bin=%q", bin)
 	cmd := terminalCommand(bin, repoPath, env)
+	log.Printf("[TEMP-DEBUG] SpawnAgent cmd path=%q args=%v dir=%q", cmd.Path, cmd.Args, cmd.Dir)
 	if err := cmd.Start(); err != nil {
+		log.Printf("[TEMP-DEBUG] SpawnAgent cmd.Start FAIL: %v", err)
 		return "", fmt.Errorf("%s 실행 실패: %w", agent, err)
 	}
 	pid := cmd.Process.Pid
+	log.Printf("[TEMP-DEBUG] SpawnAgent SUCCESS pid=%d", pid)
 	// 좀비 방지: 백그라운드에서 회수.
 	go func() { _ = cmd.Wait() }()
 	return fmt.Sprintf("%d", pid), nil
@@ -119,6 +126,7 @@ func SpawnAgent(agent, repoPath string, env []string) (string, error) {
 // terminalCommand — OS별로 대화형 CLI 를 새 터미널에서 실행하는 명령을 만든다.
 // linux/fallback 은 cmd.Env 로 env 전파, mac/windows 는 셸 스크립트에 export/set 으로 주입.
 func terminalCommand(bin, dir string, env []string) *exec.Cmd {
+	log.Printf("[TEMP-DEBUG] terminalCommand goos=%s bin=%q dir=%q", runtime.GOOS, bin, dir)
 	switch runtime.GOOS {
 	case "windows":
 		// 새 콘솔 창에서 실행. env 는 `set "K=V"&&` 로 선주입.
@@ -128,6 +136,7 @@ func terminalCommand(bin, dir string, env []string) *exec.Cmd {
 		}
 		c := exec.Command("cmd", "/c", "start", "", "cmd", "/k", prefix+bin)
 		c.Dir = dir
+		log.Printf("[TEMP-DEBUG] terminalCommand windows prefix_len=%d cmd_args=%v", len(prefix), c.Args)
 		return c
 	case "darwin":
 		exports := ""

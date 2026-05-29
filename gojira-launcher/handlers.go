@@ -130,35 +130,82 @@ type chatReq struct {
 	Agent string `json:"agent"`
 }
 
-// POST /chat — 등록된 에이전트 CLI(opencode|claude) 만 새 터미널로 spawn.
-// /edit 과 분리된 동작 — 사용자는 VS Code 만 열거나, 그 위에 채팅을 추가로 띄울 수 있다.
-// code 가 비어있으면 프로젝트 없는 일반 채팅 — repoRoot 에서 그대로 spawn (clone 안 함).
-func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	var req chatReq
+type prewarmReq struct {
+	Code string `json:"code"`
+	User string `json:"user"`
+}
+
+// POST /prewarm — 과제 생성 직후 또는 메인 화면 진입 시 호출되어, EnsureRepo 를
+// 백그라운드로 미리 수행한다(clone + docs/<user> 체크아웃). 이후 사용자가 로고를
+// 클릭해 /chat 호출하는 시점에는 EnsureRepo 가 이미 끝나 있어 SpawnAgent 까지
+// 체감 지연이 거의 없다. 비동기 — 즉시 200 응답 후 goroutine 에서 작업.
+func (s *Server) handlePrewarm(w http.ResponseWriter, r *http.Request) {
+	var req prewarmReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
 		return
 	}
+	if req.Code == "" || req.User == "" {
+		writeErr(w, http.StatusBadRequest, "code, user 필수")
+		return
+	}
+	log.Printf("[TEMP-DEBUG] handlePrewarm scheduling code=%q user=%q", req.Code, req.User)
+	// fire-and-forget — 클라이언트는 응답을 기다리지 않고 즉시 반환.
+	// 이미 락이 잡혀있으면 (다른 prewarm/chat 동시 호출) goroutine 안에서 대기 후 처리.
+	go func() {
+		if _, err := s.EnsureRepo(req.Code, req.User); err != nil {
+			log.Printf("[TEMP-DEBUG] handlePrewarm FAIL code=%s user=%s: %v", req.Code, req.User, err)
+		} else {
+			log.Printf("[TEMP-DEBUG] handlePrewarm OK code=%s user=%s", req.Code, req.User)
+		}
+	}()
+	writeJSON(w, http.StatusOK, map[string]any{"status": "started"})
+}
+
+// POST /chat — 등록된 에이전트 CLI(opencode|claude) 만 새 터미널로 spawn.
+// /edit 과 분리된 동작 — 사용자는 VS Code 만 열거나, 그 위에 채팅을 추가로 띄울 수 있다.
+// code 가 비어있으면 프로젝트 없는 일반 채팅 — repoRoot 에서 그대로 spawn (clone 안 함).
+func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[TEMP-DEBUG] handleChat ENTRY")
+	var req chatReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[TEMP-DEBUG] handleChat decode err=%v", err)
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	log.Printf("[TEMP-DEBUG] handleChat req code=%q user=%q agent=%q", req.Code, req.User, req.Agent)
 	agent, err := s.resolveAgent(req.Agent)
 	if err != nil {
+		log.Printf("[TEMP-DEBUG] handleChat resolveAgent err=%v", err)
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	log.Printf("[TEMP-DEBUG] handleChat resolved agent=%q", agent)
 	spawnDir := s.cfg.RepoRoot
 	if req.Code != "" {
-		repoPath, err := s.EnsureRepo(req.Code, req.User)
+		// EnsureRepoLocal (no fetch) — 신규 과제는 게이트가 prewarm 으로 미리 clone+체크아웃
+		// 시켜놓으므로 이 시점에는 fetch 가 불필요. fetch 를 skip 해 폐쇄망 RTT 만큼의
+		// spawn 지연을 제거한다. 만약 polled clone 이 아직 없으면 (드물게) 자동 clone.
+		// 사용자가 origin 의 최신 변경을 가져와야 한다면 별도 /pull 핸들러 사용.
+		log.Printf("[TEMP-DEBUG] handleChat EnsureRepoLocal code=%q user=%q", req.Code, req.User)
+		repoPath, err := s.EnsureRepoLocal(req.Code, req.User)
 		if err != nil {
-			log.Printf("/chat 실패 code=%s user=%s: %v", req.Code, req.User, err)
+			log.Printf("[TEMP-DEBUG] handleChat EnsureRepoLocal FAIL code=%s user=%s: %v", req.Code, req.User, err)
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		log.Printf("[TEMP-DEBUG] handleChat EnsureRepoLocal OK repoPath=%q", repoPath)
 		spawnDir = repoPath
 	}
-	sessionID, err := SpawnAgent(agent, spawnDir, s.agentEnv(spawnDir, req.User))
+	env := s.agentEnv(spawnDir, req.User)
+	log.Printf("[TEMP-DEBUG] handleChat about to spawn agent=%q spawnDir=%q envCount=%d", agent, spawnDir, len(env))
+	sessionID, err := SpawnAgent(agent, spawnDir, env)
 	if err != nil {
+		log.Printf("[TEMP-DEBUG] handleChat SpawnAgent FAIL: %v", err)
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	log.Printf("[TEMP-DEBUG] handleChat SUCCESS sessionID=%s", sessionID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "ok",
 		"repoPath":  spawnDir,
