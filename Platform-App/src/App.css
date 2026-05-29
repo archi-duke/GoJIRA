@@ -101,3 +101,44 @@
   font-size: 18px;
   color: #999;
 }
+
+/* 에이전트 호출 인디케이터 — 런처 응답 대기 + 새 터미널 창 표시 대기 동안 표시 */
+.app-launching-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.app-launching-box {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px 32px;
+  min-width: 280px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+.app-launching-spinner {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 16px;
+  border: 3px solid #eee;
+  border-top-color: #4a90e2;
+  border-radius: 50%;
+  animation: app-launching-spin 0.8s linear infinite;
+}
+.app-launching-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #333;
+}
+.app-launching-sub {
+  font-size: 12px;
+  color: #666;
+}
+@keyframes app-launching-spin {
+  to { transform: rotate(360deg); }
+}

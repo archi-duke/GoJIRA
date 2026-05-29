@@ -4,6 +4,8 @@ import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
 import { modalAlert, modalPrompt } from './AlertModal';
 import config from '../config';
+import { detectLauncher, requestPrewarm } from '../utils/launcher';
+import LauncherInstallModal from './LauncherInstallModal';
 
 const API_BASE = config.API_BASE;
 const PLATFORM_API = config.PLATFORM_API;
@@ -60,6 +62,9 @@ function getDefaultView() {
 export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, user }) {
   const [projects, setProjects] = useState([]);
   const [graphWidth, setGraphWidth] = useState(0);
+  // 신규 과제 생성 시 런처 미감지 → 설치/실행 안내 모달.
+  // { onRetry, onClose } 를 담아 retry 결과를 ensureLauncherReady 의 promise 로 resolve.
+  const [launcherGate, setLauncherGate] = useState(null);
   const [viewRange, setViewRange] = useState(() => {
     try {
       const s = JSON.parse(sessionStorage.getItem('gojira_pm_viewRange'));
@@ -225,9 +230,51 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
     }
   }
 
+  // 신규 과제 생성 게이트: launcher 가 동작 중이어야 진행. 미감지 시 LauncherInstallModal
+  // 띄우고 사용자가 "설치 완료 — 다시 시도" 누를 때까지 대기. 사용자가 닫기 누르면 null 반환.
+  // 성공 시 launcher 객체 ({version, agents, ready, token}) 반환.
+  function ensureLauncherReady() {
+    return new Promise((resolve) => {
+      (async () => {
+        const first = await detectLauncher();
+        if (first && first.token) {
+          resolve(first);
+          return;
+        }
+        // 모달 띄우고 retry 까지 대기
+        setLauncherGate({
+          onRetry: async () => {
+            const again = await detectLauncher();
+            if (again && again.token) {
+              setLauncherGate(null);
+              resolve(again);
+            }
+            // 감지 안 되면 모달 유지 — 사용자가 다시 시도하거나 닫기 가능
+          },
+          onClose: () => {
+            setLauncherGate(null);
+            resolve(null);
+          },
+        });
+      })();
+    });
+  }
+
   async function handleDialogSave(updated) {
-    // New project (POST) vs existing (PUT) — 새 과제는 LLM repo 이름 번역 + Gitea repo 생성까지 수행되어 수 초 걸린다.
+    // New project (POST) vs existing (PUT) — 새 과제는 Gitea repo 생성을 포함해 수 초 걸린다.
     const isNew = !projects.some((p) => getJiraCode(p) === getJiraCode(updated));
+
+    // 신규 과제는 launcher 가 반드시 동작해야 한다 — 생성 직후 prewarm 으로 로컬 clone 을
+    // 미리 받아두기 위해. 미감지 시 설치/실행 안내 모달로 게이트.
+    let launcher = null;
+    if (isNew) {
+      launcher = await ensureLauncherReady();
+      if (!launcher) {
+        // 사용자가 게이트를 닫음 — 다이얼로그 유지하고 진행 중단.
+        return false;
+      }
+    }
+
     setSaving({
       title: isNew ? '과제 생성 중...' : '과제 정보 저장 중...',
       sub: isNew ? '설계문서 저장소 자동 생성을 포함해 수 초 걸릴 수 있습니다.' : '',
@@ -242,6 +289,15 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
         const err = await res.json().catch(() => ({}));
         await modalAlert((isNew ? '과제 생성 실패' : '과제 저장 실패') + ': ' + (err.error || res.statusText));
         return;
+      }
+      // 신규 생성 직후 — 이미 게이트에서 launcher 확보됨. 백그라운드 prewarm 으로 미리 clone.
+      // 사용자가 곧 이 과제를 로고 클릭으로 열 가능성이 높아 EnsureRepo 를 선행하면
+      // 에이전트 spawn 까지의 체감 지연이 크게 줄어든다. 실패는 silent.
+      if (isNew && launcher && launcher.token) {
+        const code = getJiraCode(updated);
+        if (code) {
+          requestPrewarm({ code, user, token: launcher.token }).catch(() => {});
+        }
       }
       // 성공 — 목록 재조회
       const list = await fetch(`${API_BASE}/Project`, { headers: { XBody: JSON.stringify({}) } }).then((r) => r.json());
@@ -639,6 +695,14 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
             {saving.sub && <div className="pm-saving-sub">{saving.sub}</div>}
           </div>
         </div>
+      )}
+
+      {/* 신규 과제 생성 시 launcher 미감지 → 설치/실행 안내 */}
+      {launcherGate && (
+        <LauncherInstallModal
+          onClose={launcherGate.onClose}
+          onRetry={launcherGate.onRetry}
+        />
       )}
 
     </div>

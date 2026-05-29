@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,9 +65,21 @@ func (s *Server) repoPath(code string) string {
 	return filepath.Join(s.cfg.RepoRoot, code)
 }
 
+// cloneURL — git.user/token 이 설정돼 있으면 http://<user>:<token>@<host>/... 형태로 임베드한다.
+// 폐쇄망 Gitea (익명 차단) 에서 사용자 PC 의 GCM/netrc 설정 없이도 clone/fetch/push 가 자동 인증.
 func (s *Server) cloneURL(repoName string) string {
 	base := strings.TrimRight(s.cfg.Git.Base, "/")
 	org := strings.Trim(s.cfg.Git.Org, "/")
+	if s.cfg.Git.Token != "" && s.cfg.Git.User != "" {
+		// 스킴 분리해서 user:token@ 삽입. user/token 의 @ : / 같은 특수문자 url-encode.
+		if idx := strings.Index(base, "://"); idx > 0 {
+			scheme := base[:idx+3]
+			host := base[idx+3:]
+			u := url.QueryEscape(s.cfg.Git.User)
+			t := url.QueryEscape(s.cfg.Git.Token)
+			base = fmt.Sprintf("%s%s:%s@%s", scheme, u, t, host)
+		}
+	}
 	return fmt.Sprintf("%s/%s/%s.git", base, org, repoName)
 }
 
@@ -185,8 +198,13 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(repoName), code); err != nil {
 			return "", err
 		}
-	} else if withFetch {
-		gitCmd(path, "fetch", "origin")
+	} else {
+		// 기존 clone — git.user/token 변경 또는 빈 origin(이전 익명 clone) 케이스 대비
+		// origin URL 을 현재 cloneURL 로 정렬. 변경 없으면 no-op.
+		s.ensureOriginURL(path, code, user)
+		if withFetch {
+			gitCmd(path, "fetch", "origin")
+		}
 	}
 
 	if err := s.checkoutUserBranch(path, branch, withFetch); err != nil {
@@ -220,6 +238,29 @@ func (s *Server) ensureExcluded(path, entry string) {
 	content += entry + "\n"
 	if err := os.WriteFile(excludePath, []byte(content), 0o644); err != nil {
 		log.Printf("ensureExcluded write 실패 (%s): %v", excludePath, err)
+	}
+}
+
+// ensureOriginURL — 기존 clone 의 origin URL 을 현재 launcher.json 설정과 정렬.
+// 초기 clone 시점에 git.user/token 이 없어 익명 URL 로 만들어진 경우, 또는 PAT 가 갱신된
+// 경우 자동으로 origin URL 을 교체한다. 같으면 no-op.
+//
+// 보안: 로그에 token 이 노출되지 않도록 cloneURL 결과는 출력하지 않는다.
+func (s *Server) ensureOriginURL(path, code, user string) {
+	if s.cfg.Git.Token == "" || s.cfg.Git.User == "" {
+		return
+	}
+	current, _ := gitCmd(path, "remote", "get-url", "origin")
+	current = strings.TrimSpace(current)
+	repoName := s.resolveRepoName(code, user)
+	desired := s.cloneURL(repoName)
+	if current == desired {
+		return
+	}
+	if _, err := gitCmd(path, "remote", "set-url", "origin", desired); err != nil {
+		log.Printf("ensureOriginURL set-url 실패 (%s): %v", path, err)
+	} else {
+		log.Printf("ensureOriginURL origin URL 갱신 (%s)", code)
 	}
 }
 
@@ -346,8 +387,11 @@ func (s *Server) checkoutUserBranch(path, branch string, withFetch bool) error {
 		log.Printf("checkoutUserBranch: origin/main 없음 — fetch 시도 (%s)", path)
 		gitCmd(path, "fetch", "origin")
 		if _, err := gitCmd(path, "rev-parse", "--verify", "refs/remotes/origin/main"); err != nil {
-			// fetch 후에도 main 없으면 진짜 빈 Gitea repo. 명확한 에러로 안내.
-			return fmt.Errorf("Gitea 의 main 브랜치가 비어있습니다 — 프로젝트 초기화 필요 (%s)", path)
+			// fetch 후에도 main 없음: 빈 Gitea repo 이거나 (드물게), 인증 실패로 fetch 가
+			// 아무 ref 를 못 받은 경우. 폐쇄망에서는 후자가 압도적으로 흔하므로 그쪽을 우선 안내.
+			return fmt.Errorf("로컬 clone 에 origin/main 이 없음 — fetch 가 실패했거나 권한 부족. "+
+				"launcher.json 의 git.user/git.token 을 확인하고, 이 폴더(%s) 를 지운 뒤 launcher 재시도. "+
+				"(Gitea 측 main 브랜치는 정상일 수 있음 — UI 에서 직접 확인 권장.)", path)
 		}
 	}
 	args := []string{"checkout", "-b", branch, base}

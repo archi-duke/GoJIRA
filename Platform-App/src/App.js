@@ -42,6 +42,9 @@ function App() {
   const [allUsers, setAllUsers] = useState([]);
   const [mapResetCount, setMapResetCount] = useState(0);
   const [sseConnected, setSseConnected] = useState(false);
+  // 에이전트 호출 진행 인디케이터 — null | { title, sub }
+  // launchAgentChat 의 단계별 상태(런처 응답 대기 → spawn 후 새 창 표시 대기) 안내.
+  const [launching, setLaunching] = useState(null);
 
   // SSE 연결 상태 모니터링
   useEffect(() => {
@@ -137,20 +140,39 @@ function App() {
   // 로고/타이틀 클릭 — 활성 프로젝트가 있으면 그 로컬 clone 에서, 없으면 일반 repoRoot 에서 에이전트 spawn.
   // 활성 프로젝트는 GoJIRA-App 이 진입 시 sessionStorage.gojira_project 에 저장 (같은 window 공유).
   // 런처 /chat 이 code 가 오면 EnsureRepo 로 clone 없으면 생성한 뒤 그 디렉토리에서 띄운다.
+  //
+  // 인디케이터 흐름: 클릭 즉시 "에이전트 호출 중..." 표시 → requestChat 응답 후
+  // "에이전트 실행 중..." 으로 메시지 갱신 + 새 터미널 창이 화면에 뜰 때까지 약 2.5초
+  // 추가 유지 (cmd.Start 시점과 OS 의 윈도우 생성 시점 간 지연 흡수). 중복 호출 차단.
   const launchAgentChat = useCallback(async () => {
-    const r = await detectLauncher();
-    if (!r?.ready) {
-      modalAlert('로컬 런처가 감지되지 않았습니다.\n프로젝트 화면의 "로컬 수정" 버튼을 클릭하면 설치 안내가 표시됩니다.');
-      return;
-    }
-    let code = '';
+    if (launching) return;
+    setLaunching({ title: '에이전트 호출 중...', sub: '로컬 런처 응답 대기' });
     try {
-      const proj = JSON.parse(sessionStorage.getItem('gojira_project') || 'null');
-      code = proj?.jiraCodes?.main?.jiraCode || '';
-    } catch {}
-    const res = await requestChat({ code, user, token: r.token });
-    if (!res.ok) modalAlert(res.error || '에이전트 실행에 실패했습니다.');
-  }, [user]);
+      const r = await detectLauncher();
+      if (!r?.ready) {
+        setLaunching(null);
+        modalAlert('로컬 런처가 감지되지 않았습니다.\n프로젝트 화면의 "로컬 수정" 버튼을 클릭하면 설치 안내가 표시됩니다.');
+        return;
+      }
+      let code = '';
+      try {
+        const proj = JSON.parse(sessionStorage.getItem('gojira_project') || 'null');
+        code = proj?.jiraCodes?.main?.jiraCode || '';
+      } catch {}
+      const res = await requestChat({ code, user, token: r.token });
+      if (!res.ok) {
+        setLaunching(null);
+        modalAlert(res.error || '에이전트 실행에 실패했습니다.');
+        return;
+      }
+      // spawn 성공 — 새 터미널이 OS 에 의해 화면에 떠야 사용자가 인지 가능. 그 동안 안내 유지.
+      setLaunching({ title: '에이전트 실행 중...', sub: '새 터미널 창이 곧 표시됩니다' });
+      setTimeout(() => setLaunching(null), 2500);
+    } catch (e) {
+      setLaunching(null);
+      modalAlert('에이전트 호출 오류: ' + (e.message || e));
+    }
+  }, [user, launching]);
 
   // Agent 독립 창(GoJIRA-App :3001)에서 보낸 네비게이션 명령 수신
   useEffect(() => {
@@ -248,6 +270,15 @@ function App() {
       <div className="app-body">{content}</div>
       <NoticePopup user={user} />
       <AlertModal />
+      {launching && (
+        <div className="app-launching-overlay">
+          <div className="app-launching-box">
+            <div className="app-launching-spinner" />
+            <div className="app-launching-title">{launching.title}</div>
+            {launching.sub && <div className="app-launching-sub">{launching.sub}</div>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

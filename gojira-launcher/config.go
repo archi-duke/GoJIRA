@@ -33,9 +33,16 @@ type Backend struct {
 }
 
 // Git 은 clone URL 조립용. <Base>/<Org>/<code>.git
+//
+// User/Token 이 설정되면 clone URL 에 자동 임베드 — http://<user>:<token>@<host>/<org>/<repo>.git
+// → 사용자 PC 의 git credential helper / .netrc 없이도 인증 자동.
+// 폐쇄망 Gitea (익명 차단 + GCM OAuth 차단 환경) 에서 매번 인증 prompt 가 뜨는 문제 해결.
+// 보안: launcher.json 은 사용자 홈에 있고 파일 권한이 OS 제어이므로 본인만 접근 가능.
 type Git struct {
 	Base        string `json:"base"`        // 예: http://gitea-host:3000
 	Org         string `json:"org"`         // 예: gojira
+	User        string `json:"user"`        // Gitea 사용자명 (생략 시 익명 — 폐쇄망 권장: PAT 발급 후 채움)
+	Token       string `json:"token"`       // Gitea PAT (생략 시 익명 — 채워두면 clone/fetch/push 자동 인증)
 	AuthorName  string `json:"authorName"`  // git config user.name (생략 시 요청 user 사용)
 	AuthorEmail string `json:"authorEmail"` // git config user.email (생략 시 <user>@gojira.local)
 }
@@ -58,7 +65,7 @@ func gojiraDir() (string, error) {
 }
 
 // LoadConfig 는 launcher.json 을 읽어 기본값을 채운 Config 를 돌려준다.
-// 파일이 없어도 기본값으로 동작한다(PoC 편의).
+// 파일이 없으면 placeholder 를 생성한 뒤(채워야 할 필드 노출용) 기본값으로 동작한다.
 func LoadConfig() (*Config, error) {
 	dir, err := gojiraDir()
 	if err != nil {
@@ -71,7 +78,15 @@ func LoadConfig() (*Config, error) {
 		if err := json.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("%s 파싱 실패: %w", path, err)
 		}
-	} else if !os.IsNotExist(err) {
+	} else if os.IsNotExist(err) {
+		// 첫 기동 — placeholder 생성해서 사용자에게 채울 필드를 노출.
+		// 실패는 fatal 아님 — 디폴트로 계속 동작.
+		if werr := writePlaceholderConfig(dir, path); werr != nil {
+			fmt.Fprintf(os.Stderr, "launcher.json placeholder 생성 실패 (%s): %v\n", path, werr)
+		} else {
+			fmt.Fprintf(os.Stderr, "launcher.json placeholder 생성: %s — git.user/git.token 채우고 launcher 재시작 필요\n", path)
+		}
+	} else {
 		return nil, fmt.Errorf("%s 읽기 실패: %w", path, err)
 	}
 
@@ -86,6 +101,49 @@ func LoadConfig() (*Config, error) {
 		cfg.Token = tok
 	}
 	return cfg, nil
+}
+
+// writePlaceholderConfig — launcher.json 이 없을 때 사용자에게 채울 필드를 노출하는
+// placeholder 를 생성한다. user/token 은 빈 문자열 → 폐쇄망에서 인증 자동화하려면
+// 사용자가 직접 채워야 함을 명시.
+func writePlaceholderConfig(dir, path string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	content := `{
+  "defaultAgent": "opencode",
+  "repoRoot": "~/GoJIRA-projects",
+  "backend": {
+    "platformApi": "http://<gojira-host>:9000/api/v2",
+    "gojiraApi": "http://<gojira-host>:9001/api/v2"
+  },
+  "port": 5599,
+  "webOrigin": "http://<gojira-app-host>:3001",
+  "git": {
+    "base": "http://<gitea-host>:3300",
+    "org": "gojira",
+    "user": "",
+    "token": "",
+    "authorName": "",
+    "authorEmail": ""
+  }
+}
+`
+	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+// gitAuthSummary — 시작 로그용. user/token 미설정 시 명시 경고.
+func (c *Config) gitAuthSummary() string {
+	hasAuth := c.Git.User != "" && c.Git.Token != ""
+	if !hasAuth {
+		return "git auth=anonymous (WARN: git.user/git.token 미설정 — 폐쇄망 Gitea 에서 매 호출마다 인증 prompt 가 뜰 수 있습니다. " +
+			"launcher.json 의 git.user/git.token 을 채우고 재시작하세요.)"
+	}
+	masked := c.Git.Token
+	if len(masked) > 6 {
+		masked = masked[:6] + "..."
+	}
+	return fmt.Sprintf("git auth=user=%q token=%s", c.Git.User, masked)
 }
 
 func applyDefaults(cfg *Config) {

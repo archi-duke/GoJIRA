@@ -45,7 +45,12 @@
   },
   "port": 5599,
   "webOrigin": "http://<gojira-web-host>:3000",
-  "git": { "base": "http://<gitea-host>:3000", "org": "gojira" }
+  "git": {
+    "base": "http://<gitea-host>:3000",
+    "org": "gojira",
+    "user": "<gitea-username>",      // 폐쇄망 권장 — 자동 인증
+    "token": "<gitea-PAT>"           // user+token 둘 다 채우면 clone URL 에 자동 임베드
+  }
 }
 ```
 
@@ -53,6 +58,16 @@
 - 단, `webOrigin` 미설정 시 모든 브라우저 요청을 거부하고, `git.base` 미설정 시 clone 이 거부된다.
 - **SSO/CLI 토큰은 설정에 넣지 않는다** — `opencode auth login` / `claude` 가 첫 실행 시
   자체 로그인하고 토큰을 로컬 홈에 저장한다.
+
+### `git.user` / `git.token` — 폐쇄망 자동 인증
+
+폐쇄망 Gitea 처럼 익명 접근을 차단하는 환경에서는 `git clone/fetch/push` 마다 인증 prompt 가 뜨고,
+Git Credential Manager 의 OAuth 흐름이 launcher 가 띄운 자식 프로세스의 lifecycle 과 어긋나
+인증을 받지 못한다 — 인증 페이지에서 "성공"이라 떠도 자식 프로세스는 이미 timeout 된 후.
+
+`git.user` + `git.token` 을 채우면 launcher 가 clone URL 에 `http://<user>:<token>@host/...` 형태로
+PAT 를 임베드해 GCM/netrc 없이도 자동 인증. 기존에 익명으로 clone 된 폴더가 있어도
+launcher 가 다음 호출 때 origin URL 을 자동 갱신한다.
 
 ## 빌드 / 실행
 

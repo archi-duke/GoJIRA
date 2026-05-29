@@ -62,6 +62,16 @@ export async function requestChat({ code, user, agent, token }) {
 }
 
 /**
+ * "프리웜" — launcher 가 EnsureRepo(clone + 체크아웃)를 백그라운드로 미리 수행한다.
+ * 과제 생성 직후 호출하면 사용자가 로고를 클릭하는 시점에 EnsureRepo 가 이미 끝나
+ * SpawnAgent 까지 체감 지연이 거의 없다. 즉시 200 응답 ({ status: "started" }) —
+ * 클라이언트는 결과를 기다리지 않고 fire-and-forget.
+ */
+export async function requestPrewarm({ code, user, token }) {
+  return post('/prewarm', { code, user }, token);
+}
+
+/**
  * "열기" — clone 보장 + VS Code 폴더 오픈 (특정 파일/CLI 없이).
  */
 export async function requestOpen({ code, user, token }) {
