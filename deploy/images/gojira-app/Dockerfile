@@ -22,5 +22,10 @@ FROM nginx:alpine
 COPY deploy/images/gojira-app/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/images/gojira-app/entrypoint.sh /docker-entrypoint.d/40-env-js.sh
 COPY --from=builder /src/build /usr/share/nginx/html
-RUN chmod +x /docker-entrypoint.d/40-env-js.sh
+
+# 정적 파일 권한 설정 — nginx 가 읽을 수 있도록 (644: 파일, 755: 디렉토리)
+RUN chmod +x /docker-entrypoint.d/40-env-js.sh && \
+    find /usr/share/nginx/html -type d -exec chmod 755 {} \; && \
+    find /usr/share/nginx/html -type f -exec chmod 644 {} \;
+    
 EXPOSE 3001
