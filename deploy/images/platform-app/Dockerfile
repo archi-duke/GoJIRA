@@ -21,5 +21,10 @@ COPY deploy/images/platform-app/entrypoint.sh /docker-entrypoint.d/40-env-js.sh
 COPY --from=builder /src/build /usr/share/nginx/html
 # 40-env-js.sh 는 nginx:alpine 의 docker-entrypoint.sh 가 자동으로 source/exec 함.
 # (10-listen-on-ipv6-by-default.sh, 20-envsubst-on-templates.sh 와 동일 메커니즘)
-RUN chmod +x /docker-entrypoint.d/40-env-js.sh
+
+# 정적 파일 권한 설정 — nginx 가 읽을 수 있도록 (644: 파일, 755: 디렉토리)
+RUN chmod +x /docker-entrypoint.d/40-env-js.sh && \
+    find /usr/share/nginx/html -type d -exec chmod 755 {} \; && \
+    find /usr/share/nginx/html -type f -exec chmod 644 {} \;
+    
 EXPOSE 3000
