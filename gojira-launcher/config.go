@@ -24,7 +24,19 @@ type Config struct {
 	WebOrigins      []string `json:"webOrigins"`      // 허용할 웹 origin 목록 (Module Federation host + remote 등 다중 origin)
 	Git             Git      `json:"git"`             // clone 대상 Gitea base + org
 	Token           string   `json:"token"`           // 설치 토큰(미설정 시 자동 생성)
-	SkillsSourceDir string   `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink (있으면). agent CLI 가 GoJIRA 스킬 호출 가능하도록.
+	SkillsSourceDir string   `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink. 미설정 시 ~/.gojira/skills 기본값(임베드 스킬 추출 대상).
+	Update          Update   `json:"update"`          // 자동 업데이트 설정(ClickOnce 식 — 기동 시 + 주기 체크).
+}
+
+// Update — 자동 업데이트(자기 교체) 설정.
+//
+// ManifestURL 이 비어있으면 backend.platformApi 호스트에서 /launcher/version.json 을
+// 자동 유추한다(폐쇄망에서도 사내 백엔드가 서빙). CheckOnStart=false 또는 IntervalMinutes=0
+// 이면 해당 트리거를 끈다.
+type Update struct {
+	ManifestURL     string `json:"manifestUrl"`     // 예: http://<gojira-host>:9000/launcher/version.json (생략 시 backend 에서 유추)
+	CheckOnStart    *bool  `json:"checkOnStart"`    // 기동 시 1회 체크 (기본 true)
+	IntervalMinutes int    `json:"intervalMinutes"` // 주기 체크 간격(분). 0 이면 기본 60, 음수면 주기 체크 끔.
 }
 
 type Backend struct {
@@ -126,6 +138,12 @@ func writePlaceholderConfig(dir, path string) error {
     "token": "",
     "authorName": "",
     "authorEmail": ""
+  },
+  "skillsSourceDir": "",
+  "update": {
+    "manifestUrl": "",
+    "checkOnStart": true,
+    "intervalMinutes": 60
   }
 }
 `
@@ -158,8 +176,22 @@ func applyDefaults(cfg *Config) {
 			cfg.RepoRoot = filepath.Join(home, "GoJIRA-projects")
 		}
 	}
+	if cfg.SkillsSourceDir == "" {
+		// 임베드 스킬 추출 기본 위치 — ~/.gojira/skills/.claude 로 풀린다.
+		if dir, err := gojiraDir(); err == nil {
+			cfg.SkillsSourceDir = filepath.Join(dir, "skills")
+		}
+	}
 	cfg.RepoRoot = expandHome(cfg.RepoRoot)
 	cfg.SkillsSourceDir = expandHome(cfg.SkillsSourceDir)
+
+	if cfg.Update.CheckOnStart == nil {
+		def := true
+		cfg.Update.CheckOnStart = &def
+	}
+	if cfg.Update.IntervalMinutes == 0 {
+		cfg.Update.IntervalMinutes = 60
+	}
 }
 
 // expandHome — 경로 선두의 `~` 를 사용자 home 으로 치환한다. Go 의 filepath.Join 은

@@ -115,6 +115,7 @@ func main() {
 
 		// Launcher 바이너리 호스팅 — 웹이 런처 미감지 상태에서 다운로드.
 		r.Get("/launcher/manifest", handlers.LauncherManifestHandler)
+		r.Get("/launcher/version", handlers.LauncherVersionHandler)
 		r.Get("/launcher/download/{os}", handlers.LauncherDownloadHandler)
 
 		// DocRepo — 문서 이력관리 (projectCode 기반)

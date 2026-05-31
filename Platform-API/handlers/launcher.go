@@ -54,6 +54,50 @@ func LauncherDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
+// GET /api/v2/launcher/version — 런처 자동 업데이트(ClickOnce 식) 매니페스트.
+// 런처가 기동 시/주기적으로 호출해 자기 버전과 비교하고, 더 높으면
+// /api/v2/launcher/download/{os} 로 새 바이너리를 받아 교체한다.
+//
+// 응답:
+//
+//	{ "version": "0.2.0",
+//	  "platforms": { "windows": {"sha256": "...", "size": 123, "ready": true}, ... } }
+//
+// version 은 $LAUNCHER_DIST_DIR/version.txt, sha256 은 각 바이너리의 `<file>.sha256` 사이드카에서 읽는다
+// (둘 다 build-launcher.sh 가 생성). version.txt 가 없으면 빈 문자열 → 런처는 업데이트 없음으로 간주.
+func LauncherVersionHandler(w http.ResponseWriter, r *http.Request) {
+	distDir := os.Getenv("LAUNCHER_DIST_DIR")
+	if distDir == "" {
+		distDir = "/app/launcher-dist"
+	}
+	ver := ""
+	if data, err := os.ReadFile(filepath.Join(distDir, "version.txt")); err == nil {
+		ver = strings.TrimSpace(string(data))
+	}
+	type platInfo struct {
+		SHA256 string `json:"sha256"`
+		Size   int64  `json:"size"`
+		Ready  bool   `json:"ready"`
+	}
+	platforms := map[string]platInfo{}
+	for osKey, plat := range launcherPlatforms {
+		path := filepath.Join(distDir, plat.subdir, plat.filename)
+		pi := platInfo{}
+		if info, err := os.Stat(path); err == nil {
+			pi.Ready = true
+			pi.Size = info.Size()
+			if sha, err := os.ReadFile(path + ".sha256"); err == nil {
+				// sha256sum 형식("<hex>  <name>") 또는 hex 단독 모두 허용 — 첫 토큰만.
+				if fields := strings.Fields(string(sha)); len(fields) > 0 {
+					pi.SHA256 = fields[0]
+				}
+			}
+		}
+		platforms[osKey] = pi
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"version": ver, "platforms": platforms})
+}
+
 // GET /api/v2/launcher/manifest — 다운로드 가능한 OS 목록 + 크기.
 // 웹의 설치 모달이 호출해서 어떤 OS 가 실제로 호스팅되어 있는지 표시.
 func LauncherManifestHandler(w http.ResponseWriter, r *http.Request) {

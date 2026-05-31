@@ -7,14 +7,32 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 func main() {
+	// 서브커맨드(install/uninstall/version/update-finalize) 우선 처리.
+	// update-finalize 는 정리 후 데몬으로 계속 진행하므로 shouldExit=false.
+	if runSubcommand(os.Args[1:]) {
+		return
+	}
+
+	// 이전 업데이트 잔여(.old/.new) 정리(베스트에포트).
+	cleanupStaleArtifacts()
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		log.Fatalf("설정 로드 실패: %v", err)
 	}
 	srv := &Server{cfg: cfg}
+
+	// 임베드 스킬을 추출(첫 기동/버전 변경 시만 실제 쓰기). 실패는 비치명적.
+	if err := ExtractSkills(cfg.SkillsSourceDir, version, false); err != nil {
+		log.Printf("스킬 추출 실패(비치명적): %v", err)
+	}
+
+	// 자동 업데이트 — 기동 시 1회 + 주기 체크(백그라운드).
+	srv.startUpdater()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.secure(false, srv.handleHealth))
