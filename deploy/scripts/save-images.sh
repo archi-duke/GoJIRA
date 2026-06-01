@@ -21,8 +21,12 @@ out_dir="$(dirname "$OUT")"
 [[ -d "$out_dir" ]] || die "출력 디렉토리 없음: $out_dir"
 
 # 누락 이미지 사전 점검
+# (mapfile 은 bash 4+ — macOS 기본 bash 3.2 호환 위해 while-read 로 수집)
 missing=()
-mapfile -t IMAGES < <(list_all_images)
+IMAGES=()
+while IFS= read -r img; do
+  [[ -n "$img" ]] && IMAGES+=("$img")
+done < <(list_all_images)
 for img in "${IMAGES[@]}"; do
   if ! docker image inspect "$img" >/dev/null 2>&1; then
     missing+=("$img")

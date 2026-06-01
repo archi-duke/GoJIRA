@@ -8,12 +8,21 @@
 #   - 일반 코드 수정은 폐쇄망에서 docker compose build 만으로 끝
 #
 # 사용:
-#   ./build-cache-update.sh                       # → ./build-cache.tar
+#   ./build-cache-update.sh                       # → ./build-cache.tar (linux/amd64)
 #   ./build-cache-update.sh /tmp/build-cache.tar  # 출력 경로
+#
+# 타깃 플랫폼: 기본 linux/amd64 (사내 Windows Server 등 x86_64). 서비스 이미지가 이
+# 캐시를 FROM 으로 쓰므로, 캐시와 서비스 이미지의 플랫폼이 같아야 한다. Apple Silicon
+# 등 arm64 호스트에서도 amd64 캐시를 만들도록 강제(QEMU). 다른 arch 면
+# DOCKER_DEFAULT_PLATFORM 을 미리 export 하거나 native 로 지정.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUT="${1:-${REPO_ROOT}/build-cache.tar}"
+
+# 서비스 이미지와 동일 플랫폼으로 캐시를 빌드 — 기본 linux/amd64.
+export DOCKER_DEFAULT_PLATFORM="${DOCKER_DEFAULT_PLATFORM:-linux/amd64}"
+echo "[ deploy ] 타깃 플랫폼: ${DOCKER_DEFAULT_PLATFORM} (서비스 이미지와 일치해야 함)"
 
 echo "[ deploy ] build-cache-go 이미지 빌드"
 docker build -f "${REPO_ROOT}/deploy/images/build-cache-go/Dockerfile" \
