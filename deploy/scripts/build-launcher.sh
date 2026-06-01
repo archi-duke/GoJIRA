@@ -26,11 +26,15 @@ DIST_DIR="${DEPLOY_DIR}/launcher-dist"
 GO_IMAGE="golang:1.26-alpine"
 
 # OS 키 → "GOOS GOARCH subdir 파일명"
-declare -A TARGETS=(
-  [windows]="windows amd64 windows-amd64 gojira-launcher.exe"
-  [linux]="linux amd64 linux-amd64 gojira-launcher"
-  [darwin]="darwin arm64 darwin-arm64 gojira-launcher"
-)
+# 연관배열(declare -A) 대신 case — macOS 기본 bash 3.2 호환(연관배열은 bash 4+).
+target_spec() {
+  case "$1" in
+    windows) echo "windows amd64 windows-amd64 gojira-launcher.exe" ;;
+    linux)   echo "linux amd64 linux-amd64 gojira-launcher" ;;
+    darwin)  echo "darwin arm64 darwin-arm64 gojira-launcher" ;;
+    *)       return 1 ;;
+  esac
+}
 
 SELECT=()
 while [[ $# -gt 0 ]]; do
@@ -71,8 +75,7 @@ sha256_of() {
 }
 
 for key in "${SELECT[@]}"; do
-  spec="${TARGETS[$key]:-}"
-  [[ -n "$spec" ]] || die "알 수 없는 OS: $key (windows|linux|darwin)"
+  spec="$(target_spec "$key")" || die "알 수 없는 OS: $key (windows|linux|darwin)"
   read -r goos goarch subdir fname <<<"$spec"
 
   outdir="${DIST_DIR}/${subdir}"
