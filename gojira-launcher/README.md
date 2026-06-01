@@ -80,12 +80,21 @@ launcher 가 다음 호출 때 origin URL 을 자동 갱신한다.
 | `gojira-launcher uninstall` | 자동시작 해제 + 설치 exe 정리(설정/스킬은 보존). |
 | `gojira-launcher version` | 버전 출력. |
 
-### 스킬 배포 (`.claude/skills`)
+### 에이전트 자산 배포 (스킬 + opencode 설정)
 
-GoJIRA 스킬 트리는 **exe 에 embed** 된다(`//go:embed all:assets`, 빌드 시 레포 루트
-`.claude` 를 `assets/.claude` 로 동기화). 첫 기동/버전 변경 시 `skillsSourceDir`
-(기본 `~/.gojira/skills`) 아래로 추출되고, 각 프로젝트 clone 에 `.claude` 로 symlink/junction
-되어 spawn 된 `opencode`/`claude` 가 그대로 호출한다. → **폐쇄망에 exe 단일 파일만 전달하면 스킬까지 배포된다.**
+다음 셋을 **exe 에 embed** 한다(`//go:embed all:assets`, 빌드 시 레포 루트에서 동기화):
+
+| 엔트리 | 용도 | 읽는 CLI |
+|---|---|---|
+| `.claude/skills` | GoJIRA 스킬(SKILL.md) | claude, opencode |
+| `opencode.json` | opencode 모델·권한 설정 | opencode |
+| `.opencode/agents/gojira.md` | opencode `primary` 에이전트 정의 | opencode |
+
+첫 기동/버전 변경 시 `skillsSourceDir`(기본 `~/.gojira/skills`) 아래로 추출되고, 각 프로젝트
+clone 에 symlink/junction(단일 파일 `opencode.json` 은 복사)으로 연결된다. 에이전트는
+cwd=clone 에서 spawn 되므로(설계 §5-2) 두 CLI 모두 스킬+설정을 그대로 인식한다.
+사용자가 clone 에 직접 둔 동일 이름 파일이 있으면 건드리지 않는다.
+→ **폐쇄망에 exe 단일 파일만 전달하면 스킬+에이전트 설정까지 배포된다.**
 
 ### 자동 업데이트 (ClickOnce 식)
 

@@ -51,12 +51,16 @@ VERSION="$(grep -E '^const version = ' "${LAUNCHER_SRC}/handlers.go" | sed -E 's
 [[ -n "$VERSION" ]] || die "handlers.go 에서 const version 을 찾지 못함"
 log "런처 버전 v${VERSION}"
 
-# 스킬 embed 준비 — 레포 루트 .claude 를 assets/.claude 로 동기화(단일 진실 = 루트).
-log "스킬 동기화: .claude → gojira-launcher/assets/.claude"
-rm -rf "${LAUNCHER_SRC}/assets/.claude"
+# 에이전트 자산 embed 준비 — 레포 루트의 .claude + opencode.json + .opencode 를
+# assets/ 로 동기화(단일 진실 = 루트). claude 는 .claude/skills, opencode 는 추가로
+# opencode.json(모델/권한) + .opencode/agents 를 cwd=clone 에서 읽는다.
+log "에이전트 자산 동기화 → gojira-launcher/assets/"
+rm -rf "${LAUNCHER_SRC}/assets/.claude" "${LAUNCHER_SRC}/assets/.opencode" "${LAUNCHER_SRC}/assets/opencode.json"
 cp -r "${ROOT_DIR}/.claude" "${LAUNCHER_SRC}/assets/.claude"
-SKILL_FILES="$(find "${LAUNCHER_SRC}/assets/.claude" -type f | wc -l | tr -d ' ')"
-log "  임베드 대상 ${SKILL_FILES}개 파일"
+[[ -e "${ROOT_DIR}/opencode.json" ]] && cp "${ROOT_DIR}/opencode.json" "${LAUNCHER_SRC}/assets/opencode.json" || warn "  opencode.json 없음 — 스킵"
+[[ -d "${ROOT_DIR}/.opencode" ]] && cp -r "${ROOT_DIR}/.opencode" "${LAUNCHER_SRC}/assets/.opencode" || warn "  .opencode 없음 — 스킵"
+ASSET_FILES="$(find "${LAUNCHER_SRC}/assets" -type f ! -name README.txt | wc -l | tr -d ' ')"
+log "  임베드 대상 ${ASSET_FILES}개 파일 (.claude + opencode.json + .opencode)"
 
 mkdir -p "$DIST_DIR"
 

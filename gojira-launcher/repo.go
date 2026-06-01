@@ -210,8 +210,11 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 	if err := s.checkoutUserBranch(path, branch, withFetch); err != nil {
 		return "", err
 	}
-	s.ensureSkillsSymlink(path)
-	s.ensureExcluded(path, ".claude") // /sync 의 git add -A 가 .claude 심볼릭링크를 staging 하지 않도록 local-only ignore.
+	s.ensureAgentAssets(path)
+	// /sync 의 git add -A 가 provision 링크(.claude/.opencode/opencode.json)를 staging 하지 않도록 local-only ignore.
+	for _, entry := range agentAssetEntries {
+		s.ensureExcluded(path, entry)
+	}
 	s.ensureGitIdentity(path, user)
 	return path, nil
 }
@@ -288,45 +291,57 @@ func (s *Server) ensureGitIdentity(path, user string) {
 	}
 }
 
-// ensureSkillsSymlink — skillsSourceDir 가 설정돼 있고 그 안에 .claude 가 있으면,
-// target/.claude 가 마스터 레포의 .claude 를 참조하도록 만든다 (이미 있으면 노옵).
-// 실패는 비치명적 — 로그만 남긴다. 목적: 런처가 spawn 하는 opencode/claude 가
-// 마스터 레포의 GoJIRA 스킬을 그대로 호출하도록.
+// ensureAgentAssets — skillsSourceDir 의 에이전트 자산(.claude/.opencode/opencode.json)을
+// 각 clone(target) 으로 연결한다 (이미 있으면 노옵). 실패는 비치명적 — 로그만.
+// 목적: 런처가 spawn 하는 opencode/claude 가 cwd=clone 에서 스킬+설정을 그대로 인식하도록.
 //
-// OS별 전략 (사용자가 추가한 .claude 가 있으면 어느 경우든 손대지 않음):
+// OS별 전략 (사용자가 둔 동일 이름 파일이 있으면 어느 경우든 손대지 않음):
 //   - Linux/macOS: os.Symlink (권한 불요)
-//   - Windows: 1) symlink (Dev Mode 필요), 2) mklink /J 디렉토리 junction (권한 불요/동일 볼륨),
-//              3) .claude 트리 복사 (cross-volume 마지막 수단 — 스킬 수정 시 stale)
-func (s *Server) ensureSkillsSymlink(target string) {
+//   - Windows(디렉터리): 1) symlink (Dev Mode 필요) 2) mklink /J junction(권한 불요/동일 볼륨) 3) 트리 복사
+//   - Windows(단일 파일 opencode.json): symlink → 복사 (junction 은 디렉터리 전용)
+func (s *Server) ensureAgentAssets(target string) {
 	src := s.cfg.SkillsSourceDir
 	if src == "" {
 		return
 	}
-	srcClaude := filepath.Join(src, ".claude")
-	if _, err := os.Stat(srcClaude); err != nil {
-		return
+	for _, entry := range agentAssetEntries {
+		srcPath := filepath.Join(src, entry)
+		fi, err := os.Stat(srcPath)
+		if err != nil {
+			continue // 원본에 없으면 스킵 (예: 개발 빌드).
+		}
+		dst := filepath.Join(target, entry)
+		if _, err := os.Lstat(dst); err == nil {
+			continue // 이미 있음 — 사용자 파일이든 이전 링크든 건드리지 않는다.
+		}
+		linkOrCopy(srcPath, dst, fi.IsDir())
 	}
-	dst := filepath.Join(target, ".claude")
-	if _, err := os.Lstat(dst); err == nil {
-		return // 이미 있음 — 사용자 커밋이든 이전 symlink 든 건드리지 않는다.
-	}
+}
 
+// linkOrCopy — src 를 dst 로 링크(불가 시 복사). isDir 에 따라 junction/트리복사 vs 단일파일 복사.
+func linkOrCopy(src, dst string, isDir bool) {
 	if runtime.GOOS != "windows" {
-		if err := os.Symlink(srcClaude, dst); err != nil {
-			log.Printf("ensureSkillsSymlink symlink 실패 (%s → %s): %v", srcClaude, dst, err)
+		if err := os.Symlink(src, dst); err != nil {
+			log.Printf("ensureAgentAssets symlink 실패 (%s → %s): %v", src, dst, err)
 		}
 		return
 	}
-
-	// Windows: 단계적 폴백.
-	if err := os.Symlink(srcClaude, dst); err == nil {
+	// Windows 단계적 폴백.
+	if err := os.Symlink(src, dst); err == nil {
 		return
 	}
-	if err := exec.Command("cmd", "/c", "mklink", "/J", dst, srcClaude).Run(); err == nil {
+	if isDir {
+		if err := exec.Command("cmd", "/c", "mklink", "/J", dst, src).Run(); err == nil {
+			return
+		}
+		if err := copyTree(src, dst); err != nil {
+			log.Printf("ensureAgentAssets Windows fallback(copy dir) 실패 (%s → %s): %v — Dev Mode 권장", src, dst, err)
+		}
 		return
 	}
-	if err := copyTree(srcClaude, dst); err != nil {
-		log.Printf("ensureSkillsSymlink Windows fallback (copy) 실패 (%s → %s): %v — Dev Mode 활성화를 권장합니다", srcClaude, dst, err)
+	// 단일 파일 — junction 불가, 복사.
+	if err := copyFile(src, dst, 0o644); err != nil {
+		log.Printf("ensureAgentAssets Windows fallback(copy file) 실패 (%s → %s): %v", src, dst, err)
 	}
 }
 
