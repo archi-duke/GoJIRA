@@ -69,20 +69,60 @@ Git Credential Manager 의 OAuth 흐름이 launcher 가 띄운 자식 프로세�
 PAT 를 임베드해 GCM/netrc 없이도 자동 인증. 기존에 익명으로 clone 된 폴더가 있어도
 launcher 가 다음 호출 때 origin URL 을 자동 갱신한다.
 
+## 서브커맨드 (단일 exe)
+
+배포 exe 하나가 데몬 실행 + 설치/제거 + 자동 업데이트를 모두 처리한다.
+
+| 명령 | 동작 |
+|---|---|
+| `gojira-launcher` | 데몬 실행(기본). 기동 시 임베드 스킬 추출 + 자동 업데이트 체크. |
+| `gojira-launcher install` | 자기 자신을 설치 위치로 복사 → 스킬 배포 → `launcher.json`/토큰 생성 → 자동시작 등록(Windows HKCU Run) → 데몬 기동. **최초 1회만 실행하면 끝.** |
+| `gojira-launcher uninstall` | 자동시작 해제 + 설치 exe 정리(설정/스킬은 보존). |
+| `gojira-launcher version` | 버전 출력. |
+
+### 에이전트 자산 배포 (스킬 + opencode 설정)
+
+다음 셋을 **exe 에 embed** 한다(`//go:embed all:assets`, 빌드 시 레포 루트에서 동기화):
+
+| 엔트리 | 용도 | 읽는 CLI |
+|---|---|---|
+| `.claude/skills` | GoJIRA 스킬(SKILL.md) | claude, opencode |
+| `opencode.json` | opencode 모델·권한 설정 | opencode |
+| `.opencode/agents/gojira.md` | opencode `primary` 에이전트 정의 | opencode |
+
+첫 기동/버전 변경 시 `skillsSourceDir`(기본 `~/.gojira/skills`) 아래로 추출되고, 각 프로젝트
+clone 에 symlink/junction(단일 파일 `opencode.json` 은 복사)으로 연결된다. 에이전트는
+cwd=clone 에서 spawn 되므로(설계 §5-2) 두 CLI 모두 스킬+설정을 그대로 인식한다.
+사용자가 clone 에 직접 둔 동일 이름 파일이 있으면 건드리지 않는다.
+→ **폐쇄망에 exe 단일 파일만 전달하면 스킬+에이전트 설정까지 배포된다.**
+
+### 자동 업데이트 (ClickOnce 식)
+
+기동 시 1회 + `update.intervalMinutes` 주기로 백엔드 매니페스트
+(`<platformApi>/launcher/version`)를 확인한다. 임베드된 자기 버전보다 높으면 새 exe 를
+`<platformApi>/launcher/download/{os}` 에서 받아 **sha256 검증** 후 staged swap(현재 exe →
+`.old`, 새 exe 배치) 하고 재기동한다. 스킬은 exe 에 임베드돼 있어 함께 갱신된다.
+
+- 설정: `update.{manifestUrl, checkOnStart, intervalMinutes}`. `manifestUrl` 생략 시
+  `backend.platformApi` 에서 유추. `intervalMinutes` 음수면 주기 체크 끔.
+- 폐쇄망 OK — 매니페스트/바이너리를 사내 백엔드(platform-api)가 서빙(`deploy/launcher-dist`
+  bind mount). 배포물은 `deploy/scripts/build-launcher.sh` 가 OS별 빌드 + `version.txt` +
+  `.sha256` 까지 생성.
+
 ## 빌드 / 실행
 
-로컬에 Go 가 없으면 도커 이미지로 빌드한다(레포 표준 `golang:1.26-alpine`).
+배포용 전체 빌드는 외부망에서 한 번:
 
 ```bash
-# 현재 OS 용
-docker run --rm -v "$PWD":/src -w /src -e CGO_ENABLED=0 golang:1.26-alpine \
+deploy/scripts/build-launcher.sh           # windows/linux/darwin 전부 → deploy/launcher-dist/
+deploy/scripts/build-launcher.sh --os windows
+```
+
+개발 중 단건 빌드(스킬 미동기화 — 임베드 없이도 컴파일됨):
+
+```bash
+docker run --rm -v "$PWD":/src -w /src -e CGO_ENABLED=0 -e GOWORK=off golang:1.26-alpine \
   go build -o gojira-launcher .
-
-# Windows exe 크로스컴파일 (§2.5 배포용)
-docker run --rm -v "$PWD":/src -w /src \
-  -e GOOS=windows -e GOARCH=amd64 -e CGO_ENABLED=0 golang:1.26-alpine \
-  go build -o gojira-launcher.exe .
-
 ./gojira-launcher        # 127.0.0.1:5599 에서 listen
 ```
 

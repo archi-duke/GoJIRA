@@ -448,9 +448,9 @@ func listLocalTree(repoPath string) ([]map[string]any, error) {
 		if rel == "." {
 			return nil
 		}
-		// 최상위 .git / .claude 컷오프 — 하위 traversal 도 스킵.
+		// 최상위 .git / 에이전트 자산(.claude/.opencode/opencode.json) 컷오프 — 하위 traversal 도 스킵.
 		top := strings.SplitN(filepath.ToSlash(rel), "/", 2)[0]
-		if top == ".git" || top == ".claude" {
+		if top == ".git" || isAgentAssetTop(top) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}

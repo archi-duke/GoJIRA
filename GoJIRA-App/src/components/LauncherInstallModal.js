@@ -17,23 +17,24 @@ function detectOS() {
 function installInstructions(osKey) {
   if (osKey === 'windows') {
     return [
-      '내려받은 gojira-launcher.exe 를 PATH 가 닿는 폴더 (예: %USERPROFILE%\\.local\\bin) 에 둡니다.',
-      '~/.gojira/launcher.json 설정 파일을 작성합니다 (관리자에게 양식 요청).',
-      '바이너리를 실행하면 127.0.0.1:5599 에서 동작합니다.',
+      '내려받은 gojira-launcher.exe 를 적당한 폴더에 둡니다.',
+      '명령 프롬프트에서 gojira-launcher.exe install 을 1회 실행합니다 — 스킬 배포 + 설정파일 생성 + 로그인 시 자동시작 등록 + 데몬 기동(127.0.0.1:5599)까지 자동으로 수행합니다.',
+      '~/.gojira/launcher.json 의 git.user / git.token (폐쇄망 인증)을 채우고 런처를 재시작합니다 (양식은 관리자에게 요청).',
+      '이후 런처는 기동할 때마다 최신 버전을 확인하고 자동 업데이트합니다.',
     ];
   }
   if (osKey === 'darwin') {
     return [
-      'chmod +x gojira-launcher && mv gojira-launcher ~/.local/bin/',
-      '~/.gojira/launcher.json 작성 (관리자에게 양식 요청)',
-      './gojira-launcher & 또는 launchd 에 등록 → 127.0.0.1:5599',
-      'Gatekeeper: xattr -dr com.apple.quarantine ~/.local/bin/gojira-launcher (서명 전)',
+      'chmod +x gojira-launcher',
+      'Gatekeeper: xattr -dr com.apple.quarantine gojira-launcher (서명 전)',
+      './gojira-launcher install — 스킬 배포 + 설정파일 생성 + 로그인 항목 등록 + 데몬 기동(127.0.0.1:5599)까지 자동.',
+      '~/.gojira/launcher.json 의 git.user / git.token 을 채우고 재시작 (양식은 관리자에게 요청). 이후 자동 업데이트.',
     ];
   }
   return [
-    'chmod +x gojira-launcher && mv gojira-launcher ~/.local/bin/',
-    '~/.gojira/launcher.json 작성 (관리자에게 양식 요청)',
-    'nohup ~/.local/bin/gojira-launcher > ~/.gojira/logs/launcher.log 2>&1 & → 127.0.0.1:5599',
+    'chmod +x gojira-launcher',
+    './gojira-launcher install — 스킬 배포 + 설정파일 생성 + 자동시작(.desktop) 등록 + 데몬 기동(127.0.0.1:5599)까지 자동.',
+    '~/.gojira/launcher.json 의 git.user / git.token 을 채우고 재시작 (양식은 관리자에게 요청). 이후 자동 업데이트.',
   ];
 }
 

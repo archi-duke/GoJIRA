@@ -51,3 +51,17 @@ package-lock.json
 
 # 미리 빌드된 런처 바이너리 (호스팅 dist) — 거대한 산출물, 커밋 X
 deploy/launcher-dist/*/
+deploy/launcher-dist/version.txt
+
+# launcher embed: 에이전트 자산(.claude/.opencode/opencode.json)은 빌드시 복사되며 레포 루트가 단일 진실
+gojira-launcher/assets/.claude/
+gojira-launcher/assets/.opencode/
+gojira-launcher/assets/opencode.json
+
+# launcher 런타임/빌드 산출물
+gojira-launcher/*.log
+gojira-launcher/dist-out/
+gojira-launcher/out-*
+
+# 폐쇄망 배포 tar 산출물 (거대 — 커밋 X)
+*.tar
