@@ -62,25 +62,26 @@ docker load -i build-cache.tar
 
 코드 변경분은 평소처럼 git push 로.
 
-### launcher 바이너리 변경 시
+### launcher (로컬 런처) 변경 시
 
-`gojira-launcher` 도 Go 모듈이라 같은 캐시 사용. cross-compile 은 별도 작업:
+런처는 **`launcher-dist` 이미지**로 빌드·배포된다 — 별도 cross-compile 손작업이 필요 없다.
+`docker compose build` 가 OS 3종(windows/linux/darwin) cross-compile + 에이전트 자산 embed +
+`version.txt`/`.sha256` 생성까지 한 번에 수행하고, 기동 시 init job 이 공유 볼륨을 채우면
+platform-api 가 `/api/v2/launcher/download/{os}` · `/launcher/version` 으로 서빙한다.
 
 ```bash
-# 사내망 빌드 서버
-for triplet in "windows-amd64:.exe" "linux-amd64:" "darwin-arm64:"; do
-  OSARCH=${triplet%%:*}; EXT=${triplet##*:}
-  GOOS=${OSARCH%-*}; GOARCH=${OSARCH#*-}
-  docker run --rm -v $PWD:/repo -w /repo/gojira-launcher \
-    -e GOOS=$GOOS -e GOARCH=$GOARCH -e CGO_ENABLED=0 -e GOWORK=off \
-    gojira/build-cache-go:latest \
-    go build -trimpath -ldflags "-s -w" \
-    -o /repo/deploy/launcher-dist/${OSARCH}/gojira-launcher${EXT} .
-done
-
-# 결과물은 platform-api 컨테이너가 volume mount 로 그대로 서빙
-# (사용자가 GoJIRA-App 에서 다운로드 가능)
+# 사내망 빌드 서버 — 런처 소스(gojira-launcher/) 또는 embed 자산(.claude/skills,
+# opencode.json, .opencode/agents) 또는 버전(handlers.go const version) 변경 시
+git pull
+docker compose -f deploy/docker-compose.yml build launcher-dist
+docker compose -f deploy/docker-compose.yml up -d launcher-dist platform-api
 ```
+
+→ init job 이 재실행되어 공유 볼륨을 새 바이너리로 덮어쓴다. platform-api 본체 재빌드 불필요.
+자동 업데이트(`/launcher/version`)도 즉시 새 버전을 인식한다.
+
+> 런처 바이너리는 **클라이언트 OS용**(서버 arch 와 무관)이므로, 빌드 호스트가 arm64 든 amd64 든
+> 동일한 산출물이 나온다. `deploy/launcher-dist/` 폴더 수동 반입은 더 이상 필요 없다.
 
 ## 어떤 변경이 어떤 경로?
 
