@@ -55,16 +55,30 @@ VERSION="$(grep -E '^const version = ' "${LAUNCHER_SRC}/handlers.go" | sed -E 's
 [[ -n "$VERSION" ]] || die "handlers.go 에서 const version 을 찾지 못함"
 log "런처 버전 v${VERSION}"
 
-# 에이전트 자산 embed 준비 — 레포 루트의 .claude + opencode.json + .opencode 를
-# assets/ 로 동기화(단일 진실 = 루트). claude 는 .claude/skills, opencode 는 추가로
-# opencode.json(모델/권한) + .opencode/agents 를 cwd=clone 에서 읽는다.
-log "에이전트 자산 동기화 → gojira-launcher/assets/"
+# 에이전트 자산 embed 준비 — 필요한 것만 골라 assets/ 로 동기화(단일 진실 = 루트).
+# ⚠️ .claude / .opencode 디렉터리 전체를 복사하면 안 된다 — 로컬 런타임 상태
+#    (.claude/projects, .opencode/node_modules 수만개, settings.local.json, 자격증명 등)가
+#    exe 에 박혀 수십 MB 로 부풀고 시크릿 유출 위험. 에이전트가 실제 읽는 것만 embed:
+#      .claude/skills/ · opencode.json · .opencode/agents/
+log "에이전트 자산 동기화 → gojira-launcher/assets/ (skills + opencode.json + agents 만)"
 rm -rf "${LAUNCHER_SRC}/assets/.claude" "${LAUNCHER_SRC}/assets/.opencode" "${LAUNCHER_SRC}/assets/opencode.json"
-cp -r "${ROOT_DIR}/.claude" "${LAUNCHER_SRC}/assets/.claude"
-[[ -e "${ROOT_DIR}/opencode.json" ]] && cp "${ROOT_DIR}/opencode.json" "${LAUNCHER_SRC}/assets/opencode.json" || warn "  opencode.json 없음 — 스킵"
-[[ -d "${ROOT_DIR}/.opencode" ]] && cp -r "${ROOT_DIR}/.opencode" "${LAUNCHER_SRC}/assets/.opencode" || warn "  .opencode 없음 — 스킵"
+mkdir -p "${LAUNCHER_SRC}/assets/.claude"
+cp -r "${ROOT_DIR}/.claude/skills" "${LAUNCHER_SRC}/assets/.claude/skills"
+if [[ -e "${ROOT_DIR}/opencode.json" ]]; then
+  cp "${ROOT_DIR}/opencode.json" "${LAUNCHER_SRC}/assets/opencode.json"
+else
+  warn "  opencode.json 없음 — 스킵"
+fi
+if [[ -d "${ROOT_DIR}/.opencode/agents" ]]; then
+  mkdir -p "${LAUNCHER_SRC}/assets/.opencode"
+  cp -r "${ROOT_DIR}/.opencode/agents" "${LAUNCHER_SRC}/assets/.opencode/agents"
+else
+  warn "  .opencode/agents 없음 — 스킵"
+fi
+# 혹시 모를 OS 메타파일 제거(.DS_Store 등) — embed 청결 유지.
+find "${LAUNCHER_SRC}/assets" -name '.DS_Store' -delete 2>/dev/null || true
 ASSET_FILES="$(find "${LAUNCHER_SRC}/assets" -type f ! -name README.txt | wc -l | tr -d ' ')"
-log "  임베드 대상 ${ASSET_FILES}개 파일 (.claude + opencode.json + .opencode)"
+log "  임베드 대상 ${ASSET_FILES}개 파일 (.claude/skills + opencode.json + .opencode/agents)"
 
 mkdir -p "$DIST_DIR"
 
