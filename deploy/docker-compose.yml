@@ -51,6 +51,19 @@ services:
     depends_on:
       - plantuml-server
 
+  # ── 런처 배포 이미지 (init job) ───────────────────────────────────────────
+  # gojira-launcher 를 OS 3종으로 cross-compile + embed 해 공유 볼륨(launcher-dist)에
+  # 채우고 종료한다. platform-api 가 그 볼륨을 read-only 로 서빙(/api/v2/launcher/*).
+  # 소스 복사 빌드 모델에 통합 — `docker compose build` 가 런처까지 빌드, 별도 손작업 없음.
+  launcher-dist:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/launcher-dist/Dockerfile
+    image: gojira/launcher-dist:${IMAGE_TAG:-latest}
+    restart: "no"
+    volumes:
+      - launcher-dist:/shared
+
   # ── 백엔드: Platform-API ──────────────────────────────────────────────────
   platform-api:
     build:
@@ -86,8 +99,13 @@ services:
       - ${GOJIRA_REPOS_DIR:-../repos}:/data/repos
       # 사내 LLM swap 위해 llm.json 외부 주입 (없으면 이미지에 내장된 default 사용)
       - ./config/llm.json:/app/config/llm.json:ro
-      # 미리 빌드된 런처 바이너리 (OS별) — /api/v2/launcher/download/{os} 가 stream.
-      - ./launcher-dist:/app/launcher-dist:ro
+      # 런처 바이너리(OS별) — launcher-dist init job 이 채운 공유 볼륨을 read-only 서빙.
+      # /api/v2/launcher/download/{os} · /launcher/version 이 여기서 stream.
+      - launcher-dist:/app/launcher-dist:ro
+    depends_on:
+      # 런처 산출물이 볼륨에 채워진 뒤 기동 (init job 완료 대기).
+      launcher-dist:
+        condition: service_completed_successfully
 
   # ── 백엔드: GoJIRA-API ────────────────────────────────────────────────────
   gojira-api:
@@ -144,5 +162,10 @@ services:
     environment:
       <<: *react-env
 
-# named volume 은 더 이상 사용하지 않음 — ${GOJIRA_REPOS_DIR} 호스트 bind mount 로 전환.
-# 기존 platform-repos volume 데이터가 있다면 호스트 디렉토리로 미리 이전 후 `docker volume rm deploy_platform-repos`.
+# 볼륨
+# - launcher-dist: launcher-dist init job 이 채우고 platform-api 가 read-only 로 서빙.
+#   매 `up -d` 마다 init 이 재실행되어 최신 런처 산출물로 덮어쓴다.
+# - repos 는 named volume 대신 ${GOJIRA_REPOS_DIR} 호스트 bind mount 사용(위 platform-api).
+#   기존 platform-repos volume 데이터가 있다면 호스트 디렉토리로 이전 후 `docker volume rm deploy_platform-repos`.
+volumes:
+  launcher-dist:

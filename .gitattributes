@@ -2,3 +2,7 @@
 # bash 가 `\r` 를 토큰에 포함시켜 깨진다(특히 폐쇄망 빌드/배포 스크립트).
 # Windows 의 core.autocrlf=true 가 CRLF 를 재유입시키는 것을 차단한다.
 *.sh text eol=lf
+
+# Dockerfile 도 LF 고정 — CRLF 면 `RUN ... \` 연속행이 깨질 수 있다.
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
