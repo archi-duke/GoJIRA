@@ -4,32 +4,65 @@
 의존성 캐시 이미지 2종 (`gojira/build-cache-go`, `gojira/build-cache-node`) 만 한 번 적재해두면
 코드 변경 → 빌드 → 배포가 사내망 안에서 1-3분 안에 끝납니다.
 
-## 사전 조건 (이미 충족된 것)
+## 사전 조건
 
-- [x] Docker (폐쇄망 빌드 서버)
-- [x] 베이스 이미지 6종 적재 (`gojira-images.tar` 의 첫 빌드에 포함)
-- [x] 소스 코드 (사내 Gitea 또는 tar)
+| 항목 | 비고 |
+|---|---|
+| Docker (compose v2 포함) | 사내망 빌드 서버 |
+| 소스 코드 | 사내 Gitea clone 또는 tar |
+| **베이스 이미지 6종** | 첫 셋업 시 외부망에서 반입 (`alpine:3.20` 등) |
+| **build-cache 이미지 2종** | 첫 셋업 시 외부망에서 반입 (`gojira/build-cache-{go,node}`) |
+| (선택) `deploy/.env` | 사내 인프라값 반영 (Mongo/Gitea 자격, host IP) |
 
-## 추가로 필요한 것 (한 번만)
+## 최초 셋업 (한 번만)
 
-### 1) 외부망에서 의존성 캐시 이미지 생성
-
-```bash
-# 외부망 (인터넷 가능한 PC) — GoJIRA 소스 위에서
-bash deploy/scripts/build-cache-update.sh
-# → build-cache.tar (약 600~800 MB) 생성
-```
-
-### 2) 폐쇄망에 적재
+### 1) 외부망 PC 에서 베이스 이미지 + build-cache 한 번에 패키징
 
 ```bash
-# 사내망 빌드 서버
-docker load -i build-cache.tar
-# → Loaded image: gojira/build-cache-go:latest
-# → Loaded image: gojira/build-cache-node:latest
+# 외부망 PC — GoJIRA 소스 clone 후
+xargs -n1 docker pull < <(grep -v '^gojira/\|^#\|^$' deploy/scripts/images.txt)
+bash deploy/scripts/build-cache-update.sh    # → gojira/build-cache-{go,node}:latest 생성
+
+docker save \
+  plantuml/plantuml-server:jetty \
+  nginx:alpine \
+  python:3.12-slim \
+  alpine:3.20 \
+  golang:1.26-alpine \
+  node:lts-alpine \
+  gojira/build-cache-go:latest \
+  gojira/build-cache-node:latest \
+  -o base-and-cache.tar
+# 약 1.5 GB
 ```
 
-이게 끝. 이후 폐쇄망에서 외부 호출 없이 모든 서비스를 빌드할 수 있습니다.
+> **호스트 arch 주의**: 사내 빌드 서버가 amd64 면 외부망 PC 도 amd64 에서 pull/build 하거나
+> `DOCKER_DEFAULT_PLATFORM=linux/amd64` 명시. arm64 캐시를 amd64 서버에 반입하면
+> `DeadlineExceeded` (registry 재조회) 또는 platform mismatch 로 빌드 실패.
+
+### 2) 폐쇄망 빌드 서버에 적재
+
+```bash
+docker load -i base-and-cache.tar
+docker images | grep -E "alpine|node|golang|python|nginx|plantuml|build-cache"
+# → 8 줄 (베이스 6종 + 캐시 2종) 확인
+```
+
+### 3) vendor 누락 파일 1회 보완 (해당 시)
+
+`deploy/vendor/pumlex/package.json` 3개가 upstream 커밋에서 누락된 경우가 있음
+(.gitignore 됨, build 컨텍스트엔 필요). 첫 빌드 실패 시:
+
+```bash
+SRC=/path/to/pumlex   # 원본 pumlex 레포 (외부망 PC 에서)
+VEN=deploy/vendor/pumlex
+cp "$SRC/package.json"                                 "$VEN/"
+cp "$SRC/packages/pex-core/package.json"               "$VEN/packages/pex-core/"
+cp "$SRC/packages/pex-server/package.json"             "$VEN/packages/pex-server/"
+# 3 파일을 사내 빌드 서버로 반입(USB/사내 스토리지). 이후 재발 없음.
+```
+
+이로써 폐쇄망에서 외부 호출 0회로 모든 서비스(런처 포함)를 빌드할 수 있습니다.
 
 ## 운영 사이클
 
@@ -83,6 +116,25 @@ docker compose -f deploy/docker-compose.yml up -d launcher-dist platform-api
 > 런처 바이너리는 **클라이언트 OS용**(서버 arch 와 무관)이므로, 빌드 호스트가 arm64 든 amd64 든
 > 동일한 산출물이 나온다. `deploy/launcher-dist/` 폴더 수동 반입은 더 이상 필요 없다.
 
+#### 런처 배포 이미지 빌드 위치 — 권장 **"platform-api 가 도는 그 서버"**
+
+PR #40 이후 `launcher-dist` 가 compose 에 통합돼 같은 `docker compose build` 한 번으로
+끝난다. **빌드 위치를 platform-api 와 분리하지 말 것**:
+
+| 빌드 위치 | 권장도 | 이유 |
+|---|---|---|
+| 사내 배포 서버 (= platform-api 호스트) | ✅ **권장** | 단일 진실. 산출물 ↔ 서빙 위치 동일. compose 한 줄로 처리 |
+| 별도 빌드 전용 머신 | △ | sha256/embed drift 위험. 산출물 tar 반입 손작업 발생 |
+| 개발자 노트북 (Apple Silicon) | ❌ | embed 한 `.claude/skills` 가 사내 git 과 어긋날 수 있고, build-cache arch 도 mismatch 가능 |
+
+런처만 hotfix 시:
+```bash
+docker compose build launcher-dist && docker compose up -d
+```
+
+`handlers.go` 의 `const version` 을 bump 한 경우만 클라이언트가 자동 업데이트 받는다 —
+스킬/embed 만 바뀌었는데 version 그대로면 manifest 가 같아 자동 업데이트 트리거 안 됨.
+
 ## 어떤 변경이 어떤 경로?
 
 | 변경 유형 | 누가 | 어디서 | 외부망 필요? |
@@ -106,8 +158,20 @@ grep -E "^FROM golang|^FROM node" deploy/images/*/Dockerfile
 ## 함정
 
 1. **build-cache 이미지가 사내망에 없으면 build 실패** — 처음 셋업 시 `docker load -i build-cache.tar` 누락 확인.
-2. **go.mod / package-lock.json 변경 후 캐시 갱신 안 하면** `go build` 또는 `npm run build` 가 외부 fetch 시도 → 실패. 의존성 추가 후 반드시 build-cache 갱신.
-3. **사내 Gitea 의 push 권한** — 빌드 서버가 git pull 할 수 있어야 함. 또는 운영자가 수동으로 git pull 후 build 트리거.
+2. **베이스 이미지(`alpine:3.20` 등)도 없으면 build 실패** — `target X: failed to solve: DeadlineExceeded: alpine:3.20`. 베이스 6종도 함께 반입 필요(최초 셋업 §1 참조).
+3. **proxy 설정이 사내 미가용 proxy 를 가리키면 모든 빌드가 timeout** — `proxyconnect tcp: dial X.X.X.X:8080: i/o timeout`. 진단:
+   ```bash
+   env | grep -i proxy
+   cat ~/.docker/config.json 2>/dev/null
+   sudo cat /etc/docker/daemon.json 2>/dev/null
+   ```
+   임시 해결: `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy && ./scripts/build-images.sh --no-pull`. 영구 해결은 daemon 설정에서 proxy 제거.
+4. **build-cache arch 가 호스트와 다르면 buildx 가 registry 재조회 시도 → DeadlineExceeded** — 빌드 서버가 amd64 면 build-cache 도 amd64. arm64 PC 에서 build-cache 만들 때는 `DOCKER_DEFAULT_PLATFORM=linux/amd64` 명시 또는 `./scripts/build-images.sh --platform native` 로 호스트 arch 사용.
+5. **go.mod / package-lock.json 변경 후 캐시 갱신 안 하면** `go build` 또는 `npm run build` 가 외부 fetch 시도 → 실패. 의존성 추가 후 반드시 build-cache 갱신.
+6. **사내 Gitea 의 push 권한** — 빌드 서버가 git pull 할 수 있어야 함. 또는 운영자가 수동으로 git pull 후 build 트리거.
+7. **vendor/pumlex 의 package.json 3개 누락** — upstream 커밋에서 빠진 채로 들어옴(.gitignore 대상). 첫 빌드 fail 시 최초 셋업 §3 참조.
+8. **`.env` 의 MongoDB password 에 `@` 가 있으면 URL parse fail** — `MONGO_PASS` 의 특수문자는 URL-encoding 필요(`@` → `%40`). 코드가 raw 로 처리한다는 옛 문서 설명은 부정확.
+9. **런처 버전 bump 누락** — 스킬/embed 만 변경하고 `handlers.go:const version` 그대로 두면 manifest version 이 안 바뀌어 클라이언트 자동 업데이트 트리거 안 됨. 패치마다 bump 또는 클라이언트에서 수동 재다운로드.
 
 ## 비교
 
