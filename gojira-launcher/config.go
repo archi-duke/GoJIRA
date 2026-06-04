@@ -76,6 +76,16 @@ func gojiraDir() (string, error) {
 	return filepath.Join(home, defaultConfigSubdir), nil
 }
 
+// gojiraBinDir 는 ~/.gojira/bin 경로를 돌려준다 — 런처가 확보한 외부 CLI(jq, python3 shim)
+// 가 놓이는 곳. spawn.go 의 agentEnv 가 이 디렉터리를 에이전트 PATH 앞에 주입한다.
+func gojiraBinDir() (string, error) {
+	dir, err := gojiraDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "bin"), nil
+}
+
 // LoadConfig 는 launcher.json 을 읽어 기본값을 채운 Config 를 돌려준다.
 // 파일이 없으면 placeholder 를 생성한 뒤(채워야 할 필드 노출용) 기본값으로 동작한다.
 func LoadConfig() (*Config, error) {

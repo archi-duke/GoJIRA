@@ -98,6 +98,11 @@ func (s *Server) agentEnv(repoPath, user string) []string {
 		// GOJIRA_PLATFORM_URL — gojira-cli 관례, PLATFORM_API — SKILL.md 스크립트 관례.
 		env = append(env, "GOJIRA_PLATFORM_URL="+s.cfg.Backend.PlatformAPI, "PLATFORM_API="+s.cfg.Backend.PlatformAPI)
 	}
+	// 런처가 확보한 외부 CLI(jq, python3 shim)를 에이전트 PATH 맨 앞에 주입 —
+	// 스킬의 curl/jq/python3 블록이 시스템 설치 없이도 동작하도록(deps.go 참조).
+	if binDir, err := gojiraBinDir(); err == nil {
+		env = append(env, "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
 	return env
 }
 
