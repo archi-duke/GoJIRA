@@ -41,8 +41,8 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 ```
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - 임시 파일: `/tmp/${CODE}-satam-{context|draft|validation}.json`
 
 ## 인자 추출
@@ -152,8 +152,8 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 ### 0.3 데이터 수집
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 # 채택된 ADSN 목록 (decision 필드 있음) — 논리 판정에 필요한 전체 맥락 포함
 echo "=== 채택 ADSN 목록 ==="

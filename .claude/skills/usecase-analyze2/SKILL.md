@@ -44,8 +44,8 @@ OpenCode 환경이면 각 Step 진입 시 내장 `todowrite` 로 현재/남은 �
 ```
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - 임시 파일:
   - `/tmp/${CODE}-uc-draft.json` — 누적 draft (Step 1.1~1.4 가 단계별로 merge)
   - `/tmp/${CODE}-uc-validation.json` — 검증 결과
@@ -152,8 +152,8 @@ drift 모두 CLEAN 인 경우 **반드시 사용자에게 다음 3 옵션을 명
 ### 0.3 데이터 수집
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 # project-description.md (docs/{user} 우선, fallback main — 스크립트 자동 처리)
 DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md")
@@ -263,7 +263,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" 
   < /tmp/${CODE}-uc-step1.1.json
 
 # **artifact 영속화** — 다음 호출(MODE=relink/강제 재생성) 에서 LLM 0회 재생성용
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 jq '{domain, userStories, useCases}' /tmp/${CODE}-uc-step1.1.json \
   | curl -s -X PUT "${GOJIRA_API}/Project/${CODE}/usecase-artifacts" \
       -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
@@ -399,7 +399,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" 
   < /tmp/${CODE}-uc-step1.4.json
 
 # **artifact 영속화** — diagrams + vosKeys 도 함께
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 jq --argjson vos "$VOS_KEYS_JSON" '{diagrams, vosKeys: $vos}' /tmp/${CODE}-uc-step1.4.json \
   | curl -s -X PUT "${GOJIRA_API}/Project/${CODE}/usecase-artifacts" \
       -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
@@ -442,7 +442,7 @@ if [ "${FAST_PATH:-false}" = "true" ] && [ ! -f "/tmp/${CODE}-uc-draft.json" ]; 
   # 검증에 필요한 최소 골격 (vosKeys + features) 을 mongo 에서 한 번 더 빌드
   python3 - <<PY > /tmp/${CODE}-uc-draft-init.json
 import json, urllib.request, sys
-api="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+api="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 def get(u):
     req=urllib.request.Request(u, headers={"X-User-Id":"${USER}"})
     return json.loads(urllib.request.urlopen(req,timeout=10).read())

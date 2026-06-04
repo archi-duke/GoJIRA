@@ -29,8 +29,8 @@ allowed-tools: Bash, Read
 
 ## 환경
 
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - 임시 파일: `/tmp/${CODE}-dd-{draft|validation}.json`
 
 ## 인자 추출
@@ -100,8 +100,8 @@ drift 모두 CLEAN 인 경우 **반드시 사용자에게 다음 3 옵션을 명
 ### 0.3 데이터 수집
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 # 프로젝트 archSettings (chosenStyles, normalizedAttributes, qaWeights)
 echo "=== archSettings ==="

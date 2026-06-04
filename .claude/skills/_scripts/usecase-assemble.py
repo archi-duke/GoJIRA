@@ -403,7 +403,7 @@ def main() -> int:
                         help="GoJIRA-API 에서 artifact + Feature/VOS 이슈 fetch (stdin 미사용)")
     parser.add_argument("--user", default=os.environ.get("USER", "system"),
                         help="X-User-Id (--from-mongo 모드에서 필요)")
-    parser.add_argument("--api", default=os.environ.get("GOJIRA_API", "http://10.211.55.3:44360/api/v2"),
+    parser.add_argument("--api", default=os.environ["GOJIRA_API"],
                         help="GoJIRA-API base URL")
     args = parser.parse_args()
 

@@ -11,7 +11,7 @@ set -euo pipefail
 
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 # 0) 로컬 clone 루트 (트랙 E — 서버 worktree 제거). 런처가 GOJIRA_REPO_ROOT 주입.
 ROOT="${GOJIRA_REPO_ROOT:-}"

@@ -30,7 +30,7 @@ source "${DIR}/_local-write.sh"
 
 CODE="${1:?projectCode required}"
 USER="${2:?user knoxID required}"
-GOJIRA_API="${GOJIRA_API:-${GOJIRA_API_URL:-http://10.211.55.3:44360/api/v2}}"
+GOJIRA_API="${GOJIRA_API:-${GOJIRA_API_URL:?GOJIRA_API or GOJIRA_API_URL env var required (launcher must inject)}}"
 
 INPUT=$(cat)
 COUNT=$(jq 'length' <<< "$INPUT")

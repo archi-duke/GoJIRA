@@ -8,7 +8,7 @@ disable-model-invocation: true
 GoJIRA 프로젝트에 새 **Requirement** 이슈를 생성합니다. `reqType` 은 필수이며 NFR 의 경우 품질 속성 시나리오 필드를 최대한 채웁니다. 쓰기 작업이므로 실행 전 사용자 확인이 필요합니다.
 
 ## 환경
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - `X-User-Id` 헤더 필수
 
 ## 인자 추출
@@ -53,7 +53,7 @@ curl -s "${GOJIRA_API}/Issue" \
 ## Step 1 — Requirement 이슈 생성 (POST /Issue)
 
 ```bash
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 
 RESP=$(cat <<EOF | bash "${SCRIPTS}/issue-write.sh" POST /Issue

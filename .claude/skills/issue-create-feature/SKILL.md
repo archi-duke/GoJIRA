@@ -8,7 +8,7 @@ disable-model-invocation: true
 GoJIRA 프로젝트에 새 **Feature** 이슈를 생성합니다. Feature 는 사용자에게 전달되는 가치 단위(Use Case) 이며, Use Case Story 6 필드로 시나리오를 기술합니다. 쓰기 작업이므로 실행 전 사용자 확인이 필요합니다.
 
 ## 환경
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - `X-User-Id` 헤더 필수
 
 ## 인자 추출
@@ -53,7 +53,7 @@ curl -s "${GOJIRA_API}/Issue" \
 ## Step 1 — Feature 이슈 생성 (POST /Issue)
 
 ```bash
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 
 RESP=$(cat <<EOF | bash "${SCRIPTS}/issue-write.sh" POST /Issue
