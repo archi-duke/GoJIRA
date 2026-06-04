@@ -136,14 +136,17 @@ func terminalCommand(bin, dir string, env []string) *exec.Cmd {
 	log.Printf("[TEMP-DEBUG] terminalCommand goos=%s bin=%q dir=%q", runtime.GOOS, bin, dir)
 	switch runtime.GOOS {
 	case "windows":
-		// 새 콘솔 창에서 실행. env 는 `set "K=V"&&` 로 선주입.
-		prefix := ""
-		for _, kv := range env {
-			prefix += "set \"" + kv + "\"&& "
-		}
-		c := exec.Command("cmd", "/c", "start", "", "cmd", "/k", prefix+bin)
+		// 새 콘솔 창에서 실행. env 는 자식 프로세스 환경(c.Env)으로 직접 주입한다.
+		//
+		// 과거에는 `set "K=V"&& ` 프리픽스를 cmd 인자에 끼워 넣었으나, Go 의
+		// exec.Command 가 그 인자의 `"` 를 `\"` 로 escape 하는데 cmd.exe 는 `\"` 를
+		// 이해하지 못해 모든 set 이 깨졌다(변수 미주입). start 로 뜨는 새 콘솔도
+		// 부모 cmd 의 환경 블록을 상속하므로, c.Env 로 넘기면 cmd→start→cmd /k→bin
+		// 까지 정상 전파된다(linux 분기와 동일 방식).
+		c := exec.Command("cmd", "/c", "start", "", "cmd", "/k", bin)
 		c.Dir = dir
-		log.Printf("[TEMP-DEBUG] terminalCommand windows prefix_len=%d cmd_args=%v", len(prefix), c.Args)
+		c.Env = append(os.Environ(), env...)
+		log.Printf("[TEMP-DEBUG] terminalCommand windows envCount=%d cmd_args=%v", len(env), c.Args)
 		return c
 	case "darwin":
 		exports := ""
