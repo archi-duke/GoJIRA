@@ -4,7 +4,8 @@
 # 하면 그 안의 의존성으로 모든 서비스 빌드 가능.
 #
 # 갱신 시점:
-#   - go.mod / go.sum / package-lock.json 이 변경된 경우만
+#   - go.mod / go.sum / package-lock.json / pumlex package.json /
+#     JIRA-API/requirements.txt 가 변경된 경우만
 #   - 일반 코드 수정은 폐쇄망에서 docker compose build 만으로 끝
 #
 # 사용:
@@ -28,12 +29,19 @@ echo "[ deploy ] build-cache-go 이미지 빌드"
 docker build -f "${REPO_ROOT}/deploy/images/build-cache-go/Dockerfile" \
   -t gojira/build-cache-go:latest "${REPO_ROOT}"
 
-echo "[ deploy ] build-cache-node 이미지 빌드"
+echo "[ deploy ] build-cache-node 이미지 빌드 (GoJIRA-App·Platform-App·pumlex)"
 docker build -f "${REPO_ROOT}/deploy/images/build-cache-node/Dockerfile" \
   -t gojira/build-cache-node:latest "${REPO_ROOT}"
 
+echo "[ deploy ] build-cache-py 이미지 빌드 (jira-api wheel)"
+docker build -f "${REPO_ROOT}/deploy/images/build-cache-py/Dockerfile" \
+  -t gojira/build-cache-py:latest "${REPO_ROOT}"
+
 echo "[ deploy ] tar 패키징 → ${OUT}"
-docker save -o "${OUT}" gojira/build-cache-go:latest gojira/build-cache-node:latest
+docker save -o "${OUT}" \
+  gojira/build-cache-go:latest \
+  gojira/build-cache-node:latest \
+  gojira/build-cache-py:latest
 
 size="$(du -h "${OUT}" | awk '{print $1}')"
 echo "[ deploy ] 완료: ${OUT} (${size})"

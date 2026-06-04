@@ -1,8 +1,17 @@
 # 폐쇄망 자체 빌드 운영 가이드
 
 소스 변경마다 외부망에서 도커 이미지 645 MB 를 옮기는 대신, 폐쇄망에서 직접 빌드하는 모델.
-의존성 캐시 이미지 2종 (`gojira/build-cache-go`, `gojira/build-cache-node`) 만 한 번 적재해두면
-코드 변경 → 빌드 → 배포가 사내망 안에서 1-3분 안에 끝납니다.
+의존성 캐시 이미지 3종 (`gojira/build-cache-{go,node,py}`) 만 한 번 적재해두면
+코드 변경 → 빌드 → 배포가 사내망 안에서 1-3분 안에 끝납니다. (런처 포함 전체 7개 서비스 오프라인 빌드.)
+
+| 캐시 이미지 | 무엇을 담나 | 어떤 서비스가 쓰나 |
+|---|---|---|
+| `gojira/build-cache-go` | Go 모듈 캐시 | platform-api, gojira-api, launcher-dist |
+| `gojira/build-cache-node` | GoJIRA-App·Platform-App·**pumlex** node_modules | gojira-app, platform-app, pumlex-server |
+| `gojira/build-cache-py` | jira-api Python wheel | jira-api |
+
+> pumlex-server(`npm install`)·jira-api(`pip wheel`) 도 빌드 시 외부 레지스트리를 타므로,
+> 위 캐시에 의존성을 미리 담아 오프라인 빌드되도록 통합했다.
 
 ## 사전 조건
 
@@ -11,7 +20,7 @@
 | Docker (compose v2 포함) | 사내망 빌드 서버 |
 | 소스 코드 | 사내 Gitea clone 또는 tar |
 | **베이스 이미지 6종** | 첫 셋업 시 외부망에서 반입 (`alpine:3.20` 등) |
-| **build-cache 이미지 2종** | 첫 셋업 시 외부망에서 반입 (`gojira/build-cache-{go,node}`) |
+| **build-cache 이미지 3종** | 첫 셋업 시 외부망에서 반입 (`gojira/build-cache-{go,node,py}`) |
 | (선택) `deploy/.env` | 사내 인프라값 반영 (Mongo/Gitea 자격, host IP) |
 
 ## 최초 셋업 (한 번만)
@@ -21,7 +30,7 @@
 ```bash
 # 외부망 PC — GoJIRA 소스 clone 후
 xargs -n1 docker pull < <(grep -v '^gojira/\|^#\|^$' deploy/scripts/images.txt)
-bash deploy/scripts/build-cache-update.sh    # → gojira/build-cache-{go,node}:latest 생성
+bash deploy/scripts/build-cache-update.sh    # → gojira/build-cache-{go,node,py}:latest 생성
 
 docker save \
   plantuml/plantuml-server:jetty \
@@ -32,6 +41,7 @@ docker save \
   node:lts-alpine \
   gojira/build-cache-go:latest \
   gojira/build-cache-node:latest \
+  gojira/build-cache-py:latest \
   -o base-and-cache.tar
 # 약 1.5 GB
 ```
@@ -45,24 +55,14 @@ docker save \
 ```bash
 docker load -i base-and-cache.tar
 docker images | grep -E "alpine|node|golang|python|nginx|plantuml|build-cache"
-# → 8 줄 (베이스 6종 + 캐시 2종) 확인
-```
-
-### 3) vendor 누락 파일 1회 보완 (해당 시)
-
-`deploy/vendor/pumlex/package.json` 3개가 upstream 커밋에서 누락된 경우가 있음
-(.gitignore 됨, build 컨텍스트엔 필요). 첫 빌드 실패 시:
-
-```bash
-SRC=/path/to/pumlex   # 원본 pumlex 레포 (외부망 PC 에서)
-VEN=deploy/vendor/pumlex
-cp "$SRC/package.json"                                 "$VEN/"
-cp "$SRC/packages/pex-core/package.json"               "$VEN/packages/pex-core/"
-cp "$SRC/packages/pex-server/package.json"             "$VEN/packages/pex-server/"
-# 3 파일을 사내 빌드 서버로 반입(USB/사내 스토리지). 이후 재발 없음.
+# → 9 줄 (베이스 6종 + 캐시 3종) 확인
 ```
 
 이로써 폐쇄망에서 외부 호출 0회로 모든 서비스(런처 포함)를 빌드할 수 있습니다.
+
+> 참고: `deploy/vendor/pumlex/**/package.json` 3개는 루트 `.gitignore` 의 광범위한
+> `package.json` 무시 대상이지만 `!` 부정 규칙으로 명시 추적된다(build-cache-node 가
+> 읽어야 함). 과거엔 누락되어 수동 복사가 필요했으나 이제 fresh clone 에 항상 포함된다.
 
 ## 운영 사이클
 
@@ -83,7 +83,7 @@ docker compose -f deploy/docker-compose.yml up -d \
 
 ### 의존성 추가 (드물게)
 
-`go get <pkg>` 또는 `npm install <pkg>` 후 `go.mod` / `package-lock.json` 변경됨.
+의존성 변경 시 — `go.mod`/`go.sum`(build-cache-go), `package-lock.json`·pumlex `package.json`(build-cache-node), `JIRA-API/requirements.txt`(build-cache-py).
 
 ```bash
 # 외부망에서 캐시 갱신
@@ -147,12 +147,21 @@ docker compose build launcher-dist && docker compose up -d
 
 ## Dockerfile 의 build-cache 사용 검증
 
-빌드 시 `golang:1.26-alpine` 또는 `node:lts-alpine` 을 직접 base 로 안 쓰는지 확인:
+각 서비스의 **builder stage** 는 반드시 `gojira/build-cache-*` 를 base 로 써야 한다
+(외부 레지스트리에서 의존성을 받지 않도록). **runtime stage** 가 `nginx:alpine`,
+`alpine:3.20`, `python:3.12-slim`, `node:lts-alpine` 를 FROM 하는 것은 정상 —
+이들은 base-and-cache.tar 의 베이스로 제공된다.
 
 ```bash
-grep -E "^FROM golang|^FROM node" deploy/images/*/Dockerfile
-# 출력은 build-cache 이미지 Dockerfile (deploy/images/build-cache-*) 만 남고
-# 서비스 Dockerfile 들은 FROM gojira/build-cache-* 만 보여야 함.
+grep -nE "^FROM " deploy/images/*/Dockerfile
+# 기대값:
+#   build-cache-go/node/py  : FROM golang/node/python                 (캐시 이미지 자신)
+#   platform-api/gojira-api/launcher-dist : builder=gojira/build-cache-go,   runtime=alpine:3.20
+#   gojira-app/platform-app               : builder=gojira/build-cache-node, runtime=nginx:alpine
+#   pumlex-server                         : builder=gojira/build-cache-node, runtime=node:lts-alpine
+#   jira-api                              : builder=gojira/build-cache-py,   runtime=python:3.12-slim
+# ⚠️ 서비스 builder stage 에 build-cache 가 아닌 golang/node/python 이 직접 보이면
+#    그 서비스는 폐쇄망 오프라인 빌드가 깨진다(외부 레지스트리 fetch 시도).
 ```
 
 ## 함정
@@ -167,9 +176,9 @@ grep -E "^FROM golang|^FROM node" deploy/images/*/Dockerfile
    ```
    임시 해결: `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy && ./scripts/build-images.sh --no-pull`. 영구 해결은 daemon 설정에서 proxy 제거.
 4. **build-cache arch 가 호스트와 다르면 buildx 가 registry 재조회 시도 → DeadlineExceeded** — 빌드 서버가 amd64 면 build-cache 도 amd64. arm64 PC 에서 build-cache 만들 때는 `DOCKER_DEFAULT_PLATFORM=linux/amd64` 명시 또는 `./scripts/build-images.sh --platform native` 로 호스트 arch 사용.
-5. **go.mod / package-lock.json 변경 후 캐시 갱신 안 하면** `go build` 또는 `npm run build` 가 외부 fetch 시도 → 실패. 의존성 추가 후 반드시 build-cache 갱신.
+5. **의존성 변경 후 캐시 갱신 안 하면 외부 fetch 시도 → 실패.** 갱신 트리거: `go.mod`/`go.sum`(→ build-cache-go), `package-lock.json`·pumlex `package.json`(→ build-cache-node), `JIRA-API/requirements.txt`(→ build-cache-py). 변경 시 외부망에서 `build-cache-update.sh` 재실행.
 6. **사내 Gitea 의 push 권한** — 빌드 서버가 git pull 할 수 있어야 함. 또는 운영자가 수동으로 git pull 후 build 트리거.
-7. **vendor/pumlex 의 package.json 3개 누락** — upstream 커밋에서 빠진 채로 들어옴(.gitignore 대상). 첫 빌드 fail 시 최초 셋업 §3 참조.
+7. **vendor/pumlex 의 package.json** — 루트 `.gitignore` 의 `package.json` 무시 대상이나 `!` 부정 규칙으로 추적된다(`!deploy/vendor/pumlex/**/package.json`). 새 vendor 의존성 파일이 광범위 무시 규칙에 걸리지 않는지 확인.
 8. **`.env` 의 MongoDB password 에 `@` 가 있으면 URL parse fail** — `MONGO_PASS` 의 특수문자는 URL-encoding 필요(`@` → `%40`). 코드가 raw 로 처리한다는 옛 문서 설명은 부정확.
 9. **런처 버전 bump 누락** — 스킬/embed 만 변경하고 `handlers.go:const version` 그대로 두면 manifest version 이 안 바뀌어 클라이언트 자동 업데이트 트리거 안 됨. 패치마다 bump 또는 클라이언트에서 수동 재다운로드.
 

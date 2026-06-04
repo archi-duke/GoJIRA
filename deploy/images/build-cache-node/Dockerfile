@@ -20,3 +20,12 @@ COPY Platform-App/package.json Platform-App/package-lock.json* Platform-App/
 
 RUN cd GoJIRA-App && npm ci --no-audit --no-fund
 RUN cd Platform-App && npm ci --no-audit --no-fund
+
+# pumlex (vendored workspace: pex-core + pex-server) — npm 레지스트리 접근을
+# 빌드 시점에서 제거하기 위해 소스 전체 + 설치된 node_modules 를 캐시에 담는다.
+# workspace 심링크(@archi-duke/pex-core → ../packages/pex-core) 때문에 node_modules
+# 만 떼면 깨지기 쉬워, 전체 트리를 통째로 캐시하고 pumlex-server 가 그대로 복사한다.
+# pumlex 는 vendoring 정적 소스라 소스 변경 시에만 갱신(사실상 의존성 변경 빈도와 동일).
+# lock 파일이 없어 npm install(ci 아님). 캐시 위치: /cache/pumlex.
+COPY deploy/vendor/pumlex/ pumlex/
+RUN cd pumlex && npm install --omit=dev --no-audit --no-fund

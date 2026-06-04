@@ -1,0 +1,12 @@
+{
+  "name": "@archi-duke/pex-core",
+  "version": "1.0.0",
+  "main": "./geom.js",
+  "exports": {
+    ".": "./geom.js",
+    "./geom": "./geom.js",
+    "./meta": "./meta.js",
+    "./inline": "./inline.js",
+    "./package.json": "./package.json"
+  }
+}
