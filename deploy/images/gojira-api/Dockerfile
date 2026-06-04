@@ -11,9 +11,10 @@ COPY gojira-shared/ gojira-shared/
 COPY Platform-API/ Platform-API/
 RUN cd GoJIRA-API && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/gojira-api .
 
-### Runtime — exec 안 함 → scratch 가능. 다만 ca-certificates 위해 alpine 사용
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 app
+### Runtime — ca-certificates·tzdata 가 gojira/build-cache-alpine 에 선설치돼 있다
+# (폐쇄망에서 apk add 가 CDN 을 타 깨지므로). adduser 는 busybox 내장 — 네트워크 불필요.
+FROM gojira/build-cache-alpine:latest
+RUN adduser -D -u 10001 app
 WORKDIR /app
 COPY --from=builder /out/gojira-api /app/gojira-api
 # 프롬프트 템플릿 디렉토리 포함

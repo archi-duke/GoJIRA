@@ -17,8 +17,10 @@ COPY GoJIRA-API/ GoJIRA-API/
 RUN cd Platform-API && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/platform-api .
 
 ### Runtime — git binary 필요 (Gitea 로컬 clone)
-FROM alpine:3.20
-RUN apk add --no-cache git ca-certificates tzdata && adduser -D -u 10001 app
+# git·ca-certificates·tzdata 는 gojira/build-cache-alpine 에 선설치돼 있다
+# (폐쇄망에서 apk add 가 CDN 을 타 깨지므로). adduser 는 busybox 내장 — 네트워크 불필요.
+FROM gojira/build-cache-alpine:latest
+RUN adduser -D -u 10001 app
 WORKDIR /app
 COPY --from=builder /out/platform-api /app/platform-api
 # llm.json 은 volume mount 로 외부 주입 (deploy/config/llm.json → /app/config/llm.json)
