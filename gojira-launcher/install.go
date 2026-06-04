@@ -99,6 +99,17 @@ func doInstall() error {
 		fmt.Printf("✓ 스킬 배포: %s/.claude\n", cfg.SkillsSourceDir)
 	}
 
+	// 의존성(jq, python) 확보 — 스킬이 curl/jq/python3 로 동작하므로 필수.
+	// 다운로드 실패 등으로 확보 못 하면 설치를 여기서 중단한다(엄격).
+	binDir, err := gojiraBinDir()
+	if err != nil {
+		return fmt.Errorf("bin 디렉터리 경로 확인 실패: %w", err)
+	}
+	if err := EnsureDependencies(binDir); err != nil {
+		return fmt.Errorf("필수 의존성 확보 실패 — 설치를 중단합니다: %w", err)
+	}
+	fmt.Printf("✓ 의존성 디렉터리: %s\n", binDir)
+
 	// 자동시작 등록.
 	if err := registerAutostart(target); err != nil {
 		log.Printf("자동시작 등록 실패(비치명적): %v", err)

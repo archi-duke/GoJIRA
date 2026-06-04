@@ -31,6 +31,9 @@ func main() {
 		log.Printf("스킬 추출 실패(비치명적): %v", err)
 	}
 
+	// 의존성(jq, python) 상태 1회 로깅(비치명적) — 확보는 install 이 담당.
+	logDepsStatus()
+
 	// 자동 업데이트 — 기동 시 1회 + 주기 체크(백그라운드).
 	srv.startUpdater()
 
