@@ -48,6 +48,10 @@ scripts/
 !deploy/scripts/
 package.json
 package-lock.json
+# pumlex(vendored workspace)는 폐쇄망 오프라인 빌드(build-cache-node)가 읽어야 하므로
+# 위 광범위 package.json 무시에서 제외 — fresh clone 에도 포함되어야 build 가능.
+!deploy/vendor/pumlex/package.json
+!deploy/vendor/pumlex/packages/*/package.json
 
 # 미리 빌드된 런처 바이너리 (호스팅 dist) — 거대한 산출물, 커밋 X
 deploy/launcher-dist/*/

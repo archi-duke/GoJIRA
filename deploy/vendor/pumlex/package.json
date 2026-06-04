@@ -1,0 +1,9 @@
+{
+  "name": "pumlex-vendor",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/pex-core",
+    "packages/pex-server"
+  ]
+}
