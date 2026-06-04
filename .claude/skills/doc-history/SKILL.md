@@ -6,7 +6,7 @@ allowed-tools: Bash
 
 ## 환경
 
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
+- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 
 ## 인자 추출
 
@@ -34,7 +34,7 @@ export CODE="GOJIRA"
 ## 실행
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 BRANCH="${BRANCH:-main}"
 LIMIT="${LIMIT:-20}"
 

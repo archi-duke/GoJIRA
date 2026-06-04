@@ -21,8 +21,8 @@ allowed-tools: Bash, Read
 
 ## 환경
 
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 
 ## 인자 추출
 
@@ -71,8 +71,8 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 #### project-description.md 읽기 (docs/{user} 우선, 없으면 main)
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 # docs/{user} 우선, fallback main (스크립트가 자동 처리)
 DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USER}" "business/project-description.md")

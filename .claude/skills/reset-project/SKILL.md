@@ -6,7 +6,7 @@ allowed-tools: Bash
 
 ## 환경
 
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2` — 이슈/archSettings 리셋용
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast — 이슈/archSettings 리셋용
 - `GOJIRA_REPO_ROOT` — 로컬 clone 루트 (런처 주입). 미설정 시 `git rev-parse --show-toplevel` fallback.
 - 문서 리셋은 **로컬 clone 작업본에 직접 fs write/delete** (서버 `PUT/DELETE /file` 미사용 — local-agent 모델)
 
@@ -54,7 +54,7 @@ export CONFIRM="true"
 ## 1. 사전 체크
 
 ```bash
-GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 CONFIRM="${CONFIRM:-false}"
 RESET_ISSUES="${RESET_ISSUES:-true}"
 RESET_ARCH_SETTINGS="${RESET_ARCH_SETTINGS:-true}"

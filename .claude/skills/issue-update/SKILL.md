@@ -8,7 +8,7 @@ disable-model-invocation: true
 GoJIRA-API `PUT /Issue` 로 이슈 필드를 부분 업데이트합니다. 쓰기 작업이므로 실행 전 사용자 확인이 필요합니다.
 
 ## 환경
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - `X-User-Id` 헤더 필수
 
 ## 인자 추출
@@ -26,7 +26,7 @@ export KEY="GOJIRA3-1"
 export STATUS=""
 export SUMMARY=""
 export PRIORITY=""
-export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 ```
 
 ## 업데이트 (빈 필드는 제외)

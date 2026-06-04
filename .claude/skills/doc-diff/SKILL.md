@@ -7,7 +7,7 @@ allowed-tools: Bash
 Platform-API `/DocRepo/{code}/file` 로 두 브랜치의 파일을 가져와 diff 합니다.
 
 ## 환경
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
+- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 
 ## 인자
 - `CODE` — projectCode
@@ -18,7 +18,7 @@ Platform-API `/DocRepo/{code}/file` 로 두 브랜치의 파일을 가져와 dif
 export CODE="GOJIRA3"
 export USER="batman"
 export FILE="business/project-description.md"
-export PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+export PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 ```
 
 ## 파일 조회 + diff

@@ -14,7 +14,7 @@ reset-project 와의 차이:
 
 ## 환경
 
-- `PLATFORM_API` 기본값: `http://10.211.55.3:44350/api/v2`
+- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - 백업 위치는 Platform-API 가 결정 (`$HOME/.gojira-backups/{code}-{timestamp}.zip`)
 - 모든 단계 (dump/zip/repo 정리/Mongo hard delete) 는 `POST /Project/{code}/archive` 한 번 호출로 처리. UI 의 삭제 버튼과 동일 경로.
 
@@ -45,7 +45,7 @@ export CONFIRM="true"
 ## 1. 사전 체크
 
 ```bash
-PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
+PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 CONFIRM="${CONFIRM:-false}"
 
 if [ -z "$CODE" ] || [ -z "$USER" ]; then

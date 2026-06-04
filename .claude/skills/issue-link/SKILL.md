@@ -8,7 +8,7 @@ disable-model-invocation: true
 GoJIRA-API `POST /Issue/link` 로 두 이슈 간 링크를 생성합니다. 쓰기 작업.
 
 ## 환경
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 
 ## 인자 추출
 - `CODE` — projectCode
@@ -27,7 +27,7 @@ export USER="batman"
 export FROM="GOJIRA3-10"
 export TO="GOJIRA3-20"
 export TYPE="Contains(WBSGantt)"
-export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 ```
 
 ## 링크 생성

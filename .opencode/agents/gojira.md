@@ -51,11 +51,10 @@ bash 실행 시 항상 맨 앞에 export 한다. 환경에 이미 설정돼 있�
 ```bash
 export PROJECT_ROOT="${PROJECT_ROOT:-/home/parallels/works/GoJIRA}"
 # 사내 컨벤션: platform-api=44350, gojira-api=44360 (호스트 매핑 포트, 고정).
-# 현재 dev 환경: Docker compose 가 Parallels VM(10.211.55.3) 에서 도는데, OpenCode 는
-# Mac 호스트(10.211.55.2) 에 있으므로 Mac 의 스킬이 VM 으로 호출하도록 default 를 잡음.
-# 운영 환경에서는 env 로 PLATFORM_API/GOJIRA_API 자체를 override.
-export PLATFORM_API="${PLATFORM_API:-http://10.211.55.3:44350/api/v2}"
-export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+# PLATFORM_API/GOJIRA_API 는 launcher 가 launcher.json 의 backend 설정으로 주입한다.
+# 미설정 시 fail-fast — dev IP 가 prod 에 새는 것을 방지.
+export PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
+export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 # 스킬이 fs 직접 read/write 시 사용 — Platform-API 와 같은 디렉토리 공유.
 # worktree 경로 컨벤션은 아래 참조.
 export GOJIRA_REPOS_DIR="${GOJIRA_REPOS_DIR:-${PROJECT_ROOT}/repos}"
@@ -63,7 +62,7 @@ export GOJIRA_REPOS_DIR="${GOJIRA_REPOS_DIR:-${PROJECT_ROOT}/repos}"
 
 ### ⛔ API URL 호출 규칙 — 엄격 준수 (위반 금지)
 
-- 모든 API 호출은 위에서 export 한 **`${PLATFORM_API}`** (= http://10.211.55.3:44350/api/v2) 또는 **`${GOJIRA_API}`** (= http://10.211.55.3:44360/api/v2) 만 사용.
+- 모든 API 호출은 위에서 export 한 **`${PLATFORM_API}`** 또는 **`${GOJIRA_API}`** 만 사용. URL literal 박지 마라 — launcher 가 주입한 값을 그대로 쓴다.
 - 절대 curl 명령에 `http://localhost:...` / `http://127.0.0.1:...` / `http://0.0.0.0:...` 박지 마라. 항상 `${PLATFORM_API}/...` 또는 `${GOJIRA_API}/...` 형식.
 - 만약 curl 응답에 `Connection refused` 가 나오면, 먼저 `echo "PLATFORM_API=$PLATFORM_API"` 로 환경변수 값을 확인하고, 누락이면 위 export 블록을 다시 실행하라. **사용자에게 "서버를 시작하라" 고 안내하지 마라** — 서버는 이미 떠 있고 URL 만 틀린 것이다.
 - 위 규칙 위반은 오답이다.

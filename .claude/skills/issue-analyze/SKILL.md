@@ -7,14 +7,14 @@ allowed-tools: Bash
 GoJIRA-API `/Issue` 에서 전체 이슈를 가져와 에이전트가 직접 관계를 분석합니다.
 
 ## 환경 & 인자
-- `GOJIRA_API` 기본값: `http://10.211.55.3:44360/api/v2`
+- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
 - `CODE` — projectCode
 - `USER` — X-User-Id
 
 ```bash
 export CODE="GOJIRA3"
 export USER="batman"
-export GOJIRA_API="${GOJIRA_API:-http://10.211.55.3:44360/api/v2}"
+export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 ```
 
 ## 이슈 전체 조회
