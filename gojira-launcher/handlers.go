@@ -19,7 +19,7 @@ import (
 	"strings"
 )
 
-const version = "0.1.1"
+const version = "0.1.2"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
