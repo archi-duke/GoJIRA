@@ -37,11 +37,16 @@ echo "[ deploy ] build-cache-py 이미지 빌드 (jira-api wheel)"
 docker build -f "${REPO_ROOT}/deploy/images/build-cache-py/Dockerfile" \
   -t gojira/build-cache-py:latest "${REPO_ROOT}"
 
+echo "[ deploy ] build-cache-alpine 이미지 빌드 (platform-api·gojira-api 런타임 패키지)"
+docker build -f "${REPO_ROOT}/deploy/images/build-cache-alpine/Dockerfile" \
+  -t gojira/build-cache-alpine:latest "${REPO_ROOT}"
+
 echo "[ deploy ] tar 패키징 → ${OUT}"
 docker save -o "${OUT}" \
   gojira/build-cache-go:latest \
   gojira/build-cache-node:latest \
-  gojira/build-cache-py:latest
+  gojira/build-cache-py:latest \
+  gojira/build-cache-alpine:latest
 
 size="$(du -h "${OUT}" | awk '{print $1}')"
 echo "[ deploy ] 완료: ${OUT} (${size})"

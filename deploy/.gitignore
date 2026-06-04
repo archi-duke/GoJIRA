@@ -1,3 +1,6 @@
 .env*
 !.env.example
 *.tar
+# docker save 중간 산출(.tmp-*.tarNNN) 까지 포함 — git add -A 휩쓸림 방지
+*.tar*
+.tmp-*
