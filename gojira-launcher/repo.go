@@ -316,6 +316,59 @@ func (s *Server) ensureAgentAssets(target string) {
 		}
 		linkOrCopy(srcPath, dst, fi.IsDir())
 	}
+	// Windows: opencode 의 Bash 툴이 기본 PowerShell 대신 Git Bash 를 쓰도록 clone 의
+	// opencode.json 에 shell 설정을 주입한다. SHELL env 는 tool call 에 안 먹는 경우가
+	// 있어 문서화된 `shell` 설정이 신뢰성이 높다(한글 UTF-8 깨짐의 근본 차단).
+	ensureWindowsShellConfig(target, src)
+}
+
+// ensureWindowsShellConfig — Windows 에서 clone 의 opencode.json 에 Git Bash 셸 설정을
+// 병합한다. 심볼릭 링크면 공유 원본 훼손 방지를 위해 실파일 복사로 교체한 뒤 수정한다.
+// 사용자가 직접 지정한 shell 설정이 있으면 존중하고 건드리지 않는다. Git Bash 미발견 시 무시.
+func ensureWindowsShellConfig(target, src string) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	bashPath := findGitBash()
+	if bashPath == "" {
+		log.Printf("ensureWindowsShellConfig: Git Bash 미발견 — opencode shell 설정 스킵 (스킬 bash 깨짐 위험)")
+		return
+	}
+	dst := filepath.Join(target, "opencode.json")
+	// 심볼릭 링크면 실파일로 교체(원본 opencode.json 오염 방지).
+	if fi, err := os.Lstat(dst); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		_ = os.Remove(dst)
+		_ = copyFile(filepath.Join(src, "opencode.json"), dst, 0o644)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		return // clone 에 opencode.json 이 없으면 스킵(자산 추출 실패 등).
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		log.Printf("ensureWindowsShellConfig: opencode.json 파싱 실패 — 스킵: %v", err)
+		return
+	}
+	// opencode 의 `shell` 키는 단순 문자열(경로 또는 짧은 이름)이다. 객체로 주면
+	// config 스키마 검증이 실패해 opencode 가 기동조차 못 한다(config.get 등 실패).
+	// - 이미 유효한 문자열이면 사용자 지정으로 보고 존중.
+	// - 객체/비문자열(과거 잘못된 주입 포함)이면 문자열로 정규화해 self-heal.
+	if sv, ok := m["shell"]; ok {
+		if s, isStr := sv.(string); isStr && s != "" {
+			return
+		}
+		log.Printf("ensureWindowsShellConfig: 잘못된 shell 설정(비문자열) 감지 → Git Bash 문자열로 정규화")
+	}
+	m["shell"] = bashPath
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(dst, out, 0o644); err != nil {
+		log.Printf("ensureWindowsShellConfig write 실패 (%s): %v", dst, err)
+		return
+	}
+	log.Printf("ensureWindowsShellConfig: opencode.json 에 Git Bash 셸 주입 → %s", bashPath)
 }
 
 // linkOrCopy — src 를 dst 로 링크(불가 시 복사). isDir 에 따라 junction/트리복사 vs 단일파일 복사.

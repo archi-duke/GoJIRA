@@ -52,9 +52,11 @@ for i in $(seq 0 $((COUNT - 1))); do
   STATUS=""
   for attempt in 1 2 3 4 5; do
     TMP=$(mktemp)
+    # body 는 stdin(@-)으로 전달 — argv 로 넘기면 Windows 네이티브 curl 이 UTF-8 을
+    # ANSI(CP949)로 변환해 한글이 깨진다(서버 json 파싱 시 U+FFFD). stdin 은 바이트 보존.
     STATUS=$(curl -s -o "$TMP" -w '%{http_code}' -X POST "${GOJIRA_API}/Issue" \
       -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "X-Local-Write: true" \
-      --data-binary "$BODY" || echo 000)
+      --data-binary @- <<< "$BODY" || echo 000)
     RESP=$(cat "$TMP")
     rm -f "$TMP"
     if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
@@ -127,10 +129,12 @@ for i in $(seq 0 $((COUNT - 1))); do
     } | with_entries(select(.value != null and .value != ""))' <<< "$ITEM")
     if [[ "$(jq 'length' <<< "$EXTRA")" != "0" ]]; then
       PTMP=$(mktemp)
+      PUTBODY=$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson d "$EXTRA" \
+        '{prjID:$p, key:$k, user:$u, data:$d}')
+      # body 는 stdin(@-)으로 — argv 전달 시 Windows 에서 UTF-8 한글 깨짐(U+FFFD).
       curl -s -o "$PTMP" -X PUT "${GOJIRA_API}/Issue" \
         -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "X-Local-Write: true" \
-        --data-binary "$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson d "$EXTRA" \
-          '{prjID:$p, key:$k, user:$u, data:$d}')" || true
+        --data-binary @- <<< "$PUTBODY" || true
       # PUT 후 갱신된 YAML 을 로컬 clone 에 반영.
       gj_apply_local_writes "$(cat "$PTMP")"
       rm -f "$PTMP"

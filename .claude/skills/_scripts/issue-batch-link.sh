@@ -49,9 +49,10 @@ for i in $(seq 0 $((COUNT - 1))); do
   STATUS=""
   for attempt in 1 2 3; do
     TMP=$(mktemp)
+    # body 는 stdin(@-)으로 — argv 전달 시 Windows 네이티브 curl 이 UTF-8→ANSI 변환해 한글 깨짐.
     STATUS=$(curl -s -o "$TMP" -w '%{http_code}' -X POST "${GOJIRA_API}/Issue/link" \
       -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "X-Local-Write: true" \
-      --data-binary "$BODY" || echo 000)
+      --data-binary @- <<< "$BODY" || echo 000)
     RESP=$(cat "$TMP")
     rm -f "$TMP"
     if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
