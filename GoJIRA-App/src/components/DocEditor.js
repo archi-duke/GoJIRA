@@ -103,6 +103,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   const [content, setContent] = useState('');
   const [launcher, setLauncher] = useState(null); // 로컬 런처 감지 결과 { ready, agents, token } | null
   const [launching, setLaunching] = useState(false); // /edit 호출 진행 중
+  const [loadingFiles, setLoadingFiles] = useState(false); // 런처 /files 호출 진행 중 (clone 미존재 시 프로비저닝 동안 블록됨)
   const [installOpen, setInstallOpen] = useState(false); // 설치 안내 모달
   const [publishing, setPublishing] = useState(false); // 로컬 push→PR 진행 중
   const [showGraph, setShowGraph] = useState(false);
@@ -130,6 +131,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   useEffect(() => {
     localStorage.setItem('docEditorSidebarWidth', String(sidebarWidth));
   }, [sidebarWidth]);
+  // 프로비저닝 인디케이터 — /files 가 350ms 넘게 걸릴 때만 노출.
+  // clone 이 이미 있는 빠른 재로드(수십 ms)에선 깜빡이지 않고, 최초 clone 같은 느린 경우만 표시.
+  const [showProvisioning, setShowProvisioning] = useState(false);
+  useEffect(() => {
+    if (!loadingFiles) { setShowProvisioning(false); return; }
+    const t = setTimeout(() => setShowProvisioning(true), 350);
+    return () => clearTimeout(t);
+  }, [loadingFiles]);
   const handleResizerMouseDown = (e) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -164,8 +173,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
 
       let lTree = null;
       if (launcher?.ready) {
-        const r = await requestFiles({ code: projectCode, user, token: launcher.token });
-        if (r.ok) lTree = r.data;
+        // clone 미존재 시 /files 가 EnsureRepoLocal(전체 clone)로 블록됨 → 그 동안을 "프로비저닝 중" 으로 표시.
+        setLoadingFiles(true);
+        try {
+          const r = await requestFiles({ code: projectCode, user, token: launcher.token });
+          if (r.ok) lTree = r.data;
+        } finally {
+          setLoadingFiles(false);
+        }
       }
       setLocalTree(lTree);
       setAhead(lTree?.ahead ?? 0);
@@ -602,6 +617,12 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           {activeTab === 'local' && launcher?.ready && !hasChanges && hasMainOnly && (
             <div className="de-sync-notice">
               main 에 새 파일이 있습니다. <b>Main</b> 탭의 <b>Pull</b> 버튼으로 동기화하세요.
+            </div>
+          )}
+          {activeTab === 'local' && launcher?.ready && showProvisioning && (
+            <div className="de-provisioning" role="status" aria-live="polite">
+              <span className="de-provisioning-spin" aria-hidden="true">⟳</span>
+              <span>워크스페이스 프로비저닝 중…</span>
             </div>
           )}
           {(() => {
