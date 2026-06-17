@@ -171,6 +171,29 @@ func (s *Server) EnsureRepoLocal(code, user string) (string, error) {
 	return s.ensureRepoImpl(code, user, false)
 }
 
+// resolveRepoLocal — 순수 읽기(/file 단건 조회) 전용 초경량 경로 해석.
+//
+// clone 이 이미 있으면 origin 정렬·identity·branch checkout·asset 링크·exclude 갱신을
+// 일절 하지 않고, 전역 repo 락도 잡지 않고 repoPath 만 즉시 반환한다.
+// 이 프로비저닝은 사용자가 목록을 띄울 때 호출되는 /files(EnsureRepoLocal)가 이미 끝내 두므로
+// 파일을 열 때마다 반복할 필요가 없다. (클릭당 git 서브프로세스 수개 + 락 대기 제거)
+//
+// clone 이 아직 없는 콜드 케이스(목록 없이 직접 호출)만 EnsureRepoLocal 로 폴백 — 1회 clone.
+func (s *Server) resolveRepoLocal(code, user string) (string, error) {
+	if err := validateName("code", code); err != nil {
+		return "", err
+	}
+	if err := validateName("user", user); err != nil {
+		return "", err
+	}
+	path := s.repoPath(code)
+	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+		return path, nil // 이미 프로비저닝된 clone — 즉시 반환 (락/git 호출 없음).
+	}
+	// clone 부재 — 1회 full 프로비저닝 필요.
+	return s.EnsureRepoLocal(code, user)
+}
+
 func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, error) {
 	if err := validateName("code", code); err != nil {
 		return "", err
