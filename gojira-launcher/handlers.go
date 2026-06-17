@@ -398,8 +398,8 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "path 누락")
 		return
 	}
-	// /file 도 read-only — 네트워크 fetch 생략.
-	repoPath, err := s.EnsureRepoLocal(code, user)
+	// /file 은 순수 읽기 — 프로비저닝/락 없이 경로만 해석 (clone 부재 시에만 폴백 clone).
+	repoPath, err := s.resolveRepoLocal(code, user)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
