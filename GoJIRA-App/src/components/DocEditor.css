@@ -59,6 +59,10 @@
 /* 미커밋(-) : 배경 흰색 + 강조색 폰트 + 강조색 윤곽선 (outline 으로 레이아웃 영향 없음). */
 .de-badge-uncommitted { background: #fff; color: var(--accent); outline: 1px solid var(--accent); outline-offset: -1px; }
 .de-sync-notice { padding: 6px 12px; font-size: 11px; color: #e67e22; background: #fef9e7; border-bottom: 1px solid #f0e0b0; }
+/* 워크스페이스 프로비저닝(최초 clone) 진행 인디케이터 — 파일 목록 영역 상단 배너. */
+.de-provisioning { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 11px; color: #2c3e50; background: #eef4fb; border-bottom: 1px solid #d4e2f0; }
+.de-provisioning-spin { display: inline-block; animation: de-spin 0.9s linear infinite; font-size: 13px; }
+@keyframes de-spin { to { transform: rotate(360deg); } }
 .de-badge-pending { background: orange; }
 .de-badge-both { background: tomato; }
 

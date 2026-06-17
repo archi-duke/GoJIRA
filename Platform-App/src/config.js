@@ -16,7 +16,8 @@ const config = {
   GOJIRA_APP: pick('REACT_APP_GOJIRA_APP_REMOTE', 'http://localhost:3001'),
   // SSO 설정
   SSO_URL: pick('REACT_APP_SSO_URL', 'https://10.227.37.90:443'),
-  USE_SSO: false,
+  // .env(REACT_APP_USE_SSO=true) 로 활성화. env 값은 문자열이므로 'true' 비교.
+  USE_SSO: pick('REACT_APP_USE_SSO', 'false') === 'true',
   DEV_USER: 'duke.kimm',
   // 로컬 런처 (사용자 PC) — 로고/타이틀 클릭 → /chat 으로 에이전트 spawn.
   LAUNCHER_BASE: pick('REACT_APP_LAUNCHER_BASE', 'http://127.0.0.1:5599'),

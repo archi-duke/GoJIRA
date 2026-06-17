@@ -17,7 +17,8 @@ window._env_ = {
   REACT_APP_PLATFORM_API: "$(esc "${REACT_APP_PLATFORM_API:-}")",
   REACT_APP_GOJIRA_API: "$(esc "${REACT_APP_GOJIRA_API:-}")",
   REACT_APP_GOJIRA_APP_REMOTE: "$(esc "${REACT_APP_GOJIRA_APP_REMOTE:-}")",
-  REACT_APP_SSO_URL: "$(esc "${REACT_APP_SSO_URL:-}")"
+  REACT_APP_SSO_URL: "$(esc "${REACT_APP_SSO_URL:-}")",
+  REACT_APP_USE_SSO: "$(esc "${REACT_APP_USE_SSO:-}")"
 };
 EOF
 
