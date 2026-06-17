@@ -46,6 +46,17 @@ function App() {
   // launchAgentChat 의 단계별 상태(런처 응답 대기 → spawn 후 새 창 표시 대기) 안내.
   const [launching, setLaunching] = useState(null);
 
+  // SSO 콜백 처리 — ADFSAuthCallBack?auth= 으로 돌아왔을 때 쿠키 저장 후 쿼리 제거
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const auth = params.get('auth');
+    if (auth) {
+      document.cookie = `ADSSO_UID=${encodeURIComponent(auth)}; path=/; max-age=${60 * 60 * 24 * 365}`;
+      window.history.replaceState(null, '', window.location.pathname);
+      setUser(auth);
+    }
+  }, []);
+
   // SSE 연결 상태 모니터링
   useEffect(() => {
     return onStatus(setSseConnected);
