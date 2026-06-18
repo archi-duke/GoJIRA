@@ -46,16 +46,22 @@ function App() {
   // launchAgentChat 의 단계별 상태(런처 응답 대기 → spawn 후 새 창 표시 대기) 안내.
   const [launching, setLaunching] = useState(null);
 
-  // SSO 콜백 처리 — ADFSAuthCallBack?auth= 으로 돌아왔을 때 URL 정리 후 쿠키 재확인.
-  // SSO 서버가 ADSSO_UID 쿠키에 Knox ID 를 직접 설정하므로 여기서는 쿠키를 건드리지 않는다.
-  // (?auth= 는 숫자 토큰이라 덮어쓰면 우상단에 토큰이 표시됨 — 쿠키만 읽는다.)
+  // SSO 콜백 처리 — ?auth=1&code= 로 돌아왔을 때
+  // MobilAve /Account/exchange 에 code 교환 요청 → loginid 수신 → 쿠키 저장
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('auth')) {
+    const code = params.get('code');
+    if (params.get('auth') && code) {
       window.history.replaceState(null, '', window.location.pathname);
-      // SSO 서버가 심어준 ADSSO_UID 쿠키로 user 재설정
-      const uinfo = document.cookie.match(/(^| )ADSSO_UID=([^;]+)/);
-      if (uinfo) setUser(decodeURIComponent(uinfo[2]));
+      fetch(`${config.SSO_URL}/Account/exchange?code=${encodeURIComponent(code)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.loginid) {
+            document.cookie = `ADSSO_UID=${encodeURIComponent(data.loginid)}; path=/; max-age=${60 * 60 * 8}`;
+            setUser(data.loginid);
+          }
+        })
+        .catch(err => console.error('SSO exchange 실패:', err));
     }
   }, []);
 
