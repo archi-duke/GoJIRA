@@ -46,14 +46,16 @@ function App() {
   // launchAgentChat 의 단계별 상태(런처 응답 대기 → spawn 후 새 창 표시 대기) 안내.
   const [launching, setLaunching] = useState(null);
 
-  // SSO 콜백 처리 — ADFSAuthCallBack?auth= 으로 돌아왔을 때 쿠키 저장 후 쿼리 제거
+  // SSO 콜백 처리 — ADFSAuthCallBack?auth= 으로 돌아왔을 때 URL 정리 후 쿠키 재확인.
+  // SSO 서버가 ADSSO_UID 쿠키에 Knox ID 를 직접 설정하므로 여기서는 쿠키를 건드리지 않는다.
+  // (?auth= 는 숫자 토큰이라 덮어쓰면 우상단에 토큰이 표시됨 — 쿠키만 읽는다.)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const auth = params.get('auth');
-    if (auth) {
-      document.cookie = `ADSSO_UID=${encodeURIComponent(auth)}; path=/; max-age=${60 * 60 * 24 * 365}`;
+    if (params.get('auth')) {
       window.history.replaceState(null, '', window.location.pathname);
-      setUser(auth);
+      // SSO 서버가 심어준 ADSSO_UID 쿠키로 user 재설정
+      const uinfo = document.cookie.match(/(^| )ADSSO_UID=([^;]+)/);
+      if (uinfo) setUser(decodeURIComponent(uinfo[2]));
     }
   }, []);
 
