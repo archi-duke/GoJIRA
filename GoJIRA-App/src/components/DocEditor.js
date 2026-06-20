@@ -318,6 +318,46 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  // 미리보기 인라인 PlantUML 편집 커밋 — PexBlock 이 ✓ 적용 시 (원본본문, 새본문) 으로 호출.
+  // 본문이 originalSource 와 일치하는 ```plantuml|puml fence 의 본문만 newSource 로 교체하고
+  // 런처 /write 로 로컬 디스크에 저장한다 (전체 raw 편집과 동일한 저장 경로).
+  async function handlePexCommit(originalSource, newSource) {
+    if (!selectedFile || selectedMainOnly || !launcher?.ready) return;
+    if (newSource == null || newSource === originalSource) return;
+    // content 는 로컬 워킹트리에서 온 원본이라 Windows 면 CRLF 일 수 있는데, ReactMarkdown 이
+    // 준 originalSource 는 LF 로 정규화돼 있어 바이트 매칭이 어긋난다. → LF 공간에서 매칭/교체한
+    // 뒤, 원본이 CRLF 였으면 일괄 CRLF 로 복원해 줄바꿈 일관성을 유지한다.
+    const usesCRLF = /\r\n/.test(content);
+    const lf = content.replace(/\r\n/g, '\n');
+    const want = String(originalSource).replace(/\r\n/g, '\n').trim();
+    const newBody = String(newSource).replace(/\r\n/g, '\n');
+    let replaced = false;
+    let out = lf.replace(
+      /(```(?:plantuml|puml)[^\n]*\n)([\s\S]*?)(\n?```)/g,
+      (whole, open, body, close) => {
+        if (!replaced && body.trim() === want) {
+          replaced = true;
+          return `${open}${newBody}${close}`;
+        }
+        return whole;
+      },
+    );
+    if (!replaced) { modalAlert('편집 대상 PlantUML 블록을 본문에서 찾지 못했습니다.'); return; }
+    if (usesCRLF) out = out.replace(/\n/g, '\r\n');
+    setSaving(true);
+    try {
+      const r = await requestWrite({
+        code: projectCode, user, path: selectedFile,
+        content: out, token: launcher.token,
+      });
+      if (!r.ok) { modalAlert(r.error || '저장에 실패했습니다.'); return; }
+      setContent(out); // 미리보기가 교체된 다이어그램으로 즉시 반영되도록.
+      refreshDocState();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // 편집 중 "취소" — 변경 폐기 + 편집 종료.
   function handleCancelEdit() {
     setEditing(false);
@@ -760,10 +800,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                             }
                             if (lang === 'plantuml' || lang === 'puml') {
                               const src = String(children).replace(/\n$/, '');
-                              // 웹은 조회 전용 — 인라인 편집은 로컬 pex-vscode 로 이전 (local-agent-mvp §4).
-                              return (
-                                <PexBlock source={src} readOnly />
-                              );
+                              // 로컬(docs/{user}) 워킹트리 + 런처 감지 시 미리보기에서 다이어그램을
+                              // 보면서 인라인 편집 (✎ 편집 상시 노출 → ✓ 적용 시 해당 fence 본문만 교체).
+                              // 그 외(main 탭·main-only·런처 미감지)는 조회 전용.
+                              const pexEditable = activeTab === 'local' && !selectedMainOnly && !!launcher?.ready;
+                              return pexEditable
+                                ? <PexBlock source={src} onCommit={handlePexCommit} />
+                                : <PexBlock source={src} readOnly />;
                             }
                             return <code className={className} {...props}>{children}</code>;
                           },
