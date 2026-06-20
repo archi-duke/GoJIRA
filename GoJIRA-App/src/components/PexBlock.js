@@ -41,15 +41,15 @@ export default function PexBlock({ source, onCommit, readOnly }) {
   // 편집 가능 = onCommit 콜백 있고 readOnly 아님
   const editable = !readOnly && typeof onCommit === 'function';
 
-  // pex-core 사전 로드 — 편집 버튼 클릭 시 await 가 즉시 resolve 되도록 prefetch.
-  // 마이크로프론트엔드 컨테이너에서는 정적 script 태그가 없으므로 동적 inject.
+  // pex-core 사전 로드 — fitViewBox(모든 표시 SVG 의 viewBox 재-fit)와 편집(클릭 시 await
+  // 즉시 resolve) 양쪽에 필요하므로 editable 여부와 무관하게 로드한다. loadPexCore 는
+  // 싱글턴이라 PexBlock 이 많아도 1회만 로드. MFE 컨테이너엔 정적 script 가 없어 동적 inject.
   useEffect(() => {
-    if (!editable) return;
     loadPexCore().catch((e) => {
       // eslint-disable-next-line no-console
       console.warn('[PexBlock] pex-core prefetch 실패', e);
     });
-  }, [editable]);
+  }, []);
 
   // SVG 렌더 — source 변경 시 재요청
   useEffect(() => {
@@ -114,8 +114,25 @@ export default function PexBlock({ source, onCommit, readOnly }) {
     const el = renderRef.current;
     if (!el) return undefined;
     el.innerHTML = svg || '';
+    if (!svg) return undefined;
+    // 표시되는 SVG 의 viewBox 를 브라우저 getBBox 기준으로 콘텐츠에 맞게 재-fit 한다.
+    // 로직은 pex-core(PexInline.fitViewBox) 한곳에만 있고 — 편집용 adjustViewBox 와 같은
+    // 알고리즘 — 웹/vscode 등 모든 클라이언트가 재사용한다(클라이언트마다 재구현 X).
+    // 서버 /render-with-layout 의 viewBox 는 서버측 getBBox 근사라 저장→리로드 시 다이어그램이
+    // 틀어지거나 잘리는데, 브라우저에서 다시 fit 하면 편집뷰와 프레이밍이 정확히 일치한다.
+    let cancelled = false;
+    const fit = () => {
+      if (cancelled) return;
+      const node = renderRef.current?.querySelector('svg');
+      if (node && window.PexInline && typeof window.PexInline.fitViewBox === 'function') {
+        window.PexInline.fitViewBox(node, { pad: 10 });
+      }
+    };
+    fit(); // pex-core 가 이미 로드돼 있으면 즉시 적용
+    loadPexCore().then(fit).catch(() => { /* 로드 실패 시 서버 viewBox 유지 */ });
     return () => {
-      // unmount 또는 svg 교체 시 비워둠 — PexInline 핸들러는 deactivate effect 가 정리
+      cancelled = true;
+      // PexInline 핸들러는 deactivate effect 가 정리
     };
   }, [svg]);
 
@@ -151,12 +168,26 @@ export default function PexBlock({ source, onCommit, readOnly }) {
 
   function commitEdit() {
     const newSrc = pendingSrcRef.current;
+    const willCommit = newSrc && newSrc !== source && typeof onCommit === 'function';
+    // 편집 중 화면에 보이던 SVG 를 그대로 캡처해 새 source 의 캐시로 시드한다.
+    // 저장 후 서버 /render-with-layout 재렌더는 서버측 getBBox 근사라 viewBox/위치가
+    // 미세하게 어긋나 "전체 뷰영역이 틀어지거나 잘리는" 현상이 생긴다. deactivate 전에
+    // (핸들 오버레이만 제거하고) 캡처해 두면, 재마운트 시 fetch 대신 이 캡처본을 써서
+    // 저장 전후 뷰가 픽셀 단위로 동일하게 유지된다.
+    if (willCommit) {
+      const live = renderRef.current?.querySelector('svg');
+      if (live) {
+        const clone = live.cloneNode(true);
+        clone.querySelectorAll('g.pex-handle-layer, .pex-handle, .pex-handle-guide').forEach((n) => n.remove());
+        svgCache.set(newSrc, clone.outerHTML);
+      }
+    }
     if (sessionRef.current) {
       try { sessionRef.current.deactivate(); } catch (_) { /* noop */ }
       sessionRef.current = null;
     }
     setEditing(false);
-    if (newSrc && newSrc !== source && typeof onCommit === 'function') {
+    if (willCommit) {
       onCommit(source, newSrc);
     }
   }

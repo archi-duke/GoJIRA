@@ -175,6 +175,35 @@
     return pt.matrixTransform(svg.getScreenCTM().inverse());
   }
 
+  // Fit an SVG's viewBox tightly around its rendered content using the browser's
+  // real getBBox (+ uniform padding). Static-display counterpart to the editor's
+  // internal adjustViewBox: hosts that show a server-rendered SVG (web PexBlock,
+  // VS Code preview) call this so their framing matches what the inline editor
+  // shows. The server's /render-with-layout computes its viewBox from a
+  // server-side getBBox *approximation* and lands slightly off — laid-out
+  // diagrams then look shifted/cropped after save. Re-fitting in the browser
+  // (exact getBBox) removes that divergence. No-op if getBBox is unavailable
+  // (detached/hidden) or the content is empty. Returns true if it adjusted.
+  function fitViewBox(svg, opts) {
+    if (!svg || typeof svg.getBBox !== 'function') return false;
+    const pad = (opts && typeof opts.pad === 'number') ? opts.pad : 10;
+    let bbox;
+    try { bbox = svg.getBBox(); } catch (_) { return false; }
+    if (!bbox || bbox.width <= 0 || bbox.height <= 0) return false;
+    const xMin = bbox.x - pad, yMin = bbox.y - pad;
+    const nw = bbox.width + pad * 2, nh = bbox.height + pad * 2;
+    svg.setAttribute('viewBox', `${xMin} ${yMin} ${nw} ${nh}`);
+    svg.setAttribute('width', `${nw}px`);
+    svg.setAttribute('height', `${nh}px`);
+    const style = (svg.getAttribute('style') || '')
+      .replace(/width\s*:[^;]+;?/g, '')
+      .replace(/height\s*:[^;]+;?/g, '');
+    if (style.trim()) svg.setAttribute('style', style); else svg.removeAttribute('style');
+    const par = svg.getAttribute('preserveAspectRatio');
+    if (!par || par === 'none') svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    return true;
+  }
+
   // ---- The actual activation logic ----------------------------------------
   function activate(container, opts) {
     if (!container) throw new Error('PexInline.activate: container required');
@@ -1873,5 +1902,5 @@
     };
   }
 
-  return { activate, normalizeLayout };
+  return { activate, normalizeLayout, fitViewBox };
 });
