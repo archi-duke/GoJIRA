@@ -21,6 +21,7 @@ x-react-env: &react-env
   REACT_APP_GOJIRA_APP_REMOTE: "http://${GOJIRA_APP_SERVER:?required}:${GOJIRA_APP_PORT:?required}"
   REACT_APP_PUMLEX_SERVER: "http://${PUMLEX_SERVER:?required}:${PUMLEX_PORT:?required}"
   REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
+  REACT_APP_USE_SSO: "${REACT_APP_USE_SSO:-false}"
 
 services:
 

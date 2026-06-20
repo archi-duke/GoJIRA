@@ -46,6 +46,25 @@ function App() {
   // launchAgentChat 의 단계별 상태(런처 응답 대기 → spawn 후 새 창 표시 대기) 안내.
   const [launching, setLaunching] = useState(null);
 
+  // SSO 콜백 처리 — ?auth=1&code= 로 돌아왔을 때
+  // MobilAve /Account/exchange 에 code 교환 요청 → loginid 수신 → 쿠키 저장
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (params.get('auth') && code) {
+      window.history.replaceState(null, '', window.location.pathname);
+      fetch(`${config.SSO_URL}/Account/exchange?code=${encodeURIComponent(code)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.loginid) {
+            document.cookie = `ADSSO_UID=${encodeURIComponent(data.loginid)}; path=/; max-age=${60 * 60 * 8}`;
+            setUser(data.loginid);
+          }
+        })
+        .catch(err => console.error('SSO exchange 실패:', err));
+    }
+  }, []);
+
   // SSE 연결 상태 모니터링
   useEffect(() => {
     return onStatus(setSseConnected);

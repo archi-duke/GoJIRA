@@ -17,7 +17,8 @@ const config = {
   // VS Code + CLI(opencode|claude) 를 소환 (local-agent-mvp §2).
   LAUNCHER_BASE: pick('REACT_APP_LAUNCHER_BASE', 'http://127.0.0.1:5599'),
   SSO_URL: pick('REACT_APP_SSO_URL', 'https://10.227.37.90:443'),
-  USE_SSO: false,
+  // .env(REACT_APP_USE_SSO=true) 로 활성화. env 값은 문자열이므로 'true' 비교.
+  USE_SSO: pick('REACT_APP_USE_SSO', 'false') === 'true',
   DEV_USER: 'duke.kimm',
 };
 
