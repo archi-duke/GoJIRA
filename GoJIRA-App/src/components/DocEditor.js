@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { modalAlert, modalConfirm } from './AlertModal';
+import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
 import CommonBar from './CommonBar';
 import DiffAnalysis from './DiffAnalysis';
 import MermaidBlock from './MermaidBlock';
 import PexBlock from './PexBlock';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
-import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite, requestPullFromMain } from '../utils/launcher';
+import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite, requestPullFromMain, requestDelete, requestRename } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
 
@@ -464,6 +464,31 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
+  // 파일 삭제 — 로컬 working tree 에서 제거(런처 /delete). commit/push 안 함 — "등록"(/sync)
+  // 의 git add -A 가 삭제를 포착해 반영한다. 삭제 후 트리 재로드 + 열려있던 파일이면 닫는다.
+  async function handleDeleteFile(path) {
+    if (!launcher || !launcher.token) return;
+    if (!await modalConfirm(`"${path}" 파일을 로컬에서 삭제하시겠습니까?\n(등록 시 origin 에 반영됩니다)`)) return;
+    const r = await requestDelete({ code: projectCode, user, path, token: launcher.token });
+    if (!r.ok) { modalAlert(r.error || '삭제에 실패했습니다.'); return; }
+    if (selectedFile === path) { setSelectedFile(null); }
+    refreshDocState();
+  }
+
+  // 파일 이름변경/이동 — 로컬 working tree 에서 from→to(런처 /rename). commit/push 안 함(/sync 포착).
+  // 새 경로를 입력받아(폴더 이동도 경로에 / 포함하면 가능) 이동 후 트리 재로드.
+  async function handleRenameFile(path) {
+    if (!launcher || !launcher.token) return;
+    const to = await modalPrompt(`"${path}" 의 새 경로를 입력하세요 (폴더 이동은 경로에 / 포함):`, path);
+    if (to == null) return;
+    const next = to.trim();
+    if (!next || next === path) return;
+    const r = await requestRename({ code: projectCode, user, from: path, to: next, token: launcher.token });
+    if (!r.ok) { modalAlert(r.error || '이름변경에 실패했습니다.'); return; }
+    if (selectedFile === path) { setSelectedFile(next); }
+    refreshDocState();
+  }
+
   // "Pull" — 로컬 docs/{user} 를 origin/main 으로 완전히 덮어씌운다 (destructive).
   // 사용자 커밋·미커밋 변경 모두 폐기. 강한 confirm 필수.
   async function handlePullFromMain() {
@@ -689,6 +714,14 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                     ? <span className="de-file-badge de-badge-mainonly">M</span>
                     : statusBadge(item.path))}
                   <span className="de-file-name">{item._name || item.path}</span>
+                  {activeTab === 'local' && !isMainOnly && launcher?.ready && (
+                    <span className="de-file-actions">
+                      <button className="de-file-act" title="이름변경/이동"
+                        onClick={(e) => { e.stopPropagation(); handleRenameFile(item.path); }}>✎</button>
+                      <button className="de-file-act de-file-act-del" title="삭제"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteFile(item.path); }}>🗑</button>
+                    </span>
+                  )}
                 </div>
               );
             };

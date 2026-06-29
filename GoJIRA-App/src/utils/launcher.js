@@ -56,9 +56,18 @@ export async function requestEdit({ code, user, file, token }) {
 /**
  * "채팅" — 등록된 에이전트 CLI(opencode|claude)만 새 터미널로 spawn.
  *           VS Code 는 띄우지 않음 (필요하면 /edit 으로 분리 호출).
+ * replace=true 면 다른 과제의 에이전트를 종료한 뒤 spawn (과제전환 — 단일 현재과제 에이전트).
  */
-export async function requestChat({ code, user, agent, token }) {
-  return post('/chat', { code, user, agent }, token);
+export async function requestChat({ code, user, agent, replace, token }) {
+  return post('/chat', { code, user, agent, replace: !!replace }, token);
+}
+
+/**
+ * 현재 살아있는 에이전트 세션 목록. 과제전환 시 "다른 과제 에이전트가 떠 있는가" 판정용.
+ * @returns {Promise<{ok:boolean, data?:{sessions:[{code,agent,pid}]}, error?:string}>}
+ */
+export async function requestSessions({ token }) {
+  return get('/sessions', token);
 }
 
 /**
@@ -108,6 +117,20 @@ export async function requestPullFromMain({ code, user, token }) {
  */
 export async function requestWrite({ code, user, path, content, token }) {
   return post('/write', { code, user, path, content }, token);
+}
+
+/**
+ * 파일 삭제 — 로컬 working tree 의 단일 파일 삭제. commit/push 안 함(/sync 가 포착).
+ */
+export async function requestDelete({ code, user, path, token }) {
+  return post('/delete', { code, user, path }, token);
+}
+
+/**
+ * 파일 이동/이름변경 — 로컬 working tree 의 from→to. commit/push 안 함(/sync 가 포착).
+ */
+export async function requestRename({ code, user, from, to, token }) {
+  return post('/rename', { code, user, from, to }, token);
 }
 
 /**

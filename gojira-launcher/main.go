@@ -24,7 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("설정 로드 실패: %v", err)
 	}
-	srv := &Server{cfg: cfg}
+	srv := &Server{cfg: cfg, sessions: newSessionRegistry()}
 
 	// 임베드 스킬을 추출(첫 기동/버전 변경 시만 실제 쓰기). 실패는 비치명적.
 	if err := ExtractSkills(cfg.SkillsSourceDir, version, false); err != nil {
@@ -56,8 +56,14 @@ func main() {
 	mux.HandleFunc("OPTIONS /sync", srv.secure(true, srv.handleSync))
 	mux.HandleFunc("POST /write", srv.secure(true, srv.handleWrite))
 	mux.HandleFunc("OPTIONS /write", srv.secure(true, srv.handleWrite))
+	mux.HandleFunc("POST /delete", srv.secure(true, srv.handleDelete))
+	mux.HandleFunc("OPTIONS /delete", srv.secure(true, srv.handleDelete))
+	mux.HandleFunc("POST /rename", srv.secure(true, srv.handleRename))
+	mux.HandleFunc("OPTIONS /rename", srv.secure(true, srv.handleRename))
 	mux.HandleFunc("GET /status", srv.secure(true, srv.handleStatus))
 	mux.HandleFunc("OPTIONS /status", srv.secure(true, srv.handleStatus))
+	mux.HandleFunc("GET /sessions", srv.secure(true, srv.handleSessions))
+	mux.HandleFunc("OPTIONS /sessions", srv.secure(true, srv.handleSessions))
 	mux.HandleFunc("GET /files", srv.secure(true, srv.handleFiles))
 	mux.HandleFunc("OPTIONS /files", srv.secure(true, srv.handleFiles))
 	mux.HandleFunc("GET /file", srv.secure(true, srv.handleFile))

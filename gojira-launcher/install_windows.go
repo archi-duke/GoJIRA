@@ -7,8 +7,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 )
+
+// killProcessTree — 콘솔(cmd)과 그 자식(claude/opencode)까지 트리 종료. 과제전환 시 옛 에이전트 정리.
+// (새 콘솔 spawn 은 spawn_windows.go 의 CreateProcess 가 담당 — 거기서 받은 PID 를 여기 넘긴다.)
+func killProcessTree(pid int) error {
+	out, err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).CombinedOutput()
+	if err != nil {
+		s := strings.ToLower(string(out))
+		// 이미 종료/부재면 성공으로 간주(영문 "not found"/한글 "없").
+		if strings.Contains(s, "not found") || strings.Contains(s, "no running") || strings.Contains(string(out), "없") {
+			return nil
+		}
+		return fmt.Errorf("taskkill pid=%d: %s (%w)", pid, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
 
 // Windows 자동시작은 HKCU Run 키 사용 — 관리자 권한 불필요, 로그인 시 자동 실행.
 const (

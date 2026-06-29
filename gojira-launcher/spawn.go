@@ -150,54 +150,61 @@ func findGitBash() string {
 	return ""
 }
 
-// SpawnAgent — 검증된 agent 를 repoPath 에서 새 터미널 창으로 띄운다.
-// CLI 는 대화형이므로 TTY 가 필요 → OS별 터미널로 감싼다. sessionId(=pid 문자열) 반환.
+// SpawnAgent — 검증된 agent 를 repoPath 에서 새 콘솔/터미널 창으로 띄운다.
+// CLI 는 대화형이므로 TTY 가 필요 → OS별 startAgent 가 새 콘솔(windows: CreateProcess,
+// unix: 터미널 에뮬레이터)을 만든다. sessionId(=pid 문자열) 반환.
 // env 는 자식 CLI 가 로컬 clone/백엔드를 찾도록 주입된다(agentEnv).
-func SpawnAgent(agent, repoPath string, env []string) (string, error) {
-	log.Printf("[TEMP-DEBUG] SpawnAgent ENTRY agent=%q repoPath=%q envCount=%d goos=%s", agent, repoPath, len(env), runtime.GOOS)
+//
+// Design B: label 을 창 제목으로 달아 과제별 에이전트를 구분하고, code 로 세션 레지스트리에
+// 등록한다(종료 시 자동 해제 — 과제전환 replace 가 이 PID 를 트리종료). code=="" 는 추적 제외.
+func (s *Server) SpawnAgent(agent, repoPath, label, code string, env []string) (string, error) {
+	log.Printf("[TEMP-DEBUG] SpawnAgent ENTRY agent=%q repoPath=%q label=%q code=%q envCount=%d goos=%s", agent, repoPath, label, code, len(env), runtime.GOOS)
 	bin, ok := agentBins[agent]
 	if !ok {
 		log.Printf("[TEMP-DEBUG] SpawnAgent rejected agent=%q (not in allowlist)", agent)
 		return "", fmt.Errorf("허용되지 않은 agent: %q", agent)
 	}
 	log.Printf("[TEMP-DEBUG] SpawnAgent bin=%q", bin)
-	cmd := terminalCommand(bin, repoPath, env)
-	log.Printf("[TEMP-DEBUG] SpawnAgent cmd path=%q args=%v dir=%q", cmd.Path, cmd.Args, cmd.Dir)
-	if err := cmd.Start(); err != nil {
-		log.Printf("[TEMP-DEBUG] SpawnAgent cmd.Start FAIL: %v", err)
+	pid, wait, err := startAgent(bin, label, repoPath, env)
+	if err != nil {
+		log.Printf("[TEMP-DEBUG] SpawnAgent startAgent FAIL: %v", err)
 		return "", fmt.Errorf("%s 실행 실패: %w", agent, err)
 	}
-	pid := cmd.Process.Pid
 	log.Printf("[TEMP-DEBUG] SpawnAgent SUCCESS pid=%d", pid)
-	// 좀비 방지: 백그라운드에서 회수.
-	go func() { _ = cmd.Wait() }()
+	s.sessions.add(code, agent, pid)
+	// 좀비 방지 + 종료 시 레지스트리 정리: 백그라운드에서 회수 후 해당 세션 dead 처리.
+	go func() {
+		wait()
+		s.sessions.markDead(code, pid)
+	}()
 	return fmt.Sprintf("%d", pid), nil
 }
 
-// terminalCommand — OS별로 대화형 CLI 를 새 터미널에서 실행하는 명령을 만든다.
-// linux/fallback 은 cmd.Env 로 env 전파, mac/windows 는 셸 스크립트에 export/set 으로 주입.
-func terminalCommand(bin, dir string, env []string) *exec.Cmd {
-	log.Printf("[TEMP-DEBUG] terminalCommand goos=%s bin=%q dir=%q", runtime.GOOS, bin, dir)
+// sanitizeLabel — 터미널 창 제목으로 안전한 1줄 라벨. 따옴표/제어문자를 제거해
+// start/osascript/터미널 인자 주입을 막는다. 길이도 적당히 자른다.
+func sanitizeLabel(label string) string {
+	label = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == '"' || r == '\'' || r == '`' {
+			return -1
+		}
+		return r
+	}, label)
+	if len(label) > 60 {
+		label = label[:60]
+	}
+	return label
+}
+
+// terminalCommand — unix(mac/linux)에서 대화형 CLI 를 새 터미널에서 실행하는 명령을 만든다.
+// windows 는 startAgent(spawn_windows.go)의 CreateProcess 경로를 쓰므로 여기 오지 않는다.
+// label 은 새 창의 제목으로 달려 과제별 에이전트를 구분한다(Design B). 빈 문자열이면 미지정.
+func terminalCommand(bin, dir, label string, env []string) *exec.Cmd {
+	log.Printf("[TEMP-DEBUG] terminalCommand goos=%s bin=%q dir=%q label=%q", runtime.GOOS, bin, dir, label)
+	title := sanitizeLabel(label)
 	switch runtime.GOOS {
-	case "windows":
-		// 새 콘솔 창에서 실행. env 는 자식 프로세스 환경(c.Env)으로 직접 주입한다.
-		//
-		// 과거에는 `set "K=V"&& ` 프리픽스를 cmd 인자에 끼워 넣었으나, Go 의
-		// exec.Command 가 그 인자의 `"` 를 `\"` 로 escape 하는데 cmd.exe 는 `\"` 를
-		// 이해하지 못해 모든 set 이 깨졌다(변수 미주입). start 로 뜨는 새 콘솔도
-		// 부모 cmd 의 환경 블록을 상속하므로, c.Env 로 넘기면 cmd→start→cmd /k→bin
-		// 까지 정상 전파된다(linux 분기와 동일 방식).
-		//
-		// `chcp 65001` 로 새 콘솔을 UTF-8 코드페이지로 전환한다 — 기본값(한국어 Windows
-		// 는 CP949)에서는 에이전트가 출력/전달하는 한글 UTF-8 바이트가 깨져(U+FFFD) 이슈
-		// YAML/DB 에 그대로 저장되는 문제가 있었다. chcp+bin 을 한 인자(따옴표 없음)로 묶어
-		// 전달하므로 위 `\"` escape 함정에 걸리지 않는다.
-		c := exec.Command("cmd", "/c", "start", "", "cmd", "/k", "chcp 65001>nul && "+bin)
-		c.Dir = dir
-		c.Env = append(os.Environ(), env...)
-		log.Printf("[TEMP-DEBUG] terminalCommand windows envCount=%d cmd_args=%v", len(env), c.Args)
-		return c
 	case "darwin":
+		// NOTE: 제목(title) 주입은 AppleScript↔shell 이스케이프가 취약해 생략. mac 은
+		// 에이전트 spawn 의 실사용 환경이 아니다(사용자=Windows, 배포=헤드리스 Ubuntu).
 		exports := ""
 		for _, kv := range env {
 			if i := strings.IndexByte(kv, '='); i > 0 {
@@ -209,7 +216,20 @@ func terminalCommand(bin, dir string, env []string) *exec.Cmd {
 	default: // linux/기타 — 흔한 터미널 에뮬레이터를 순서대로 시도.
 		for _, term := range []string{"x-terminal-emulator", "gnome-terminal", "konsole", "xterm"} {
 			if _, err := exec.LookPath(term); err == nil {
-				c := exec.Command(term, "-e", bin)
+				// 에뮬레이터별 제목 플래그(best-effort). 미지원이면 -e 만.
+				args := []string{}
+				if title != "" {
+					switch term {
+					case "xterm":
+						args = append(args, "-T", title)
+					case "konsole":
+						args = append(args, "-p", "tabtitle="+title)
+					default: // gnome-terminal / x-terminal-emulator
+						args = append(args, "--title="+title)
+					}
+				}
+				args = append(args, "-e", bin)
+				c := exec.Command(term, args...)
 				c.Dir = dir
 				c.Env = append(os.Environ(), env...)
 				return c

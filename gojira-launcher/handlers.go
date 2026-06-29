@@ -19,11 +19,12 @@ import (
 	"strings"
 )
 
-const version = "0.1.8"
+const version = "0.1.12"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
-	cfg *Config
+	cfg      *Config
+	sessions *sessionRegistry // 과제별 에이전트 세션 추적(Design B). session.go.
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -125,9 +126,10 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 type chatReq struct {
-	Code  string `json:"code"`
-	User  string `json:"user"`
-	Agent string `json:"agent"`
+	Code    string `json:"code"`
+	User    string `json:"user"`
+	Agent   string `json:"agent"`
+	Replace bool   `json:"replace"` // true 면 다른 과제의 살아있는 에이전트를 종료 후 spawn(과제전환).
 }
 
 type prewarmReq struct {
@@ -197,9 +199,36 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[TEMP-DEBUG] handleChat EnsureRepoLocal OK repoPath=%q", repoPath)
 		spawnDir = repoPath
 	}
+	// Design B 과제전환(replace): 다른 과제의 살아있는 에이전트를 먼저 트리종료한다.
+	// 웹이 "과제 전환할까요?" 확인을 받은 뒤 replace=true 로 호출 → 옛 에이전트 닫고 새로 연다.
+	if req.Replace {
+		for _, other := range s.sessions.liveExcept(req.Code) {
+			log.Printf("[TEMP-DEBUG] handleChat replace: closing code=%s pid=%d", other.Code, other.PID)
+			if err := killProcessTree(other.PID); err != nil {
+				log.Printf("[TEMP-DEBUG] handleChat replace kill 실패 code=%s pid=%d: %v", other.Code, other.PID, err)
+			}
+			s.sessions.markDead(other.Code, other.PID)
+		}
+	}
+	// Design B: 같은 과제에 이미 살아있는 에이전트가 있으면 중복 spawn 하지 않고 기존
+	// 세션을 알려준다(과제별 1 에이전트). 사용자는 창 제목 "GoJIRA · CODE" 로 찾는다.
+	// 다른 과제는 별개 세션이라 이 검사를 통과해 새로 뜬다(과제별 공존).
+	if existing := s.sessions.live(req.Code); existing != nil {
+		log.Printf("[TEMP-DEBUG] handleChat reuse code=%q pid=%d agent=%q", req.Code, existing.PID, existing.Agent)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":    "already-running",
+			"reused":    true,
+			"repoPath":  spawnDir,
+			"agent":     existing.Agent,
+			"sessionId": fmt.Sprintf("%d", existing.PID),
+			"label":     chatLabel(req.Code),
+		})
+		return
+	}
 	env := s.agentEnv(spawnDir, req.User)
-	log.Printf("[TEMP-DEBUG] handleChat about to spawn agent=%q spawnDir=%q envCount=%d", agent, spawnDir, len(env))
-	sessionID, err := SpawnAgent(agent, spawnDir, env)
+	label := chatLabel(req.Code)
+	log.Printf("[TEMP-DEBUG] handleChat about to spawn agent=%q spawnDir=%q label=%q envCount=%d", agent, spawnDir, label, len(env))
+	sessionID, err := s.SpawnAgent(agent, spawnDir, label, req.Code, env)
 	if err != nil {
 		log.Printf("[TEMP-DEBUG] handleChat SpawnAgent FAIL: %v", err)
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -208,10 +237,26 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[TEMP-DEBUG] handleChat SUCCESS sessionID=%s", sessionID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":    "ok",
+		"reused":    false,
 		"repoPath":  spawnDir,
 		"agent":     agent,
 		"sessionId": sessionID,
+		"label":     label,
 	})
+}
+
+// chatLabel — 에이전트 터미널 창 제목(Design B 과제별 구분).
+func chatLabel(code string) string {
+	if code == "" {
+		return "GoJIRA · 일반 채팅"
+	}
+	return "GoJIRA · " + code
+}
+
+// GET /sessions — 현재 살아있는 에이전트 세션 목록(과제별). 웹이 과제전환 시 "다른 과제
+// 에이전트가 떠 있는가" 를 판정해 전환 확인 다이얼로그를 띄울지 결정하는 데 쓴다.
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": s.sessions.snapshot()})
 }
 
 type syncReq struct {
@@ -339,6 +384,114 @@ func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
 		"path":   req.Path,
 		"size":   len(req.Content),
 	})
+}
+
+type deleteReq struct {
+	Code string `json:"code"`
+	User string `json:"user"`
+	Path string `json:"path"`
+}
+
+// POST /delete — 로컬 working tree 에서 단일 파일 삭제. commit/push 는 하지 않음 —
+// /sync 의 `git add -A` 가 삭제를 포착해 커밋한다(/write 와 동일한 책임 분리). 디렉터리는 거부.
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	var req deleteReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	if req.Path == "" {
+		writeErr(w, http.StatusBadRequest, "path 누락")
+		return
+	}
+	repoPath, err := s.EnsureRepo(req.Code, req.User)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	full, err := safeFilePath(repoPath, req.Path)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, http.StatusNotFound, "file 없음: "+req.Path)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if info.IsDir() {
+		writeErr(w, http.StatusBadRequest, "디렉터리는 삭제할 수 없습니다: "+req.Path)
+		return
+	}
+	if err := os.Remove(full); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "path": req.Path, "deleted": true})
+}
+
+type renameReq struct {
+	Code string `json:"code"`
+	User string `json:"user"`
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// POST /rename — 로컬 working tree 의 파일 이동/이름변경. commit/push 는 하지 않음(/sync 포착).
+// from/to 모두 safeFilePath 컨테인먼트. to 부모 디렉터리는 자동 생성. to 가 이미 있으면 거부.
+func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
+	var req renameReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	if req.From == "" || req.To == "" {
+		writeErr(w, http.StatusBadRequest, "from, to 필수")
+		return
+	}
+	repoPath, err := s.EnsureRepo(req.Code, req.User)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fromFull, err := safeFilePath(repoPath, req.From)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "from: "+err.Error())
+		return
+	}
+	toFull, err := safeFilePath(repoPath, req.To)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "to: "+err.Error())
+		return
+	}
+	if fi, err := os.Stat(fromFull); err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, http.StatusNotFound, "from 없음: "+req.From)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if fi.IsDir() {
+		writeErr(w, http.StatusBadRequest, "디렉터리는 이동할 수 없습니다: "+req.From)
+		return
+	}
+	if _, err := os.Stat(toFull); err == nil {
+		writeErr(w, http.StatusConflict, "대상이 이미 존재합니다: "+req.To)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(toFull), 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.Rename(fromFull, toFull); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "from": req.From, "to": req.To, "renamed": true})
 }
 
 // GET /files?code=&user= — 로컬 clone 의 working tree 파일 목록 + HEAD 트리.

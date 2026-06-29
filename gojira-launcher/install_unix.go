@@ -65,3 +65,13 @@ func startDetached(exe string) error {
 func detach(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
+
+// killProcessTree — pid 종료(과제전환 시 옛 에이전트 정리). dev 한정 경로.
+func killProcessTree(pid int) error {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return nil
+	}
+	_ = p.Kill()
+	return nil
+}
