@@ -55,6 +55,10 @@ func (s *Server) IngestIssues(code, user string) (*IngestResult, error) {
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", user)
+	// SSO 모드: 사용자 세션토큰을 Bearer 로(백엔드 introspect 검증). dev 면 X-User-Id 폴백.
+	if t := s.ssoToken(); t != "" {
+		req.Header.Set("Authorization", "Bearer "+t)
+	}
 
 	client := &http.Client{Timeout: 90 * time.Second}
 	resp, err := client.Do(req)

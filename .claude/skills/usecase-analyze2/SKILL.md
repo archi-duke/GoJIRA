@@ -163,13 +163,13 @@ echo "$DESC"
 # VOS 목록 (issueLinks 포함 — relink 차집합 계산 / Feature 미연결 VOS 검출용)
 echo
 echo "=== VOS 목록 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client,issueLinks}]'
 
 # 기존 Feature (issueLinks + 전체 본문 — relink/강제 재생성 에서 원문 그대로 보존)
 echo
 echo "=== 기존 Feature ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]'
 ```
 
@@ -266,7 +266,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" 
 GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 jq '{domain, userStories, useCases}' /tmp/${CODE}-uc-step1.1.json \
   | curl -s -X PUT "${GOJIRA_API}/Project/${CODE}/usecase-artifacts" \
-      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
       --data-binary @- | jq '.updated'
 ```
 
@@ -402,7 +402,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" 
 GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 jq --argjson vos "$VOS_KEYS_JSON" '{diagrams, vosKeys: $vos}' /tmp/${CODE}-uc-step1.4.json \
   | curl -s -X PUT "${GOJIRA_API}/Project/${CODE}/usecase-artifacts" \
-      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+      -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
       --data-binary @- | jq '.updated'
 ```
 

@@ -19,6 +19,9 @@ import (
 
 const tokenHeader = "X-Gojira-Launcher-Token"
 
+// sessionHeader — 웹이 SSO 세션토큰을 런처에 전달하는 헤더(Phase 4 C).
+const sessionHeader = "X-Gojira-Session"
+
 // secure 는 모든 핸들러를 감싸 Origin/CORS/토큰을 검증한다.
 //   - requireToken=true 면 인증 토큰이 없으면 401.
 func (s *Server) secure(requireToken bool, next http.HandlerFunc) http.HandlerFunc {
@@ -51,6 +54,9 @@ func (s *Server) secure(requireToken bool, next http.HandlerFunc) http.HandlerFu
 			return
 		}
 
+		// SSO 세션토큰 캡처(Phase 4 C) — 웹이 보내면 보관해 백엔드 호출/에이전트 env 에 쓴다.
+		s.setSSOToken(r.Header.Get(sessionHeader))
+
 		next(w, r)
 	}
 }
@@ -76,7 +82,7 @@ func (s *Server) writeCORS(w http.ResponseWriter, origin string) {
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+tokenHeader)
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+tokenHeader+", "+sessionHeader)
 }
 
 func (s *Server) tokenValid(r *http.Request) bool {

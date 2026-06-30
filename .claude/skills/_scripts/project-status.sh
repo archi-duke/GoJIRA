@@ -24,7 +24,7 @@ fi
 # 1) 이슈 통계 (HTTP 유지 — DB)
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" > /tmp/gojira_issues.json
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" > /tmp/gojira_issues.json
 
 ISSUE_STATS=$(jq '{
   total: length,
@@ -49,7 +49,7 @@ HAS_REQ=$(echo "$ISSUE_STATS" | jq '[.byType[] | select(.type=="Requirement")] |
 HAS_DRIVER=$(jq '[.[] | select(.issueType=="Requirement" and (.driverSelected // false) == true)] | length > 0' /tmp/gojira_issues.json)
 HAS_NON_STYLE_ADSN=$(jq '[.[] | select((.issueType=="Architectural Design" or .issueType=="Detailed Design") and (.designPoint // "") != "시스템 스타일 결정")] | length > 0' /tmp/gojira_issues.json)
 HAS_CHOSEN_STYLES=$(curl -s "${GOJIRA_API}/Project" \
-  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
+  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | (.archSettings.chosenStyles.primary // [])] | flatten | length > 0' 2>/dev/null || echo "false")
 PROJDESC_LEN=$(echo "$PROJDESC" | wc -c | tr -d ' ')
 

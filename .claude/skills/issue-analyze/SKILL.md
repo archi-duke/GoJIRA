@@ -23,7 +23,7 @@ export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inje
 ```bash
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   > /tmp/gojira_issues.json
 
 jq '[.[] | {key, subkey, issueType, reqType, summary, status, issueLinks}]' /tmp/gojira_issues.json

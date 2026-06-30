@@ -26,7 +26,7 @@ export PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher mus
 
 ```bash
 curl -s "${PLATFORM_API}/DocRepo/${CODE}/prs?state=${STATE}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   > /tmp/gojira_prs.json
 
 jq '[.[] | {number, title, state, author: (.user.login // .author // null), head: (.head.ref // null)}]' /tmp/gojira_prs.json

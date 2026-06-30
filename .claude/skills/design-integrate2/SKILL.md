@@ -106,20 +106,20 @@ GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 # ADSN/DDSN 이슈
 echo "=== ADSN/DDSN 설계 이슈 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design")
          | {key,subkey,issueType,summary,description,designLevel,designPoint,decision,decisionRationale,tradeoffs,risk,sensitivity}]'
 
 # Requirement 요약
 echo
 echo "=== Requirement 요약 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,reqtype,summary}]'
 
 # archSettings (chosenStyles, normalizedAttributes)
 echo
 echo "=== archSettings ==="
-curl -s "${GOJIRA_API}/Project/${CODE}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Project/${CODE}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '.archSettings // {}'
 ```
 
@@ -625,7 +625,7 @@ jq -r '.indexDocument // ""' /tmp/${CODE}-integrate-draft.json \
 ```bash
 VIEWS_JSON=$(jq -c '.viewsIncluded // []' /tmp/${CODE}-integrate-draft.json)
 curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d "$(jq -n --argjson v "$VIEWS_JSON" '{designIntegrated:true, viewsIncluded:$v}')" \
   | jq '{updated, archSettings}'
 ```

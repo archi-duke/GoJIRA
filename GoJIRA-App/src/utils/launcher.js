@@ -11,6 +11,12 @@ import config from '../config';
 
 const BASE = (config.LAUNCHER_BASE || 'http://127.0.0.1:5599').replace(/\/$/, '');
 const TOKEN_HEADER = 'X-Gojira-Launcher-Token';
+// SSO 세션토큰을 런처에 전달(Phase 4 C) — 런처가 백엔드 호출/에이전트 env 에 Bearer 로 쓴다.
+const SESSION_HEADER = 'X-Gojira-Session';
+function ssoSession() {
+  const m = (typeof document !== 'undefined' ? document.cookie : '').match(/(^| )SSO_SESSION=([^;]+)/);
+  return m ? decodeURIComponent(m[2]) : '';
+}
 
 // fetch + 타임아웃 (런처 미기동 시 connection refused 가 빠르게 떨어지지만,
 // 방화벽/응답지연 대비 명시적 abort).
@@ -159,6 +165,8 @@ async function get(path, token) {
   try {
     const headers = {};
     if (token) headers[TOKEN_HEADER] = token;
+    const sess = ssoSession();
+    if (sess) headers[SESSION_HEADER] = sess;
     const res = await fetchWithTimeout(`${BASE}${path}`, { method: 'GET', headers }, LAUNCHER_OP_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
@@ -172,6 +180,8 @@ async function post(path, body, token) {
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers[TOKEN_HEADER] = token;
+    const sess = ssoSession();
+    if (sess) headers[SESSION_HEADER] = sess;
     const res = await fetchWithTimeout(`${BASE}${path}`, {
       method: 'POST',
       headers,

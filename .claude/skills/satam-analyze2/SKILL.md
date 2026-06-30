@@ -159,7 +159,7 @@ GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 echo "=== 채택 ADSN 목록 ==="
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
          | {key, subkey, summary, designPoint, designLevel,
             objectives, decision, decisionRationale, approaches,
@@ -170,7 +170,7 @@ echo
 echo "=== Requirement 전체 (FR/NFR/CNST + driverSelected) ==="
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Requirement")
          | {key, subkey, summary, description, reqtype,
             driverSelected: (.driverSelected // false),
@@ -192,14 +192,14 @@ v3 SATAM 대상 Requirement:
 
 ```bash
 ADSN_JSON=$(curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
          | {key, summary, designPoint, objectives, decision, decisionRationale,
             approaches, pros, cons, eval, tradeoffs, adiagram, bdiagram}]
         | reduce .[] as $i ({}; . + {($i.key): $i})')
 
 REQ_JSON=$(curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Requirement")
          | select(.reqtype=="NFR" or .reqtype=="CNST" or (.reqtype=="FR" and (.driverSelected // false) == true))
          | {key, summary, description, reqtype,
@@ -533,7 +533,7 @@ ADSN 전체 업데이트가 성공하면 (5.2 모든 PUT 이 2xx) 프로젝트 �
 
 ```bash
 curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d '{"satamDone": true}' \
   | jq '{updated, archSettings}'
 ```

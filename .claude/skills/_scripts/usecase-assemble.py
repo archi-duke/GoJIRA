@@ -328,7 +328,7 @@ def assemble(payload: dict, template: str) -> str:
 
 
 def _http_get_json(url: str, user: str) -> dict:
-    req = urllib.request.Request(url, headers={"X-User-Id": user})
+    req = urllib.request.Request(url, headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", "")})
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -338,7 +338,7 @@ def _http_get_issues(api: str, code: str, user: str) -> list:
     xbody = json.dumps({"prjID": code, "infoType": ""})
     req = urllib.request.Request(
         f"{api}/Issue",
-        headers={"X-User-Id": user, "XBody": xbody},
+        headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody},
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))

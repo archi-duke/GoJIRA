@@ -111,6 +111,11 @@ func (s *Server) agentEnv(repoPath, user string) []string {
 	if user != "" {
 		env = append(env, "GOJIRA_USER="+user)
 	}
+	// SSO 세션토큰(Phase 4 C) — gojira-cli/스킬이 백엔드 호출 시 Authorization: Bearer 로 사용.
+	// 웹이 보낸 토큰을 spawn 시점에 주입(유효기간 동안). dev 모드(토큰 없음)면 미주입 → X-User-Id 폴백.
+	if t := s.ssoToken(); t != "" {
+		env = append(env, "GOJIRA_SESSION_TOKEN="+t)
+	}
 	if s.cfg.Backend.GojiraAPI != "" {
 		// GOJIRA_API_URL — gojira-cli 관례, GOJIRA_API — SKILL.md 스크립트 관례.
 		env = append(env, "GOJIRA_API_URL="+s.cfg.Backend.GojiraAPI, "GOJIRA_API="+s.cfg.Backend.GojiraAPI)

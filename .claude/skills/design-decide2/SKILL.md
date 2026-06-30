@@ -105,22 +105,22 @@ GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 # 프로젝트 archSettings (chosenStyles, normalizedAttributes, qaWeights)
 echo "=== archSettings ==="
-curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '.[0].archSettings // {}'
 
 # Architecture Drivers
 echo; echo "=== Drivers ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Requirement" and .driverSelected==true) | {key,subkey,summary,reqtype,qa,qad,qai,priority}]'
 
 # 전체 Requirement (hallucination 방지용 실존 key 풀)
 echo; echo "=== Requirement 전체 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,reqtype,qa}]'
 
 # 기존 ADSN/DDSN (스타일 ADSN 포함)
 echo; echo "=== 기존 설계 이슈 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design") | {key,subkey,issueType,summary,designPoint,designLevel}]'
 ```
 
@@ -542,7 +542,7 @@ cat /tmp/dd_link_result.json
 QAW_JSON=$(jq '[.designs[] | {designPoint, qaWeights}]' /tmp/${CODE}-dd-draft.json 2>/dev/null)
 if [ -n "$QAW_JSON" ] && [ "$QAW_JSON" != "null" ] && [ "${FAST_PATH:-false}" != "true" ]; then
   curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
     -d "$(jq -n --argjson w "$QAW_JSON" '{designDecideQAWeights:$w}')" \
     | jq '.updated'
 fi
@@ -573,7 +573,7 @@ DP별 qaWeights 를 fast path 결정적 조립용 archSettings 에 영속화.
 QAW_JSON=$(jq '[.designs[] | {designPoint, qaWeights}]' /tmp/${CODE}-dd-draft.json)
 if [ "$QAW_JSON" != "null" ] && [ -n "$QAW_JSON" ]; then
   curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
     -d "$(jq -n --argjson w "$QAW_JSON" '{designDecideQAWeights:$w}')" \
     | jq '.updated'
 fi
