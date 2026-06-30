@@ -17,20 +17,34 @@ try {
   createEventQueue = () => ({ push: () => {}, clear: () => {} });
 }
 
-// GoJIRA-API 가 /Issue* 엔드포인트에서 user 를 필수로 요구하므로 (403 방지),
-// 전역 fetch 에 X-User-Id 를 자동 주입. 모듈 로드 시점에 1회 설치 —
-// child useEffect(fetch) 가 parent useEffect 보다 먼저 실행되는 React 순서
-// 문제를 피한다. user 값은 GoJIRAApp mount 시 window 변수로 노출.
+// 전역 fetch 에 인증 헤더 자동 주입. 모듈 로드 시점에 1회 설치 — child useEffect(fetch) 가
+// parent 보다 먼저 실행되는 React 순서 문제를 피한다.
+// - SSO: SSO_SESSION 토큰 → Authorization: Bearer (백엔드가 introspect 검증).
+// - dev: SSO_SESSION 없으면 기존처럼 X-User-Id(window.__gojiraUser) 주입.
+// API 경로(/api/v2 또는 백엔드 베이스)에만 적용 — MobilAve/외부 호출엔 미주입.
 if (typeof window !== 'undefined' && !window.__gojiraFetchWrapped) {
   const orig = window.fetch;
   window.__gojiraFetchWrapped = true;
+  const getSession = () => {
+    const m = document.cookie.match(/(^| )SSO_SESSION=([^;]+)/);
+    return m ? decodeURIComponent(m[2]) : '';
+  };
+  const isApi = (url) =>
+    url.includes('/api/v2') ||
+    (config.PLATFORM_API && url.startsWith(config.PLATFORM_API)) ||
+    (config.GOJIRA_API && url.startsWith(config.GOJIRA_API));
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    const user = window.__gojiraUser;
-    if (url.includes('/Issue') && user) {
+    if (isApi(url)) {
       init = init || {};
       const headers = new Headers(init.headers || {});
-      if (!headers.has('X-User-Id')) headers.set('X-User-Id', user);
+      const token = getSession();
+      if (token) {
+        if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+      } else {
+        const user = window.__gojiraUser;
+        if (user && !headers.has('X-User-Id')) headers.set('X-User-Id', user);
+      }
       init.headers = headers;
     }
     return orig.call(window, input, init);

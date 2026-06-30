@@ -14,6 +14,30 @@ import './App.css';
 
 const API_BASE = config.API_BASE;
 
+// 전역 fetch 에 인증 헤더 주입(모듈 로드 1회). SSO 모드: SSO_SESSION 토큰 → Authorization:
+// Bearer (백엔드가 introspect 검증). dev(토큰 없음): 헤더 미주입 → 백엔드 DEV_USER 폴백.
+// API 경로(/api/v2 또는 백엔드 베이스)에만 적용 — MobilAve/외부 호출엔 미주입.
+if (typeof window !== 'undefined' && !window.__platformFetchWrapped) {
+  const orig = window.fetch;
+  window.__platformFetchWrapped = true;
+  const apiBases = [config.PLATFORM_API, config.GOJIRA_API, API_BASE].filter(Boolean);
+  const isApi = (url) => url.includes('/api/v2') || apiBases.some((b) => url.startsWith(b));
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (isApi(url)) {
+      const m = document.cookie.match(/(^| )SSO_SESSION=([^;]+)/);
+      const token = m ? decodeURIComponent(m[2]) : '';
+      if (token) {
+        init = init || {};
+        const headers = new Headers(init.headers || {});
+        if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+        init.headers = headers;
+      }
+    }
+    return orig.call(window, input, init);
+  };
+}
+
 class RemoteErrorBoundary extends Component {
   state = { hasError: false };
   static getDerivedStateFromError() { return { hasError: true }; }
