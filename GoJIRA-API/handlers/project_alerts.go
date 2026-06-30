@@ -7,10 +7,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	authmw "gojira-api/auth"
 	"gojira-api/config"
 	"gojira-api/db"
 )
@@ -19,7 +21,7 @@ import (
 // 전체 프로젝트의 알림 상태를 DB 플래그 기반으로 반환
 // 웹훅/이벤트로 갱신되는 branchAlerts, gitOpenPR, gitLastCommit 필드 사용
 func ProjectAlertsHandler(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user")
+	userID := authmw.UserID(r.Context())
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
@@ -88,8 +90,13 @@ func checkTreeDiff(projectCode, userID string) bool {
 	}
 
 	fetchTree := func(ref string) map[string]string {
-		resp, err := http.Get(fmt.Sprintf("%s/DocRepo/%s/tree?ref=%s",
-			config.PlatformAPI, projectCode, url.QueryEscape(ref)))
+		req, _ := http.NewRequest("GET", fmt.Sprintf("%s/DocRepo/%s/tree?ref=%s",
+			config.PlatformAPI, projectCode, url.QueryEscape(ref)), nil)
+		// 서비스간 read — Platform-API auth 미들웨어 통과용 서비스 토큰(SSO 모드).
+		if st := os.Getenv("SERVICE_TOKEN"); st != "" {
+			req.Header.Set("X-Service-Token", st)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil || resp.StatusCode >= 400 {
 			return nil
 		}

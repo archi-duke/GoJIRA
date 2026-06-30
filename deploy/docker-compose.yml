@@ -23,6 +23,17 @@ x-react-env: &react-env
   REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
   REACT_APP_USE_SSO: "${REACT_APP_USE_SSO:-false}"
 
+# 백엔드 SSO 인증 env (auth 미들웨어). USE_SSO 는 프론트 토글과 동일 소스라 같이 켜진다.
+# USE_SSO=false(기본)면 X-User-Id/DEV_USER 폴백 → 동작 무변. SSO 모드 켤 때:
+#  - SSO_INTROSPECT_URL: 백엔드(컨테이너)에서 MobilAve 에 도달하는 주소(mock 은 host.docker.internal:8443)
+#  - SERVICE_TOKEN: 런처/CLI/스킬/서비스간 호출이 X-Service-Token 으로 제시할 공유 비밀
+x-sso-backend-env: &sso-backend-env
+  USE_SSO: "${REACT_APP_USE_SSO:-false}"
+  SSO_INTROSPECT_URL: "${SSO_INTROSPECT_URL:-}"
+  SERVICE_TOKEN: "${SERVICE_TOKEN:-}"
+  SSO_INSECURE_TLS: "${SSO_INSECURE_TLS:-false}"
+  DEV_USER: "${DEV_USER:-duke.kimm}"
+
 services:
 
   # ── 외부 도구: PlantUML 렌더링 서버 ───────────────────────────────────────
@@ -84,6 +95,7 @@ services:
       GITHUB_URL: "http://${GITEA_SERVER:?required}/"
       GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
       GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
+      <<: *sso-backend-env
       # SMTP (선택)
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_PORT: "${SMTP_PORT:-587}"
@@ -124,6 +136,7 @@ services:
       GOJIRA_JIRA_USER: "${GOJIRA_JIRA_USER:-}"
       GOJIRA_JIRA_PASS: "${GOJIRA_JIRA_PASS:-}"
       GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
+      <<: *sso-backend-env
     depends_on:
       - platform-api
 

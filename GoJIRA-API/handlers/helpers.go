@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+
+	authmw "gojira-api/auth"
 )
 
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -73,17 +75,13 @@ func parseXBody(r *http.Request, v interface{}) error {
 	return json.Unmarshal([]byte(xbody), v)
 }
 
-// resolveUser — 요청 user 추출. 우선순위: 명시값(body.User) → X-User-Id → user 쿼리.
-// 비어있으면 false 반환. 호출 측이 403 응답.
+// resolveUser — 요청자 신원은 auth 미들웨어가 검증해 context 에 넣은 값만 신뢰한다.
+// (client 가 보낸 body.User/X-User-Id/?user= 는 더 이상 신뢰하지 않음 — 사칭 차단.)
+// 대신 행위 사용자(act-as)는 미들웨어의 서비스토큰 경로에서 X-User-Id 로 들어와 context 에 반영됨.
+// bodyUser 인자는 시그니처 호환을 위해 남겨두되 사용하지 않는다.
 func resolveUser(r *http.Request, bodyUser string) (string, bool) {
-	if bodyUser != "" {
-		return bodyUser, true
-	}
-	if v := r.Header.Get("X-User-Id"); v != "" {
-		return v, true
-	}
-	if v := r.URL.Query().Get("user"); v != "" {
-		return v, true
+	if u := authmw.UserID(r.Context()); u != "" {
+		return u, true
 	}
 	return "", false
 }
