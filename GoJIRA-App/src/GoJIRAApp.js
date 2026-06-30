@@ -4,8 +4,9 @@ import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
-import AlertModal from './components/AlertModal';
+import AlertModal, { modalConfirm, modalAlert } from './components/AlertModal';
 import config from './config';
+import { detectLauncher, requestSessions, requestChat } from './utils/launcher';
 
 // Platform-App의 sseManager/eventQueue가 없으면 noop
 let subscribe, createEventQueue;
@@ -63,6 +64,35 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     if (project) sessionStorage.setItem('gojira_project', JSON.stringify(project));
     else sessionStorage.removeItem('gojira_project');
   }, []);
+
+  // Design B 과제전환: 에이전트가 "다른 과제" 에 열려 있는 상태에서 현재 과제가 바뀌면,
+  // 사용자에게 확인한 뒤 옛 에이전트를 닫고 새 과제로 다시 띄운다(단일 "현재 과제" 에이전트).
+  // 런처 미감지/미실행이거나, 떠 있는 에이전트가 없거나 같은 과제면 아무것도 안 한다
+  // (others.length===0 가드 → 최초 진입/에이전트 없음 시 조용함).
+  const prevProjectCodeRef = useRef(null);
+  useEffect(() => {
+    const code = selectedProject?.jiraCodes?.main?.jiraCode || '';
+    const prev = prevProjectCodeRef.current;
+    prevProjectCodeRef.current = code;
+    if (!code || code === prev) return;
+    let cancelled = false;
+    (async () => {
+      const r = await detectLauncher();
+      if (cancelled || !r?.ready || !r.token) return;
+      const s = await requestSessions({ token: r.token });
+      if (cancelled || !s.ok) return;
+      const others = (s.data?.sessions || []).filter((x) => x.code && x.code !== code);
+      if (others.length === 0) return;
+      const names = others.map((x) => x.code).join(', ');
+      const ok = await modalConfirm(
+        `다른 과제(${names}) 에이전트가 실행 중입니다.\n'${code}' 로 전환하시겠습니까?\n(기존 에이전트는 닫히고 '${code}' 에이전트가 새로 열립니다)`
+      );
+      if (cancelled || !ok) return;
+      const res = await requestChat({ code, user, replace: true, token: r.token });
+      if (!res.ok) modalAlert(res.error || '에이전트 전환에 실패했습니다.');
+    })();
+    return () => { cancelled = true; };
+  }, [selectedProject, user]);
 
   // Agent 독립 창에서 보낸 네비게이션 명령 수신 (cross-origin postMessage + same-origin BroadcastChannel)
   // minimal project 로 덮어쓰면 documents (repoName 등) 가 사라져 DocEditor 가 "저장소 없음" 으로 오판.

@@ -79,16 +79,12 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
   }
 
-  // 진입 시 초기 파일 확인 → 사용자 브랜치 생성 → 트리 비교 (순차 실행)
+  // 진입 시 트리 비교(read-only). 과거 여기서 init-files/ensure-branch 를 서버로 POST 했으나
+  // local-agent 모델에서 둘 다 제거됨(브랜치/초기파일은 로컬 런처 EnsureRepo 담당). 서버 호출은
+  // 404 로 죽어 의미가 없어 제거 — 트리 갱신만 수행한다.
   useEffect(() => {
     if (!hasRepo) return;
-    // init-files 완료 후 ensure-branch 실행 (main 최신 상태에서 브랜치 생성)
-    fetch(`${API}/${projectCode}/init-files`, { method: 'POST' })
-      .catch(() => {})
-      .then(() => fetch(`${API}/${projectCode}/ensure-branch`, {
-        method: 'POST', headers: { 'X-User-Id': user },
-      }).catch(() => {}))
-      .then(() => refreshDocState());
+    refreshDocState();
   }, [projectCode, hasRepo, user]);
 
   // SSE 구독 — main 변경 시 실시간 트리 갱신

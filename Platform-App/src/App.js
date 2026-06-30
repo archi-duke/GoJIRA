@@ -6,7 +6,7 @@ import DocManager from './components/DocManager';
 import AlertModal from './components/AlertModal';
 import { getAuthUser } from './utils/auth';
 import { subscribe, onStatus } from './utils/sseManager';
-import { modalAlert, modalConfirm } from './components/AlertModal';
+import { modalAlert } from './components/AlertModal';
 import appRegistry from './apps/registry';
 import config from './config';
 import { detectLauncher, requestChat } from './utils/launcher';
@@ -95,20 +95,12 @@ function App() {
         if (!Array.isArray(notifs) || notifs.length === 0) return;
         for (const n of notifs) {
           if (n.type === 'pr_rejected') {
-            const ok = await modalConfirm(
-              `${n.message}\n\n변경 내용을 보관하고 동기화 후 재반영하시겠습니까?`
+            // local-agent 모델: 서버측 conflict-resolve(재반영)는 제거됨. 사용자 변경은 로컬
+            // clone(docs/<user>)에 있으므로, 반려는 알리되 복구는 로컬 문서화면의 "Pull"로 main
+            // 최신을 받아 충돌 해소 후 재등록/발행하도록 안내한다.
+            await modalAlert(
+              `${n.message}\n\n로컬 문서 화면의 "Pull" 로 main 최신을 받아 수정한 뒤 다시 등록/발행해주세요.`
             );
-            if (ok && n.projectCode) {
-              const res = await fetch(`${API_BASE}/DocRepo/${n.projectCode}/conflict-resolve`, {
-                method: 'POST', headers: { 'X-User-Id': user },
-              });
-              const result = await res.json().catch(() => ({}));
-              if (result.resolved) {
-                modalAlert(`${result.applied?.length || 0}개 파일이 재반영되었습니다.`);
-              } else {
-                modalAlert(result.message || '재반영할 변경사항이 없습니다.');
-              }
-            }
           }
         }
         // 알림 읽음 처리
@@ -123,20 +115,10 @@ function App() {
       try {
         const data = JSON.parse(e.data);
         if (data.type === 'pr_review' && data.state === 'changes_requested' && data.prCreator === user) {
-          const ok = await modalConfirm(
-            `PR #${data.prNumber}이 ${data.reviewer}님에 의해 반려되었습니다.\n사유: ${data.body || '(없음)'}\n\n변경 내용을 보관하고 동기화 후 재반영하시겠습니까?`
+          // local-agent 모델: 서버 conflict-resolve 제거됨 — 반려 알림만 하고 로컬 Pull 로 복구 안내.
+          await modalAlert(
+            `PR #${data.prNumber}이 ${data.reviewer}님에 의해 반려되었습니다.\n사유: ${data.body || '(없음)'}\n\n로컬 문서 화면의 "Pull" 로 main 최신을 받아 수정한 뒤 다시 등록/발행해주세요.`
           );
-          if (ok && data.projectCode) {
-            const res = await fetch(`${API_BASE}/DocRepo/${data.projectCode}/conflict-resolve`, {
-              method: 'POST', headers: { 'X-User-Id': user },
-            });
-            const result = await res.json().catch(() => ({}));
-            if (result.resolved) {
-              modalAlert(`${result.applied?.length || 0}개 파일이 재반영되었습니다.`);
-            } else {
-              modalAlert(result.message || '재반영할 변경사항이 없습니다.');
-            }
-          }
         }
       } catch {}
     });
@@ -184,8 +166,21 @@ function App() {
         modalAlert(res.error || '에이전트 실행에 실패했습니다.');
         return;
       }
+      // Design B: 같은 과제에 이미 살아있는 에이전트가 있으면 런처가 중복 spawn 하지 않고
+      // reused 로 응답한다. 사용자가 옛 창을 못 찾고 새로 띄운다고 오해하지 않도록, 창 제목
+      // (과제별 라벨)을 알려 그 창을 찾게 한다.
+      if (res.data?.reused) {
+        setLaunching(null);
+        modalAlert(
+          `이 과제의 에이전트가 이미 실행 중입니다.\n터미널 창 제목 "${res.data.label || 'GoJIRA'}" 을(를) 확인하세요.`
+        );
+        return;
+      }
       // spawn 성공 — 새 터미널이 OS 에 의해 화면에 떠야 사용자가 인지 가능. 그 동안 안내 유지.
-      setLaunching({ title: '에이전트 실행 중...', sub: '새 터미널 창이 곧 표시됩니다' });
+      setLaunching({
+        title: '에이전트 실행 중...',
+        sub: `새 터미널 창(${res.data?.label || 'GoJIRA'})이 곧 표시됩니다`,
+      });
       setTimeout(() => setLaunching(null), 2500);
     } catch (e) {
       setLaunching(null);
