@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
+	authmw "gojira-api/auth"
 	"gojira-api/db"
 )
 
@@ -90,11 +91,11 @@ func UserAuthorityHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, auth)
 }
 
-// 현재 로그인 사용자 정보 조회 (knoxId 기반)
+// 현재 로그인 사용자 정보 조회 — 신원은 auth 미들웨어가 검증한 context 값만 사용(사칭 차단).
 func UserMeHandler(w http.ResponseWriter, r *http.Request) {
-	knoxID := r.URL.Query().Get("knoxId")
+	knoxID := authmw.UserID(r.Context())
 	if knoxID == "" {
-		respondError(w, http.StatusBadRequest, "knoxId is required")
+		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)

@@ -22,9 +22,29 @@ function App() {
     catch { return null; }
   });
 
+  // SSO_SESSION 토큰으로 loginid 복원 (standalone :44301 SSO 진입/새로고침 시).
+  // 교환(?auth=1&code=)은 Platform-App 이 담당하므로 여기선 기존 토큰 복원만 한다.
+  useEffect(() => {
+    if (!config.USE_SSO) return;
+    if (user && user !== '__pending__') return;
+    const m = document.cookie.match(/(^| )SSO_SESSION=([^;]+)/);
+    const sessionToken = m ? decodeURIComponent(m[2]) : null;
+    if (!sessionToken) return;
+    fetch(`${config.SSO_URL}/Account/introspect?token=${encodeURIComponent(sessionToken)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (data?.loginid) setUser(data.loginid);
+        else {
+          document.cookie = 'SSO_SESSION=; path=/; max-age=0';
+          window.location.href = `${config.SSO_URL}/Account/ADFSLogin?client=${window.location.origin}`;
+        }
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 로그인 시 권한 조회
   useEffect(() => {
-    if (!user) return;
+    if (!user || user === '__pending__') return;
     fetch(`${PLATFORM_API}/Account/me?knoxId=${encodeURIComponent(user)}`)
       .then(r => r.json())
       .then(data => {
@@ -75,6 +95,9 @@ function App() {
   }, [navigate, selectedProject]);
 
   if (!user) return null;
+  if (user === '__pending__') {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#888' }}>인증 확인 중...</div>;
+  }
 
   let content;
   if (page === 'docs' && selectedProject) {

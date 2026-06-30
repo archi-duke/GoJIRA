@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"time"
 
+	authmw "platform-api/auth"
 	"platform-api/db"
 )
 
 // GET /Notification/unread?user={userId}
 func NotificationUnreadHandler(w http.ResponseWriter, r *http.Request) {
-	userId := r.URL.Query().Get("user")
+	userId := authmw.UserID(r.Context())
 	if userId == "" {
 		respondJSON(w, http.StatusOK, []interface{}{})
 		return
@@ -27,9 +28,9 @@ func NotificationUnreadHandler(w http.ResponseWriter, r *http.Request) {
 
 // POST /Notification/read?user={userId}
 func NotificationReadHandler(w http.ResponseWriter, r *http.Request) {
-	userId := r.URL.Query().Get("user")
+	userId := authmw.UserID(r.Context())
 	if userId == "" {
-		respondError(w, http.StatusBadRequest, "user 필요")
+		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	authmw "platform-api/auth"
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/github"
@@ -920,7 +921,7 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 승인/반려 후 requested_reviewers에서 해당 사용자 제거
-	knoxID := r.Header.Get("X-User-Id")
+	knoxID := authmw.UserID(r.Context())
 	if knoxID != "" {
 		github.RemoveRequestedReviewer(owner, name, num, knoxID)
 	}
@@ -1068,9 +1069,9 @@ func hasRef(refs []string, name string) bool {
 	return false
 }
 
-// getUserToken 요청에서 X-User-Id 헤더로 Gitea 토큰 조회
+// getUserToken 검증된 요청자(auth.UserID)로 Gitea 토큰 조회
 func getUserToken(r *http.Request) string {
-	userID := r.Header.Get("X-User-Id")
+	userID := authmw.UserID(r.Context())
 	if userID == "" {
 		return ""
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	authmw "platform-api/auth"
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/github"
@@ -55,9 +56,9 @@ func ProjectArchiveHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "code path param required")
 		return
 	}
-	user := r.Header.Get("X-User-Id")
+	user := authmw.UserID(r.Context())
 	if user == "" {
-		respondError(w, http.StatusForbidden, "X-User-Id header required")
+		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	var body struct {
@@ -219,6 +220,10 @@ func callGoJira(ctx context.Context, method, path string, bodyJSON []byte, user 
 	}
 	if user != "" {
 		req.Header.Set("X-User-Id", user)
+	}
+	// 서비스간 호출 — GoJIRA-API auth 미들웨어를 위해 서비스 토큰 동반(SSO 모드 enforcement).
+	if st := os.Getenv("SERVICE_TOKEN"); st != "" {
+		req.Header.Set("X-Service-Token", st)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
