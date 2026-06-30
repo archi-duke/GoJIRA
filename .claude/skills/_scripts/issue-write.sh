@@ -30,7 +30,7 @@ USER="${GOJIRA_USER:-}"
 TMP=$(mktemp)
 # body 는 stdin(@-)으로 — argv 전달 시 Windows 네이티브 curl 이 UTF-8→ANSI 변환해 한글 깨짐.
 STATUS=$(curl -s -o "$TMP" -w '%{http_code}' -X "$METHOD" "${GOJIRA_API}${APIPATH}" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "X-Local-Write: true" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" -H "X-Local-Write: true" \
   --data-binary @- <<< "$BODY" || echo 000)
 RESP=$(cat "$TMP")
 rm -f "$TMP"

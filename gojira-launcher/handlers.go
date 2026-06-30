@@ -17,14 +17,37 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
-const version = "0.1.12"
+const version = "0.1.13"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
 	cfg      *Config
 	sessions *sessionRegistry // 과제별 에이전트 세션 추적(Design B). session.go.
+
+	// SSO 세션토큰(Phase 4 C) — 웹이 X-Gojira-Session 헤더로 매 요청 보낸다(secure 가 캡처).
+	// 런처의 백엔드 호출(ingest/resolveRepoName)에 Bearer 로 쓰고 에이전트 env 로 주입한다.
+	// 단일 사용자 로컬 데몬이라 "마지막 값" 보관으로 충분(함수 시그니처 threading 회피).
+	ssoMu  sync.Mutex
+	ssoTok string
+}
+
+// setSSOToken/ssoToken — 웹이 보낸 SSO 세션토큰 캡처/조회.
+func (s *Server) setSSOToken(t string) {
+	if t == "" {
+		return
+	}
+	s.ssoMu.Lock()
+	s.ssoTok = t
+	s.ssoMu.Unlock()
+}
+
+func (s *Server) ssoToken() string {
+	s.ssoMu.Lock()
+	defer s.ssoMu.Unlock()
+	return s.ssoTok
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

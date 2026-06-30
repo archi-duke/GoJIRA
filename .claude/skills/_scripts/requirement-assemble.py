@@ -23,7 +23,7 @@ import urllib.request
 def http_get_issues(api: str, code: str, user: str) -> list:
     xbody = json.dumps({"prjID": code, "infoType": ""})
     req = urllib.request.Request(
-        f"{api}/Issue", headers={"X-User-Id": user, "XBody": xbody}
+        f"{api}/Issue", headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody}
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -32,7 +32,7 @@ def http_get_issues(api: str, code: str, user: str) -> list:
 def http_get_project(api: str, code: str, user: str) -> dict:
     xbody = json.dumps({"jiraCode": code})
     req = urllib.request.Request(
-        f"{api}/Project", headers={"X-User-Id": user, "XBody": xbody}
+        f"{api}/Project", headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody}
     )
     arr = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
     return arr[0] if arr else {}

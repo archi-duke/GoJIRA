@@ -51,7 +51,7 @@ if [[ "$PATH_SPEC" == *.md ]]; then
   TARGETS=("$PATH_SPEC")
 else
   mapfile -t TARGETS < <(curl -s "${PLATFORM_API}/DocRepo/${CODE}/tree?ref=$(printf %s "docs/${USER}" | jq -sRr @uri)" \
-    -H "X-User-Id: ${USER}" \
+    -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
     | jq -r --arg p "${PATH_SPEC}/" '.tree[] | select(.path | startswith($p)) | select(.path | endswith(".md")) | .path')
 fi
 echo "대상 파일: ${#TARGETS[@]}건"

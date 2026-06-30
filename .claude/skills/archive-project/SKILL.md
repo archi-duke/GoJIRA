@@ -57,7 +57,7 @@ fi
 
 ```bash
 DRY=$(curl -s -X POST "${PLATFORM_API}/Project/${CODE}/archive" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d '{"confirm":false}')
 echo "$DRY" | jq .
 ```
@@ -82,7 +82,7 @@ echo "$DRY" | jq .
 
 ```bash
 RESULT=$(curl -s -X POST "${PLATFORM_API}/Project/${CODE}/archive" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d '{"confirm":true}')
 echo "$RESULT" | jq .
 ```

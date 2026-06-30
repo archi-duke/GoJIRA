@@ -127,17 +127,17 @@ echo; echo "=== use-cases.md ==="; echo "$UC"
 
 # Feature (issueLinks 포함 — relink 차집합 계산에 필요)
 echo; echo "=== Feature ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]'
 
 # VOS (참조용)
 echo; echo "=== VOS ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="VOS") | {key,summary}]'
 
 # 기존 Requirement (description/QAS 전체 + issueLinks — relink 모드에서 원문 그대로 보존)
 echo; echo "=== 기존 Requirement ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,description,reqtype,qa,source,stimulus,environment,artifact,response,measure,responseScenario,measureAuto,issueLinks}]'
 ```
 

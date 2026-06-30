@@ -31,7 +31,7 @@ export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inje
 # 1) 반드시 파일로 저장 ($() 캡처 금지)
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   > /tmp/gojira_issues.json
 
 # 2) 개수

@@ -4,6 +4,12 @@ import config from '../config';
 
 const BASE = (config.LAUNCHER_BASE || 'http://127.0.0.1:5599').replace(/\/$/, '');
 const TOKEN_HEADER = 'X-Gojira-Launcher-Token';
+// SSO 세션토큰을 런처에 전달(Phase 4 C) — 런처가 에이전트 env(GOJIRA_SESSION_TOKEN)로 주입.
+const SESSION_HEADER = 'X-Gojira-Session';
+function ssoSession() {
+  const m = (typeof document !== 'undefined' ? document.cookie : '').match(/(^| )SSO_SESSION=([^;]+)/);
+  return m ? decodeURIComponent(m[2]) : '';
+}
 
 async function fetchWithTimeout(url, opts = {}, ms = 2500) {
   const ctrl = new AbortController();
@@ -38,6 +44,8 @@ export async function requestChat({ code, user, agent, token }) {
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers[TOKEN_HEADER] = token;
+    const sess = ssoSession();
+    if (sess) headers[SESSION_HEADER] = sess;
     const res = await fetchWithTimeout(`${BASE}/chat`, {
       method: 'POST',
       headers,

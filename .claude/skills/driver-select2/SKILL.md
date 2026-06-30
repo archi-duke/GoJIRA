@@ -103,7 +103,7 @@ echo
 echo "=== Requirement 목록 ==="
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Requirement") | {key, subkey, summary, description, reqtype, qa, measure}]'
 
 # Feature (참고)
@@ -111,7 +111,7 @@ echo
 echo "=== Feature (참고) ==="
 curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Feature") | {key, summary}]'
 
 # priorityWeight (projects.archSettings 에서 조회 — 없으면 0.5/0.5)
@@ -244,7 +244,7 @@ jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
 # 현재 labels 조회 (XBody 헤더 방식) → ASR 누락 시 append
 LABELS=$(curl -s "${GOJIRA_API}/Issue" \
   -H "XBody: {\"prjID\":\"${CODE}\",\"key\":\"${KEY}\"}" \
-  -H "X-User-Id: ${USER}" \
+  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq -c '.[0].labels // []')
 NEW_LABELS=$(echo "$LABELS" | jq -c 'if index("ASR") then . else . + ["ASR"] end')
 SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
@@ -265,7 +265,7 @@ jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson l "$NEW_LABELS" \
 # NORM_JSON: Step 1.7 에서 만든 normalizedAttributes JSON 객체
 # 가중치는 Step 0 에서 결정된 W_QAD / W_QAI 사용
 RESP=$(curl -s -w '\n%{http_code}' -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d "$(jq -n --argjson n "$NORM_JSON" --argjson wq "$W_QAD" --argjson wi "$W_QAI" \
     '{normalizedAttributes:$n, priorityWeight:{qad:$wq, qai:$wi}}')")
 STATUS=$(printf '%s' "$RESP" | tail -1)
@@ -276,7 +276,7 @@ if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
   echo "✓ archSettings PATCH 성공 (status=$STATUS)"
 
   # 사후 GET 으로 실제 영속화 확인 (선택, 강력 권장)
-  GET_BODY=$(curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}")
+  GET_BODY=$(curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}")
   HAS_NORM=$(echo "$GET_BODY" | jq '.[0].archSettings.normalizedAttributes | length')
   HAS_W=$(echo "$GET_BODY" | jq '.[0].archSettings.priorityWeight | length')
   if [[ "$HAS_NORM" == "0" || "$HAS_W" == "0" ]]; then

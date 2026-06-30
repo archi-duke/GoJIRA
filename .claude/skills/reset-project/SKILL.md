@@ -82,7 +82,7 @@ fi
 
 ```bash
 curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d "$(jq -n --argjson ri "$RESET_ISSUES" --argjson ra "$RESET_ARCH_SETTINGS" \
     '{confirm:false, resetIssues:$ri, resetArchSettings:$ra}')" \
   | jq
@@ -130,7 +130,7 @@ curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
 
 ```bash
 RESET_RESULT=$(curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d "$(jq -n --argjson ri "$RESET_ISSUES" --argjson ra "$RESET_ARCH_SETTINGS" \
     '{confirm:true, resetIssues:$ri, resetArchSettings:$ra}')")
 echo "$RESET_RESULT" | jq '{mode, deletedCount, failedCount, archSettingsCleared}'

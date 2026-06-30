@@ -22,13 +22,13 @@ import urllib.request
 def http_get(api: str, code: str, user: str) -> tuple[list, dict]:
     xbody = json.dumps({"prjID": code, "infoType": ""})
     req = urllib.request.Request(
-        f"{api}/Issue", headers={"X-User-Id": user, "XBody": xbody}
+        f"{api}/Issue", headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody}
     )
     issues = json.loads(urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
 
     pxbody = json.dumps({"jiraCode": code})
     preq = urllib.request.Request(
-        f"{api}/Project", headers={"X-User-Id": user, "XBody": pxbody}
+        f"{api}/Project", headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": pxbody}
     )
     parr = json.loads(urllib.request.urlopen(preq, timeout=10).read().decode("utf-8"))
     arch = (parr[0].get("archSettings") if parr else {}) or {}

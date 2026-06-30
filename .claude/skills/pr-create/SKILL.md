@@ -28,7 +28,7 @@ export PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher mus
 ## 생성
 ```bash
 curl -s -X POST "${PLATFORM_API}/DocRepo/${CODE}/pr" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d "$(jq -n --arg t "$TITLE" --arg b "$BODY" --arg h "docs/${USER}" \
     '{title:$t, body:$b, head:$h, base:"main"}')"
 ```

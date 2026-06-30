@@ -141,6 +141,11 @@ func platformPost(path string, body interface{}) (interface{}, error) {
 }
 
 func doRequest(req *http.Request) (interface{}, error) {
+	// SSO 모드(Phase 4 C): 런처가 주입한 사용자 세션토큰을 Authorization: Bearer 로 전송 →
+	// 백엔드가 introspect 검증해 신원 추출. dev 모드(토큰 없음)면 미설정 → 기존 X-User-Id 폴백.
+	if t := os.Getenv("GOJIRA_SESSION_TOKEN"); t != "" {
+		req.Header.Set("Authorization", "Bearer "+t)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err

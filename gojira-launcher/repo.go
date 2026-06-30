@@ -118,6 +118,9 @@ func (s *Server) resolveRepoName(code, user string) string {
 	req, _ := http.NewRequest(http.MethodGet, base+"/Project", nil)
 	req.Header.Set("XBody", fmt.Sprintf(`{"jiraCode":%q}`, code))
 	req.Header.Set("X-User-Id", user)
+	if t := s.ssoToken(); t != "" { // SSO 모드: 사용자 세션토큰 Bearer
+		req.Header.Set("Authorization", "Bearer "+t)
+	}
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
 		log.Printf("resolveRepoName warn (%s): %v — code 사용", code, err)

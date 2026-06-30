@@ -106,7 +106,7 @@ PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must injec
 GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
 NORM=$(curl -s "${GOJIRA_API}/Project" \
-  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" \
+  -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '.[0].archSettings.normalizedAttributes // {}')
 
 # Fallback 1: driver-select2 가 같은 세션에서 flush 해둔 /tmp 파일
@@ -178,7 +178,7 @@ cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}]
 동일 프로젝트에 기존 스타일 ADSN 이 있으면 참고용으로 파악. 현재 `create` 중심 모드만 지원 — 기존 ADSN 재사용·수정 로직은 design-decide2 와 같은 패턴으로 후속 확장 가능.
 
 ```bash
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" \
+curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '[.[] | select(.issueType=="Architectural Design" and (.designPoint // "") == "시스템 스타일 결정") | {key,subkey,summary,decision}]'
 ```
 
@@ -620,7 +620,7 @@ PY
 
 CHOSEN_JSON=$(cat /tmp/style_chosen.json)
 curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   -d "$(jq -n --argjson c "$CHOSEN_JSON" '{chosenStyles:$c}')" \
   | jq '{updated, archSettings}'
 
@@ -628,7 +628,7 @@ curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
 QAW_JSON=$(jq '.qaWeights' /tmp/${CODE}-styledef-draft.json)
 if [ "$QAW_JSON" != "null" ] && [ -n "$QAW_JSON" ]; then
   curl -s -X PATCH "${GOJIRA_API}/Project/${CODE}/archSettings" \
-    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" \
+    -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
     -d "$(jq -n --argjson w "$QAW_JSON" '{styleQAWeights:$w}')" \
     | jq '.updated'
 fi

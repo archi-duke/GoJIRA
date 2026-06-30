@@ -55,7 +55,7 @@ def fetch_issues(code: str, user: str):
         f"{GOJIRA_API}/Issue",
         headers={
             "XBody": json.dumps({"prjID": code, "infoType": ""}),
-            "X-User-Id": user,
+            "X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""),
         },
     ) or []
 
@@ -66,7 +66,7 @@ def fetch_arch_settings(code: str, user: str):
         f"{GOJIRA_API}/Project",
         headers={
             "XBody": json.dumps({"jiraCode": code}),
-            "X-User-Id": user,
+            "X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""),
         },
     ) or []
     if isinstance(raw, list) and raw:
@@ -78,7 +78,7 @@ def patch_arch_settings(code: str, user: str, patch: dict):
     return http(
         "PATCH",
         f"{GOJIRA_API}/Project/{code}/archSettings",
-        headers={"X-User-Id": user},
+        headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", "")},
         body=patch,
     )
 
