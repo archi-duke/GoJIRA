@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"platform-api/auth"
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/handlers"
@@ -54,6 +55,9 @@ func main() {
 	r.Use(caseInsensitiveRouting)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	// SSO 인증 — 검증된 신원을 context 주입(핸들러는 auth.UserID). 비인증 경로(/launcher,
+	// /webhook)·OPTIONS 통과. USE_SSO!=true(dev)면 X-User-Id/DEV_USER 폴백이라 동작 무변.
+	r.Use(auth.Middleware)
 
 	// Webhook (버전 없이)
 	r.Post("/webhook/github", handlers.GitHubWebhookHandler)

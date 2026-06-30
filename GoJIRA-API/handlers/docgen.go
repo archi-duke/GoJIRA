@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -235,6 +236,10 @@ func callPlatform(method, path string, body interface{}, userID ...string) (inte
 	req.Header.Set("Content-Type", "application/json")
 	if len(userID) > 0 && userID[0] != "" {
 		req.Header.Set("X-User-Id", userID[0])
+	}
+	// 서비스간 호출 — Platform-API auth 미들웨어 통과용 서비스 토큰(SSO 모드).
+	if st := os.Getenv("SERVICE_TOKEN"); st != "" {
+		req.Header.Set("X-Service-Token", st)
 	}
 	resp, err := platformClient.Do(req)
 	if err != nil {
