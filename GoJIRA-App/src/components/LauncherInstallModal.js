@@ -14,11 +14,14 @@ function detectOS() {
   return 'linux';
 }
 
-function installInstructions(osKey) {
+function installInstructions(osKey, gwOrigin) {
+  // 현재 웹 origin(=게이트웨이 주소)을 install --gateway 로 넣어주면 launcher.json 의
+  // backend URL/webOrigins 가 자동 파생된다 — 손편집 불필요. origin 미확인 시 플래그 생략.
+  const gw = gwOrigin ? ` --gateway ${gwOrigin}` : '';
   if (osKey === 'windows') {
     return [
       '내려받은 gojira-launcher.exe 를 적당한 폴더에 둡니다.',
-      '명령 프롬프트에서 gojira-launcher.exe install 을 1회 실행합니다 — 스킬 배포 + 설정파일 생성 + 로그인 시 자동시작 등록 + 데몬 기동(127.0.0.1:5599)까지 자동으로 수행합니다.',
+      `명령 프롬프트에서 gojira-launcher.exe install${gw} 을 1회 실행합니다 — 스킬 배포 + 설정파일 생성(gateway 자동 기록) + 로그인 시 자동시작 등록 + 데몬 기동(127.0.0.1:5599)까지 자동.`,
       '~/.gojira/launcher.json 의 git.user / git.token (폐쇄망 인증)을 채우고 런처를 재시작합니다 (양식은 관리자에게 요청).',
       '이후 런처는 기동할 때마다 최신 버전을 확인하고 자동 업데이트합니다.',
     ];
@@ -27,13 +30,13 @@ function installInstructions(osKey) {
     return [
       'chmod +x gojira-launcher',
       'Gatekeeper: xattr -dr com.apple.quarantine gojira-launcher (서명 전)',
-      './gojira-launcher install — 스킬 배포 + 설정파일 생성 + 로그인 항목 등록 + 데몬 기동(127.0.0.1:5599)까지 자동.',
+      `./gojira-launcher install${gw} — 스킬 배포 + 설정파일 생성(gateway 자동 기록) + 로그인 항목 등록 + 데몬 기동(127.0.0.1:5599)까지 자동.`,
       '~/.gojira/launcher.json 의 git.user / git.token 을 채우고 재시작 (양식은 관리자에게 요청). 이후 자동 업데이트.',
     ];
   }
   return [
     'chmod +x gojira-launcher',
-    './gojira-launcher install — 스킬 배포 + 설정파일 생성 + 자동시작(.desktop) 등록 + 데몬 기동(127.0.0.1:5599)까지 자동.',
+    `./gojira-launcher install${gw} — 스킬 배포 + 설정파일 생성(gateway 자동 기록) + 자동시작(.desktop) 등록 + 데몬 기동(127.0.0.1:5599)까지 자동.`,
     '~/.gojira/launcher.json 의 git.user / git.token 을 채우고 재시작 (양식은 관리자에게 요청). 이후 자동 업데이트.',
   ];
 }
@@ -52,6 +55,8 @@ export default function LauncherInstallModal({ onClose, onRetry }) {
 
   const entry = (manifest || []).find(p => p.os === osKey);
   const downloadHref = `${PLATFORM_API}/launcher/download/${osKey}`;
+  // 현재 접속 origin = 게이트웨이 주소. install --gateway 로 그대로 넣어준다.
+  const gwOrigin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
 
   return (
     <div className="lim-backdrop" onClick={onClose}>
@@ -86,7 +91,7 @@ export default function LauncherInstallModal({ onClose, onRetry }) {
             )}
           </div>
           <ol className="lim-steps">
-            {installInstructions(osKey).map((s, i) => <li key={i}>{s}</li>)}
+            {installInstructions(osKey, gwOrigin).map((s, i) => <li key={i}>{s}</li>)}
           </ol>
         </div>
         <div className="lim-footer">

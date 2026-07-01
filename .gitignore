@@ -12,6 +12,11 @@ gojira-launcher/gojira-launcher.exe
 # Env
 .env
 
+# TLS 인증서 (개인키 포함 — 절대 커밋 금지)
+deploy/certs/*
+!deploy/certs/.gitkeep
+!deploy/certs/README.md
+
 # Python
 __pycache__/
 *.pyc

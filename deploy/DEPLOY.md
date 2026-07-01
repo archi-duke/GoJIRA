@@ -57,8 +57,9 @@ cp .env.example .env
 | | `PLATFORM_GITHUB_ORG` | Gitea organization 이름 |
 | 호스트 파일시스템 | `GOJIRA_REPOS_DIR` | Platform-API 의 bare clone + worktree 저장 경로 (호스트 측). 폐쇄망은 절대경로 권장 — 예: `/var/lib/gojira/repos` |
 | | `UID` / `GID` | 컨테이너가 호스트 사용자 권한으로 실행되도록 매핑. 보통 `id -u` / `id -g` 값. bind mount fs 권한 일치 목적 |
-| GoJIRA 서비스<br>(사용자 access) | `*_SERVER` + `*_PORT` 쌍 6종 | 브라우저가 접근하는 host + port (Platform/GoJIRA API + Platform/GoJIRA App + PlantUML + pumlex). React 에 **런타임** 주입 (env.js) — 재빌드 불요 |
-| 컨테이너 노출 port<br>(선택) | `*_HOST_PORT` | nginx reverse proxy 환경에서 컨테이너 외부 노출 port 가 사용자 access port 와 다를 때만 |
+| 게이트웨이<br>(단일 진입점) | `GATEWAY_HOST` + `GATEWAY_PORT` | 브라우저/스킬이 접속하는 **단일** host + port. 모든 서비스는 gateway 뒤 경로로 프록시됨(백엔드는 호스트 미노출). `GATEWAY_HOST` 는 인증서 CN/SAN 과 일치해야 함 |
+| HTTPS 토글 | `URL_SCHEME` | `https` 면 gateway 가 TLS 종단(모든 URL https/wss), `http`(기본)면 평문 |
+| TLS 인증서 | `TLS_CERT_DIR` | `URL_SCHEME=https` 일 때 `fullchain.pem`+`privkey.pem` 이 있는 호스트 디렉토리 (기본 `./certs`). 상세: `deploy/certs/README.md` |
 
 ### 2-2. 선택 값
 
@@ -116,6 +117,7 @@ docker images | grep -E "gojira|plantuml"
 # gojira/platform-app    latest
 # gojira/gojira-app      latest
 # gojira/pumlex-server   latest
+# gojira/gateway         latest
 # plantuml/plantuml-server  jetty
 ```
 
@@ -248,16 +250,20 @@ docker compose up -d
 
 ### 7-1. 헬스 체크 (서버 내부)
 
-`.env` 의 `*_PORT` (또는 `*_HOST_PORT` 가 설정됐으면 그 값) 으로 호출. 아래는 `.env` 의 값을 읽어 자동 호출:
+백엔드는 호스트에 직접 노출되지 않으므로 **gateway 경유**로 확인한다. `URL_SCHEME=https`
+면 `http` 대신 `https`, 자체서명이면 `curl -k`. (`.env` 값 자동 사용)
 
 ```bash
 source .env
-curl -sS http://localhost:${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT}}/                  # Platform-API → 404 OK
-curl -sS http://localhost:${GOJIRA_API_HOST_PORT:-${GOJIRA_API_PORT}}/                      # GoJIRA-API   → 404 OK
-curl -sS http://localhost:${JIRA_API_HOST_PORT:-8000}/rest/api/2/serverInfo                 # JIRA Mock    → JSON
-curl -sS http://localhost:${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT}}/                  # Platform-App → HTML
-curl -sS http://localhost:${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT}}/                      # GoJIRA-App   → HTML
-curl -sS http://localhost:${PUMLEX_HOST_PORT:-${PUMLEX_PORT}}/                              # pumlex       → HTML
+B="${URL_SCHEME:-http}://localhost:${GATEWAY_PORT}"
+curl -sS  ${B}/                          # Platform-App → HTML (shell)
+curl -sS  ${B}/gojira-app/remoteEntry.js # GoJIRA-App remote → JS
+curl -sS  ${B}/platform-api/             # Platform-API → 404 OK (gateway→9000)
+curl -sS  ${B}/gojira-api/               # GoJIRA-API   → 404 OK (gateway→9001)
+curl -sS  ${B}/pumlex/                   # pumlex       → HTML
+
+# 백엔드 컨테이너 자체를 직접 보려면 내부에서:
+docker compose exec platform-api wget -qO- http://localhost:9000/ || true
 ```
 
 ### 7-2. startup 로그 확인
@@ -272,10 +278,10 @@ docker compose logs gojira-api    | head -30
 ### 7-3. 브라우저 통합 확인
 
 ```
-http://${PLATFORM_APP_SERVER}:${PLATFORM_APP_PORT}   # Platform-App (계정/공지/문서)
-http://${GOJIRA_APP_SERVER}:${GOJIRA_APP_PORT}       # GoJIRA-App (이슈/프로젝트/채팅)
+${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/               # Platform-App (계정/공지/문서)
+${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/ 내에서 이동    # GoJIRA-App (이슈/프로젝트/채팅, MF remote)
 ```
-(.env 에 채운 값이 그대로 사용자 access URL)
+(gateway 단일 origin — GoJIRA-App 은 Platform-App shell 안에서 `/gojira-app/` remote 로 로드됨)
 
 체크리스트:
 - [ ] Platform-App 로그인 / 프로젝트 목록 표시
@@ -300,9 +306,30 @@ http://${GOJIRA_APP_SERVER}:${GOJIRA_APP_PORT}       # GoJIRA-App (이슈/프로
 | 변경 대상 | 절차 |
 |---|---|
 | 백엔드용 변수 (Mongo/Gitea/OpenCode/시크릿) | `.env` 수정 → `docker compose up -d` |
-| 사용자 access URL (`*_SERVER` / `*_PORT`) | `.env` 수정 → `docker compose up -d` (런타임 config 라 재빌드 불요) |
+| 사용자 access host/port (`GATEWAY_HOST` / `GATEWAY_PORT`) | `.env` 수정 → `docker compose up -d` (런타임 config 라 재빌드 불요) |
+| HTTP ↔ HTTPS 전환 (`URL_SCHEME`) | 아래 "HTTPS 전환" 절차 참고 |
 | LLM provider swap | `config/llm.json` 편집 (active provider 와 `_disabled_*` swap) → `docker compose restart platform-api` |
 | llm.json 만 수정 | volume mount 이므로 컨테이너 재시작만 (`docker compose restart platform-api`) |
+
+### HTTPS 전환
+
+모든 브라우저 대면 트래픽은 `gateway`(nginx) 한 곳으로 들어와 경로 기반으로 백엔드에
+프록시된다. `URL_SCHEME` 하나로 http/https 를 토글한다.
+
+1. 인증서 배치 — `TLS_CERT_DIR`(기본 `deploy/certs/`)에 두 파일:
+   - `fullchain.pem` (서버 인증서 + 중간 체인), `privkey.pem` (개인키)
+   - 인증서 CN/SAN 이 `.env` 의 `GATEWAY_HOST` 와 일치해야 브라우저 경고가 없다.
+   - 상세/자체서명 예시: `deploy/certs/README.md`
+2. `.env` 수정: `URL_SCHEME=https` (필요 시 `GATEWAY_PORT` 를 443 등으로)
+3. 반영: `docker compose up -d` — React/백엔드 재빌드 불요(런타임 env.js + gateway 재설정)
+4. 스킬/런처 연동 — **자동**: 사용자 PC 의 `~/.gojira/launcher.json` 은 단일 `gateway`
+   필드에서 backend URL/webOrigins 를 자동 파생한다. 웹 설치 안내 모달이
+   `gojira-launcher install --gateway <접속주소>` 명령을 그대로 제시하므로, 사용자가
+   그 명령으로 설치하면 gateway 가 자동 기록된다(손편집 불요).
+   - 이미 설치된 런처는 `~/.gojira/launcher.json` 에 `"gateway": "https://<GATEWAY_HOST>:<GATEWAY_PORT>"` 한 줄만 넣고 재시작하면 된다.
+   - 남는 사용자 몫: `git.user`/`git.token`(폐쇄망 Gitea 인증), 그리고 자체서명 인증서면 각 PC 신뢰스토어에 CA 등록(스킬 `curl` 실패 방지).
+
+> `./scripts/preflight.sh` 는 `URL_SCHEME=https` 일 때 인증서 존재를 자동 검증한다.
 
 ### 백업 / 복구
 
@@ -348,8 +375,10 @@ docker image prune                     # 옛 이미지 정리
 | Platform-API 가 `permission denied` 로 worktree 생성 실패 | `GOJIRA_REPOS_DIR` 디렉토리 소유자가 `${UID}:${GID}` 와 다름. `sudo chown -R ${UID}:${GID} ${GOJIRA_REPOS_DIR}` |
 | Platform-API startup 시 `mkdir /data/repos: permission denied` | 위와 동일 — bind mount 호스트 디렉토리 권한 확인 |
 | 백엔드 startup 시 `MongoDB connect timeout` | `MONGODB_SERVER` / `MONGO_USER` / `MONGO_PASS` 확인. 비밀번호에 `@` / `:` / `/` 들어가면 URL encoding 필요 (`@` → `%40`) |
-| 브라우저 콘솔 `ERR_CONNECTION_REFUSED localhost` | env.js 가 생성되지 않았거나 비어있음. `docker compose exec platform-app cat /usr/share/nginx/html/env.js` 로 확인. `.env` 의 `*_SERVER`/`*_PORT` 값 검증 후 `docker compose up -d platform-app gojira-app` |
-| Module Federation `remoteEntry.js` 실패 | `GOJIRA_APP_SERVER` + `GOJIRA_APP_PORT` 가 브라우저 접근 가능한 endpoint 인지 확인 |
+| 브라우저 콘솔 `ERR_CONNECTION_REFUSED` | env.js 가 비었거나 `GATEWAY_HOST`/`GATEWAY_PORT` 오설정. `docker compose exec platform-app cat /usr/share/nginx/html/env.js` 로 확인 후 `docker compose up -d platform-app gojira-app gateway` |
+| Module Federation `remoteEntry.js` 실패 | `${GATEWAY_HOST}:${GATEWAY_PORT}/gojira-app/remoteEntry.js` 가 브라우저에서 200 인지 확인 (gateway 라우팅) |
+| HTTPS 인 데 `ERR_SSL` / 인증서 경고 | 인증서 CN/SAN 이 `GATEWAY_HOST` 와 불일치하거나 체인 누락. `deploy/certs/fullchain.pem` 은 leaf+중간 체인 연결본이어야 함 |
+| gateway 가 502 Bad Gateway | 대상 백엔드 컨테이너 미기동. `docker compose ps` 로 상태 확인, `docker compose logs <service>` |
 | LLM 호출 시 `unauthorized` | `OPENAI_API_KEY` / `PLATFORM_LLM_TICKET` 확인. `GOJIRA_ENC_KEY` 가 `ENC:` 값 암호화 시 사용한 키와 동일한지 |
 | `ENC:` 값 복호화 fail | 두 환경의 `GOJIRA_ENC_KEY` 가 다름. 양쪽 모두 미설정이면 코드 default key 가 동일하게 적용됨 |
 | PlantUML 한글/다이어그램 깨짐 | `docker compose restart plantuml-server` (JVM 폰트 캐시 이슈) |

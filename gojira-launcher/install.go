@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // runSubcommand — 단일 exe 가 데몬 외에 install/uninstall/version/update-finalize 를 처리한다.
@@ -20,7 +22,7 @@ func runSubcommand(args []string) (shouldExit bool) {
 		fmt.Printf("gojira-launcher v%s\n", version)
 		return true
 	case "install":
-		if err := doInstall(); err != nil {
+		if err := doInstall(parseGatewayFlag(args[1:])); err != nil {
 			fmt.Fprintf(os.Stderr, "설치 실패: %v\n", err)
 			os.Exit(1)
 		}
@@ -50,11 +52,28 @@ func printUsage() {
 	fmt.Fprint(os.Stderr, `gojira-launcher — GoJIRA 로컬 소환 데몬
 
 사용법:
-  gojira-launcher                 데몬 실행 (기본)
-  gojira-launcher install         설치(자기복사 + 스킬배포 + 설정파일 + 자동시작 등록) 후 기동
-  gojira-launcher uninstall       자동시작 해제 + 설치 정리
-  gojira-launcher version         버전 출력
+  gojira-launcher                        데몬 실행 (기본)
+  gojira-launcher install                설치(자기복사 + 스킬배포 + 설정파일 + 자동시작 등록) 후 기동
+  gojira-launcher install --gateway URL  설치 + launcher.json 의 gateway 자동 기록
+                                         (backend URL/webOrigins 자동 파생). 예: --gateway https://gojira-host:44300
+  gojira-launcher uninstall              자동시작 해제 + 설치 정리
+  gojira-launcher version                버전 출력
 `)
+}
+
+// parseGatewayFlag — install 인자에서 `--gateway <url>` (또는 `--gateway=<url>`) 을 뽑는다.
+// 없으면 "". 웹이 install 명령을 만들 때 자기 origin 을 넣어주면 손편집이 사라진다.
+func parseGatewayFlag(args []string) string {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--gateway" && i+1 < len(args) {
+			return args[i+1]
+		}
+		if v, ok := strings.CutPrefix(a, "--gateway="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // doInstall — 단일 exe 로부터 전체 설치를 수행한다:
@@ -63,7 +82,7 @@ func printUsage() {
 //  3. 임베드 스킬을 skillsSourceDir 로 추출
 //  4. OS 자동시작 등록(Windows: HKCU Run 키)
 //  5. 데몬 기동(detached)
-func doInstall() error {
+func doInstall(gateway string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("실행 파일 경로 확인 실패: %w", err)
@@ -83,6 +102,18 @@ func doInstall() error {
 		fmt.Printf("✓ exe 설치: %s\n", target)
 	} else {
 		fmt.Printf("✓ exe 이미 설치 위치에서 실행 중: %s\n", target)
+	}
+
+	// gateway 가 넘어오면 launcher.json 에 자동 기록 — backend URL/webOrigins 는
+	// 런처가 파생하므로 이후 손편집 불요(자동화). LoadConfig 이전에 기록해야 파생에 반영됨.
+	if gateway != "" {
+		if dir, derr := gojiraDir(); derr == nil {
+			if perr := persistGateway(dir, gateway); perr != nil {
+				log.Printf("gateway 기록 실패(비치명적): %v", perr)
+			} else {
+				fmt.Printf("✓ gateway 기록: %s (backend URL/webOrigins 자동 파생)\n", gateway)
+			}
+		}
 	}
 
 	// 설정/토큰 — placeholder 생성 트리거.
@@ -144,6 +175,34 @@ func doUninstall() error {
 	}
 	fmt.Printf("\n설정(~/.gojira/%s)과 스킬은 보존했습니다. 완전 삭제하려면 ~/.gojira/skills 와 설정 파일을 직접 지우세요.\n", configFileName)
 	return nil
+}
+
+// persistGateway — launcher.json 의 `gateway` 필드만 갱신해 저장한다. 다른 필드
+// (git 크리덴셜 등)는 map round-trip 으로 보존. 파일이 없으면 placeholder 를 먼저 만든다.
+func persistGateway(dir, gateway string) error {
+	path := filepath.Join(dir, configFileName)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if werr := writePlaceholderConfig(dir, path); werr != nil {
+			return werr
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("%s 파싱 실패: %w", path, err)
+	}
+	if strings.TrimSpace(gateway) == m["gateway"] {
+		return nil // 변경 없음
+	}
+	m["gateway"] = strings.TrimSpace(gateway)
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o600)
 }
 
 // copyFile — src → dst 복사(권한 mode). dst 가 실행 중이면 실패할 수 있음(호출부에서 처리).

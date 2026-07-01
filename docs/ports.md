@@ -44,10 +44,27 @@ OpenCode 는 어디서든 띄울 수 있다 (단일 호스트 / 게스트→호�
 | 8000 | 8000 | `JIRA_API_HOST_PORT` |
 | 4096 | 4096 | OpenCode (host native, 컨테이너 외부) |
 
-스킬 / 외부 클라이언트가 사내 서버 호출 시 사용하는 URL 도 호스트 매핑 포트 기준:
-- `http://<gojira-host>:44350/api/v2` — Platform-API
-- `http://<gojira-host>:44360/api/v2` — GoJIRA-API
-- `http://<gojira-host>:44370/api/v2` — Agent-Service
+### 게이트웨이 단일 진입점 (deploy/docker-compose.yml)
+
+> **변경(리버스 프록시 도입):** deploy compose 에서는 위 백엔드/프론트 컨테이너를
+> 호스트에 직접 노출하지 않는다(`expose` 만, 내부 네트워크 전용). 대신 `gateway`
+> (nginx) 컨테이너 **하나만** `GATEWAY_PORT` 로 노출하고, 경로 기반으로 프록시한다.
+> 방화벽에는 `GATEWAY_PORT` 하나만 등록하면 된다.
+
+| gateway 경로 | 대상 컨테이너 |
+|---|---|
+| `/` | Platform-App (3000) |
+| `/gojira-app/` | GoJIRA-App (3001, Module Federation remote) |
+| `/platform-api/` | Platform-API (9000) |
+| `/gojira-api/` | GoJIRA-API (9001) |
+| `/pumlex/` | pumlex (3030) |
+
+`URL_SCHEME=https` 면 gateway 가 인증서(`TLS_CERT_DIR`)로 TLS 종단하고 모든 URL 이
+https/wss 로 조합된다. `http`(기본)면 평문. 백엔드는 항상 컨테이너 내부 HTTP.
+
+스킬 / 외부 클라이언트(런처 주입)가 사용하는 URL 도 gateway 경로 기준:
+- `${URL_SCHEME}://<gojira-host>:<GATEWAY_PORT>/platform-api/api/v2` — Platform-API
+- `${URL_SCHEME}://<gojira-host>:<GATEWAY_PORT>/gojira-api/api/v2` — GoJIRA-API
 
 자세한 배포 토폴로지: `docs/deployment-topology.md`
 

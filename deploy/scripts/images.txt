@@ -20,4 +20,5 @@ gojira/jira-api:${IMAGE_TAG}
 gojira/platform-app:${IMAGE_TAG}
 gojira/gojira-app:${IMAGE_TAG}
 gojira/pumlex-server:${IMAGE_TAG}
+gojira/gateway:${IMAGE_TAG}
 gojira/launcher-dist:${IMAGE_TAG}

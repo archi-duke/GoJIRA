@@ -40,11 +40,7 @@ load_env "$ENV_FILE"
 REQUIRED_VARS=(
   MONGODB_SERVER MONGO_USER MONGO_PASS
   GITEA_SERVER PLATFORM_GITHUB_TOKEN PLATFORM_GITHUB_ORG
-  PLATFORM_API_SERVER PLATFORM_API_PORT
-  GOJIRA_API_SERVER  GOJIRA_API_PORT
-  PLATFORM_APP_SERVER PLATFORM_APP_PORT
-  GOJIRA_APP_SERVER   GOJIRA_APP_PORT
-  PUMLEX_SERVER       PUMLEX_PORT
+  GATEWAY_HOST GATEWAY_PORT
 )
 log "1) .env required 변수 검증"
 fail=0
@@ -58,6 +54,22 @@ for v in "${REQUIRED_VARS[@]}"; do
 done
 [[ $fail -eq 0 ]] && ok "  → 전부 채워짐"
 [[ $fail -eq 1 ]] && die "필수 변수 누락 — .env 보완 필요"
+
+# ── 1b) HTTPS 모드면 TLS 인증서 존재 검증 ────────────────────────────────
+if [[ "${URL_SCHEME:-http}" == "https" ]]; then
+  log "1b) URL_SCHEME=https — TLS 인증서 검증"
+  CERT_DIR="${TLS_CERT_DIR:-./certs}"
+  [[ "$CERT_DIR" = /* ]] || CERT_DIR="$(cd "${DEPLOY_DIR}" && cd "$(dirname "$CERT_DIR")" 2>/dev/null && pwd)/$(basename "$CERT_DIR")"
+  cfail=0
+  for f in fullchain.pem privkey.pem; do
+    if [[ ! -r "${CERT_DIR}/${f}" ]]; then
+      err "  ✗ 인증서 없음/읽기불가: ${CERT_DIR}/${f}"
+      cfail=1
+    fi
+  done
+  [[ $cfail -eq 0 ]] && ok "  ✓ TLS 인증서 확인 (${CERT_DIR}/{fullchain,privkey}.pem)"
+  [[ $cfail -eq 1 ]] && die "TLS 인증서 누락 — ${CERT_DIR} 에 fullchain.pem + privkey.pem 배치 (또는 URL_SCHEME=http)"
+fi
 
 # ── 2) GOJIRA_REPOS_DIR 디렉토리 + 권한 ─────────────────────────────────
 log "2) bind mount 호스트 디렉토리 검증"

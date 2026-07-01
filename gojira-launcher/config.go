@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,13 @@ import (
 // 토큰을 사용자 홈에 저장한다. 여기 Token 은 웹↔런처 핸드셰이크용 설치 토큰이며,
 // 설정에 없으면 첫 기동 시 자동 생성되어 token 파일에 영구 저장된다(§2.3).
 type Config struct {
-	DefaultAgent    string   `json:"defaultAgent"`    // opencode | claude
-	RepoRoot        string   `json:"repoRoot"`        // 로컬 clone 루트
+	DefaultAgent    string   `json:"defaultAgent"` // opencode | claude
+	RepoRoot        string   `json:"repoRoot"`     // 로컬 clone 루트
+	Gateway         string   `json:"gateway"`      // 게이트웨이 base origin (예: https://gojira-host:44300). 설정 시 backend URL 2종 + webOrigins 를 자동 파생 → 손편집 불요.
 	Backend         Backend  `json:"backend"`
 	Port            int      `json:"port"`
 	WebOrigin       string   `json:"webOrigin"`       // (legacy) 허용할 웹 origin 단일값
-	WebOrigins      []string `json:"webOrigins"`      // 허용할 웹 origin 목록 (Module Federation host + remote 등 다중 origin)
+	WebOrigins      []string `json:"webOrigins"`      // 허용할 웹 origin 목록 (gateway 파생분 + 수동 추가분). gateway 설정 시 자동 채워짐.
 	Git             Git      `json:"git"`             // clone 대상 Gitea base + org
 	Token           string   `json:"token"`           // 설치 토큰(미설정 시 자동 생성)
 	SkillsSourceDir string   `json:"skillsSourceDir"` // <dir>/.claude 를 각 clone 에 symlink. 미설정 시 ~/.gojira/skills 기본값(임베드 스킬 추출 대상).
@@ -113,6 +115,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	applyDefaults(cfg)
+	deriveGateway(cfg)
 
 	// 설치 토큰 확보(설정에 없으면 token 파일에서 로드/생성).
 	if cfg.Token == "" {
@@ -132,15 +135,13 @@ func writePlaceholderConfig(dir, path string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// gateway 한 줄만 채우면 backend URL 2종 + webOrigins 는 런처가 자동 파생한다
+	// (deriveGateway). `install --gateway <origin>` 로 설치하면 이 값도 자동 기록됨.
 	content := `{
   "defaultAgent": "opencode",
   "repoRoot": "~/GoJIRA-projects",
-  "backend": {
-    "platformApi": "http://<gojira-host>:9000/api/v2",
-    "gojiraApi": "http://<gojira-host>:9001/api/v2"
-  },
+  "gateway": "http://<gojira-host>:<gateway-port>",
   "port": 5599,
-  "webOrigin": "http://<gojira-app-host>:3001",
   "git": {
     "base": "http://<gitea-host>:3300",
     "org": "gojira",
@@ -202,6 +203,55 @@ func applyDefaults(cfg *Config) {
 	if cfg.Update.IntervalMinutes == 0 {
 		cfg.Update.IntervalMinutes = 60
 	}
+}
+
+// deriveGateway — launcher.json 의 단일 `gateway` origin 에서 backend URL 2종과
+// webOrigins 를 자동 파생한다. 게이트웨이(리버스 프록시) 도입 후 운영자가 backend/
+// webOrigins 를 손으로 채우지 않아도 되게 하는 자동화의 핵심.
+//
+//   gateway = https://gojira-host:44300  →
+//     backend.platformApi = https://gojira-host:44300/platform-api/api/v2  (미설정 시)
+//     backend.gojiraApi   = https://gojira-host:44300/gojira-api/api/v2    (미설정 시)
+//     webOrigins          += https://gojira-host:44300                      (중복 제거)
+//
+// backend.* 가 이미 명시돼 있으면 존중(수동 override 우선). gateway 가 비면 no-op —
+// 기존(gateway 이전) launcher.json 은 그대로 동작한다.
+func deriveGateway(cfg *Config) {
+	if strings.TrimSpace(cfg.Gateway) == "" {
+		return
+	}
+	origin := gatewayOrigin(cfg.Gateway)
+	if origin == "" {
+		fmt.Fprintf(os.Stderr, "launcher.json gateway=%q 파싱 실패 — scheme://host[:port] 형식 필요\n", cfg.Gateway)
+		return
+	}
+	if cfg.Backend.PlatformAPI == "" {
+		cfg.Backend.PlatformAPI = origin + "/platform-api/api/v2"
+	}
+	if cfg.Backend.GojiraAPI == "" {
+		cfg.Backend.GojiraAPI = origin + "/gojira-api/api/v2"
+	}
+	// webOrigins 에 gateway origin 추가(WebOrigin/WebOrigins 어디에도 없을 때만).
+	seen := strings.TrimRight(cfg.WebOrigin, "/") == origin
+	for _, w := range cfg.WebOrigins {
+		if strings.TrimRight(w, "/") == origin {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		cfg.WebOrigins = append(cfg.WebOrigins, origin)
+	}
+}
+
+// gatewayOrigin — 입력 URL 에서 scheme://host[:port] origin 만 뽑는다(경로/쿼리 제거).
+// 잘못된 입력이면 "" 반환.
+func gatewayOrigin(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // expandHome — 경로 선두의 `~` 를 사용자 home 으로 치환한다. Go 의 filepath.Join 은
