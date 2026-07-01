@@ -13,13 +13,17 @@ x-build-context: &build-context
 
 # React 두 앱이 사용하는 런타임 env. nginx entrypoint 가 컨테이너 startup 시
 # env → /usr/share/nginx/html/env.js 로 직렬화 → window._env_ 로 노출.
-# 더 이상 build-arg 가 아니므로 host/port 변경 시 React 재빌드 불요 — 컨테이너
+# 더 이상 build-arg 가 아니므로 스킴/호스트 변경 시 React 재빌드 불요 — 컨테이너
 # recreate (docker compose up -d) 만 하면 즉시 반영.
+#
+# 모든 URL 은 gateway 단일 진입점(GATEWAY_HOST:GATEWAY_PORT) + 경로 프리픽스로 조합.
+# URL_SCHEME=https 면 gateway 가 TLS 종단하고 여기 URL 이 https 로 조합된다
+# (WebSocket 은 프론트가 http→ws 치환하므로 자동으로 wss). http(기본)면 평문.
 x-react-env: &react-env
-  REACT_APP_PLATFORM_API: "http://${PLATFORM_API_SERVER:?required}:${PLATFORM_API_PORT:?required}/api/v2"
-  REACT_APP_GOJIRA_API: "http://${GOJIRA_API_SERVER:?required}:${GOJIRA_API_PORT:?required}/api/v2"
-  REACT_APP_GOJIRA_APP_REMOTE: "http://${GOJIRA_APP_SERVER:?required}:${GOJIRA_APP_PORT:?required}"
-  REACT_APP_PUMLEX_SERVER: "http://${PUMLEX_SERVER:?required}:${PUMLEX_PORT:?required}"
+  REACT_APP_PLATFORM_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/platform-api/api/v2"
+  REACT_APP_GOJIRA_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira-api/api/v2"
+  REACT_APP_GOJIRA_APP_REMOTE: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira-app"
+  REACT_APP_PUMLEX_SERVER: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/pumlex"
   REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
   REACT_APP_USE_SSO: "${REACT_APP_USE_SSO:-false}"
 
@@ -54,8 +58,9 @@ services:
       dockerfile: deploy/images/pumlex-server/Dockerfile
     image: gojira/pumlex-server:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    ports:
-      - "${PUMLEX_HOST_PORT:-${PUMLEX_PORT:-3030}}:3030"
+    # 호스트에 직접 노출하지 않는다 — gateway 가 /pumlex/ 로 프록시.
+    expose:
+      - "3030"
     environment:
       PORT: "3030"
       # compose 내부 DNS 로 plantuml 컨테이너 직접 호출 (브라우저 경유 아님).
@@ -86,8 +91,9 @@ services:
     # 호스트 사용자 권한으로 실행 — ${GOJIRA_REPOS_DIR} bind mount fs 권한 일치.
     # 향후 OpenCode 스킬이 같은 디렉토리를 직접 read/write 할 때도 권한 충돌 없음.
     user: "${UID:-1000}:${GID:-1000}"
-    ports:
-      - "${PLATFORM_API_HOST_PORT:-${PLATFORM_API_PORT:-9000}}:9000"
+    # 호스트에 직접 노출하지 않는다 — gateway 가 /platform-api/ 로 프록시.
+    expose:
+      - "9000"
     environment:
       MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
       PLATFORM_GITHUB_TOKEN: "${PLATFORM_GITHUB_TOKEN:?required}"
@@ -127,8 +133,9 @@ services:
       dockerfile: deploy/images/gojira-api/Dockerfile
     image: gojira/gojira-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    ports:
-      - "${GOJIRA_API_HOST_PORT:-${GOJIRA_API_PORT:-9001}}:9001"
+    # 호스트에 직접 노출하지 않는다 — gateway 가 /gojira-api/ 로 프록시.
+    expose:
+      - "9001"
     environment:
       MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
       GOJIRA_PLATFORM_API: "http://platform-api:9000/api/v2"
@@ -159,8 +166,9 @@ services:
       dockerfile: deploy/images/platform-app/Dockerfile
     image: gojira/platform-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    ports:
-      - "${PLATFORM_APP_HOST_PORT:-${PLATFORM_APP_PORT:-3000}}:3000"
+    # 호스트에 직접 노출하지 않는다 — gateway 가 / (루트) 로 프록시.
+    expose:
+      - "3000"
     environment:
       <<: *react-env
 
@@ -171,10 +179,40 @@ services:
       dockerfile: deploy/images/gojira-app/Dockerfile
     image: gojira/gojira-app:${IMAGE_TAG:-latest}
     restart: unless-stopped
-    ports:
-      - "${GOJIRA_APP_HOST_PORT:-${GOJIRA_APP_PORT:-3001}}:3001"
+    # 호스트에 직접 노출하지 않는다 — gateway 가 /gojira-app/ 로 프록시.
+    expose:
+      - "3001"
     environment:
       <<: *react-env
+
+  # ── 게이트웨이: TLS 종단 리버스 프록시 ───────────────────────────────────
+  # 모든 브라우저 대면 트래픽의 단일 진입점. URL_SCHEME=https 면 인증서로 TLS 종단,
+  # 아니면 평문. 경로(/, /gojira-app, /platform-api, /gojira-api, /pumlex)로
+  # 백엔드에 프록시한다. 백엔드는 전부 컨테이너 내부 HTTP — gateway 포트만 노출.
+  # 스킴 전환은 URL_SCHEME 만 바꾸고 `docker compose up -d` — 재빌드 불요.
+  gateway:
+    build:
+      <<: *build-context
+      dockerfile: deploy/images/gateway/Dockerfile
+    image: gojira/gateway:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:?required}:${GATEWAY_PORT:?required}"
+    environment:
+      URL_SCHEME: "${URL_SCHEME:-http}"
+      GATEWAY_PORT: "${GATEWAY_PORT:?required}"
+      TLS_CERT_FILE: "/etc/gojira/tls/fullchain.pem"
+      TLS_KEY_FILE: "/etc/gojira/tls/privkey.pem"
+    volumes:
+      # URL_SCHEME=https 일 때 fullchain.pem + privkey.pem 을 read-only 로 읽는다.
+      # http 모드면 디렉토리가 비어 있어도 무방(설정이 인증서를 참조하지 않음).
+      - ${TLS_CERT_DIR:-./certs}:/etc/gojira/tls:ro
+    depends_on:
+      - platform-app
+      - gojira-app
+      - platform-api
+      - gojira-api
+      - pumlex-server
 
 # 볼륨
 # - launcher-dist: launcher-dist init job 이 채우고 platform-api 가 read-only 로 서빙.
