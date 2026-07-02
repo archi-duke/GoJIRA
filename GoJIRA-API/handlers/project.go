@@ -14,6 +14,17 @@ import (
 	"gojira-api/models"
 )
 
+// withIssueCounts — 프로젝트 목록에 _issueCount 필드를 주입한다.
+// 프론트가 이슈 0개 여부를 별도 API 없이 판단할 수 있도록 한다.
+func withIssueCounts(ctx context.Context, projects []bson.M) []bson.M {
+	for i, p := range projects {
+		id := p["_id"]
+		count, _ := db.Issues().CountDocuments(ctx, bson.M{"projectId": id})
+		projects[i]["_issueCount"] = count
+	}
+	return projects
+}
+
 // archSettingsAllowedKeys — PATCH /Project/{jiraCode}/archSettings 가 허용하는 서브필드.
 // 이 집합에 들어있는 키만 bson 의 `archSettings.<key>` 경로로 $set 된다.
 var archSettingsAllowedKeys = map[string]struct{}{
@@ -99,7 +110,7 @@ func ProjectCreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[TEMP-DEBUG] ProjectCreateHandler SUCCESS code=%q", code)
 
 	projects, _ := db.FindAllProjects(ctx, nil)
-	respondJSON(w, http.StatusOK, projects)
+	respondJSON(w, http.StatusOK, withIssueCounts(ctx, projects))
 }
 
 // GET /api/v{version}/Project
@@ -120,7 +131,7 @@ func ProjectGetHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, projects)
+	respondJSON(w, http.StatusOK, withIssueCounts(ctx, projects))
 }
 
 // PUT /api/v{version}/Project
@@ -166,7 +177,7 @@ func ProjectUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projects, _ := db.FindAllProjects(ctx, nil)
-	respondJSON(w, http.StatusOK, projects)
+	respondJSON(w, http.StatusOK, withIssueCounts(ctx, projects))
 }
 
 // PATCH /api/v{version}/Project/{jiraCode}/archSettings

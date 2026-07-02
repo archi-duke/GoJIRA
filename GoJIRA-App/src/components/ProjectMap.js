@@ -569,18 +569,26 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
 
         {/* Sidebar */}
         <div className="pm-sidebar" ref={sidebarRef}>
-          {sortedProjects.map((p, i) => (
-            <div
-              key={i}
-              className="pm-sidebar-row pm-sidebar-clickable"
-              style={{ height: ROW_HEIGHT }}
-              onClick={() => onProjectClick && onProjectClick(p)}
-              onContextMenu={(e) => handleContextMenu(e, p)}
-              title={`${p.name} 이슈 보기`}
-            >
-              {p.name}
-            </div>
-          ))}
+          {sortedProjects.map((p, i) => {
+            const isCompleted = ['done', 'completed'].includes((p.status || '').toLowerCase());
+            const hasNoIssues = (p._issueCount ?? -1) === 0;
+            const rowCls = isCompleted && hasNoIssues ? 'pm-sidebar-completed-empty'
+                         : isCompleted              ? 'pm-sidebar-completed'
+                         : hasNoIssues              ? 'pm-sidebar-empty'
+                         : '';
+            return (
+              <div
+                key={i}
+                className={`pm-sidebar-row pm-sidebar-clickable${rowCls ? ' ' + rowCls : ''}`}
+                style={{ height: ROW_HEIGHT }}
+                onClick={() => onProjectClick && onProjectClick(p)}
+                onContextMenu={(e) => handleContextMenu(e, p)}
+                title={`${p.name} 이슈 보기`}
+              >
+                {p.name}
+              </div>
+            );
+          })}
         </div>
 
         {/* Graph */}
@@ -633,7 +641,8 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
               {sortedProjects.map((p, rowIdx) => {
                 const now = new Date();
                 // 18: Status === "Done" -> completed
-                const isCompleted = (p.status || '').toLowerCase() === 'done';
+                const isCompleted = ['done', 'completed'].includes((p.status || '').toLowerCase());
+                const hasNoIssues = (p._issueCount ?? -1) === 0;
                 // 19: overdue = last milestone passed but not Done
                 const scheds = (p.schedules || []);
                 const lastDate = scheds.length > 0
@@ -654,6 +663,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
                     rangeEnd={visibleEnd}
                     isCompleted={isCompleted}
                     isOverdue={isOverdue}
+                    hasNoIssues={hasNoIssues}
                     onContextMenu={handleContextMenu}
                     onProjectClick={onProjectClick}
                     alert={alerts[getJiraCode(p)]}
@@ -814,7 +824,7 @@ function RangeSlider({ viewRange, onChange }) {
 }
 
 // --- Project Row ---
-function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, onContextMenu, onProjectClick, alert }) {
+function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd, isCompleted, isOverdue, hasNoIssues, onContextMenu, onProjectClick, alert }) {
   // 비례폰트라 length*charPx 추정이 부정확 — 실제 렌더된 텍스트 폭을 SVG getBBox 로 측정
   const textRef = useRef(null);
   const [measuredTextW, setMeasuredTextW] = useState(null);
@@ -891,7 +901,11 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
   // Right overflow indicator
   const hasRightOverflow = lastDate >= rangeEnd;
 
-  const cls = isCompleted ? 'completed' : isOverdue ? 'overdue' : 'active';
+  const cls = isCompleted && hasNoIssues ? 'completed-empty'
+            : isCompleted              ? 'completed'
+            : hasNoIssues              ? 'empty'
+            : isOverdue                ? 'overdue'
+            : 'active';
   const hasAlert = alert && alert.branchDiff;
   const hasPR = alert && alert.hasOpenPR;
   // 알람: "확인할 변경 있음" 의 주의(caution) 톤 — 위험(red) 아닌 앰버 계열
