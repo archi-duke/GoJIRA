@@ -306,15 +306,29 @@
 .pm-row-overdue .pm-ms-label { fill: #e07060; }
 .pm-row-overdue .pm-prj-name { fill: tomato; }
 
-/* Completed project - gray + faded */
-.pm-row-completed {
-  opacity: 0.6;
-}
-.pm-row-completed .pm-line { stroke: #999; }
-.pm-row-completed .pm-milestone { stroke: #999; }
-.pm-row-completed .pm-day { fill: #777; }
-.pm-row-completed .pm-ms-label { fill: #888; }
-.pm-row-completed .pm-prj-name { fill: #999; }
+/* Completed + 이슈있음 - 짙은 회색 */
+.pm-sidebar-completed { color: #666 !important; }
+.pm-row-completed .pm-line { stroke: #666; }
+.pm-row-completed .pm-milestone { stroke: #666; fill: #f0f0f0; }
+.pm-row-completed .pm-day { fill: #555; }
+.pm-row-completed .pm-ms-label { fill: #555; }
+.pm-row-completed .pm-prj-name { fill: #555; }
+
+/* Completed + 이슈없음 - 중간 회색 */
+.pm-sidebar-completed-empty { color: #999 !important; }
+.pm-row-completed-empty .pm-line { stroke: #999; stroke-width: 1; }
+.pm-row-completed-empty .pm-milestone { stroke: #999; fill: #f4f4f4; }
+.pm-row-completed-empty .pm-day { fill: #999; }
+.pm-row-completed-empty .pm-ms-label { fill: #999; }
+.pm-row-completed-empty .pm-prj-name { fill: #999; }
+
+/* Active + 이슈없음 - 파란색 명도 20% 올림 (#2980b9 → #5ba3d0) */
+.pm-sidebar-empty { color: #5ba3d0 !important; }
+.pm-row-empty .pm-line { stroke: #5ba3d0; stroke-width: 1; }
+.pm-row-empty .pm-milestone { stroke: #5ba3d0; fill: #fff; }
+.pm-row-empty .pm-day { fill: #5ba3d0; }
+.pm-row-empty .pm-ms-label { fill: #7ab6d9; }
+.pm-row-empty .pm-prj-name { fill: #5ba3d0; }
 
 .pm-empty {
   display: flex;
