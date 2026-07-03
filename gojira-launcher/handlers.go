@@ -20,7 +20,7 @@ import (
 	"sync"
 )
 
-const version = "0.1.13"
+const version = "0.1.14"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -32,6 +32,13 @@ type Server struct {
 	// 단일 사용자 로컬 데몬이라 "마지막 값" 보관으로 충분(함수 시그니처 threading 회피).
 	ssoMu  sync.Mutex
 	ssoTok string
+
+	// alignedRepos — code → 마지막으로 정렬(origin URL·branch checkout·identity·assets)을
+	// 마친 user. no-fetch 조회 경로(/files 등)는 같은 (code,user) 면 정렬을 통째로 건너뛴다.
+	// Windows 사내망에서 git 프로세스 기동이 spawn 당 0.5s+ 로 느려, 매 /files 마다 반복되던
+	// 정렬 서브프로세스들이 체감 지연의 주범이었다. 값이 user 인 이유: 유저 전환 시 branch 가
+	// docs/{다른유저} 로 남아있으면 안 되므로 user 불일치면 풀 정렬 경로로 되돌린다.
+	alignedRepos sync.Map
 }
 
 // setSSOToken/ssoToken — 웹이 보낸 SSO 세션토큰 캡처/조회.
