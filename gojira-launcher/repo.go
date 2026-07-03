@@ -209,6 +209,18 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 	}
 
 	path := s.repoPath(code)
+
+	// 정렬 게이트 — no-fetch 조회 경로는 프로세스 생애 동안 (code,user) 당 1회만 정렬한다.
+	// clone 존재 확인(stat)은 값싸므로 유지 — 사용자가 clone 을 지웠으면 게이트 무효화 후 재프로비저닝.
+	if !withFetch {
+		if u, ok := s.alignedRepos.Load(code); ok && u.(string) == user {
+			if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+				return path, nil // 락/git 서브프로세스 0 으로 즉시 반환.
+			}
+			s.alignedRepos.Delete(code)
+		}
+	}
+
 	mu := getRepoLock(code)
 	mu.Lock()
 	defer mu.Unlock()
@@ -242,6 +254,7 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 		s.ensureExcluded(path, entry)
 	}
 	s.ensureGitIdentity(path, user)
+	s.alignedRepos.Store(code, user) // 정렬 완료 — 이후 no-fetch 조회는 fast-path.
 	return path, nil
 }
 
@@ -281,7 +294,14 @@ func (s *Server) ensureOriginURL(path, code, user string) {
 	}
 	current, _ := gitCmd(path, "remote", "get-url", "origin")
 	current = strings.TrimSpace(current)
-	repoName := s.resolveRepoName(code, user)
+	// repo 이름은 기존 origin URL 의 마지막 path segment 에서 파생 — 정렬 목적은 자격증명
+	// (user/token) 갱신이지 repo 변경이 아니므로 백엔드 조회가 필요 없다. 이전에는 여기서
+	// 매 호출 resolveRepoName(GoJIRA-API HTTP, timeout 10s)이 나가 사내망 /files 지연의
+	// 주범이었다. URL 파싱 불가(빈 origin 등) 케이스만 HTTP 폴백.
+	repoName := repoNameFromURL(current)
+	if repoName == "" {
+		repoName = s.resolveRepoName(code, user)
+	}
 	desired := s.cloneURL(repoName)
 	if current == desired {
 		return
@@ -291,6 +311,23 @@ func (s *Server) ensureOriginURL(path, code, user string) {
 	} else {
 		log.Printf("ensureOriginURL origin URL 갱신 (%s)", code)
 	}
+}
+
+// repoNameFromURL — origin URL 의 마지막 path segment 에서 repo 이름을 뽑는다 (".git" 제거).
+// 예) http://user:tok@host:3300/gojira/number-baseball.git → number-baseball
+// 파싱 불가(빈 문자열, path 없음)면 "" — 호출 측이 resolveRepoName 으로 폴백.
+func repoNameFromURL(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return ""
+	}
+	u, err := url.Parse(remote)
+	if err != nil {
+		return ""
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	name := strings.TrimSuffix(segs[len(segs)-1], ".git")
+	return name
 }
 
 // ensureGitIdentity — clone 의 user.name/user.email 이 비어있으면 주입한다 (commit author 식별).
