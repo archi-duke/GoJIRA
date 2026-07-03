@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
@@ -357,6 +357,44 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       setSaving(false);
     }
   }
+
+  // ReactMarkdown components 를 렌더마다 새 객체/함수로 만들면 code/pre 가 매번 새 컴포넌트
+  // 타입으로 취급되어 모든 PexBlock/MermaidBlock 이 unmount→remount 된다. 저장 한 번에
+  // setSaving/setContent/refreshDocState 로 리렌더가 4~5회 발생하므로 그때마다 전체
+  // 다이어그램이 재마운트되며 깜박였다. → identity 를 고정해 리렌더 시 인스턴스를 유지한다.
+  // handlePexCommit 은 content 등 최신 state 를 봐야 하므로 ref 경유로 고정 래퍼를 만든다.
+  const pexCommitRef = useRef(null);
+  pexCommitRef.current = handlePexCommit;
+  const handlePexCommitStable = useCallback((orig, next) => pexCommitRef.current?.(orig, next), []);
+  const pexEditable = activeTab === 'local' && !selectedMainOnly && !!launcher?.ready;
+  const markdownComponents = useMemo(() => ({
+    code({ className, children, ...props }) {
+      const lang = /language-(\w+)/.exec(className || '')?.[1];
+      if (lang === 'mermaid') {
+        return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
+      }
+      if (lang === 'plantuml' || lang === 'puml') {
+        const src = String(children).replace(/\n$/, '');
+        // 로컬(docs/{user}) 워킹트리 + 런처 감지 시 미리보기에서 다이어그램을
+        // 보면서 인라인 편집 (✎ 편집 상시 노출 → ✓ 적용 시 해당 fence 본문만 교체).
+        // 그 외(main 탭·main-only·런처 미감지)는 조회 전용.
+        return pexEditable
+          ? <PexBlock source={src} onCommit={handlePexCommitStable} />
+          : <PexBlock source={src} readOnly />;
+      }
+      return <code className={className} {...props}>{children}</code>;
+    },
+    pre({ children, ...props }) {
+      // mermaid/plantuml 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
+      const arr = React.Children.toArray(children);
+      const only = arr.length === 1 ? arr[0] : null;
+      const cls = only?.props?.className || '';
+      if (cls.includes('language-mermaid') || cls.includes('language-plantuml') || cls.includes('language-puml')) {
+        return <>{children}</>;
+      }
+      return <pre {...props}>{children}</pre>;
+    },
+  }), [pexEditable, handlePexCommitStable]);
 
   // 편집 중 "취소" — 변경 폐기 + 편집 종료.
   function handleCancelEdit() {
@@ -825,35 +863,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
                     ) : (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
-                        components={{
-                          code({ className, children, ...props }) {
-                            const lang = /language-(\w+)/.exec(className || '')?.[1];
-                            if (lang === 'mermaid') {
-                              return <MermaidBlock code={String(children).replace(/\n$/, '')} />;
-                            }
-                            if (lang === 'plantuml' || lang === 'puml') {
-                              const src = String(children).replace(/\n$/, '');
-                              // 로컬(docs/{user}) 워킹트리 + 런처 감지 시 미리보기에서 다이어그램을
-                              // 보면서 인라인 편집 (✎ 편집 상시 노출 → ✓ 적용 시 해당 fence 본문만 교체).
-                              // 그 외(main 탭·main-only·런처 미감지)는 조회 전용.
-                              const pexEditable = activeTab === 'local' && !selectedMainOnly && !!launcher?.ready;
-                              return pexEditable
-                                ? <PexBlock source={src} onCommit={handlePexCommit} />
-                                : <PexBlock source={src} readOnly />;
-                            }
-                            return <code className={className} {...props}>{children}</code>;
-                          },
-                          pre({ children, ...props }) {
-                            // mermaid/plantuml 코드블록은 <pre> 래퍼를 없애 회색 박스가 생기지 않도록 처리
-                            const arr = React.Children.toArray(children);
-                            const only = arr.length === 1 ? arr[0] : null;
-                            const cls = only?.props?.className || '';
-                            if (cls.includes('language-mermaid') || cls.includes('language-plantuml') || cls.includes('language-puml')) {
-                              return <>{children}</>;
-                            }
-                            return <pre {...props}>{children}</pre>;
-                          },
-                        }}
+                        components={markdownComponents}
                       >{content}</ReactMarkdown>
                     )}
                   </div>

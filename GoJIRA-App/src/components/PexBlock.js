@@ -1,12 +1,20 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import config from '../config';
 import { loadPexCore } from '../utils/pexLoader';
 import './PexBlock.css';
 
-// source → 렌더된 SVG 캐시. 부모(ReactMarkdown components) 가 매 렌더마다 code 콜백을
-// 새 함수로 만들어 PexBlock 인스턴스가 언마운트/재마운트되어도, 같은 source 면 즉시 SVG 를
-// 표시해서 loading 텍스트로 인한 높이 깜빡임을 막는다.
+// source → 렌더된 SVG 캐시. 재마운트(파일 전환 등) 시 같은 source 면 fetch 없이 즉시
+// SVG 를 표시해서 loading 텍스트로 인한 높이 깜빡임을 막는다.
 const svgCache = new Map();
+
+// 캐시 키 정규화 — 같은 다이어그램이 경로에 따라 개행이 달라져 캐시 미스가 나는 것을 막는다.
+//  · commitEdit 캡처본 키: pex-core buildSource() 결과 (embedMeta 는 끝에 \n 을 붙임)
+//  · 마운트 시 조회 키: ReactMarkdown 이 준 fence 본문 (LF, 끝 개행 strip)
+//  · 워킹트리 원본: Windows 면 CRLF
+// → LF + trim 공간으로 통일 (DocEditor 의 fence 매칭과 같은 정규화).
+function cacheKey(source) {
+  return String(source || '').replace(/\r\n/g, '\n').trim();
+}
 
 /**
  * PexBlock — pumlex 인라인 편집 PlantUML 블록.
@@ -28,8 +36,8 @@ const svgCache = new Map();
  */
 export default function PexBlock({ source, onCommit, readOnly }) {
   // 초기 state 를 캐시로 시드 — 같은 source 로 재마운트되면 loading=true 상태를 거치지 않음
-  const [svg, setSvg] = useState(() => svgCache.get(source) || '');
-  const [loading, setLoading] = useState(() => !svgCache.has(source));
+  const [svg, setSvg] = useState(() => svgCache.get(cacheKey(source)) || '');
+  const [loading, setLoading] = useState(() => !svgCache.has(cacheKey(source)));
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
 
@@ -63,8 +71,8 @@ export default function PexBlock({ source, onCommit, readOnly }) {
       return undefined;
     }
     // 캐시 hit 면 fetch 건너뜀 (이미 초기 state 에서 시드된 상태)
-    if (svgCache.has(source)) {
-      setSvg(svgCache.get(source));
+    if (svgCache.has(cacheKey(source))) {
+      setSvg(svgCache.get(cacheKey(source)));
       setLoading(false);
       setError(null);
       return undefined;
@@ -82,7 +90,7 @@ export default function PexBlock({ source, onCommit, readOnly }) {
       })
       .then((text) => {
         if (cancelled) return;
-        svgCache.set(source, text);
+        svgCache.set(cacheKey(source), text);
         setSvg(text);
         setLoading(false);
       })
@@ -110,7 +118,9 @@ export default function PexBlock({ source, onCommit, readOnly }) {
   // 재렌더 때 React 가 같은 string 을 비교하더라도 props object reference 가 매번
   // 새로 만들어지면서 setInnerHTML 을 다시 호출, PexInline 이 단 listener 를 쓸어버림.
   // → div 의 children 을 React 모델 밖으로 두고 svg state 가 실제로 바뀔 때만 갱신.
-  useEffect(() => {
+  // useLayoutEffect: paint 전에 주입 + fitViewBox 까지 적용해야 마운트/재마운트 시
+  // "빈 div 한 프레임 → SVG 채워짐" 공백 프레임과 viewBox 점프가 안 보인다.
+  useLayoutEffect(() => {
     const el = renderRef.current;
     if (!el) return undefined;
     el.innerHTML = svg || '';
@@ -179,7 +189,7 @@ export default function PexBlock({ source, onCommit, readOnly }) {
       if (live) {
         const clone = live.cloneNode(true);
         clone.querySelectorAll('g.pex-handle-layer, .pex-handle, .pex-handle-guide').forEach((n) => n.remove());
-        svgCache.set(newSrc, clone.outerHTML);
+        svgCache.set(cacheKey(newSrc), clone.outerHTML);
       }
     }
     if (sessionRef.current) {
