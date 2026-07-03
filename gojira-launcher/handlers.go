@@ -380,6 +380,8 @@ type writeReq struct {
 
 // POST /write — 인라인 편집 저장. 로컬 working tree 의 단일 파일에 raw text 를 쓴다.
 // commit/push 는 하지 않음 — Local 탭의 "등록" 흐름과 책임 분리(VS Code 저장과 동일 의미).
+// no-fetch: 저장은 디스크 변형일 뿐이라 origin fetch 가 필요 없다 — 신선한 main 동기화는
+// Pull 버튼(/pull)의 책임. 느린 Gitea/사내망에서 저장마다 네트워크 대기하던 것 제거.
 // safeFilePath 로 경로 컨테인먼트, 부모 디렉터리 자동 생성, mode 0644.
 func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
 	var req writeReq
@@ -391,7 +393,7 @@ func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "path 누락")
 		return
 	}
-	repoPath, err := s.EnsureRepo(req.Code, req.User)
+	repoPath, err := s.EnsureRepoLocal(req.Code, req.User)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -424,6 +426,7 @@ type deleteReq struct {
 
 // POST /delete — 로컬 working tree 에서 단일 파일 삭제. commit/push 는 하지 않음 —
 // /sync 의 `git add -A` 가 삭제를 포착해 커밋한다(/write 와 동일한 책임 분리). 디렉터리는 거부.
+// no-fetch: /write 와 같은 디스크 전용 변형 — origin fetch 불필요.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	var req deleteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -434,7 +437,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "path 누락")
 		return
 	}
-	repoPath, err := s.EnsureRepo(req.Code, req.User)
+	repoPath, err := s.EnsureRepoLocal(req.Code, req.User)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -473,6 +476,7 @@ type renameReq struct {
 
 // POST /rename — 로컬 working tree 의 파일 이동/이름변경. commit/push 는 하지 않음(/sync 포착).
 // from/to 모두 safeFilePath 컨테인먼트. to 부모 디렉터리는 자동 생성. to 가 이미 있으면 거부.
+// no-fetch: /write 와 같은 디스크 전용 변형 — origin fetch 불필요.
 func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	var req renameReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -483,7 +487,7 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "from, to 필수")
 		return
 	}
-	repoPath, err := s.EnsureRepo(req.Code, req.User)
+	repoPath, err := s.EnsureRepoLocal(req.Code, req.User)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
