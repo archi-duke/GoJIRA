@@ -314,24 +314,8 @@
 
     const fire = () => {
       try { onLayoutChange(state.layout); } catch {}
-      // [TEMP-DEBUG] 라벨이동 미반영 추적 — layout 스냅샷 + buildSource 결과
-      try {
-        const L = state.layout || {};
-        const textsCnt = Object.values(L.edges || {}).reduce((n, ov) => n + Object.keys((ov && ov.texts) || {}).length, 0);
-        console.log('[TEMP-DEBUG][pex-core] fire()', {
-          nodes: Object.keys(L.nodes || {}).length,
-          edges: Object.keys(L.edges || {}).length,
-          participants: Object.keys(L.participants || {}).length,
-          edgeTexts: textsCnt,
-          hasOnSourceChange: !!onSourceChange,
-        });
-      } catch {}
       if (onSourceChange) {
         const s = buildSource();
-        // [TEMP-DEBUG] s===null 이면 cleanSource/PexMeta 부재 — onSourceChange 미발화 원인
-        try {
-          console.log('[TEMP-DEBUG][pex-core] buildSource →', s === null ? 'NULL(발화 안함!)' : `len=${s.length}, cleanSource와 동일=${s === cleanSource}`);
-        } catch {}
         if (s !== null) { try { onSourceChange(s); } catch {} }
       }
       setDirty(true);
@@ -1506,8 +1490,6 @@
     }
     function commitTextDrag(d) {
       const eKey = edgeKeyForLink(svg, d.linkG);
-      // [TEMP-DEBUG] eKey=null 이면 라벨 드래그가 조용히 무시됨 — 미반영 1순위 의심 지점
-      try { console.log('[TEMP-DEBUG][pex-core] commitTextDrag eKey=', eKey, 'idx=', d.idx, 'linkG.id=', d.linkG && d.linkG.getAttribute('id')); } catch {}
       if (!eKey) return false;
       const ov = ensureEdgeOverrideFor(d.linkG, eKey);
       ov.texts = ov.texts || {};
@@ -1545,8 +1527,6 @@
       d.textEl.removeEventListener('pointercancel', endTextDrag);
       try { d.textEl.releasePointerCapture(e.pointerId); } catch {}
       state.draggingText = null;
-      // [TEMP-DEBUG] committed=false 면 2px 임계 미달 또는 eKey 실패 — fire() 자체가 안 감
-      try { console.log('[TEMP-DEBUG][pex-core] endTextDrag committed=', d.committed, 'eKey=', d.eKey, 'texts=', d.eKey && state.layout.edges[d.eKey] ? JSON.stringify(state.layout.edges[d.eKey].texts) : '(없음)'); } catch {}
       if (d.committed) {
         d.textEl.classList.remove('pex-text-dragging');
         adjustViewBox();

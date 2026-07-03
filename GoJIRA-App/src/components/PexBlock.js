@@ -165,16 +165,11 @@ export default function PexBlock({ source, onCommit, readOnly }) {
     if (!renderRef.current?.querySelector('svg')) return;
 
     pendingSrcRef.current = source;
-    // eslint-disable-next-line no-console
-    console.log('[TEMP-DEBUG][PexBlock] startEdit — source len=', (source || '').length);
     sessionRef.current = window.PexInline.activate(renderRef.current, {
       source,
       useDrafts: false,
       useDirtyBadge: false,
       onSourceChange: (newSrc) => {
-        // [TEMP-DEBUG] 라벨이동 미반영 추적 — 여기가 안 찍히면 pex-core 가 발화 안 한 것
-        // eslint-disable-next-line no-console
-        console.log('[TEMP-DEBUG][PexBlock] onSourceChange — newSrc len=', (newSrc || '').length, '원본과 다름=', newSrc !== source);
         pendingSrcRef.current = newSrc;
       },
     });
@@ -184,9 +179,6 @@ export default function PexBlock({ source, onCommit, readOnly }) {
   function commitEdit() {
     const newSrc = pendingSrcRef.current;
     const willCommit = newSrc && newSrc !== source && typeof onCommit === 'function';
-    // [TEMP-DEBUG] willCommit=false + 원본과동일=true 면 "적용을 눌렀지만 변경분이 없어 조용히 스킵" 케이스
-    // eslint-disable-next-line no-console
-    console.log('[TEMP-DEBUG][PexBlock] commitEdit —', { willCommit, 원본과동일: newSrc === source, onCommit있음: typeof onCommit === 'function', newSrcLen: (newSrc || '').length });
     // 편집 중 화면에 보이던 SVG 를 그대로 캡처해 새 source 의 캐시로 시드한다.
     // 저장 후 서버 /render-with-layout 재렌더는 서버측 getBBox 근사라 viewBox/위치가
     // 미세하게 어긋나 "전체 뷰영역이 틀어지거나 잘리는" 현상이 생긴다. deactivate 전에

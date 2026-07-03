@@ -322,9 +322,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   // 본문이 originalSource 와 일치하는 ```plantuml|puml fence 의 본문만 newSource 로 교체하고
   // 런처 /write 로 로컬 디스크에 저장한다 (전체 raw 편집과 동일한 저장 경로).
   async function handlePexCommit(originalSource, newSource) {
-    // [TEMP-DEBUG] 라벨이동 미반영 추적 — 진입/가드 판정
-    // eslint-disable-next-line no-console
-    console.log('[TEMP-DEBUG][DocEditor] handlePexCommit 진입 —', { selectedFile, selectedMainOnly, launcherReady: !!launcher?.ready, 원본len: (originalSource || '').length, 새len: (newSource || '').length, 동일: newSource === originalSource });
     if (!selectedFile || selectedMainOnly || !launcher?.ready) return;
     if (newSource == null || newSource === originalSource) return;
     // content 는 로컬 워킹트리에서 온 원본이라 Windows 면 CRLF 일 수 있는데, ReactMarkdown 이
@@ -345,9 +342,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         return whole;
       },
     );
-    // [TEMP-DEBUG] fence 매칭 결과 — false 면 CRLF/개행 되매칭 실패 계열
-    // eslint-disable-next-line no-console
-    console.log('[TEMP-DEBUG][DocEditor] fence 매칭 —', { replaced, usesCRLF, contentLen: content.length });
     if (!replaced) { modalAlert('편집 대상 PlantUML 블록을 본문에서 찾지 못했습니다.'); return; }
     if (usesCRLF) out = out.replace(/\n/g, '\r\n');
     setSaving(true);
@@ -356,9 +350,6 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
         code: projectCode, user, path: selectedFile,
         content: out, token: launcher.token,
       });
-      // [TEMP-DEBUG] 런처 /write 결과
-      // eslint-disable-next-line no-console
-      console.log('[TEMP-DEBUG][DocEditor] requestWrite 결과 —', { ok: r.ok, error: r.error || null, outLen: out.length });
       if (!r.ok) { modalAlert(r.error || '저장에 실패했습니다.'); return; }
       setContent(out); // 미리보기가 교체된 다이어그램으로 즉시 반영되도록.
       refreshDocState();
