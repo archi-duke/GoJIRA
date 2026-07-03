@@ -85,20 +85,33 @@ function applyLayout(svg, rawLayout) {
 
   // Build qname ↔ id maps so PlantUML's auto-generated `ent00XX` ids can shift
   // freely as the source is edited without invalidating saved layouts.
-  const qToEl = {};
-  const idToQ = {};
-  $('g.entity').each((_, el) => {
+  //
+  // idToQ MUST include clusters: an edge endpoint can be a cluster (e.g.
+  // `Firewall --> System` where System is a `rectangle { ... }` group). The
+  // client's edgeKeyForLink resolves ANY g[id] — entity or cluster — to its
+  // data-qualified-name, so a layout saved as `Firewall__System` was never
+  // found here when idToQ only scanned g.entity (server computed
+  // `Firewall__ent0004` instead and silently dropped texts/curve/anchor).
+  const qToEl = {};   // entity only — node translate targets
+  const idToQ = {};   // entity + cluster — edge endpoint key resolution
+  const allQnames = [];
+  $('g.entity, g.cluster').each((_, el) => {
     const $el = $(el);
     const id = $el.attr('id');
     const q = $el.attr('data-qualified-name') || id;
-    if (q) { qToEl[q] = $el; idToQ[id] = q; }
+    if (!q) return;
+    idToQ[id] = q;
+    allQnames.push(q);
+    if ($el.hasClass('entity')) qToEl[q] = $el;
   });
 
   // Detect simple 1:1 renames (orphan meta key + fresh SVG qname) and
   // migrate the layout's node + edge keys before applying. Lets a meta
   // saved against `Order` keep its dx/dy after the user renames the
   // class to `PurchaseOrder` in source, without manual cleanup.
-  PexMeta.migrateRenamedKeys(Object.keys(qToEl), layout);
+  // Cluster qnames included so a cluster edge endpoint (`...__System`) is
+  // not mistaken for an orphan and mis-migrated.
+  PexMeta.migrateRenamedKeys(allQnames, layout);
   const nodes = layout.nodes;
   const edges = layout.edges;
 
