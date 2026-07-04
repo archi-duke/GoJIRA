@@ -14,6 +14,7 @@ import (
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/handlers"
+	"platform-api/notify"
 )
 
 func caseInsensitiveRouting(next http.Handler) http.Handler {
@@ -43,6 +44,9 @@ func main() {
 	db.InitDocRepoIndexes()
 	db.InitNotificationIndexes()
 	db.SeedAccountData()
+
+	// 알림 provider 연결 — NOTIFY_PROVIDER 설정에 따라 smtp/internal/none 선택
+	notify.Init()
 
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
@@ -116,6 +120,9 @@ func main() {
 
 		// LLM gateway — Platform-API 가 키/모델/엔드포인트를 단독 관리, 다른 서비스는 HTTP 호출
 		r.Post("/LLM/call", handlers.LLMCallHandler)
+		// LLM 연결 검증용 단순 질의응답 (curl/브라우저 확인용)
+		r.Get("/LLM/chat", handlers.LLMChatHandler)
+		r.Post("/LLM/chat", handlers.LLMChatHandler)
 
 		// Launcher 바이너리 호스팅 — 웹이 런처 미감지 상태에서 다운로드.
 		r.Get("/launcher/manifest", handlers.LauncherManifestHandler)
@@ -150,6 +157,7 @@ func main() {
 	fmt.Printf("MongoDB         : %s/%s\n", config.MongoURI, config.MongoDB)
 	fmt.Printf("Gitea (GitHub)  : %s\n", config.GitHubURL)
 	fmt.Printf("GoJIRA-API peer : %s\n", config.GoJiraAPI)
+	fmt.Printf("Notify provider : %s\n", notify.Provider())
 	fmt.Printf("Ports overview  : docs/ports.md\n")
 	fmt.Printf("─────────────────────────────────────────\n")
 	log.Fatal(http.ListenAndServe(config.ServerPort, r))

@@ -102,7 +102,11 @@ services:
       GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
       GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
       <<: *sso-backend-env
-      # SMTP (선택)
+      # 알림 발송 (선택) — smtp | internal(사내 API) | none, 미설정 시 자동 판별
+      NOTIFY_PROVIDER: "${NOTIFY_PROVIDER:-}"
+      NOTIFY_API_URL: "${NOTIFY_API_URL:-}"
+      NOTIFY_API_TOKEN: "${NOTIFY_API_TOKEN:-}"
+      # SMTP (NOTIFY_PROVIDER=smtp 또는 자동 판별 시)
       SMTP_HOST: "${SMTP_HOST:-}"
       SMTP_PORT: "${SMTP_PORT:-587}"
       SMTP_USER: "${SMTP_USER:-}"

@@ -27,6 +27,12 @@ var (
 	WebhookSecret string
 	GitHubAPI     string
 
+	// 알림 발송 provider — "smtp"(사외/dev) | "internal"(사내 API) | "none" | ""(자동)
+	NotifyProvider string
+	// 사내 알림 API (NOTIFY_PROVIDER=internal) — 스펙 확정 전까지 스텁이 참조만 함
+	NotifyAPIURL   string
+	NotifyAPIToken string
+
 	// SMTP — 메일 기능 미사용 시 비어있어도 무방
 	SMTPHost string
 	SMTPPort string
@@ -52,6 +58,8 @@ func init() {
 	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 	WebhookURL = envOrDefault("PLATFORM_WEBHOOK_URL", "")
 	WebhookSecret = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
+	NotifyProvider = envOrDefault("NOTIFY_PROVIDER", "")
+	NotifyAPIURL = envOrDefault("NOTIFY_API_URL", "")
 	SMTPHost = envOrDefault("SMTP_HOST", "")
 	SMTPPort = envOrDefault("SMTP_PORT", "587")
 	SMTPUser = envOrDefault("SMTP_USER", "")
@@ -63,6 +71,14 @@ func init() {
 		SMTPPass = val
 	} else {
 		SMTPPass = raw
+	}
+
+	// 사내 알림 API 토큰 복호화 (SMTP_PASS 와 동일 규칙)
+	rawTok := envOrDefault("NOTIFY_API_TOKEN", "")
+	if val, err := Decrypt(rawTok); err == nil {
+		NotifyAPIToken = val
+	} else {
+		NotifyAPIToken = rawTok
 	}
 
 	// LLM 관련 시크릿 복호화: ENC: prefix 가 있으면 복호화 후 환경에 평문으로 재설정.
