@@ -157,9 +157,21 @@ export async function requestLocalFile({ code, user, path, token }) {
   return get(`/file?${q}`, token);
 }
 
-// 30s — 사용자 PC ↔ Gitea 네트워크 RTT 가 느린 환경에서 git fetch/clone/merge 가
-// 2.5s 안에 안 끝나는 케이스 (사내 폐쇄망 등) 대비. health 만 짧게 (별도 호출).
+// 읽기(GET /files·/file — 로컬 디스크)는 30s.
+// 쓰기(POST — /sync·/push·/pull·/open 은 최초 clone/느린 Gitea push 포함)는 180s:
+// 사내 폐쇄망에서 첫 EnsureRepo clone 이 30s 를 넘겨 브라우저가 요청을 abort
+// (DevTools "canceled") 하고 '런처 미기동' 오진 메시지가 뜨던 문제 방지.
+// 주의: 웹이 abort 해도 런처 쪽 git 작업은 계속 진행된다.
 const LAUNCHER_OP_TIMEOUT_MS = 30000;
+const LAUNCHER_GIT_TIMEOUT_MS = 180000;
+
+// fetch 실패를 원인별 메시지로 — abort(타임아웃)를 '미기동' 으로 오진하지 않는다.
+function launcherErr(e) {
+  if (e && e.name === 'AbortError') {
+    return '런처 응답 대기 시간 초과 — git 작업(최초 clone/push)이 오래 걸리는 중일 수 있습니다. 잠시 후 다시 시도하세요.';
+  }
+  return '로컬 런처에 연결할 수 없습니다 (127.0.0.1 데몬 미기동?)';
+}
 
 async function get(path, token) {
   try {
@@ -171,8 +183,8 @@ async function get(path, token) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
     return { ok: true, data };
-  } catch {
-    return { ok: false, error: '로컬 런처에 연결할 수 없습니다 (127.0.0.1 데몬 미기동?)' };
+  } catch (e) {
+    return { ok: false, error: launcherErr(e) };
   }
 }
 
@@ -186,13 +198,13 @@ async function post(path, body, token) {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-    }, LAUNCHER_OP_TIMEOUT_MS);
+    }, LAUNCHER_GIT_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
     }
     return { ok: true, data };
-  } catch {
-    return { ok: false, error: '로컬 런처에 연결할 수 없습니다 (127.0.0.1 데몬 미기동?)' };
+  } catch (e) {
+    return { ok: false, error: launcherErr(e) };
   }
 }

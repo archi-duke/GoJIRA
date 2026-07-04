@@ -32,6 +32,11 @@ func (s *Server) secure(requireToken bool, next http.HandlerFunc) http.HandlerFu
 		if r.Method == http.MethodOptions {
 			if s.originAllowed(origin) {
 				s.writeCORS(w, origin)
+				// Chrome PNA(Private Network Access): HTTPS 페이지 → 127.0.0.1 요청은
+				// preflight 에 이 헤더가 없으면 차단될 수 있다 (사내 HTTPS gateway 환경).
+				if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+					w.Header().Set("Access-Control-Allow-Private-Network", "true")
+				}
 				w.WriteHeader(http.StatusNoContent)
 			} else {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
@@ -65,12 +70,14 @@ func (s *Server) originAllowed(origin string) bool {
 	if origin == "" {
 		return false
 	}
+	// scheme/host 는 대소문자 무관(RFC 3986) — 브라우저는 Origin 을 항상 소문자로
+	// 보내므로 설정에 대문자 호스트(https://SERVER1:...)가 있어도 매치돼야 한다.
 	got := strings.TrimRight(origin, "/")
-	if want := strings.TrimRight(s.cfg.WebOrigin, "/"); want != "" && got == want {
+	if want := strings.TrimRight(s.cfg.WebOrigin, "/"); want != "" && strings.EqualFold(got, want) {
 		return true
 	}
 	for _, w := range s.cfg.WebOrigins {
-		if want := strings.TrimRight(w, "/"); want != "" && got == want {
+		if want := strings.TrimRight(w, "/"); want != "" && strings.EqualFold(got, want) {
 			return true
 		}
 	}
