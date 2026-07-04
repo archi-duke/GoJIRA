@@ -37,8 +37,9 @@ export async function detectLauncher() {
   }
 }
 
-// 30s — git fetch/clone 가 느린 네트워크(폐쇄망 등) 에서 2.5s 안에 안 끝나는 케이스 대비.
-const LAUNCHER_OP_TIMEOUT_MS = 30000;
+// 180s — /chat 은 최초 EnsureRepo clone 포함, 사내 폐쇄망에서 30s 를 넘겨
+// 브라우저 abort("canceled") → '런처 미기동' 오진이 나던 문제 방지.
+const LAUNCHER_OP_TIMEOUT_MS = 180000;
 
 export async function requestChat({ code, user, agent, token }) {
   try {
@@ -54,7 +55,10 @@ export async function requestChat({ code, user, agent, token }) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data.error || `런처 응답 오류 (${res.status})` };
     return { ok: true, data };
-  } catch {
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      return { ok: false, error: '런처 응답 대기 시간 초과 — git 작업(최초 clone)이 오래 걸리는 중일 수 있습니다. 잠시 후 다시 시도하세요.' };
+    }
     return { ok: false, error: '로컬 런처에 연결할 수 없습니다 (127.0.0.1 데몬 미기동?)' };
   }
 }
