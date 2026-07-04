@@ -197,36 +197,8 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       case 'satam':
         if (onSATAM) onSATAM(project);
         break;
-      case 'docgen':
-        handleDocGen(project);
-        break;
       default:
         break;
-    }
-  }
-
-  async function handleDocGen(project) {
-    const prjCode = getJiraCode(project);
-    const hasRepo = !!project.documents?.repo;
-    const msg = hasRepo
-      ? `${prjCode} 프로젝트의 설계문서를 생성/갱신하시겠습니까?`
-      : `${prjCode} 프로젝트에 설계문서 저장소가 없습니다.\n자동으로 저장소를 생성하고 설계문서를 생성하시겠습니까?`;
-    if (!window.confirm(msg)) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/Issue/docgen`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prjID: prjCode, userId: user }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert(`설계문서 생성 완료!\n브랜치: ${data.branch}\n파일 수: ${data.files}\nPR이 생성되었습니다.`);
-      } else {
-        alert('실패: ' + (data.error || res.statusText));
-      }
-    } catch (err) {
-      alert('설계문서 생성 실패: ' + err.message);
     }
   }
 

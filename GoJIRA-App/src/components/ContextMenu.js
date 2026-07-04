@@ -21,8 +21,6 @@ export default function ContextMenu({ x, y, project, onClose, onAction }) {
     { key: 'divider' },
     { key: 'relationMap', label: 'Relation Map' },
     { key: 'satam', label: 'SATAM' },
-    { key: 'divider' },
-    { key: 'docgen', label: '설계문서 생성' },
   ];
 
   return (
