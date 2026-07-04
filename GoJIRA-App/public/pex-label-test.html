@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>[TEMP-DEBUG] pex 라벨이동 검증 페이지</title>
+<style>
+  body { font-family: -apple-system, "Malgun Gothic", sans-serif; margin: 16px; background: #f8fafc; }
+  h1 { font-size: 16px; }
+  .row { display: flex; gap: 16px; align-items: flex-start; }
+  textarea { width: 480px; height: 320px; font: 11px/1.4 ui-monospace, Consolas, monospace; }
+  #stage { border: 1px solid #cbd5e1; background: #fff; min-width: 640px; min-height: 420px; position: relative; }
+  #log { font: 11px/1.5 ui-monospace, Consolas, monospace; background: #0f172a; color: #a5f3fc; padding: 8px; height: 260px; overflow: auto; white-space: pre-wrap; margin-top: 12px; }
+  button { margin: 2px; padding: 6px 10px; }
+  .ok { color: #4ade80; } .bad { color: #f87171; } .warn { color: #fbbf24; }
+  select { padding: 4px; }
+</style>
+<!-- pex-core (GoJIRA-App/public/pex-core — 배포 gojira-app 이미지와 동일 소스) -->
+<script src="/pex-core/geom.js"></script>
+<script src="/pex-core/meta.js"></script>
+<script src="/pex-core/inline.js"></script>
+</head>
+<body>
+<h1>[TEMP-DEBUG] pex 라벨이동(edge texts) 미반영 검증 — 사내망 use-cases 다이어그램</h1>
+<div>
+  pumlex 서버:
+  <input id="server" size="46" list="serverList">
+  <datalist id="serverList">
+    <option value="http://localhost:44300/pumlex">
+    <option value="http://192.168.219.109:44352">
+  </datalist>
+  <button id="btnRender">1️⃣ 서버 렌더 (/render-with-layout)</button>
+  <button id="btnEdit">2️⃣ 인라인 편집 활성화 (라벨 드래그)</button>
+  <button id="btnCommit">3️⃣ 적용 → 새 소스 생성 + 서버 재렌더</button>
+  <button id="btnAuto">🧪 자동테스트: texts 주입 → 서버 적용 여부 판정</button>
+</div>
+<div class="row">
+  <textarea id="src"></textarea>
+  <div id="stage"><em style="color:#94a3b8">1️⃣ 를 눌러 렌더</em></div>
+</div>
+<div id="log"></div>
+<script>
+const SOURCE = `@startuml
+skinparam actorStyle stick
+left to right direction
+title NBALL Use Case Diagram
+actor "플레이어" as Player
+actor "운영자" as Operator
+rectangle "NBALL 숫자야구 서비스" {
+  usecase "닉네임 입력 및 게임 참여" as UC01
+  usecase "게임방 생성 및 입장" as UC02
+  usecase "비밀 숫자 설정" as UC03
+  usecase "추측 제출 및 실시간 게임 진행" as UC04
+  usecase "추측 히스토리 조회" as UC05
+  usecase "게임 결과 및 승패 확인" as UC06
+  usecase "세션 복구 및 재접속" as UC07
+  usecase "운영자 서비스 모니터링" as UC08
+  usecase "사내망 접근 제어" as UC09
+  usecase "비밀 숫자 보안 격리" as UC10
+  usecase "다중 게임방 독립 실행" as UC11
+}
+Player --> UC01
+Player --> UC02
+Player --> UC03
+Player --> UC04
+Player --> UC05
+Player --> UC06
+Player --> UC07
+Operator --> UC08
+UC01 ..> UC09 : <<include>>
+UC02 ..> UC01 : <<include>>
+UC03 ..> UC02 : <<include>>
+UC04 ..> UC03 : <<include>>
+UC04 ..> UC10 : <<include>>
+UC04 ..> UC05 : <<include>>
+UC04 ..> UC07 : <<extend>>
+UC04 ..> UC11 : <<include>>
+UC06 ..> UC04 : <<include>>
+@enduml
+
+' @startmeta
+' {
+'   "schema": 2,
+'   "layout": {
+'     "nodes": {
+'       "NBALL .... ....UC09": { "dx": -329, "dy": -128 },
+'       "NBALL .... ....UC02": { "dx": 63, "dy": -170 }
+'     },
+'     "edges": {
+'       "Player__NBALL .... ....UC02": {
+'         "type": "curve",
+'         "u2": { "x": 43.894287109375, "y": -401.83630266548585 },
+'         "u1": { "x": 362.4711967135237, "y": 29.035790480704364 },
+'         "endAnchor": { "side": "bottom", "t": 0.21084825013066108 }
+'       }
+'     },
+'     "participants": {}
+'   }
+' }
+' @endmeta
+`;
+
+const $src = document.getElementById('src');
+const $stage = document.getElementById('stage');
+const $log = document.getElementById('log');
+const $server = document.getElementById('server');
+$src.value = SOURCE;
+// 기본 서버: 게이트웨이 배포(사내/44300)면 같은 origin 의 /pumlex, dev(3001)면 WSL compose.
+$server.value = /:300[01]$/.test(location.origin)
+  ? 'http://localhost:44300/pumlex'
+  : location.origin + '/pumlex';
+
+let session = null;
+let pendingSrc = null;
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  $log.appendChild(line);
+  $log.scrollTop = $log.scrollHeight;
+  console.log('[TEMP-DEBUG][test-page] ' + msg);
+}
+
+async function serverRender(source) {
+  const base = $server.value;
+  const r = await fetch(base + '/render-with-layout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    body: source,
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.text();
+}
+
+// SVG 에서 엣지 라벨 텍스트들의 좌표 맵 추출 — {"<<include>>#0": {x,y}, ...}
+function edgeTextPositions(svgText) {
+  const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+  const out = {};
+  doc.querySelectorAll('g.link').forEach((g) => {
+    const e1 = g.getAttribute('data-entity-1'), e2 = g.getAttribute('data-entity-2');
+    g.querySelectorAll('text').forEach((t, i) => {
+      out[`${e1}->${e2}#${i}:${t.textContent}`] = { x: parseFloat(t.getAttribute('x')), y: parseFloat(t.getAttribute('y')) };
+    });
+  });
+  return out;
+}
+
+document.getElementById('btnRender').onclick = async () => {
+  try {
+    log('서버 렌더 요청 → ' + $server.value);
+    const svg = await serverRender($src.value);
+    $stage.innerHTML = svg;
+    const s = $stage.querySelector('svg');
+    if (window.PexInline?.fitViewBox && s) window.PexInline.fitViewBox(s, { pad: 10 });
+    log('렌더 OK (svg ' + svg.length + ' bytes). g.link 라벨 좌표:', 'ok');
+    const pos = edgeTextPositions(svg);
+    Object.entries(pos).slice(0, 12).forEach(([k, v]) => log(`  ${k} → x=${v.x}, y=${v.y}`));
+  } catch (e) { log('렌더 실패: ' + e.message, 'bad'); }
+};
+
+document.getElementById('btnEdit').onclick = () => {
+  if (!$stage.querySelector('svg')) { log('먼저 1️⃣ 렌더', 'warn'); return; }
+  pendingSrc = $src.value;
+  session = window.PexInline.activate($stage, {
+    source: $src.value,
+    useDrafts: false, useDirtyBadge: false,
+    onSourceChange: (s) => {
+      pendingSrc = s;
+      const m = window.PexMeta.parseSource(s).meta;
+      const texts = m?.layout?.edges ? Object.entries(m.layout.edges).filter(([, ov]) => ov.texts).map(([k, ov]) => `${k} → ${JSON.stringify(ov.texts)}`) : [];
+      log('onSourceChange len=' + s.length + (texts.length ? ' | texts: ' + texts.join(' ; ') : ' | texts 없음'), texts.length ? 'ok' : 'warn');
+    },
+  });
+  log('편집 활성화 — 라벨(<<include>> 등)을 드래그해 보세요. 콘솔 [TEMP-DEBUG] 로그도 참고.', 'ok');
+};
+
+document.getElementById('btnCommit').onclick = async () => {
+  if (!session) { log('편집 세션 없음', 'warn'); return; }
+  try { session.deactivate(); } catch {}
+  session = null;
+  if (!pendingSrc) { log('변경 없음', 'warn'); return; }
+  log('적용 — 새 소스 len=' + pendingSrc.length + ' (원본 ' + $src.value.length + ')');
+  $src.value = pendingSrc;
+  log('새 소스로 서버 재렌더…');
+  document.getElementById('btnRender').click();
+};
+
+// 자동테스트: 라벨 있는 "모든" g.link 를 전수검사한다.
+// 각 링크의 eKey 를 클라이언트(edgeKeyForLink)와 동일 방식으로 계산해 texts 주입 →
+// 서버 렌더 전/후 라벨 좌표 비교 → 엣지별 적용/무시 판정.
+// 핵심: 끝점이 cluster(rectangle 그룹)인 엣지가 구버전 서버에서 무시되는 버그가 있으므로
+// cluster 끝점 여부를 함께 표시한다. entity 엣지만 통과하고 cluster 엣지가 실패하면
+// pumlex-server 에 cluster-edge-key fix (archi-duke/pumlex#6) 미반영.
+document.getElementById('btnAuto').onclick = async () => {
+  try {
+    log('=== 자동테스트(전수) 시작 (서버: ' + $server.value + ') ===');
+    const base = await serverRender($src.value);
+    const posBefore = edgeTextPositions(base);
+    const doc = new DOMParser().parseFromString(base, 'image/svg+xml');
+
+    const isCluster = (id) => !!doc.querySelector('g.cluster[id="' + id + '"]');
+    const anyQ = (id) => { const el = doc.querySelector('g[id="' + id + '"]'); return el ? (el.getAttribute('data-qualified-name') || id) : id; };
+
+    // 라벨 있는 링크 전부 수집 + 클라이언트 방식 eKey
+    const targets = [];
+    doc.querySelectorAll('g.link').forEach((g) => {
+      if (!g.querySelector('text')) return;
+      const e1 = g.getAttribute('data-entity-1'), e2 = g.getAttribute('data-entity-2');
+      targets.push({
+        e1, e2,
+        eKey: anyQ(e1) + '__' + anyQ(e2),
+        cluster: isCluster(e1) || isCluster(e2),
+        label: g.querySelector('text').textContent,
+      });
+    });
+    if (!targets.length) { log('text 있는 g.link 없음', 'bad'); return; }
+    log('라벨 엣지 ' + targets.length + '개 전수검사 (cluster 끝점 ' + targets.filter(t => t.cluster).length + '개)');
+
+    // 모든 대상 엣지에 texts={0:{dx:120,dy:60}} 일괄 주입
+    const parsed = window.PexMeta.parseSource($src.value);
+    const layout = (parsed.meta && parsed.meta.layout) || { nodes: {}, edges: {}, participants: {} };
+    layout.edges = layout.edges || {};
+    targets.forEach((t) => {
+      layout.edges[t.eKey] = Object.assign({}, layout.edges[t.eKey] || { type: 'straight' });
+      layout.edges[t.eKey].texts = { 0: { dx: 120, dy: 60 } };
+    });
+    const injected = window.PexMeta.embedMeta(parsed.source, { schema: 2, layout });
+    const after = await serverRender(injected);
+    const posAfter = edgeTextPositions(after);
+
+    let entOk = 0, entFail = 0, cluOk = 0, cluFail = 0;
+    targets.forEach((t) => {
+      const bKeyPrefix = t.e1 + '->' + t.e2 + '#0:';
+      const bKey = Object.keys(posBefore).find(k => k.startsWith(bKeyPrefix));
+      const b = bKey && posBefore[bKey], a = bKey && posAfter[bKey];
+      if (!b || !a) { log('  좌표 못찾음: ' + t.eKey, 'warn'); return; }
+      const dx = Math.round(a.x - b.x), dy = Math.round(a.y - b.y);
+      const applied = Math.abs(dx - 120) <= 2 && Math.abs(dy - 60) <= 2;
+      if (applied) { t.cluster ? cluOk++ : entOk++; } else { t.cluster ? cluFail++ : entFail++; }
+      log(`  ${applied ? '✅' : '❌'} ${t.cluster ? '[cluster]' : '[entity ]'} ${t.eKey} "${t.label}" Δ=(${dx}, ${dy})`, applied ? 'ok' : 'bad');
+    });
+    log('--- 판정 ---');
+    if (cluFail === 0 && entFail === 0) log('전부 적용 — 서버 정상 (cluster fix 반영됨)', 'ok');
+    else if (entOk > 0 && cluFail > 0) log('entity 엣지만 통과, cluster 엣지 무시 → pumlex-server 에 cluster-edge-key fix(pumlex#6) 미반영. 서버 이미지 재빌드 필요', 'bad');
+    else log('texts 전반 무시 → pumlex-server 가 texts 미지원 구버전', 'bad');
+    $stage.innerHTML = after;
+    const s2 = $stage.querySelector('svg');
+    if (window.PexInline?.fitViewBox && s2) window.PexInline.fitViewBox(s2, { pad: 10 });
+  } catch (e) { log('자동테스트 실패: ' + e.message, 'bad'); }
+};
+</script>
+</body>
+</html>

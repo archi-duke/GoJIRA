@@ -109,9 +109,6 @@ func main() {
 		// Fetch (pull from JIRA)
 		r.Get("/Issue/fetch", handlers.IssueFetchHandler)
 
-		// 문서 생성/배포 요청
-		r.Post("/Issue/docgen", handlers.DocGenHandler)
-
 		// Field
 		r.Put("/Issue/field", handlers.FieldUpdateHandler)
 

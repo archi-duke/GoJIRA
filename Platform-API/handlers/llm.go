@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"platform-api/config"
 	"platform-api/llm"
@@ -71,6 +72,61 @@ func LLMCallHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, LLMCallResponse{Text: text})
+}
+
+// LLMChatHandler GET|POST /api/v2/LLM/chat — LLM 연결 검증용 단순 질의응답.
+// llm.json 설정(endpoint/auth/모델)이 실제로 동작하는지 curl/브라우저로 바로 확인한다.
+//   GET  /LLM/chat?q=안녕
+//   POST /LLM/chat {"q": "안녕"}  (또는 {"message": "..."} / {"prompt": "..."})
+func LLMChatHandler(w http.ResponseWriter, r *http.Request) {
+	if config.LLM == nil {
+		respondError(w, http.StatusInternalServerError, "LLM 설정 미로드")
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+	if query == "" && r.Method == http.MethodPost {
+		var req struct {
+			Q       string `json:"q"`
+			Message string `json:"message"`
+			Prompt  string `json:"prompt"`
+		}
+		if err := decodeJSON(r, &req); err == nil {
+			switch {
+			case req.Q != "":
+				query = req.Q
+			case req.Message != "":
+				query = req.Message
+			default:
+				query = req.Prompt
+			}
+		}
+	}
+	if query == "" {
+		respondError(w, http.StatusBadRequest, "질의가 없습니다 — ?q= 또는 body {\"q\": \"...\"} 로 전달")
+		return
+	}
+
+	start := time.Now()
+	text, err := llm.Call(config.LLM, []llm.Message{{Role: "user", Content: query}},
+		&llm.Options{Ctx: r.Context()})
+	elapsed := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		log.Printf("LLM chat 실패 (%s): %v", elapsed, err)
+		respondJSON(w, http.StatusBadGateway, map[string]interface{}{
+			"error":     err.Error(),
+			"endpoint":  config.LLM.Endpoint,
+			"model":     config.LLM.Model,
+			"elapsedMs": elapsed.Milliseconds(),
+		})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"answer":    text,
+		"endpoint":  config.LLM.Endpoint,
+		"model":     config.LLM.Model,
+		"elapsedMs": elapsed.Milliseconds(),
+	})
 }
 
 // decodeJSON / respondError / respondJSON 은 Platform-API/handlers 의 공용 헬퍼 사용.
