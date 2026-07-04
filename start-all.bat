@@ -82,9 +82,9 @@ echo   [Frontend - wait for "Compiled successfully"]
 echo   - Platform-App : http://localhost:3000
 echo   - GoJIRA-App   : http://localhost:3001
 echo.
-echo   [External infra]
-echo   - MongoDB : 10.227.37.89:44330
-echo   - Gitea   : 10.227.37.92:44350
+echo   [External infra - see docs/shared-infra-handoff.md]
+echo   - MongoDB : localhost:27017 (shared-infra / shared-mongo)
+echo   - Gitea   : per deploy/.env GITEA_SERVER
 echo.
 echo To stop all: run stop-all.bat
 pause
