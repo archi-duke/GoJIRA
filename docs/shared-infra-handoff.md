@@ -199,3 +199,14 @@ shared-infra로 이관했습니다.
    연결돼 혼동 가능, exe 기동 중엔 Windows 리스너 우선이라 지장 없음. ports.md 에 명시.
 3. ✅ **인프라 추가 원칙 합의** — GoJIRA 에 Redis/그래프DB 필요 시 앱 compose 에 넣지 않고
    shared-redis 공용 또는 shared-infra 에 추가. `docs/ports.md` 에 기록.
+4. ✅ **계약 리스너(consumer-template) 설치 (2026-07-05)** — `.infra-deps.yml`(services 는
+   실사용 기준 `[mongo, gitea]` — redis 는 사용 시작 시 추가), `.contract/contract.lock.json`
+   (발행본 1.0.0 기준), `tools/infra_contract.py`, GitHub Actions 리스너,
+   Claude SessionStart 훅. 검증: GoJIRA 관점 드리프트 verdict 0, 훅 정상.
+   - **shared-infra 측 전달 2건**: ① `tools/infra_contract.py` 의 `read_text()` 에
+     encoding 미지정 — Windows(cp949) 에서 UTF-8 한글 주석 파싱 실패 →
+     `encoding="utf-8"` 로 수정해서 설치함, 원본(템플릿/C repo CI)에도 반영 권장.
+     ② **발행본이 낡음**: `.contract/contract.json` 은 1.0.0 인데 라이브 compose 는
+     2.0.0 (Milvus/Fuseki/Neo4j/Redis 추가분 미발행) — C 에서 재발행 필요.
+   - 리스너 워크플로에 가드 추가: `archi-duke/shared-infra` GitHub 미공개(현재 404)
+     상태에서 매시 스케줄 런이 실패로 쌓이지 않게 fetch 실패 시 조용히 skip.
