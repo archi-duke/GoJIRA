@@ -28,7 +28,7 @@ OpenCode 는 어디서든 띄울 수 있다 (단일 호스트 / 게스트→호�
 | 9000 | Platform-API | Backend (Go) | 계정/문서/Webhook/LLM 게이트웨이 |
 | 9001 | GoJIRA-API | Backend (Go) | 이슈/프로젝트/Agent 프록시 |
 | 9002 | Agent-Service | Backend (Python) | OpenCode 브리지 (SSE 번역) |
-| 27017 | MongoDB | DB (사내망: 별도 서버 / 로컬: Docker) | 공용 DB (`gojira` database) |
+| 27017 | MongoDB | DB (사내망: 별도 서버 / 로컬: shared-infra 스택) | 공용 DB (`gojira` database — RAGaaS 와 인스턴스 공유 시 `shared-mongo`, DB 는 분리) |
 
 > 위 표는 **컨테이너 내부 listen 포트**. Docker compose 배포 시 호스트 외부에는 아래의 매핑된 포트로 노출 — 사내 컨벤션이며 firewall/policy 등록 이력 때문에 변경 금지.
 
@@ -67,6 +67,38 @@ https/wss 로 조합된다. `http`(기본)면 평문. 백엔드는 항상 컨테
 - `${URL_SCHEME}://<gojira-host>:<GATEWAY_PORT>/gojira-api/api/v2` — GoJIRA-API
 
 자세한 배포 토폴로지: `docs/deployment-topology.md`
+
+### RAGaaS 와 같은 호스트에 배포할 때 (shared-infra, docs/shared-infra-handoff.md)
+
+MongoDB 는 `shared-infra` 스택의 `shared-mongo` 로 일원화 (호스트 27017 은 shared-infra 가
+바인딩, GoJIRA 백엔드는 `shared-net` 컨테이너 DNS `shared-mongo:27017` 로 접근 — 호스트
+포트 경유 아님). platform-api / gojira-api 가 `shared-net` 에 조인하며, RAGaaS API 는
+`http://ragaas-backend:8000` (컨테이너 DNS) 으로 호출한다.
+
+호스트 포트 충돌은 **8000 하나** — GoJIRA JIRA Mock 과 RAGaaS Backend API:
+
+| 호스트 포트 | RAGaaS | GoJIRA | 조정 |
+|---|---|---|---|
+| 8000 | Backend API | JIRA Mock (`JIRA_API_HOST_PORT`) | 공존 시 GoJIRA 쪽 `.env` 에 `JIRA_API_HOST_PORT=44380` 권장 (44xxx 관례) |
+| 3030 | Fuseki | ~~Pumlex~~ | 충돌 없음 — gateway 도입 후 pumlex 는 호스트 비노출(`expose` 전용), RAGaaS 가 3030 사용 가능 |
+| 27017 | shared-mongo | shared-mongo | shared-infra 로 일원화되어 해소 |
+
+**shared-infra 호스트 점유 포트 (2차 통합, 2026-07-05)** — GoJIRA 가 새 포트를 쓸 때
+아래와 겹치지 않게 shared-infra README 포트표를 먼저 확인:
+
+| 호스트 포트 | shared-infra 서비스 | 비고 |
+|---|---|---|
+| 27017 | shared-mongo | 공용 (gojira/ragaas DB 분리) |
+| 3030 | shared-fuseki | RAGaaS |
+| 19530, 9091 | shared-milvus | RAGaaS |
+| **9000, 9001** | shared-minio | ⚠️ Windows dev 에서 platform-api(9000)/gojira-api(9001) exe 와 **localhost 포트가 겹침** — WSL2 포트포워딩 때문에 dev exe 미기동 시 localhost:9000/9001 이 MinIO 로 연결돼 혼동 가능. dev exe 가 떠 있으면 Windows 리스너가 우선이라 동작엔 지장 없음 |
+| 7474, 7687 | shared-neo4j | RAGaaS |
+| 6379 | shared-redis | RAGaaS (GoJIRA 도 사용 가능) |
+| (예정) 3300 | shared-gitea | GoJIRA — Mac Gitea 데이터 이관과 동시 활성화 (아래 참조) |
+
+GoJIRA 에 Redis/그래프DB 등 서드파티 인프라가 필요해지면 **앱 compose 에 추가하지 말고**
+shared-infra 의 기존 서비스(shared-redis 등)를 공용하거나 shared-infra 에 추가한다
+(분리 기준: 서드파티 기성 이미지(상태 보유) = shared-infra / 자체 빌드 앱 = 각 프로젝트).
 
 ## 서비스별 의존 매트릭스
 

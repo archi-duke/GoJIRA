@@ -1,6 +1,9 @@
 # GoJIRA 사내 폐쇄망 배포 docker-compose
 # ─────────────────────────────────────────────────────────────────────────────
 # - MongoDB / Gitea 는 사내 별도 인프라 사용 (이 compose 에 포함 안 함)
+#   MongoDB 를 shared-infra 스택(RAGaaS 와 공유, docs/shared-infra-handoff.md)으로
+#   쓰는 경우: shared-infra 를 먼저 기동(shared-net 생성) 후 이 스택 기동.
+#   shared-net 없이 단독 기동하려면 `docker network create shared-net` 1회 실행.
 # - 모든 환경변수는 deploy/.env 한 곳에서 atomic 입력 (host/port/user/pass)
 # - 조합된 URL (MONGO_URI / GOJIRA_API_URL / REACT_APP_* 등) 은 이 파일에서 만듦
 # - 빌드 context 는 레포 루트 (이 파일 기준 ..)
@@ -94,6 +97,8 @@ services:
     # 호스트에 직접 노출하지 않는다 — gateway 가 /platform-api/ 로 프록시.
     expose:
       - "9000"
+    # shared-net: shared-mongo(공유 MongoDB) + RAGaaS API 도달용 (external 네트워크)
+    networks: [default, shared-net]
     environment:
       MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
       PLATFORM_GITHUB_TOKEN: "${PLATFORM_GITHUB_TOKEN:?required}"
@@ -140,6 +145,8 @@ services:
     # 호스트에 직접 노출하지 않는다 — gateway 가 /gojira-api/ 로 프록시.
     expose:
       - "9001"
+    # shared-net: shared-mongo(공유 MongoDB) + RAGaaS API 도달용 (external 네트워크)
+    networks: [default, shared-net]
     environment:
       MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
       GOJIRA_PLATFORM_API: "http://platform-api:9000/api/v2"
@@ -225,3 +232,11 @@ services:
 #   기존 platform-repos volume 데이터가 있다면 호스트 디렉토리로 이전 후 `docker volume rm deploy_platform-repos`.
 volumes:
   launcher-dist:
+
+# shared-net: shared-infra 스택(D:\works\shared-infra)이 생성하는 공용 네트워크.
+# shared-mongo(공유 MongoDB) 와 RAGaaS backend(http://ragaas-backend:8000) 도달용.
+# external 이므로 이 compose 기동 전에 존재해야 한다 (shared-infra 먼저 up,
+# 또는 `docker network create shared-net`).
+networks:
+  shared-net:
+    external: true

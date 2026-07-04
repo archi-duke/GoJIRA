@@ -4,13 +4,20 @@ GoJIRA-App/build/
 
 # Go binary
 GoJIRA-API/gojira-api
+GoJIRA-API/gojira-api.exe
 GoJIRA-API/server
 Platform-API/platform-api
+Platform-API/platform-api.exe
 gojira-launcher/gojira-launcher
 gojira-launcher/gojira-launcher.exe
 
 # Env
 .env
+
+# dev 런타임 주입 파일 — dev 에서 window._env_ 로 REACT_APP_* 주입용.
+# deploy 는 컨테이너 entrypoint 가 자체 생성하므로 레포에 커밋하지 않는다.
+Platform-App/public/env.js
+GoJIRA-App/public/env.js
 
 # TLS 인증서 (개인키 포함 — 절대 커밋 금지)
 deploy/certs/*

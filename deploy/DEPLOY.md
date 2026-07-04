@@ -14,6 +14,12 @@
 
 전제: MongoDB / Gitea / OpenCode 는 사내 별도 인프라로 이미 운영 중.
 
+> MongoDB 를 RAGaaS 와 공유하는 shared-infra 스택으로 운영하는 경우
+> (`docs/shared-infra-handoff.md`): shared-infra 를 먼저 기동해 `shared-net` 을
+> 만들고, `.env` 는 `MONGODB_SERVER=shared-mongo:27017` / `MONGO_USER=gojira_app` /
+> `MONGO_AUTH_SOURCE=gojira` 로 설정한다. 반입 이미지 목록에 `mongo:8.0` 은
+> shared-infra 스택 몫이며 GoJIRA 목록에는 포함하지 않는다.
+
 ---
 
 ## ① 외부망 — 사전 준비
