@@ -2,24 +2,24 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
-	"os"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	authmw "gojira-api/auth"
-	"gojira-api/config"
 	"gojira-api/db"
 )
 
 // GET /api/v{version}/Project/alerts?user={userId}
-// 전체 프로젝트의 알림 상태를 DB 플래그 기반으로 반환
-// 웹훅/이벤트로 갱신되는 branchAlerts, gitOpenPR, gitLastCommit 필드 사용
+// 전체 프로젝트의 알림 상태를 DB 플래그 기반으로 반환 — 라이브 git 비교 없음.
+//   - branchDiff: 프로젝트 branchAlerts 배열(웹훅이 push 마다 갱신)에 사용자 포함 여부
+//   - hasOpenPR : gitOpenPRReviewers 배열에 사용자 포함 여부
+// branchAlerts 필드가 아직 계산된 적 없는(미존재) 프로젝트는 Platform-API 의
+// /alerts/recompute 를 비동기로 호출해 self-healing 한다 (응답은 기다리지 않음 —
+// 계산 완료 시 SSE project_alert 로 웹에 반영된다).
 func ProjectAlertsHandler(w http.ResponseWriter, r *http.Request) {
 	userID := authmw.UserID(r.Context())
 
@@ -53,19 +53,25 @@ func ProjectAlertsHandler(w http.ResponseWriter, r *http.Request) {
 
 		alert := AlertInfo{JiraCode: code}
 
-		// 1. 브랜치 차이: main과 사용자 브랜치 트리 비교 (파일 SHA 기반)
 		if userID != "" {
-			alert.BranchDiff = checkTreeDiff(code, userID)
-		}
+			// 1. 브랜치 차이 — 웹훅이 갱신하는 branchAlerts 플래그만 읽는다
+			for _, u := range bsonGetStrArray(prj, "branchAlerts") {
+				if u == userID {
+					alert.BranchDiff = true
+					break
+				}
+			}
+			// 필드 자체가 없으면(웹훅 이전 데이터) 비동기 재계산 요청 — 다음
+			// 조회/SSE 부터 반영. repo 없는 프로젝트는 계산할 것이 없어 제외.
+			if prj["branchAlerts"] == nil && docRepoName(prj) != "" {
+				go recomputeBranchAlerts(code)
+			}
 
-		// 2. 열린 PR — 리뷰어로 지정된 경우만
-		if userID != "" {
-			if reviewers := bsonGetStrArray(prj, "gitOpenPRReviewers"); len(reviewers) > 0 {
-				for _, rv := range reviewers {
-					if rv == userID {
-						alert.HasOpenPR = true
-						break
-					}
+			// 2. 열린 PR — 리뷰어로 지정된 경우만
+			for _, rv := range bsonGetStrArray(prj, "gitOpenPRReviewers") {
+				if rv == userID {
+					alert.HasOpenPR = true
+					break
 				}
 			}
 		}
@@ -78,59 +84,28 @@ func ProjectAlertsHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, alerts)
 }
 
-// checkTreeDiff Platform-API를 통해 main과 사용자 브랜치 트리를 비교
-func checkTreeDiff(projectCode, userID string) bool {
-	type treeFile struct {
-		Path string `json:"path"`
-		SHA  string `json:"sha"`
-		Type string `json:"type"`
+// recomputeBranchAlerts Platform-API 에 branchAlerts 재계산을 위임 (fire-and-forget)
+func recomputeBranchAlerts(code string) {
+	if _, sc := callPlatform("POST", fmt.Sprintf("/DocRepo/%s/alerts/recompute", code), nil); sc >= 400 {
+		log.Printf("alerts: %s branchAlerts 재계산 요청 실패 (status=%d)", code, sc)
 	}
-	type treeResp struct {
-		Tree []treeFile `json:"tree"`
-	}
+}
 
-	fetchTree := func(ref string) map[string]string {
-		req, _ := http.NewRequest("GET", fmt.Sprintf("%s/DocRepo/%s/tree?ref=%s",
-			config.PlatformAPI, projectCode, url.QueryEscape(ref)), nil)
-		// 서비스간 read — Platform-API auth 미들웨어 통과용 서비스 토큰(SSO 모드).
-		if st := os.Getenv("SERVICE_TOKEN"); st != "" {
-			req.Header.Set("X-Service-Token", st)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil || resp.StatusCode >= 400 {
-			return nil
-		}
-		defer resp.Body.Close()
-		var t treeResp
-		json.NewDecoder(resp.Body).Decode(&t)
-		m := map[string]string{}
-		for _, f := range t.Tree {
-			if f.Type != "tree" {
-				m[f.Path] = f.SHA
+// docRepoName 프로젝트 documents 에서 repoName 추출
+func docRepoName(prj bson.M) string {
+	switch docs := prj["documents"].(type) {
+	case bson.M:
+		s, _ := docs["repoName"].(string)
+		return s
+	case bson.D:
+		for _, e := range docs {
+			if e.Key == "repoName" {
+				s, _ := e.Value.(string)
+				return s
 			}
 		}
-		return m
 	}
-
-	mainFiles := fetchTree("main")
-	userFiles := fetchTree("docs/" + userID)
-	if mainFiles == nil || userFiles == nil {
-		return false
-	}
-	// docs/{user} 브랜치 미존재 시 Platform-API 가 200 + 빈 tree 로 응답하므로
-	// 빈 사용자 트리는 "브랜치 없음 = diff 없음" 으로 판정
-	if len(userFiles) == 0 {
-		return false
-	}
-	if len(mainFiles) != len(userFiles) {
-		return true
-	}
-	for p, sha := range mainFiles {
-		if userFiles[p] != sha {
-			return true
-		}
-	}
-	return false
+	return ""
 }
 
 func bsonGetStrArray(doc bson.M, key string) []string {
@@ -155,21 +130,4 @@ func bsonGetStrArray(doc bson.M, key string) []string {
 		return arr
 	}
 	return nil
-}
-
-func getTime(doc bson.M, key string) time.Time {
-	switch v := doc[key].(type) {
-	case time.Time:
-		return v
-	case bson.DateTime:
-		return v.Time()
-	case string:
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			return t
-		}
-		if t, err := time.Parse("2006-01-02T15:04:05.000+0900", v); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
 }
