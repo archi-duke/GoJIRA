@@ -13,12 +13,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"platform-api/config"
 	"platform-api/db"
 	"platform-api/github"
 )
+
+// POST /DocRepo/{code}/alerts/recompute — branchAlerts 플래그 전체 재계산.
+// 웹훅 이전에 만들어져 플래그가 계산된 적 없는(필드 미존재) 프로젝트의
+// self-healing 용 — GoJIRA-API /Project/alerts 가 비동기로 호출한다.
+func DocRepoAlertsRecomputeHandler(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	owner, name, err := getRepoInfo(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	alerts := compareAllBranches(owner, name, code)
+	if alerts == nil {
+		alerts = []string{}
+	}
+	db.UpdateProjectField(ctx, code, "branchAlerts", alerts)
+	BroadcastDocEvent(map[string]interface{}{
+		"type":         "project_alert",
+		"repo":         name,
+		"projectCode":  code,
+		"branchAlerts": alerts,
+	})
+	respondJSON(w, http.StatusOK, map[string]interface{}{"branchAlerts": alerts})
+}
 
 // POST /webhook/github — GitHub Webhook 수신
 func GitHubWebhookHandler(w http.ResponseWriter, r *http.Request) {
@@ -226,6 +253,28 @@ func handlePushEvent(payload map[string]interface{}) {
 		repoOwner, _ = owner["login"].(string)
 	}
 
+	// docs/{user} push — 해당 사용자의 branchAlerts 플래그만 갱신 (등록/발행 직후 반영).
+	// 알림 API(GoJIRA-API /Project/alerts)는 이 플래그를 읽기만 하므로 여기서 갱신을
+	// 놓치면 마크가 안 뜬다.
+	if idx := strings.Index(ref, "/docs/"); idx >= 0 {
+		userID := ref[idx+len("/docs/"):]
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		projectCode := findProjectByRepo(ctx, repoName)
+		if projectCode == "" || userID == "" {
+			return
+		}
+		alerts := UpdateBranchAlert(repoOwner, repoName, projectCode, userID)
+		BroadcastDocEvent(map[string]interface{}{
+			"type":         "project_alert",
+			"repo":         repoName,
+			"projectCode":  projectCode,
+			"ref":          ref,
+			"branchAlerts": alerts,
+		})
+		return
+	}
+
 	// main 브랜치 push만 처리
 	if !strings.HasSuffix(ref, "/main") && !strings.HasSuffix(ref, "/master") {
 		return
@@ -246,6 +295,9 @@ func handlePushEvent(payload map[string]interface{}) {
 
 	// 모든 docs/* 브랜치 vs 새 main 비교
 	alerts := compareAllBranches(repoOwner, repoName, projectCode)
+	if alerts == nil {
+		alerts = []string{} // null 저장 방지 — "미계산" 과 구분
+	}
 
 	// DB 갱신: 차이가 있는 사용자 목록 저장
 	db.UpdateProjectField(ctx, projectCode, "branchAlerts", alerts)
@@ -264,8 +316,8 @@ func handlePushEvent(payload map[string]interface{}) {
 	})
 }
 
-// UpdateBranchAlert 특정 사용자의 브랜치 알림 상태를 갱신 (exported — 다른 핸들러에서도 사용)
-func UpdateBranchAlert(owner, repoName, projectCode, userID string) {
+// UpdateBranchAlert 특정 사용자의 브랜치 알림 상태를 갱신하고 갱신된 전체 목록을 반환
+func UpdateBranchAlert(owner, repoName, projectCode, userID string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -276,7 +328,7 @@ func UpdateBranchAlert(owner, repoName, projectCode, userID string) {
 	// 현재 branchAlerts 배열 조회 후 업데이트
 	prj, _ := db.FindProjectByCode(ctx, projectCode)
 	if prj == nil {
-		return
+		return nil
 	}
 	var currentAlerts []string
 	switch v := prj["branchAlerts"].(type) {
@@ -312,8 +364,13 @@ func UpdateBranchAlert(owner, repoName, projectCode, userID string) {
 		newAlerts = append(newAlerts, userID)
 	}
 
+	// nil 이면 Mongo 에 null 로 저장돼 "미계산" 과 구분이 안 됨 — 빈 배열로 정규화
+	if newAlerts == nil {
+		newAlerts = []string{}
+	}
 	db.UpdateProjectField(ctx, projectCode, "branchAlerts", newAlerts)
 	log.Printf("branchAlert: %s user=%s diff=%v alerts=%v", projectCode, userID, hasDiff, newAlerts)
+	return newAlerts
 }
 
 // findProjectByRepo 레포 이름으로 프로젝트 코드 찾기

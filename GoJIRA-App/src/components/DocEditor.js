@@ -269,7 +269,9 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
           refreshDocState();
           reloadSelectedFile();
         }
-        if (data.type === 'push' && data.repo) {
+        // push 는 현재 열린 프로젝트의 레포일 때만 — 남의 프로젝트 push 마다
+        // Gitea 왕복(main 트리 재조회)이 생기는 낭비 방지.
+        if (data.type === 'push' && data.repo && data.repo === project?.documents?.repoName) {
           refreshDocState();
           reloadSelectedFile();
         }
