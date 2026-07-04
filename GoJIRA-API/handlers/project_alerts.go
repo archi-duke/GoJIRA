@@ -117,6 +117,11 @@ func checkTreeDiff(projectCode, userID string) bool {
 	if mainFiles == nil || userFiles == nil {
 		return false
 	}
+	// docs/{user} 브랜치 미존재 시 Platform-API 가 200 + 빈 tree 로 응답하므로
+	// 빈 사용자 트리는 "브랜치 없음 = diff 없음" 으로 판정
+	if len(userFiles) == 0 {
+		return false
+	}
 	if len(mainFiles) != len(userFiles) {
 		return true
 	}
