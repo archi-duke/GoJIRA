@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="GoJIRA platform shell" />
+    <link rel="apple-touch-icon" href="/logo192.png" />
+    <!--
+      런타임 config — nginx entrypoint 가 컨테이너 startup 시 env.js 를 생성한다.
+      window._env_ 로 모든 REACT_APP_* 값을 노출. src/config.js 가 1순위로 읽음.
+      dev 모드(npm start)에서는 public/env.js 가 있으면 로드, 없으면 404 →
+      window._env_ 미정의 → src/config.js 가 env/fallback 으로 동작.
+    -->
+    <script src="/env.js"></script>
+    <link rel="manifest" href="/manifest.json" />
+    <title>GoJIRA</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/index.js"></script>
+  </body>
+</html>

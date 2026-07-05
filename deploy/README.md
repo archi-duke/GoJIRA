@@ -130,11 +130,12 @@ curl -sS http://localhost:3030/                    # pumlex (plantumlEx 렌더�
 
 ## React 런타임 config (재빌드 불요)
 
-`REACT_APP_*` 는 nginx 컨테이너 entrypoint 가 컨테이너 startup 시 environment → `/usr/share/nginx/html/env.js` (`window._env_`) 로 직렬화한다. React (`src/config.js`) 가 1순위로 이를 읽고, 없으면 `process.env.REACT_APP_*` 로 fallback (dev 모드 호환).
+`REACT_APP_*` 는 nginx 컨테이너 entrypoint 가 컨테이너 startup 시 environment → `/usr/share/nginx/html/env.js` (`window._env_`) 로 직렬화한다. React (`src/config.js`) 가 1순위로 이를 읽고, 없으면 `import.meta.env.REACT_APP_*` (Vite dev .env) 로 fallback.
 
 - 빌드된 이미지는 host-agnostic — 어떤 사내망에도 그대로 반입 가능
 - 폐쇄망에서 host/도메인 변경 → `.env` 수정 → `docker compose up -d` (재빌드 불요)
-- Module Federation remote URL 도 Promise-based dynamic remote (craco.config.js) 로 런타임 결정 — 동일하게 재빌드 불요
+- Module Federation remote URL 도 런타임 결정 — Platform-App 부트스트랩이 `window._env_.REACT_APP_GOJIRA_APP_REMOTE` 로 `registerRemotes` (MF 2.0). 동일하게 재빌드 불요
+- (Vite 이전 2026-07-06) 프론트 빌드는 Vite 6 — package-lock 이 바뀌었으므로 **build-cache-node 이미지 재생성 필요** (deploy/images/build-cache-node)
 
 ## LLM provider 변경
 

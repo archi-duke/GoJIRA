@@ -52,7 +52,7 @@ if errorlevel 1 (
 REM ── [3/4] Platform-App (port 3000) ──
 call :isPortInUse 3000
 if errorlevel 1 (
-    echo [3/4] Starting Platform-App ^(port 3000^)... initial webpack compile may take 30s-2min
+    echo [3/4] Starting Platform-App ^(port 3000, Vite^)...
     start "Platform-App" /D "%CD%\Platform-App" cmd /k "set BROWSER=none && npm start"
     timeout /t 3 /nobreak >nul
 ) else (
@@ -62,7 +62,7 @@ if errorlevel 1 (
 REM ── [4/4] GoJIRA-App (port 3001) ──
 call :isPortInUse 3001
 if errorlevel 1 (
-    echo [4/4] Starting GoJIRA-App ^(port 3001^)...
+    echo [4/4] Starting GoJIRA-App ^(port 3001, Vite^)...
     start "GoJIRA-App" /D "%CD%\GoJIRA-App" cmd /k "set BROWSER=none && npm start"
     timeout /t 2 /nobreak >nul
 ) else (
@@ -78,7 +78,7 @@ echo   [Backend]
 echo   - Platform-API : http://localhost:9000
 echo   - GoJIRA-API   : http://localhost:9001
 echo.
-echo   [Frontend - wait for "Compiled successfully"]
+echo   [Frontend - Vite dev server, ready in a few seconds]
 echo   - Platform-App : http://localhost:3000
 echo   - GoJIRA-App   : http://localhost:3001
 echo.
