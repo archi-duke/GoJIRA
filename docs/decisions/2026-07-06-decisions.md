@@ -1,0 +1,51 @@
+# 의사결정 기록 — 2026-07-06
+
+> 세션 주제: 프론트엔드 표준화 & 플랫폼 통합 계약(P0). RAGaaS 가 두 번째 remote 로 합류하는
+> 플랫폼 전략의 일부. 계약 문서: `docs/platform-contract/`.
+
+## D1. 인증 제공 방식 = MF exposed 모듈 `platformApp/auth` (props 아님)
+
+- **결정**: 셸이 인증 런타임을 MF 모듈로 노출(`getToken/getUser/getAuthority/authFetch/onSessionChange/requireLogin`),
+  props(user/authority)는 보조 스냅샷 채널로 유지.
+- **근거**: ① RAGaaS 는 axios — 인터셉터는 모듈 스코프라 props 로는 우회가 필요. ② SSE/런처 등 React 밖 코드 경로 실재.
+  ③ 셸이 host-init 시점 준비 + 인증 확정 후 remote 마운트로 초기화 순서 보장. (02-auth-contract.md §1)
+- **파급**: window.fetch monkey-patch 2곳 폐기 예정(P2). remote 는 표준 어댑터 한 겹으로 standalone 폴백.
+
+## D2. Kendo 소유권 = @platform/web-ui 단독 (예방 계약)
+
+- **결정**: Kendo React 의존·라이선스·테마는 @platform/web-ui 패키지만 가진다. 제품 앱 직접 의존은 CI 실패.
+- **사실 확인**: 2026-07-06 현재 GoJIRA 두 앱에 Kendo 의존 0건 — "수습"이 아니라 확산 전 예방 계약.
+- **형태**: 레포 내 workspace 패키지(packages/web-ui)로 시작, MF singleton 공유. 복붙 공통코드(AlertModal 등 17종,
+  기능 슈퍼셋 판 기준)를 흡수. (04-web-ui-contract.md)
+
+## D3. 셸↔remote 상태 공유 = 마운트 props + onNavigate 콜백 (sessionStorage magic string 폐기)
+
+- **결정**: `RemoteAppProps { user, authority, resetKey, basePath?, onNavigate? }` 가 유일한 상태 계약.
+  `gojira_page`/`gojira_project` sessionStorage 채널은 P2 에서 제거. remote 내부 UI 상태 키는 `<app>_` 접두사.
+- **근거**: 타입 없음·키 충돌·3번째 앱 합류 시 암묵 계약 확산 위험. (01-mf-host-contract.md §2)
+
+## D4. MF 표준 = Vite + @module-federation/vite, singleton 은 react/react-dom/@platform/web-ui 3개만
+
+- **결정**: raw webpack MF plugin + `requiredVersion '^19.2.4'` 수동 고정 → MF 2.0 런타임(버전 협상/폴백)으로.
+  requiredVersion 은 package.json range 재사용, strictVersion 미사용. remote expose 는 `./App` 표준
+  (GoJIRA 의 `./GoJIRAApp` 은 이전 시 개명).
+- **근거**: 빌드도구 무관 상호운용(RAGaaS 도 Vite), singleton 은 "어긋나면 앱이 안 뜨는" 결합이므로 최소화.
+
+## D5. 게이트웨이/런타임 env 규약을 계약으로 명문화
+
+- **결정**: `/<app>-app/`·`/<svc>-api/` 프리픽스 + strip, 백엔드 베이스 `/api/v2` 표준, env.js(window._env_) 주입 방식을
+  언어중립 계약으로 고정. introspect 는 "SSO 서버로의 outbound GET, `{loginid, active}` 문자열 스키마, 3s 타임아웃,
+  200∧loginid≠""∧active≠"false"" 로 명세 — 파이썬 참조 스니펫 제공. (05-backend-contract.md)
+- **정정된 오해**: introspect 는 Platform-API 가 호스팅하는 API 가 아님 (조사로 확인).
+
+## D6. 조사 중 발견된 계약 위반 3건 → P2 수정 목록 등재
+
+1. platform-app entrypoint.sh 가 `REACT_APP_USE_SSO` 를 env.js 에 미직렬화 (컨테이너에서 SSO 토글 불가).
+2. 프론트 DEV_USER 가 config.js 하드코딩 (`duke.kimm`) — 런타임 키로 승격 필요.
+3. `Platform-App/src/App.js:23` 이 미정의 `config.PLATFORM_API` 참조 (조용히 무시되는 잠재 버그).
+
+## D7. 실행 단계 (계획)
+
+- **P0(본 세션)**: 계약 문서 docs/platform-contract/ 작성 → PR → Duke 승인 시 v1.0 확정. RAGaaS 팀 소비 시작 가능.
+- **P1**: CRA/CRACO→Vite+TS 이전(두 앱), MF 런타임 현대화, env.js/게이트웨이 파이프라인 갱신. 회귀 없음 조건.
+- **P2**: monkey-patch 제거→auth 모듈, 복붙→web-ui, magic string→props 계약, 라우팅 표준화, D6 버그 수정.
