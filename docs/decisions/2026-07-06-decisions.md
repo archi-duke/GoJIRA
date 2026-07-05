@@ -46,6 +46,22 @@
 
 ## D7. 실행 단계 (계획)
 
-- **P0(본 세션)**: 계약 문서 docs/platform-contract/ 작성 → PR → Duke 승인 시 v1.0 확정. RAGaaS 팀 소비 시작 가능.
+- **P0(본 세션)**: 계약 문서 docs/platform-contract/ 작성 → PR #70 → **머지됨(v1.0 확정)**. RAGaaS 팀 소비 시작 가능.
 - **P1**: CRA/CRACO→Vite+TS 이전(두 앱), MF 런타임 현대화, env.js/게이트웨이 파이프라인 갱신. 회귀 없음 조건.
 - **P2**: monkey-patch 제거→auth 모듈, 복붙→web-ui, magic string→props 계약, 라우팅 표준화, D6 버그 수정.
+
+## D8. Kendo 플랫폼 기준 버전 = RAGaaS 실사 값 (KendoReact 5.8.0 / theme-bootstrap / TELERIK_LICENSE 빌드타임)
+
+- **결정**: @platform/web-ui 의 Kendo 기준을 RAGaaS frontend 실사(2026-07-06)에서 출발 — KendoReact 5.8.0(exact pin),
+  테마 kendo-theme-bootstrap 5.8.0(사전컴파일 all.css), 라이선스는 빌드타임 `TELERIK_LICENSE` env/`telerik-license.txt`
+  (RAGaaS Dockerfile build-arg 패턴을 플랫폼 표준으로). 버전 상향은 web-ui 단독 결정·일괄 적용.
+- **실사 요점**: 실사용 표면은 Grid 단일(2개 파일) + data-query descriptor. RAGaaS 백엔드가 Kendo Grid Sort/Filter
+  Descriptor JSON 을 쿼리 계약으로 수신 — web-ui 이관 후에도 wire format 유지. **좌석/에디션/만료는 레포에 정보 없음 — 미결,
+  조달 주체 별도 확인 필요.**
+- web-ui 1차 구현 범위 = Grid 래퍼 + 테마 엔트리 + 라이선스 빌드 규약. (04-web-ui-contract.md §5)
+
+## D9. React 버전 충돌 해소 방향 = RAGaaS 가 19 로 상향 (플랫폼 표준 고수)
+
+- **사실**: RAGaaS react 18.3.1 vs 플랫폼 셸 19.x — singleton 공유 불가 조합.
+- **결정**: 플랫폼 표준(19.x)을 유지하고 RAGaaS 가 합류 전 React 19 로 상향한다. 온보딩 A2 의 선행 조건으로 명시.
+- **근거**: 셸/GoJIRA 가 이미 19 기반이고, 18→19 는 전방 이동(3개 앱 중 1개만 이동)이며 singleton 다운그레이드는 퇴행.
