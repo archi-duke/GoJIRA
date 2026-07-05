@@ -1,0 +1,94 @@
+# 플랫폼 인증 관련 HTTP 계약의 OpenAPI 표현.
+# 주의: introspect/exchange 는 플랫폼이 아니라 "사내 SSO(MobilAve) 서버"가 호스팅한다 —
+# 각 백엔드/셸이 이를 '소비'하는 outbound 계약으로서 여기 명세한다. (05-backend-contract.md §2)
+openapi: 3.0.3
+info:
+  title: Platform Auth Contract
+  version: 1.0.0
+  description: >
+    플랫폼 합류 제품이 구현/소비해야 하는 인증 HTTP 계약.
+    servers 는 배포마다 다르므로 런타임 env 로 결정된다
+    (SSO_INTROSPECT_URL / REACT_APP_SSO_URL / 게이트웨이 /platform-api/).
+
+components:
+  securitySchemes:
+    ssoBearer:
+      type: http
+      scheme: bearer
+      description: SSO sessionToken. 백엔드가 introspect 로 검증 (USE_SSO=true).
+    serviceToken:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+      description: 서비스간 공유비밀 (env SERVICE_TOKEN). 통과 시 X-User-Id 를 act-as 신원으로 신뢰.
+  parameters:
+    actAsUser:
+      name: X-User-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: 행위 사용자 loginid. serviceToken 검증 통과 시(또는 dev 모드) 신뢰됨.
+
+paths:
+  /Account/introspect:
+    get:
+      summary: 세션 토큰 검증 (SSO 서버 호스팅 — 소비 계약)
+      description: >
+        모든 백엔드가 Bearer 토큰 검증 시 호출. 타임아웃 3초.
+        유효 판정: HTTP 200 AND loginid != "" AND active != "false".
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 검증 결과 (active 가 "false" 면 무효 토큰)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loginid: { type: string, description: 사용자 ID. 빈 문자열이면 무효 }
+                  active:  { type: string, description: '"false" 면 무효. 그 외(예 "true")는 유효' }
+
+  /Account/exchange:
+    get:
+      summary: SSO 콜백 code → sessionToken 교환 (SSO 서버 호스팅 — 셸만 소비)
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionToken: { type: string }
+
+  /api/v2/Account/me:
+    get:
+      summary: 사용자 권한 조회 (Platform-API 호스팅, 게이트웨이 /platform-api/ 경유)
+      description: 셸이 로그인 확정 후 호출해 authority 맵을 얻는다. remote 는 마운트 props 로 전달받음.
+      security:
+        - ssoBearer: []
+        - serviceToken: []
+      parameters:
+        - name: knoxId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authority:
+                    type: object
+                    additionalProperties: { type: integer }
+                    description: '권한코드→레벨 맵. 예: { "USR": 15, "GITRP": 4 }'
