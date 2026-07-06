@@ -188,17 +188,18 @@ entrypoint.sh 가 컨테이너 기동 시 env → `/env.js` 를 생성해 재빌
 
 ## 3. Phase 2 — Kendo Grid 를 @platform/web-ui 로 이관 (Phase 1 합류 검증 후, 서두르지 않아도 됨)
 
-**여기 크로스레포 이슈가 하나 있습니다 — 먼저 GoJIRA 팀과 조율 필요:**
+**~~크로스레포 이슈~~ → 해소됨 (2026-07-06, GoJIRA 팀 B7 완료)**:
 
-`@platform/web-ui` (Kendo 의 유일한 소유자)는 현재 GoJIRA 모노레포 안에서 "소스 패키지 + Vite `resolve.alias`"
-방식으로 소비됩니다(`packages/web-ui/src` 를 상대경로로 직접 alias). 이 방식은 **같은 레포 안의 앱끼리만** 가능합니다.
-RAGaaS 는 별도 레포이므로 이 alias 를 그대로 쓸 수 없습니다.
+`@platform/web-ui` tarball 반입 경로가 준비됐습니다 — GoJIRA 레포 `deploy/scripts/pack-web-ui.sh` 실행 →
+`deploy/dist/platform-web-ui-<ver>.tgz` 생성. **외부 Vite 프로젝트에서 tarball 설치 → 서브패스 import
+(`@platform/web-ui/components/DataGrid` 등) → 빌드까지 검증 완료**했습니다. 소비:
 
-**따라서 RAGaaS 가 이 작업을 시작하기 전에, GoJIRA 팀에 다음을 요청하세요**: `@platform/web-ui` 를 `npm pack` 으로
-tarball 로 만들어 반입 가능하게 하거나, 사내 npm 레지스트리에 올려달라고. (계약 04 §2, 온보딩 체크리스트 B7 항목 —
-GoJIRA 팀 책임입니다. RAGaaS 가 먼저 할 일은 없고, 준비되면 통보받는 쪽입니다.)
+```bash
+npm install ./platform-web-ui-0.1.0.tgz
+# Kendo 의존은 tarball 의 dependencies 로 함께 설치됨 (react/react-dom 은 peer — RAGaaS 것 사용)
+```
 
-준비되면:
+이관 작업 시:
 - RAGaaS 의 `@progress/kendo-*` 직접 의존을 제거하고 `@platform/web-ui` 의 `DataGrid` 래퍼로 교체
   (참조: GoJIRA 레포 `packages/web-ui/src/components/DataGrid.jsx` — kendo-data-query 기반 소팅/필터/페이징 래퍼)
 - MF shared 에 `'@platform/web-ui': { singleton: true }` 추가
@@ -212,13 +213,23 @@ GoJIRA 팀 책임입니다. RAGaaS 가 먼저 할 일은 없고, 준비되면 �
 자체 공지 UI 는 만들지 마세요. 필요하면 셸이 노출하는 `platformApp/notice` 의 `NoticeCenter` 위젯을 마운트만 하면
 됩니다(계약 03). 급하지 않으면 이번 온보딩 범위에서 제외해도 무방합니다.
 
-## 5. GoJIRA(플랫폼) 쪽에서 병행하는 일 — 참고용, RAGaaS 액션 아님
+## 5. GoJIRA(플랫폼) 쪽 준비 상태 — 2026-07-06 완료분
 
-- `Platform-App/src/apps/registry.js` 에 RAGaaS 엔트리 등록
-- 게이트웨이에 `/ragaas-app/`, `/ragaas-api/` location 블록 추가
-- `deploy/docker-compose.yml` 에 서비스 추가 + `SERVICE_TOKEN` 공유
-- RAGaaS 메뉴용 authCode 를 Platform-API authority 체계에 등록
-- `@platform/web-ui` tarball 반입 경로 마련(§3)
+- ✅ 셸 registry 에 RAGaaS 엔트리 등록 (env `REACT_APP_RAGAAS_APP_REMOTE` 설정 시 탭 자동 노출, `/ragaas` 딥링크 포함)
+- ✅ 게이트웨이 `/ragaas-app/`(→ragaas-frontend:80), `/ragaas-api/`(→ragaas-backend:8000) — **`/ragaas-api/` 는
+  이미 라이브 관통 확인됨** (RAGaaS API 루트 응답 수신)
+- ✅ `@platform/web-ui` tarball 반입 경로 (§3)
+- ⏳ SERVICE_TOKEN 공유 — SSO 모드 전환 시점에 양쪽 .env 동일 값 배포
+
+**RAGaaS 쪽에 필요한 compose 수정 1건 (검증 중 발견)**: `frontend` 서비스가 shared-net 에 미조인이라
+게이트웨이가 `/ragaas-app/` 을 프록시하지 못합니다(현재 502). backend 처럼 추가해주세요:
+
+```yaml
+  frontend:
+    networks:
+      - default
+      - shared-net
+```
 
 ## 6. 완료 판정 체크리스트
 

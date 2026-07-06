@@ -126,4 +126,26 @@
   함을 프롬프트에 명시(B7 선행). Phase 2(Kendo 이관)는 이게 준비되기 전까지 RAGaaS 쪽 착수 불가 — RAGaaS 는
   당분간 자체 Kendo 5.8.0 의존 유지(라이선스 만료로 인한 버전 상향 금지는 별개로 유효, D8).
 - **How to apply**: 다음 세션에서 RAGaaS 진행 상황 문의가 오면, tarball 반입 경로(B7)가 GoJIRA 쪽에서 준비됐는지부터
-  확인 — 안 됐다면 Phase 2 는 여전히 블록 상태.
+  확인 — 안 됐다면 Phase 2 는 여전히 블록 상태. → **같은 날 D15 로 해소됨.**
+
+## D15. RAGaaS 온보딩 GoJIRA측 준비 완료 (B1·B2·B3·B7) — B4 는 불필요로 확정
+
+- **B7 (블로커 해소)**: web-ui package.json 에 `exports` 맵(서브패스→소스 파일)·`files` 추가,
+  `deploy/scripts/pack-web-ui.sh` → `deploy/dist/platform-web-ui-<ver>.tgz`. **외부 Vite 프로젝트를 실제로 만들어
+  tarball 설치→서브패스 import→빌드까지 검증** (node_modules 안 .jsx 를 Vite/esbuild 가 확장자 기준으로 변환 확인).
+  react/react-dom 은 peer, Kendo 는 dependencies 로 동반 설치.
+- **B1/B2**: 셸 registry 에 RAGaaS 엔트리 — **env 게이트** (`REACT_APP_RAGAAS_APP_REMOTE` 미설정 시 탭 미노출,
+  미배포 환경에서 죽은 탭 방지). makeRemote() 공통화, TAB_PATHS 를 registry 파생으로 바꿔 `/ragaas` 딥링크 자동 지원.
+  RemoteErrorBoundary 폴백 문구도 제품 label 기반으로 일반화. entrypoint/compose(x-react-env, `RAGAAS_APP_REMOTE`
+  변수) 직렬화 추가.
+- **B3**: 게이트웨이 `/ragaas-app/`·`/ragaas-api/` — 타 스택 컨테이너라 **런타임 DNS**(resolver 127.0.0.11 +
+  변수 proxy_pass) 로 해석해 미배포 시에도 nginx 기동 무영향. gateway 가 shared-net 조인.
+  **실검증: `/ragaas-api/` 는 라이브 ragaas-backend 까지 관통**(RAGaaS API 루트 응답 수신 — 404 는 그쪽 /api/v2
+  미표준화 때문, A11 항목). `/ragaas-app/` 은 ragaas-frontend 의 shared-net 미조인으로 502 → **RAGaaS 측 compose
+  수정 전달사항** (frontend 에 networks [default, shared-net] 추가).
+- **B4 불필요 확정**: RAGaaS 컨테이너는 자기 레포 compose 로 배포 + shared-net 연결이 원칙 — GoJIRA compose 에
+  타 제품 서비스를 넣지 않는다.
+- **셸 검증**: env 미설정 → 탭 없음(회귀 무), env 주입 → RAGaaS 탭 표시·클릭 시 `/ragaas` URL + 폴백 UI
+  ("RAGaaS에 연결할 수 없습니다"), 딥링크 직행 정상, 기존 라우트 200 유지.
+- **"platform app/api 분리" 질의 결론**: 이미 독립 서비스로 분리되어 있음 — 추가 분리(레포 분할 등)는 불필요 판단,
+  web-ui 공유만 더 복잡해짐.
