@@ -1,10 +1,10 @@
 // 런타임 config — 컨테이너 startup 시 nginx entrypoint 가 생성하는
-// /env.js (window._env_) 를 1순위로 읽고, dev 모드에서는 process.env.REACT_APP_*
-// (CRA 의 .env / shell env) 로 fallback. 빌드된 번들은 host-agnostic 이므로
-// 폐쇄망에서 .env 만 수정해도 재배포 없이 URL 갱신됨.
+// /env.js (window._env_) 를 1순위로 읽고, dev 모드에서는 import.meta.env.REACT_APP_*
+// (Vite .env — envPrefix 'REACT_APP_' 유지) 로 fallback. 빌드된 번들은 host-agnostic
+// 이므로 폐쇄망에서 .env 만 수정해도 재배포 없이 URL 갱신됨.
 const e = (typeof window !== 'undefined' && window._env_) || {};
 const pick = (key, fallback) =>
-  e[key] || (typeof process !== 'undefined' && process.env && process.env[key]) || fallback;
+  e[key] || (import.meta.env && import.meta.env[key]) || fallback;
 
 const config = {
   // 공통 플랫폼 API (인증, 계정, 공지)

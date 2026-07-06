@@ -51,24 +51,24 @@ Platform-App은 GoJIRA-App의 컴포넌트를 **Webpack 5 Module Federation**으
 
 ```
 GoJIRA-App (:3001) — Remote
-├── craco.config.js          ← ModuleFederationPlugin (expose)
-├── src/GoJIRAApp.js         ← expose되는 래퍼 컴포넌트
-├── src/bootstrap.js         ← 비동기 부트스트랩
+├── vite.config.ts           ← @module-federation/vite (expose './App')
+├── src/GoJIRAApp.jsx        ← expose되는 래퍼 컴포넌트
+├── src/bootstrap.jsx        ← 비동기 부트스트랩
 └── src/components/          ← 실제 컴포넌트 (원본)
 
 Platform-App (:3000) — Host
-├── craco.config.js          ← ModuleFederationPlugin (remotes)
-├── src/bootstrap.js         ← 비동기 부트스트랩
+├── vite.config.ts           ← @module-federation/vite (remotes dev 폴백)
+├── src/bootstrap.jsx        ← 비동기 부트스트랩
 └── src/apps/
-    └── registry.js          ← import('gojiraApp/GoJIRAApp')
+    └── registry.js          ← registerRemotes(env URL) + loadRemote('gojiraApp/App')
 ```
 
 **동적 로딩 흐름:**
-1. Platform-App 로드 → `bootstrap.js` 비동기 실행
-2. Project 메뉴 클릭 → `React.lazy(() => import('gojiraApp/GoJIRAApp'))`
-3. Webpack이 `http://localhost:3001/remoteEntry.js` 로드
-4. GoJIRA-App의 GoJIRAApp 컴포넌트를 런타임에 가져와 렌더링
-5. React, react-dom은 singleton으로 공유 (중복 로딩 방지)
+1. Platform-App 로드 → `bootstrap.jsx` 비동기 실행
+2. registry 가 `window._env_.REACT_APP_GOJIRA_APP_REMOTE` 로 remote 를 등록(force)
+3. Project 메뉴 클릭 → `React.lazy(() => loadRemote('gojiraApp/App'))`
+4. MF 2.0 런타임이 `<remote>/remoteEntry.js` (ESM) 로드 → GoJIRAApp 렌더링
+5. React, react-dom은 singleton으로 공유 (버전은 package.json range 로 런타임 협상)
 
 **장점:**
 - 컴포넌트 중복 완전 제거 (GoJIRA-App 한 곳에서만 관리)
@@ -378,15 +378,17 @@ export function modalConfirm(message) {
 - **BEM 미사용**: 접두사 기반 네이밍으로 충돌 방지 (`ac-`, `satam-`, `rm-` 등)
 - CSS Modules 미사용: create-react-app 기본 설정 유지
 
-### 빌드 구성
+### 빌드 구성 (2026-07-06 Vite 이전)
 
 | 항목 | 값 |
 |------|------|
-| 빌드 도구 | create-react-app (react-scripts 5.0.1) |
+| 빌드 도구 | Vite 6 + TypeScript(점진 채택) + @module-federation/vite — CRA/CRACO 폐기 |
 | React 버전 | 19.2.4 |
-| 번들 방식 | 단일 bundle.js (코드 분할 미적용) |
-| 환경변수 | `REACT_APP_*` 접두사 |
+| 번들 방식 | Rollup 코드 분할 (assets/ 청크) |
+| 환경변수 | `REACT_APP_*` 접두사 유지 (envPrefix) — 런타임은 window._env_ 1순위 |
 | 주요 의존성 | react-markdown, remark-gfm, html2canvas, diff |
+
+> MF/셸 규약의 원천은 `docs/platform-contract/01-mf-host-contract.md` — 이 문서와 다르면 계약이 우선.
 
 ### 컴포넌트 규모 (라인 수)
 
@@ -440,7 +442,7 @@ ContextMenu       █                                              46
 | **맥락** | GoJIRA 컴포넌트를 Platform-App에 복사하여 정적 바인딩하면 양쪽 수동 동기화 필요 |
 | **결정** | Webpack 5 Module Federation으로 GoJIRA-App을 Remote, Platform-App을 Host로 구성. 런타임에 동적 로딩 |
 | **근거** | 컴포넌트 중복 제거, GoJIRA-App 수정 시 Platform-App 자동 반영, 독립 배포 가능 |
-| **구현** | craco로 CRA webpack 오버라이드. GoJIRA-App이 `remoteEntry.js` expose, Platform-App이 `gojiraApp/GoJIRAApp`으로 import |
+| **구현** | (2026-07-06 갱신) @module-federation/vite (MF 2.0). GoJIRA-App이 `remoteEntry.js` 로 `./App` expose, Platform-App이 런타임 `registerRemotes` + `loadRemote('gojiraApp/App')` 로 로드 (URL 은 window._env_ 결정) |
 | **트레이드오프** | 개발 시 양쪽 앱 모두 실행 필요. Remote 앱 다운 시 Host 앱에서 해당 기능 미동작 (Suspense fallback 표시) |
 
 ### ADR-4: WebSocket 래퍼 (SSE 대체)

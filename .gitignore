@@ -38,6 +38,10 @@ test-results/
 # Cache
 GoJIRA-API/cache/
 
+# Module Federation 자동 생성물 (DTS/런타임 임시)
+@mf-types/
+.__mf__temp/
+
 # Docs backup
 docs-bkg/
 

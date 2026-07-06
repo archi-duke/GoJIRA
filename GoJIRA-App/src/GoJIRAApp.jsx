@@ -7,16 +7,8 @@ import DocEditor from './components/DocEditor';
 import AlertModal, { modalConfirm, modalAlert } from './components/AlertModal';
 import config from './config';
 import { detectLauncher, requestSessions, requestChat } from './utils/launcher';
-
-// Platform-App의 sseManager/eventQueue가 없으면 noop
-let subscribe, createEventQueue;
-try {
-  ({ subscribe } = require('./utils/sseManager'));
-  ({ createEventQueue } = require('./utils/eventQueue'));
-} catch {
-  subscribe = () => () => {};
-  createEventQueue = () => ({ push: () => {}, clear: () => {} });
-}
+import { subscribe } from './utils/sseManager';
+import { createEventQueue } from './utils/eventQueue';
 
 // 전역 fetch 에 인증 헤더 자동 주입. 모듈 로드 시점에 1회 설치 — child useEffect(fetch) 가
 // parent 보다 먼저 실행되는 React 순서 문제를 피한다.
