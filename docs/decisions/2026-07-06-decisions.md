@@ -116,3 +116,14 @@
   서비스 Dockerfile 은 fresh clone 시 캐시에서 node_modules 보충. **build-cache-node 재생성 필요.**
 - **D11 승격 트리거 재정의**: "Kendo 도입 시" → **"둘 이상의 앱이 Kendo(web-ui singleton 필요 표면)를 소비하는
   시점"** 으로 정밀화 — 현재 소비는 셸 1곳이라 alias 모델 유지가 여전히 유효.
+
+## D14. RAGaaS 팀에 온보딩 작업지시 프롬프트 전달 완료
+
+- **사실**: `docs/platform-contract/ragaas-onboarding-prompt.md` 작성 후 RAGaaS 팀에 실제 전달·작업 지시함
+  (Duke 확인, 계약 01~06 재구성 + RAGaaS 실사 요약 + 선행조건/Phase1·2/체크리스트).
+- **크로스레포 함정 사전 고지**: `@platform/web-ui` 1단계(alias 소비, D11)는 같은 레포 안에서만 가능 — RAGaaS 는
+  별도 레포이므로 그대로 못 씀. RAGaaS 착수 전 **GoJIRA 팀이 tarball(npm pack)/레지스트리 반입 경로를 먼저 마련**해야
+  함을 프롬프트에 명시(B7 선행). Phase 2(Kendo 이관)는 이게 준비되기 전까지 RAGaaS 쪽 착수 불가 — RAGaaS 는
+  당분간 자체 Kendo 5.8.0 의존 유지(라이선스 만료로 인한 버전 상향 금지는 별개로 유효, D8).
+- **How to apply**: 다음 세션에서 RAGaaS 진행 상황 문의가 오면, tarball 반입 경로(B7)가 GoJIRA 쪽에서 준비됐는지부터
+  확인 — 안 됐다면 Phase 2 는 여전히 블록 상태.
