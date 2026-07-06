@@ -102,3 +102,17 @@
 - **URL 딥링크 범위 = 탭 수준**: `/account`·`/notice`·`/repository`(맵=`/`) 를 history API(pushState/popstate)로 동기화.
   라우터 라이브러리 미도입 — 탭 4개에 라우터는 과함(ADR-1 유지). remote 내부 페이지 URL 은 remote 별 딥링크 수요가
   생기면 `basePath` 계약으로 확장. 배포는 기존 nginx `try_files /index.html` SPA 폴백으로 즉시 호환.
+
+## D13. Kendo 도입 1호 = web-ui DataGrid → 셸 AccountManager Users (소유권 계약 첫 이행)
+
+- **구현**: packages/web-ui 가 KendoReact **5.8.0**(D8 기준, 라이선스 커버 범위) 세트를 자체 node_modules 로 소유.
+  `.npmrc` legacy-peer-deps 로 react 자동설치 차단(앱 MF shared react 와 이중 인스턴스 방지 — hooks 깨짐 예방).
+  `DataGrid` 래퍼(소팅/필터, kendo-data-query process) 를 노출하고 셸 AccountManager Users 목록이 1호 소비.
+  테마(kendo-theme-bootstrap all.css)는 래퍼가 import — 이후 소비 확장 시 셸 1회 로드 규칙(§4)로 승격.
+- **React 19 호환 실측**: KendoReact 5.8 공식 지원은 React 18 까지이나, 실브라우저 판정(렌더·소팅 토글·
+  필터·액션 셀) **에러 0 으로 통과** — 5.x 가 class 컴포넌트 기반이라 React 19 제거 API(findDOMNode 등)에
+  걸리지 않는 것으로 확인. 단 공식 지원 밖이므로 업그레이드 시 재판정 필요.
+- **deploy**: build-cache-node 가 packages/web-ui npm ci 추가(+선택 TELERIK_LICENSE build-arg 훅),
+  서비스 Dockerfile 은 fresh clone 시 캐시에서 node_modules 보충. **build-cache-node 재생성 필요.**
+- **D11 승격 트리거 재정의**: "Kendo 도입 시" → **"둘 이상의 앱이 Kendo(web-ui singleton 필요 표면)를 소비하는
+  시점"** 으로 정밀화 — 현재 소비는 셸 1곳이라 alias 모델 유지가 여전히 유효.

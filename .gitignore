@@ -70,8 +70,10 @@ package-lock.json
 # 위 광범위 package.json 무시에서 제외 — fresh clone 에도 포함되어야 build 가능.
 !deploy/vendor/pumlex/package.json
 !deploy/vendor/pumlex/packages/*/package.json
-# @platform/web-ui 소스 패키지 (packages/) — 위 광범위 무시에서 제외
+# @platform/web-ui 소스 패키지 (packages/) — 위 광범위 무시에서 제외.
+# lock 은 build-cache-node 의 npm ci 가 읽으므로 반드시 추적.
 !packages/*/package.json
+!packages/*/package-lock.json
 
 # 미리 빌드된 런처 바이너리 (호스팅 dist) — 거대한 산출물, 커밋 X
 deploy/launcher-dist/*/

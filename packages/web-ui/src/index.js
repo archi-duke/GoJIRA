@@ -2,6 +2,7 @@
 // 소비: vite.config resolve.alias '@platform/web-ui' → 이 패키지 src/.
 // 서브패스 import 권장: '@platform/web-ui/components/AlertModal' 등.
 export { default as AlertModal, modalAlert, modalConfirm, modalPrompt } from './components/AlertModal';
+export { default as DataGrid } from './components/DataGrid';
 export { default as CommonBar } from './components/CommonBar';
 export { default as NoticePopup } from './components/NoticePopup';
 export { default as DiffAnalysis } from './components/DiffAnalysis';

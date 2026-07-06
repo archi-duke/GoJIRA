@@ -3,13 +3,15 @@
 > **원칙: Kendo(Telerik KendoReact)의 유일한 소유자는 @platform/web-ui 패키지다.**
 > 제품 앱은 `@progress/kendo-*` 를 **직접 의존하지 않는다** — web-ui 가 감싼 컴포넌트만 사용한다.
 
-## 0. 현황 명시 (2026-07-06)
+## 0. 현황 명시 (2026-07-06 갱신)
 
-**Kendo 는 아직 GoJIRA 어디에도 없다** (두 앱 package.json·src 전체에 `@progress/kendo-*` 0건).
-이 계약은 "이미 확산된 것을 수습"이 아니라 **확산 전에 단일 소유 지점을 세우는 예방 계약**이다.
+**Kendo 는 web-ui 에만 존재한다** — 같은 날 도입됨(D13): `packages/web-ui/package.json` 이 KendoReact 5.8.0 세트를
+단독 소유하고(자체 node_modules, `.npmrc` legacy-peer-deps 로 react 이중설치 차단), 첫 소비는
+`DataGrid` 래퍼(소팅/필터) → 셸 AccountManager Users 목록. **React 19 셸에서 렌더/소팅/필터 실측 통과** (콘솔 에러 0).
+두 앱 package.json 에는 여전히 `@progress/kendo-*` 0건 — 계약(§1·§5)대로 유지한다.
 
-단, **RAGaaS 는 이미 Kendo 를 사용 중**이다 (D:\works\RAGaaS\frontend 실사, 아래 §6) — 플랫폼 기준 버전은
-RAGaaS 실사용 버전에서 출발하고, RAGaaS 의 Kendo 의존은 합류 시 web-ui 로 이관한다.
+**RAGaaS 도 Kendo 사용 중** (D:\works\RAGaaS\frontend 실사, 아래 §5) — 같은 5.8.0 기준이며,
+RAGaaS 의 Kendo 의존은 합류 시 web-ui 로 이관한다.
 
 ## 1. 패키지 소유 범위
 
