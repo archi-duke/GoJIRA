@@ -38,13 +38,24 @@ class RemoteErrorBoundary extends Component {
   }
 }
 
+// 셸 탭 ↔ URL 경로 동기화 (딥링크/뒤로가기, D12). URL 은 탭 키 수준만 반영 —
+// remote 내부 페이지(docs/issues 등)는 remote 소유이고 onNavigate 보고로 탭 활성만 동기화.
+const TAB_PATHS = ['map', 'account', 'notice', 'repository'];
+const pageFromPath = () => {
+  const seg = window.location.pathname.replace(/^\//, '').split('/')[0];
+  return TAB_PATHS.includes(seg) ? seg : 'map';
+};
+
 function App() {
   const [user, setUser] = useState(() => getAuthUser());
   const [authority, setAuthority] = useState(null);
-  const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
+  const [page, setPage] = useState(pageFromPath);
   const [allUsers, setAllUsers] = useState([]);
   const [mapResetCount, setMapResetCount] = useState(0);
   const [sseConnected, setSseConnected] = useState(false);
+  // remote 가 onNavigate 로 보고한 현재 과제 코드 — launchAgentChat 이 사용.
+  // (구 sessionStorage.gojira_project 암묵 계약 대체, 계약 01 §2)
+  const [activeProjectCode, setActiveProjectCode] = useState('');
   // 에이전트 호출 진행 인디케이터 — null | { title, sub }
   // launchAgentChat 의 단계별 상태(런처 응답 대기 → spawn 후 새 창 표시 대기) 안내.
   const [launching, setLaunching] = useState(null);
@@ -159,22 +170,38 @@ function App() {
     });
   }, [user]);
 
+  const navigate = useCallback((p) => {
+    setPage(p);
+    if (TAB_PATHS.includes(p)) {
+      const path = p === 'map' ? '/' : `/${p}`;
+      if (window.location.pathname !== path) window.history.pushState(null, '', path);
+    }
+    if (p === 'map') setMapResetCount(c => c + 1);
+  }, []);
+
   function switchUser(knoxId) {
     document.cookie = `ADSSO_USER=${encodeURIComponent(knoxId)}; path=/; max-age=${60*60*24*365}`;
     setUser(knoxId);
     setAuthority(null);
-    setPage('map');
-    sessionStorage.setItem('gojira_page', 'map');
+    navigate('map');
   }
 
-  const navigate = useCallback((p) => {
+  // 브라우저 뒤로/앞으로 — URL 이 진실
+  useEffect(() => {
+    const onPop = () => setPage(pageFromPath());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // remote 의 내부 페이지 전환 보고 (계약 01 §2 onNavigate) — 탭 활성 판정 + 현재 과제 추적.
+  // URL 은 탭 수준만 쓰므로 remote 내부 페이지는 pushState 하지 않는다.
+  const handleRemoteNavigate = useCallback((p, ctx) => {
     setPage(p);
-    sessionStorage.setItem('gojira_page', p);
-    if (p === 'map') setMapResetCount(c => c + 1);
+    if (ctx && 'projectCode' in ctx) setActiveProjectCode(ctx.projectCode || '');
   }, []);
 
   // 로고/타이틀 클릭 — 활성 프로젝트가 있으면 그 로컬 clone 에서, 없으면 일반 repoRoot 에서 에이전트 spawn.
-  // 활성 프로젝트는 GoJIRA-App 이 진입 시 sessionStorage.gojira_project 에 저장 (같은 window 공유).
+  // 활성 프로젝트는 remote 가 onNavigate(page, { projectCode }) 로 보고 (계약 01 §2).
   // 런처 /chat 이 code 가 오면 EnsureRepo 로 clone 없으면 생성한 뒤 그 디렉토리에서 띄운다.
   //
   // 인디케이터 흐름: 클릭 즉시 "에이전트 호출 중..." 표시 → requestChat 응답 후
@@ -190,11 +217,7 @@ function App() {
         modalAlert('로컬 런처가 감지되지 않았습니다.\n프로젝트 화면의 "로컬 수정" 버튼을 클릭하면 설치 안내가 표시됩니다.');
         return;
       }
-      let code = '';
-      try {
-        const proj = JSON.parse(sessionStorage.getItem('gojira_project') || 'null');
-        code = proj?.jiraCodes?.main?.jiraCode || '';
-      } catch {}
+      const code = activeProjectCode || '';
       const res = await requestChat({ code, user, token: r.token });
       if (!res.ok) {
         setLaunching(null);
@@ -221,7 +244,7 @@ function App() {
       setLaunching(null);
       modalAlert('에이전트 호출 오류: ' + (e.message || e));
     }
-  }, [user, launching]);
+  }, [user, launching, activeProjectCode]);
 
   // Agent 독립 창(GoJIRA-App :3001)에서 보낸 네비게이션 명령 수신
   useEffect(() => {
@@ -274,7 +297,8 @@ function App() {
       content = (
         <RemoteErrorBoundary>
           <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
-            <AppComponent user={user} authority={authority} resetKey={mapResetCount} />
+            <AppComponent user={user} authority={authority} resetKey={mapResetCount}
+              onNavigate={handleRemoteNavigate} />
           </Suspense>
         </RemoteErrorBoundary>
       );

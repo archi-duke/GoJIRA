@@ -91,7 +91,7 @@ MongoDB 는 `shared-infra` 스택의 `shared-mongo` 로 일원화 (호스트 270
 | 27017 | shared-mongo | 공용 (gojira/ragaas DB 분리) |
 | 3030 | shared-fuseki | RAGaaS |
 | 19530, 9091 | shared-milvus | RAGaaS |
-| **9000, 9001** | shared-minio | ⚠️ Windows dev 에서 platform-api(9000)/gojira-api(9001) exe 와 **localhost 포트가 겹침** — WSL2 포트포워딩 때문에 dev exe 미기동 시 localhost:9000/9001 이 MinIO 로 연결돼 혼동 가능. dev exe 가 떠 있으면 Windows 리스너가 우선이라 동작엔 지장 없음 |
+| **9000, 9001** | shared-minio | ⚠️ Windows dev 에서 platform-api(9000)/gojira-api(9001) exe 와 **localhost 포트가 겹침** — WSL2 포트포워딩 때문에 dev exe 미기동 시 localhost:9000/9001 이 MinIO 로 연결돼 혼동 가능(프론트는 S3 XML 403 을 받음). **방침(2026-07-06 확정): GoJIRA 는 9000/9001 을 유지하고, 포트 조정은 RAGaaS(shared-infra MinIO) 쪽에서 수행한다.** 그때까지의 임시 우회: dev exe 를 `PLATFORM_SERVER_PORT=:9100` / `GOJIRA_SERVER_PORT=:9101`(+`GOJIRA_PLATFORM_API=http://localhost:9100/api/v2`) 로 띄우고 두 앱 `public/env.js`(git-ignored) 에 `REACT_APP_PLATFORM_API/GOJIRA_API` 를 9100/9101 로 주입 — 커밋 코드/기본값은 9000/9001 불변 |
 | 7474, 7687 | shared-neo4j | RAGaaS |
 | 6379 | shared-redis | RAGaaS (GoJIRA 도 사용 가능) |
 | (예정) 3300 | shared-gitea | GoJIRA — Mac Gitea 데이터 이관과 동시 활성화 (아래 참조) |

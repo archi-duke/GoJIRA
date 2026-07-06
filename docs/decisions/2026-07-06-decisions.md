@@ -56,8 +56,11 @@
   테마 kendo-theme-bootstrap 5.8.0(사전컴파일 all.css), 라이선스는 빌드타임 `TELERIK_LICENSE` env/`telerik-license.txt`
   (RAGaaS Dockerfile build-arg 패턴을 플랫폼 표준으로). 버전 상향은 web-ui 단독 결정·일괄 적용.
 - **실사 요점**: 실사용 표면은 Grid 단일(2개 파일) + data-query descriptor. RAGaaS 백엔드가 Kendo Grid Sort/Filter
-  Descriptor JSON 을 쿼리 계약으로 수신 — web-ui 이관 후에도 wire format 유지. **좌석/에디션/만료는 레포에 정보 없음 — 미결,
-  조달 주체 별도 확인 필요.**
+  Descriptor JSON 을 쿼리 계약으로 수신 — web-ui 이관 후에도 wire format 유지.
+- **라이선스 확보 확인(같은 날 해소)**: Duke 가 Telerik 계정에서 키 파일 확보(telerik-license.txt, JWT).
+  perpetual·비trial·KENDOUIREACT 포함(Complete 번들). **업데이트 구독 만료 2024-04-05** → 그 이전 릴리스만 사용 가능,
+  **5.8.0 은 커버** (exact pin 의 라이선스적 근거). 2024-04-05 이후 릴리스로 상향 시 구독 갱신 선행 — D8 의
+  "버전 상향은 web-ui 단독 결정" 에 이 제약이 걸림. 키는 개발 머신 `~/.telerik/telerik-license.txt` 에 설치(비커밋).
 - web-ui 1차 구현 범위 = Grid 래퍼 + 테마 엔트리 + 라이선스 빌드 규약. (04-web-ui-contract.md §5)
 
 ## D9. React 버전 충돌 해소 방향 = RAGaaS 가 19 로 상향 (플랫폼 표준 고수)
@@ -88,3 +91,14 @@
   ② 공지 "3일 보지 않기" 키가 user별(`gojira_notice_hide_until_<user>`)로 통일 — 기존 standalone 사용자 1회 리셋.
 - **부수 효과**: web-ui runtime/env.js 가 캐노니컬 env 키의 단일 소비 지점 — 앱별 config 키 분기(API_BASE 의미 상이)가
   공유 모듈로 번지던 원인 제거. web-ui 는 앱 config.js import 금지.
+
+## D12. 셸↔remote 상태 채널 전환 구현 + 셸 URL 딥링크는 탭 수준 (P2-C)
+
+- **구현**: D3 결정 이행 — 셸이 sessionStorage(`gojira_page`/`gojira_project`)를 읽던 암묵 계약 제거.
+  remote 는 `onNavigate(page, { projectCode })` 로 페이지 전환마다 + **마운트 직후(복원 동기화)** 보고,
+  셸은 탭 활성 판정과 에이전트 소환용 현재 과제 추적(activeProjectCode state)에만 사용.
+- **remote 세션키 유지**: `gojira_*` 키는 remote 내부 새로고침 복원 전용으로 존치 (`<app>_` 접두사 규칙 충족,
+  셸 미참조). 제거가 아니라 "채널로 쓰지 않음"이 계약의 본질.
+- **URL 딥링크 범위 = 탭 수준**: `/account`·`/notice`·`/repository`(맵=`/`) 를 history API(pushState/popstate)로 동기화.
+  라우터 라이브러리 미도입 — 탭 4개에 라우터는 과함(ADR-1 유지). remote 내부 페이지 URL 은 remote 별 딥링크 수요가
+  생기면 `basePath` 계약으로 확장. 배포는 기존 nginx `try_files /index.html` SPA 폴백으로 즉시 호환.
