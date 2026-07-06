@@ -1,8 +1,19 @@
 # GoJIRA 사용자 가이드 (알파)
 
-> 파트내 개발자 대상 알파 오픈용 간략 가이드입니다.
+> 파트내 개발자 대상 알파 오픈용 가이드입니다.
 > GoJIRA 는 **웹(조회·관리) + 로컬 런처(편집·에이전트)** 조합으로 동작합니다 —
 > 이슈/문서의 실제 생성·편집은 내 PC 의 에이전트가 수행하고, 웹은 그 결과를 보는 화면입니다.
+
+**목차**
+1. [초기 접속](#1-초기-접속)
+2. [로컬 런처 설치 (필수)](#2-로컬-런처-설치-필수--최초-1회)
+3. [과제 생성](#3-과제-생성)
+4. [설계 진행 방법](#4-설계-진행-방법-설계-프로세스)
+5. [화면 사용법](#5-화면-사용법) — Project Map / Issues / Relation Map / SATAM / Docs
+6. [문서 공유: 등록 → 발행 → 리뷰 → 머지](#6-문서-공유-등록--발행--리뷰--머지)
+7. [관리자 기능](#7-관리자-기능)
+8. [부록: 이슈 타입 체계](#8-부록-이슈-타입-체계)
+9. [자주 묻는 문제](#9-자주-묻는-문제)
 
 ---
 
@@ -60,6 +71,8 @@
 설계는 **에이전트**와 함께 진행합니다. 화면 좌상단 **GoJIRA 로고를 클릭**하면 현재 과제의
 로컬 clone 에서 에이전트 터미널이 새 창으로 열립니다. (같은 과제 에이전트가 이미 있으면 그 창을 재사용)
 
+### 4.1 설계 프로세스 9단계
+
 에이전트에게 아래 순서대로 요청하면, 각 단계가 이슈와 설계 문서를 자동 생성/갱신합니다.
 자연어로 요청해도 되고(예: "요구사항 도출해줘"), 단계별 스킬명을 직접 말해도 됩니다.
 
@@ -77,17 +90,28 @@
 
 각 단계 후 웹에서 결과를 확인하세요 — 이슈는 **Issues**, 연결 구조는 **Relation Map**, 분석은 **SATAM**, 문서는 **Docs**.
 
-### 문서 등록과 발행 (Docs 화면)
+> **에이전트가 만든 문서는 어디에 저장되나?** 내 PC 의 로컬 clone(`docs/<내ID>` 브랜치 작업본)에
+> 저장됩니다 — 서버로 바로 올라가지 않습니다. 팀 공유는 §6 의 **등록 → 발행** 으로 진행하세요.
 
-에이전트/편집으로 만든 문서는 내 로컬(`docs/<내ID>` 브랜치)에 있습니다. 팀에 공유하려면:
+### 4.2 재정립(relink) — 이미 만든 이슈를 보존하고 연결만 다시
 
-1. **Docs** 탭 → 좌측 **Local** 탭에서 변경 파일 확인 (`-M/-A/-D` = 아직 커밋 전, `+M/+A/+D` = 커밋됨)
-2. **`등록`** 클릭 = 커밋 + 서버 push
-3. push 가 끝나면 버튼이 **`발행`** 으로 바뀜 = PR 생성 → Auditor 리뷰 후 main 반영
-4. main 이 앞서 있으면(파란 `M` 배지 / PR 반려 시) **Main 탭의 `Pull`** 로 최신을 받아 수정 후 재등록
-   - ⚠️ Pull 은 내 로컬 docs 브랜치를 main 으로 **완전히 덮어씁니다** — 미등록 변경이 있으면 먼저 `등록` 하세요.
+Feature↔VOS, Requirement↔Feature 연결이 어긋났을 때 이슈를 다시 만들 필요 없이:
+- "Feature-VOS 연결 재정리해줘" → `usecase-analyze2` 가 relink 모드로 (기존 이슈 보존, 링크·문서만 재작성)
+- "요구사항 링크만 다시 정리해줘" → `requirement-refine2` relink 모드
 
-웹에서 직접 고치고 싶으면 파일 열고 **편집** → **저장**(로컬 저장) 또는 **VS Code** 버튼으로 IDE 에서 계속.
+### 4.3 조회·분석도 에이전트로
+
+터미널에서 바로 물어볼 수 있는 조회/분석 스킬들:
+
+| 요청 예시 | 스킬 | 내용 |
+|---|---|---|
+| "이슈 목록 보여줘 (FR만)" | `issue-query` | 타입/서브타입 필터 조회 |
+| "이슈 관계 분석해줘" | `issue-analyze` | Contains 체인, 고아 이슈, 타입 통계 |
+| "설계문서 목록" / "문서 요약해줘" | `doc-list` / `doc-summarize` | 파일 목록 / 에이전트가 읽고 요약 |
+| "main 과 내 문서 차이 분석" | `doc-diff` | 브랜치 간 문서 diff 분석 |
+| "문서 변경 이력" | `doc-history` | 커밋 이력 조회 |
+| "PR 목록" | `pr-list` | 열린 PR 조회 |
+| "일정 진행률 분석해줘" | `schedule-analyze` | 이슈 상태 기반 진행률/지연 리스크 |
 
 ---
 
@@ -105,8 +129,16 @@
 
 ### 5.2 Issues
 
-과제의 이슈 목록(조회 전용). 상단 `V / F / R / A / D` 토글 = VOS / Feature / Requirement /
-Architectural Design / Detailed Design 타입 필터. 행 클릭 → 이슈 상세. 이슈의 생성/수정은 에이전트로.
+과제의 이슈 목록(조회 전용 — 이슈 생성/수정은 에이전트로).
+
+- 상단 `V / F / R / A / D` 토글 = VOS / Feature / Requirement / Architectural Design / Detailed Design 필터
+- **행 클릭 → 이슈 상세**. 타입에 따라 탭이 다릅니다:
+  - 공통: Summary / Description / Status / Priority / Due Date / Reporter
+  - Feature: **Use Scenario** (Actor·Pre Condition·Basic/Alternative Flow·Post Condition)
+  - NFR(QA): **Quality Attribute Scenario** (Source·Stimulus·Environment·Artifact·Response·Measure) + **Priority Score** (QAD/QAI/QAS)
+  - Architectural Design: **Architecture Design** (다이어그램·Pros/Cons·Score·Decision) + **Trade Off** (Risks·TradeOffs·Sensitivities)
+  - Detailed Design: **Detailed Design** (다이어그램·Design Model)
+- 이슈 간 연결은 상세가 아니라 **Relation Map** 에서 봅니다.
 
 ### 5.3 Relation Map
 
@@ -126,9 +158,85 @@ Architectural Design / Detailed Design 타입 필터. 행 클릭 → 이슈 상�
 - 상단 토글 `A / F / S / D / R`: ASR 만 / FR 표시 / 결정된 설계만 / DDSN 표시 / Reserved 표시
 - 하단에 범례(Effects List)·Counter Strategy 테이블·Concerns 목록
 
+### 5.5 Docs (설계 문서)
+
+좌측 사이드바 = 파일 목록, 우측 = 문서 뷰어/편집기.
+
+**Main 탭 vs Local 탭**
+- **Main**: 서버의 `main` 브랜치 (팀 공식본, 조회 전용). 헤더에 **`Pull`** 버튼.
+- **Local**: 내 PC 로컬 clone 의 작업본 (`docs/<내ID>`). 파일별 상태 배지:
+  - `-M / -A / -D` = 수정/추가/삭제했지만 **아직 커밋 전**
+  - `+M / +A / +D` = 커밋됨(등록됨 — PR 에 포함될 내용)
+  - 회색 이탤릭 + `M` = main 에만 있는 파일 → Main 탭 `Pull` 로 동기화
+  - 파일에 마우스를 올리면 **✎**(이름변경/이동) / **🗑**(삭제)
+- 사이드바 옆 **그래프 아이콘** = Commit Graph — 브랜치별 커밋 이력을 그래프로 확인
+
+**보기 모드** (툴바): **미리보기 / Raw 보기 / Diff 분석**
+- 미리보기는 마크다운 + 다이어그램 렌더: ` ```mermaid ` 블록, ` ```plantuml `(또는 ` ```puml `) 블록, YAML 파일은 색상 뷰
+- **Diff 분석**(Local 에서 main 과 다른 파일일 때): *Semantic Diff*(섹션 단위 추가/수정/삭제 + 문단 하이라이트) / *Diff*(라인 diff) / *Summary*(자연어 요약) 3개 탭
+
+**문서 편집**
+- **편집** 버튼 → 인라인 편집 → **저장**(로컬 디스크에만 저장) / **VS Code**(저장 후 IDE 로 열기) / **취소**
+- **PlantUML 다이어그램은 그림 위에서 직접 편집**: Local 탭에서 다이어그램에 표시되는
+  **✎ 편집** 클릭 → 요소/라벨을 드래그로 배치 조정 → **✓ 적용**(문서의 plantuml 블록이 자동 갱신되어
+  로컬 저장) / **✗ 취소**. Mermaid 블록은 렌더 전용(텍스트로 편집).
+
 ---
 
-## 6. 자주 묻는 문제
+## 6. 문서 공유: 등록 → 발행 → 리뷰 → 머지
+
+로컬에서 작성한 문서를 팀 공식본(main)에 반영하는 흐름입니다.
+
+```
+[내 로컬 clone]  ──등록(커밋+push)──▶  [서버 docs/<내ID>]  ──발행──▶  [PR]  ──승인/머지──▶  [main]
+```
+
+1. **등록** (Docs › Local 탭): 미커밋(-배지) 변경이 있으면 버튼이 `등록` — 클릭하면 커밋 + 서버 push
+2. **발행**: push 된 내용이 main 과 다르면 버튼이 `발행` 으로 바뀜 — 클릭하면 PR 생성
+3. **리뷰** (Auditor): 상단 **Repository 탭 › PRs** 에서 —
+   - PR 행의 **승인**(의견 입력, 기본 "LGTM") 또는 **반려**(사유 입력)
+   - 리뷰 상태: ✓ 승인자 / ✗ 반려자 / ◦ 대기중, `승인수/총수` 표시. 행을 펼치면 본문·코멘트 확인
+   - **상세보기** 링크로 Git 서버 화면에서 리뷰해도 됩니다
+4. **머지**: 모든 승인 완료(반려·대기 0) 시에만 머지 버튼 활성 → main 반영
+5. **반려되면**: 작성자에게 팝업 알림이 옵니다("PR #N이 ~님에 의해 반려되었습니다. 사유: ...").
+   Main 탭 **`Pull`** 로 main 최신을 받아 수정 후 다시 등록/발행하세요.
+   - ⚠️ Pull 은 내 로컬 docs 브랜치를 main 으로 **완전히 덮어씁니다** — 보존할 변경이 있으면 먼저 `등록` 하세요.
+
+---
+
+## 7. 관리자 기능
+
+권한이 있는 계정에만 탭이 보입니다.
+
+- **Account** (사용자 관리): `Users / Auth Groups / Org Units` 탭.
+  - **Users 목록은 그리드에서 컬럼 헤더 클릭으로 정렬, 필터 행으로 검색**됩니다.
+  - `+ 사용자 추가`, 행의 `편집 / 삭제(비활성화)`. 편집에서 권한그룹·조직 지정
+  - Auth Groups: 권한 코드별 C/R/U/D 비트 편집. Org Units: 조직 트리(company/division/team/group)
+- **Notice** (공지 관리): `+ 공지 작성` — 제목/상태(게시전·게시중·게시종료)/본문 형식(Markdown·HTML)/게시 시작·종료/본문.
+  행의 **비상** 토글 = 비상 공지(사용자 화면에 즉시 팝업)
+- **Repository**: 문서 저장소 관리 — `Files / Commits / PRs / Graph` 뷰 (PR 리뷰·머지는 §6 참조)
+
+---
+
+## 8. 부록: 이슈 타입 체계
+
+| 이슈 타입 | subkey | 색 (Relation Map) | 만들어지는 단계 |
+|---|---|---|---|
+| VOS (이해관계자 요구) | `VOS_NNN` | 초록 | ② VOS 도출 |
+| Feature / Use Case | `UC_NNN` | 주황 | ③ Use Case 분석 |
+| Requirement — 기능 | `FR_NNN` | 빨강 | ④ 요구사항 정제 |
+| Requirement — 품질(NFR) | `QA_NNN` | 빨강 | ④ 요구사항 정제 |
+| Requirement — 제약 | `CNST_NNN` | 빨강 | ④ 요구사항 정제 |
+| Architectural Design | `ADSN_NNN` | 파랑 | ⑥ 스타일 선정 / ⑦ 설계 결정 |
+| Detailed Design | `DDSN_NNN` | 보라 | 상세 설계 |
+
+- 이슈 키: `<과제코드>-NNN`, subkey: `<접두사>_NNN`
+- 이슈 간 연결은 **Contains** 링크로 상위→하위(VOS→Feature→Requirement→Design)를 잇습니다 — Relation Map 의 선이 이것입니다
+- ASR(Architecturally Significant Requirement) = ⑤ 드라이버 선정에서 뽑힌 요구사항 (Relation Map/SATAM 의 `A` 토글로 필터)
+
+---
+
+## 9. 자주 묻는 문제
 
 | 증상 | 조치 |
 |---|---|
@@ -137,3 +245,5 @@ Architectural Design / Detailed Design 타입 필터. 행 클릭 → 이슈 상�
 | 문서 push 실패 | `~/.gojira/launcher.json` 의 `git.user`/`git.token` 확인 후 런처 재시작 |
 | 과제에 🟠 아이콘이 계속 표시 | 내 docs 브랜치와 main 의 차이 — `등록`→`발행`으로 PR 하거나, 필요 없으면 Main 탭 `Pull` 로 동기화 |
 | PR 이 반려됨 | 알림 안내대로 Main 탭 `Pull` → 수정 → 다시 `등록`/`발행` |
+| 에이전트로 만든 문서가 Docs 에 안 보임 | Local 탭인지 확인(Main 은 발행·머지 후에만 반영). Local 탭이 비어 있으면 런처 감지 확인 |
+| 다이어그램 ✎ 편집 버튼이 안 보임 | Main 탭이거나 런처 미감지 상태 — Local 탭 + 런처 동작 중일 때만 인라인 편집 가능 |
