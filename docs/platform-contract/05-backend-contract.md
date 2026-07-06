@@ -128,6 +128,11 @@ exec nginx -g 'daemon off;'
 - `esc()` 로 `\` 와 `"` 를 escape.
 - **규칙: 앱이 소비하는 모든 런타임 키는 entrypoint 직렬화 목록에 반드시 포함** — 현재 platform-app entrypoint 가
   `REACT_APP_USE_SSO` 를 누락한 버그가 이 규칙 위반 사례 (P2 수정 대상).
+- **규칙(2026-07-07, RAGaaS 제안 수용): remote 의 자기 API 폴백은 빌드 base 기준 상대경로** —
+  예: `import.meta.env.BASE_URL + 'api/v2/'` → `/ragaas/api/v2/`. 셸 탭에서 remote 가 읽는
+  `window._env_` 는 **셸의 env.js** 라 제품 API 키가 없다 — 루트 절대 폴백(`/api/v2/`)은 셸로
+  새므로 금지. base 상대 폴백은 게이트웨이 단일 origin 전제에서 셸/standalone/직접/dev 진입을
+  모두 관통한다. (셸 env.js 에 제품별 키를 싣는 대안은 셸-remote 결합 증가로 기각.)
 
 ## 6. ENV 키 표
 
