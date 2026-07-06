@@ -58,7 +58,7 @@ shared: { '@platform/web-ui': { singleton: true } }
 |------|----|------|
 | KendoReact 컴포넌트군 | **5.8.0** (exact pin — grid/intl/theme는 caret 없음) | 실사용 표면은 **Grid 단일** (GraphDataTable, ChunksModal) + kendo-data-query descriptor |
 | 테마 | **@progress/kendo-theme-bootstrap 5.8.0** — 사전컴파일 `dist/all.css`, 커스텀 SCSS 없음 | kendo-theme-default 도 설치돼 있으나 미사용 → web-ui 이관 시 제거 |
-| 라이선스 | @progress/kendo-licensing (lock 1.10.0), **빌드타임 `TELERIK_LICENSE` env / `telerik-license.txt`** — 키는 레포 미커밋, CI 파이프라인 부재(Dockerfile build-arg 훅만 준비) | **좌석/에디션/만료 정보가 레포에 없음 — 조달 주체·갱신 책임은 별도 확인 필요** (미결) |
+| 라이선스 | @progress/kendo-licensing (lock 1.10.0), **빌드타임 `TELERIK_LICENSE` env / `telerik-license.txt`** — 키는 레포 미커밋, CI 파이프라인 부재(Dockerfile build-arg 훅만 준비) | **키 확보 확인(2026-07-06)**: perpetual, trial 아님, KENDOUIREACT 포함(Complete 번들). **업데이트 구독 만료 2024-04-05 → 그 이전 릴리스 버전까지만 사용 가능. 5.8.0(2022 릴리스)은 커버** — exact pin 의 라이선스적 근거. **2024-04-05 이후 릴리스로 상향하려면 구독 갱신 선행** |
 | 백엔드 결합 | RAGaaS backend 가 Kendo Grid Sort/Filter **Descriptor JSON 을 쿼리 파라미터 계약으로 수신** (graph_viewer.py) | web-ui 로 Grid 를 이관해도 이 wire format 은 유지해야 함 |
 | RAGaaS 툴체인 | Vite 5 + TS, react-router-dom 7, axios 1.13 | 계약(01·02)과 이미 정합 |
 | **React 버전 충돌** | RAGaaS **react 18.3.1** vs 플랫폼 셸 **19.x** | singleton 공유 불가 조합 — **RAGaaS 는 합류 전 React 19 로 상향** ([01](01-mf-host-contract.md) §4 버전 정책). 온보딩 A2 선행 조건 |
