@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
 import './NoticeManager.css';
+import { authFetch } from '../platform/auth';
 
 const API = config.API_BASE + '/Notice';
 
@@ -12,7 +13,7 @@ export default function NoticeManager({ user }) {
   const [editItem, setEditItem] = useState(null);
 
   const fetchNotices = useCallback(() => {
-    fetch(API).then(r => r.json()).then(d => setNotices(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(API).then(r => r.json()).then(d => setNotices(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
 
   useEffect(() => { fetchNotices(); }, [fetchNotices]);
@@ -27,14 +28,14 @@ export default function NoticeManager({ user }) {
     }
     body.createdBy = body.createdBy || user;
     body.updatedBy = user;
-    await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     setEditItem(null);
     fetchNotices();
   }
 
   async function handleDelete(id) {
     if (!window.confirm('삭제하시겠습니까?')) return;
-    await fetch(`${API}/${id}`, { method: 'DELETE' });
+    await authFetch(`${API}/${id}`, { method: 'DELETE' });
     fetchNotices();
   }
 
@@ -84,7 +85,7 @@ export default function NoticeManager({ user }) {
                     const msg = next ? `"${n.title}" 공지를 비상 공지로 게시하시겠습니까?` : `"${n.title}" 비상 공지를 해제하시겠습니까?`;
                     if (!window.confirm(msg)) return;
                     const updates = next ? { isEmergency: true, status: 'active' } : { isEmergency: false };
-                    await fetch(`${API}/${n._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+                    await authFetch(`${API}/${n._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
                     fetchNotices();
                   }}
                 >비상</button>

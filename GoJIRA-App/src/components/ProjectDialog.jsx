@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import config from '../config';
 import './ProjectDialog.css';
+import { authFetch } from '../platform/auth';
 
 const PLATFORM_API = config.PLATFORM_API;
 
@@ -42,11 +43,11 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
   }, [project]);
 
   useEffect(() => {
-    fetch(`${PLATFORM_API}/Account/orgUnits`)
+    authFetch(`${PLATFORM_API}/Account/orgUnits`)
       .then((r) => r.json())
       .then((d) => setOrgUnits(Array.isArray(d) ? d : []))
       .catch(() => {});
-    fetch(`${PLATFORM_API}/Account/users`)
+    authFetch(`${PLATFORM_API}/Account/users`)
       .then((r) => r.json())
       .then((d) => setUsers(Array.isArray(d) ? d : []))
       .catch(() => {});
@@ -65,7 +66,7 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
     }
     setRepoCheck({ status: 'checking', slug: '', suggestion: '', message: '확인 중...' });
     try {
-      const res = await fetch(`${PLATFORM_API}/DocRepo/check?name=${encodeURIComponent(raw)}`);
+      const res = await authFetch(`${PLATFORM_API}/DocRepo/check?name=${encodeURIComponent(raw)}`);
       const data = await res.json();
       if (!res.ok) {
         setRepoCheck({ status: 'error', slug: '', suggestion: '', message: data.error || '검사 실패' });
@@ -119,7 +120,7 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
       if (parent) parentOrgUnitId = unitId(parent);
     }
     try {
-      const res = await fetch(`${PLATFORM_API}/Account/orgUnits`, {
+      const res = await authFetch(`${PLATFORM_API}/Account/orgUnits`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed, type, parentOrgUnitId, sortOrder: 0 }),

@@ -5,6 +5,7 @@ import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
 import './DocManager.css';
+import { authFetch } from '../platform/auth';
 
 const API = config.API_BASE + '/DocRepo';
 
@@ -19,12 +20,12 @@ export default function DocManager({ user }) {
   const resizing = useRef(false);
 
   const fetchRepos = useCallback(() => {
-    fetch(API).then(r => r.json()).then(d => {
+    authFetch(API).then(r => r.json()).then(d => {
       const list = Array.isArray(d) ? d : [];
       setRepos(list);
       // 각 repo의 열린 PR 수 조회
       list.forEach(r => {
-        fetch(`${API}/${r.projectCode}/prs?state=open`)
+        authFetch(`${API}/${r.projectCode}/prs?state=open`)
           .then(res => res.json())
           .then(prs => {
             if (Array.isArray(prs)) {
@@ -54,7 +55,7 @@ export default function DocManager({ user }) {
   async function handleSync() {
     setSyncing(true);
     try {
-      const res = await fetch(`${API}/sync`, { method: 'POST' });
+      const res = await authFetch(`${API}/sync`, { method: 'POST' });
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
@@ -69,7 +70,7 @@ export default function DocManager({ user }) {
       for (const r of data.filter(r => r.status === 'orphan')) {
         if (await modalConfirm(`"${r.repoName}" — GitHub에 존재하지만 연결된 프로젝트가 없습니다.\nGitHub 레포지토리를 삭제하시겠습니까?`)) {
           // orphan은 projectCode가 없으므로 repoName으로 삭제
-          await fetch(`${API}/${r.repoName}/github`, { method: 'DELETE' });
+          await authFetch(`${API}/${r.repoName}/github`, { method: 'DELETE' });
           cleaned = true;
         }
       }
@@ -77,7 +78,7 @@ export default function DocManager({ user }) {
       // 빨강: GitHub에 없지만 프로젝트에 연결됨 (missing)
       for (const r of data.filter(r => r.status === 'missing')) {
         if (await modalConfirm(`"${r.repoName}" — GitHub에 존재하지 않습니다.\n프로젝트 연결 정보를 삭제하시겠습니까?`)) {
-          await fetch(`${API}/${r.projectCode}/purge`, { method: 'DELETE' });
+          await authFetch(`${API}/${r.projectCode}/purge`, { method: 'DELETE' });
           cleaned = true;
         }
       }
@@ -155,7 +156,7 @@ function DocTree({ repo }) {
   const [content, setContent] = useState('');
 
   useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/tree?ref=${repo.defaultBranch || 'main'}`)
+    authFetch(`${API}/${repo.projectCode}/tree?ref=${repo.defaultBranch || 'main'}`)
       .then(r => r.json()).then(d => setTree(d)).catch(() => {});
     setSelectedFile(null);
     setContent('');
@@ -163,7 +164,7 @@ function DocTree({ repo }) {
 
   function handleFileClick(path) {
     setSelectedFile(path);
-    fetch(`${API}/${repo.projectCode}/file?path=${encodeURIComponent(path)}&ref=${repo.defaultBranch || 'main'}`)
+    authFetch(`${API}/${repo.projectCode}/file?path=${encodeURIComponent(path)}&ref=${repo.defaultBranch || 'main'}`)
       .then(r => r.json())
       .then(d => {
         if (d.content && d.encoding === 'base64') {
@@ -225,7 +226,7 @@ function CommitHistory({ repo }) {
   const colors = ['#6b9bc3', '#7fb685', 'tomato', '#d4a862', '#8a8dc9', '#6abfb0', '#c4876e'];
 
   useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/branches`)
+    authFetch(`${API}/${repo.projectCode}/branches`)
       .then(r => r.json()).then(d => {
         const list = Array.isArray(d) ? d.map(b => b.name || b) : [];
         setBranches(list);
@@ -237,7 +238,7 @@ function CommitHistory({ repo }) {
   useEffect(() => {
     activeBranches.forEach(branch => {
       if (allCommits[branch]) return;
-      fetch(`${API}/${repo.projectCode}/commits?branch=${branch}&perPage=50`)
+      authFetch(`${API}/${repo.projectCode}/commits?branch=${branch}&perPage=50`)
         .then(r => r.json()).then(d => {
           setAllCommits(prev => ({ ...prev, [branch]: Array.isArray(d) ? d : [] }));
         }).catch(() => {});
@@ -313,13 +314,13 @@ function PRList({ repo, user }) {
   const [expandedPR, setExpandedPR] = useState(null);
 
   const fetchPRs = useCallback(() => {
-    fetch(`${API}/${repo.projectCode}/prs?state=${filter}`)
+    authFetch(`${API}/${repo.projectCode}/prs?state=${filter}`)
       .then(r => r.json()).then(d => {
         const list = Array.isArray(d) ? d : [];
         setPRs(list);
         // 열린 PR의 리뷰 상태 조회
         list.filter(pr => pr.state === 'open').forEach(pr => {
-          fetch(`${API}/${repo.projectCode}/pr/${pr.number}/reviews`)
+          authFetch(`${API}/${repo.projectCode}/pr/${pr.number}/reviews`)
             .then(r => r.json()).then(reviews => {
               if (!Array.isArray(reviews)) return;
               // 사용자별 최신 리뷰만 유지 (PENDING, REQUEST_REVIEW, dismissed 제외).
@@ -365,7 +366,7 @@ function PRList({ repo, user }) {
       if (body === null) return;
       if (!body) body = 'LGTM';
     }
-    const res = await fetch(`${API}/${repo.projectCode}/pr/${prNum}/review`, {
+    const res = await authFetch(`${API}/${repo.projectCode}/pr/${prNum}/review`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
       body: JSON.stringify({ event, body: body || '' }),
     });
@@ -378,7 +379,7 @@ function PRList({ repo, user }) {
 
   async function handleMerge(prNum) {
     if (!await modalConfirm('머지하시겠습니까?')) return;
-    const res = await fetch(`${API}/${repo.projectCode}/pr/${prNum}/merge`, {
+    const res = await authFetch(`${API}/${repo.projectCode}/pr/${prNum}/merge`, {
       method: 'POST', headers: { 'X-User-Id': user },
     });
     if (!res.ok) {
@@ -393,7 +394,7 @@ function PRList({ repo, user }) {
           // 반려 처리 — review로 CHANGES_REQUESTED
           const reason = await modalPrompt('반려 사유', '충돌로 인한 반려');
           if (reason !== null) {
-            await fetch(`${API}/${repo.projectCode}/pr/${prNum}/review`, {
+            await authFetch(`${API}/${repo.projectCode}/pr/${prNum}/review`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
               body: JSON.stringify({ event: 'REQUEST_CHANGES', body: reason || '충돌로 인한 반려' }),
@@ -564,7 +565,7 @@ function GitGraph({ repo }) {
   const limit = 30;
 
   useEffect(() => {
-    fetch(`${API}/${repo.projectCode}/graph?offset=${offset}&limit=${limit}`)
+    authFetch(`${API}/${repo.projectCode}/graph?offset=${offset}&limit=${limit}`)
       .then(r => r.json()).then(d => {
         // lanes 정보 재구성 (merge parent의 lane 정보)
         const shaToCommit = {};

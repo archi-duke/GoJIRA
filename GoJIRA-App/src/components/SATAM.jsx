@@ -4,6 +4,7 @@ import IssueDetailDialog from './IssueDetailDialog';
 import { exportContent } from '../utils/exportUtils';
 import config from '../config';
 import './SATAM.css';
+import { authFetch } from '../platform/auth';
 
 const API_BASE = config.API_BASE;
 
@@ -605,7 +606,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   /* fetch issues */
   const fetchIssues = useCallback(() => {
     setLoading(true);
-    return fetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
+    return authFetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
       .then((r) => r.json())
       .then((data) => setIssues(Array.isArray(data) ? data : []))
       .catch(() => setIssues([]))
@@ -616,7 +617,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
 
   const handlePull = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/Issue/fetch`, {
+      await authFetch(`${API_BASE}/Issue/fetch`, {
         headers: { XBody: JSON.stringify({ prjID: projectCode }) },
       });
       await fetchIssues();
@@ -710,7 +711,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const res = await fetch(`${API_BASE}/Issue`, {
+        const res = await authFetch(`${API_BASE}/Issue`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -742,7 +743,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   /* 이슈 업데이트 */
   async function handleSave(key, data) {
     try {
-      await fetch(`${API_BASE}/Issue`, {
+      await authFetch(`${API_BASE}/Issue`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, data }),
@@ -757,7 +758,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   /* contains 링크 생성 */
   async function handleCreateLink(fromKey, toKey) {
     try {
-      await fetch(`${API_BASE}/Issue/link`, {
+      await authFetch(`${API_BASE}/Issue/link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inwardKey: fromKey, outwardKey: toKey }),
@@ -771,7 +772,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   /* contains 링크 삭제 */
   async function handleDeleteLink(linkId, fromKey, toKey) {
     try {
-      await fetch(`${API_BASE}/Issue/link`, {
+      await authFetch(`${API_BASE}/Issue/link`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linkId, fromKey, toKey }),

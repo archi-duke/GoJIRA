@@ -4,6 +4,7 @@ import IssueDetailDialog from './IssueDetailDialog';
 import { exportContent } from '../utils/exportUtils';
 import config from '../config';
 import './RelationMap.css';
+import { authFetch } from '../platform/auth';
 
 const API_BASE = config.API_BASE;
 
@@ -157,7 +158,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   /* fetch issues */
   const fetchIssues = useCallback(() => {
     setLoading(true);
-    return fetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
+    return authFetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
       .then((r) => r.json())
       .then((data) => setIssues(Array.isArray(data) ? data : []))
       .catch(() => setIssues([]))
@@ -168,7 +169,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
 
   const handlePull = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/Issue/fetch`, {
+      await authFetch(`${API_BASE}/Issue/fetch`, {
         headers: { XBody: JSON.stringify({ prjID: projectCode }) },
       });
       await fetchIssues();
@@ -284,7 +285,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     const has = labels.includes(label);
     const newLabels = has ? labels.filter((l) => l !== label) : [...labels, label];
     try {
-      await fetch(`${API_BASE}/Issue`, {
+      await authFetch(`${API_BASE}/Issue`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: issue.key, data: { labels: newLabels } }),
@@ -298,7 +299,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   async function deleteIssue(issue) {
     if (!window.confirm(`"${issue.key}" 이슈를 삭제하시겠습니까?`)) return;
     try {
-      await fetch(`${API_BASE}/Issue`, {
+      await authFetch(`${API_BASE}/Issue`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: issue.key, prjID: projectCode }),
@@ -311,7 +312,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
 
   async function createLink(fromKey, toKey) {
     try {
-      await fetch(`${API_BASE}/Issue/link`, {
+      await authFetch(`${API_BASE}/Issue/link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inwardKey: fromKey, outwardKey: toKey }),
@@ -326,7 +327,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     console.log('[deleteLink] clicked:', conn.id, 'linkId:', conn.linkId, 'from:', conn.from, 'to:', conn.to);
     if (!window.confirm('이 연결을 삭제하시겠습니까?')) return;
     try {
-      await fetch(`${API_BASE}/Issue/link`, {
+      await authFetch(`${API_BASE}/Issue/link`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linkId: conn.linkId, fromKey: conn.from, toKey: conn.to }),
@@ -376,7 +377,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const res = await fetch(`${API_BASE}/Issue`, {
+        const res = await authFetch(`${API_BASE}/Issue`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -407,7 +408,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
 
   async function handleDetailSave(key, data) {
     try {
-      await fetch(`${API_BASE}/Issue`, {
+      await authFetch(`${API_BASE}/Issue`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, data }),
@@ -420,7 +421,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
 
   function handleSummaryBlur(issue, newSummary) {
     if (newSummary === issue.summary) return;
-    fetch(`${API_BASE}/Issue`, {
+    authFetch(`${API_BASE}/Issue`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),

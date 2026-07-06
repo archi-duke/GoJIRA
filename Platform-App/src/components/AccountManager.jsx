@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
 import { modalAlert } from './AlertModal';
 import './AccountManager.css';
+import { authFetch } from '../platform/auth';
 
 const API = config.API_BASE + '/Account';
 
@@ -28,9 +29,9 @@ export default function AccountManager({ user }) {
   const [editItem, setEditItem] = useState(null); // { mode: 'create'|'edit', tab, data }
 
   const fetchAll = useCallback(() => {
-    fetch(`${API}/users`).then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
-    fetch(`${API}/authGroups`).then(r => r.json()).then(d => setAuthGroups(Array.isArray(d) ? d : [])).catch(() => {});
-    fetch(`${API}/orgUnits`).then(r => r.json()).then(d => setOrgUnits(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(`${API}/users`).then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(`${API}/authGroups`).then(r => r.json()).then(d => setAuthGroups(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(`${API}/orgUnits`).then(r => r.json()).then(d => setOrgUnits(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -48,7 +49,7 @@ export default function AccountManager({ user }) {
       delete body.updatedBy;
       delete body.isActive;
     }
-    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await authFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       modalAlert(err.error || '저장 실패');
@@ -60,7 +61,7 @@ export default function AccountManager({ user }) {
 
   async function handleDelete(tabKey, id) {
     if (!window.confirm('비활성화 하시겠습니까?')) return;
-    await fetch(`${API}/${tabKey}/${id}`, { method: 'DELETE' });
+    await authFetch(`${API}/${tabKey}/${id}`, { method: 'DELETE' });
     fetchAll();
   }
 

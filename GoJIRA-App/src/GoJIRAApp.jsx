@@ -9,40 +9,9 @@ import config from './config';
 import { detectLauncher, requestSessions, requestChat } from './utils/launcher';
 import { subscribe } from './utils/sseManager';
 import { createEventQueue } from './utils/eventQueue';
-
-// 전역 fetch 에 인증 헤더 자동 주입. 모듈 로드 시점에 1회 설치 — child useEffect(fetch) 가
-// parent 보다 먼저 실행되는 React 순서 문제를 피한다.
-// - SSO: SSO_SESSION 토큰 → Authorization: Bearer (백엔드가 introspect 검증).
-// - dev: SSO_SESSION 없으면 기존처럼 X-User-Id(window.__gojiraUser) 주입.
-// API 경로(/api/v2 또는 백엔드 베이스)에만 적용 — MobilAve/외부 호출엔 미주입.
-if (typeof window !== 'undefined' && !window.__gojiraFetchWrapped) {
-  const orig = window.fetch;
-  window.__gojiraFetchWrapped = true;
-  const getSession = () => {
-    const m = document.cookie.match(/(^| )SSO_SESSION=([^;]+)/);
-    return m ? decodeURIComponent(m[2]) : '';
-  };
-  const isApi = (url) =>
-    url.includes('/api/v2') ||
-    (config.PLATFORM_API && url.startsWith(config.PLATFORM_API)) ||
-    (config.GOJIRA_API && url.startsWith(config.GOJIRA_API));
-  window.fetch = function (input, init) {
-    const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (isApi(url)) {
-      init = init || {};
-      const headers = new Headers(init.headers || {});
-      const token = getSession();
-      if (token) {
-        if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
-      } else {
-        const user = window.__gojiraUser;
-        if (user && !headers.has('X-User-Id')) headers.set('X-User-Id', user);
-      }
-      init.headers = headers;
-    }
-    return orig.call(window, input, init);
-  };
-}
+// 플랫폼 인증 어댑터 (계약 02 §5) — 셸 게시본(window.__platformAuth) 우선, standalone 로컬 폴백.
+// 구 window.fetch monkey-patch 를 대체: 플랫폼 API 호출은 authFetch 로 명시.
+import { authFetch } from './platform/auth';
 
 export default function GoJIRAApp({ user, authority, resetKey }) {
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
@@ -126,7 +95,7 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
       } catch {}
       // 3. API 조회 — /Project 전체 목록에서 코드 매칭
       try {
-        const res = await fetch(`${API_BASE_URL}/Project`, { headers: { XBody: JSON.stringify({}) } });
+        const res = await authFetch(`${API_BASE_URL}/Project`, { headers: { XBody: JSON.stringify({}) } });
         const arr = await res.json();
         if (Array.isArray(arr)) {
           const full = arr.find(p => p?.jiraCodes?.main?.jiraCode === projectCode);
@@ -166,7 +135,7 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     if (!projectCode || page === 'map') { setProjectAlert(null); return; }
     const API = PLATFORM_API + '/DocRepo';
 
-    const p1 = fetch(`${GOJIRA_API}/Project/alerts?user=${encodeURIComponent(user || '')}`)
+    const p1 = authFetch(`${GOJIRA_API}/Project/alerts?user=${encodeURIComponent(user || '')}`)
       .then(r => r.json())
       .then(arr => {
         if (Array.isArray(arr)) return arr.find(a => a.jiraCode === projectCode) || null;
@@ -174,8 +143,8 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
       }).catch(() => null);
 
     const p2 = Promise.all([
-      fetch(`${API}/${projectCode}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent('docs/' + user)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      authFetch(`${API}/${projectCode}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
+      authFetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent('docs/' + user)}`).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([mainTree, userTree]) => {
       if (!mainTree?.tree || !userTree?.tree) return false;
       const mainMap = {};
@@ -201,8 +170,8 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
   async function compareTree(code, userId) {
     const API = PLATFORM_API + '/DocRepo';
     const [mainTree, userTree] = await Promise.all([
-      fetch(`${API}/${code}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${API}/${code}/tree?ref=${encodeURIComponent('docs/' + userId)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      authFetch(`${API}/${code}/tree?ref=main`).then(r => r.ok ? r.json() : null).catch(() => null),
+      authFetch(`${API}/${code}/tree?ref=${encodeURIComponent('docs/' + userId)}`).then(r => r.ok ? r.json() : null).catch(() => null),
     ]);
     if (!mainTree?.tree || !userTree?.tree) return false;
     const mainMap = {};

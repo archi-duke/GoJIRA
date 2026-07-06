@@ -9,6 +9,7 @@ import NoticePopup from './components/NoticePopup';
 import { getAuthUser } from './utils/auth';
 import config from './config';
 import './App.css';
+import { authFetch } from './platform/auth';
 
 const PLATFORM_API = config.PLATFORM_API;
 
@@ -30,7 +31,7 @@ function App() {
     const m = document.cookie.match(/(^| )SSO_SESSION=([^;]+)/);
     const sessionToken = m ? decodeURIComponent(m[2]) : null;
     if (!sessionToken) return;
-    fetch(`${config.SSO_URL}/Account/introspect?token=${encodeURIComponent(sessionToken)}`)
+    authFetch(`${config.SSO_URL}/Account/introspect?token=${encodeURIComponent(sessionToken)}`)
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data?.loginid) setUser(data.loginid);
@@ -45,12 +46,12 @@ function App() {
   // 로그인 시 권한 조회
   useEffect(() => {
     if (!user || user === '__pending__') return;
-    fetch(`${PLATFORM_API}/Account/me?knoxId=${encodeURIComponent(user)}`)
+    authFetch(`${PLATFORM_API}/Account/me?knoxId=${encodeURIComponent(user)}`)
       .then(r => r.json())
       .then(data => {
         setAuthority(data.authority || {});
         if ((data.authority?.USR || 0) >= 15) {
-          fetch(`${PLATFORM_API}/Account/users`).then(r => r.json())
+          authFetch(`${PLATFORM_API}/Account/users`).then(r => r.json())
             .then(d => setAllUsers(Array.isArray(d) ? d : []));
         }
       })

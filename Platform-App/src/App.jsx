@@ -10,33 +10,12 @@ import { modalAlert } from './components/AlertModal';
 import appRegistry from './apps/registry';
 import config from './config';
 import { detectLauncher, requestChat } from './utils/launcher';
+// 셸 인증 런타임 (계약 02) — 모듈 로드 시 window.__platformAuth 게시까지 수행.
+// 구 window.fetch monkey-patch 를 대체: 플랫폼 API 호출은 authFetch 로 명시.
+import { authFetch, __setSession } from './platform/auth';
 import './App.css';
 
 const API_BASE = config.API_BASE;
-
-// 전역 fetch 에 인증 헤더 주입(모듈 로드 1회). SSO 모드: SSO_SESSION 토큰 → Authorization:
-// Bearer (백엔드가 introspect 검증). dev(토큰 없음): 헤더 미주입 → 백엔드 DEV_USER 폴백.
-// API 경로(/api/v2 또는 백엔드 베이스)에만 적용 — MobilAve/외부 호출엔 미주입.
-if (typeof window !== 'undefined' && !window.__platformFetchWrapped) {
-  const orig = window.fetch;
-  window.__platformFetchWrapped = true;
-  const apiBases = [config.PLATFORM_API, config.GOJIRA_API, API_BASE].filter(Boolean);
-  const isApi = (url) => url.includes('/api/v2') || apiBases.some((b) => url.startsWith(b));
-  window.fetch = function (input, init) {
-    const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (isApi(url)) {
-      const m = document.cookie.match(/(^| )SSO_SESSION=([^;]+)/);
-      const token = m ? decodeURIComponent(m[2]) : '';
-      if (token) {
-        init = init || {};
-        const headers = new Headers(init.headers || {});
-        if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
-        init.headers = headers;
-      }
-    }
-    return orig.call(window, input, init);
-  };
-}
 
 class RemoteErrorBoundary extends Component {
   state = { hasError: false };
@@ -70,6 +49,12 @@ function App() {
   // launchAgentChat 의 단계별 상태(런처 응답 대기 → spawn 후 새 창 표시 대기) 안내.
   const [launching, setLaunching] = useState(null);
 
+  // 셸 인증 상태 → auth 모듈 동기화 — remote 는 platformApp/auth(getUser/getAuthority)와
+  // 마운트 props 로 이 스냅샷을 소비한다 (계약 02 §4).
+  useEffect(() => {
+    __setSession(user && user !== '__pending__' ? user : null, authority);
+  }, [user, authority]);
+
   // SSO 콜백 처리 — ?auth=1&code= 로 돌아왔을 때
   // MobilAve /Account/exchange 로 code 교환 → sessionToken 수신 → 쿠키 저장.
   // loginid 를 직접 보관하지 않는다(자가발급=사칭 가능). 신원은 introspect 로 확인하고,
@@ -79,12 +64,12 @@ function App() {
     const code = params.get('code');
     if (params.get('auth') && code) {
       window.history.replaceState(null, '', window.location.pathname);
-      fetch(`${config.SSO_URL}/Account/exchange?code=${encodeURIComponent(code)}`)
+      authFetch(`${config.SSO_URL}/Account/exchange?code=${encodeURIComponent(code)}`)
         .then(r => r.json())
         .then(async data => {
           if (data.sessionToken) {
             document.cookie = `SSO_SESSION=${encodeURIComponent(data.sessionToken)}; path=/; max-age=${60 * 60 * 8}`;
-            const res = await fetch(`${config.SSO_URL}/Account/introspect?token=${encodeURIComponent(data.sessionToken)}`);
+            const res = await authFetch(`${config.SSO_URL}/Account/introspect?token=${encodeURIComponent(data.sessionToken)}`);
             if (res.ok) {
               const info = await res.json();
               if (info.loginid) setUser(info.loginid);
@@ -103,7 +88,7 @@ function App() {
     const m = document.cookie.match(/(^| )SSO_SESSION=([^;]+)/);
     const sessionToken = m ? decodeURIComponent(m[2]) : null;
     if (!sessionToken) return;
-    fetch(`${config.SSO_URL}/Account/introspect?token=${encodeURIComponent(sessionToken)}`)
+    authFetch(`${config.SSO_URL}/Account/introspect?token=${encodeURIComponent(sessionToken)}`)
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data?.loginid) setUser(data.loginid);
@@ -122,13 +107,13 @@ function App() {
 
   useEffect(() => {
     if (!user || user === '__pending__') return; // introspect 완료 전 임시값이면 보류
-    fetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}`)
+    authFetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}`)
       .then(r => r.json())
       .then(data => {
         setAuthority(data.authority || {});
         // 마스터 그룹이면 전체 사용자 목록 로드
         if ((data.authority?.USR || 0) >= 15) {
-          fetch(`${API_BASE}/Account/users`)
+          authFetch(`${API_BASE}/Account/users`)
             .then(r => r.json())
             .then(d => setAllUsers(Array.isArray(d) ? d : []));
         }
@@ -139,7 +124,7 @@ function App() {
   // 접속 시 미읽은 알림 확인 (반려 등)
   useEffect(() => {
     if (!user) return;
-    fetch(`${API_BASE}/Notification/unread?user=${encodeURIComponent(user)}`)
+    authFetch(`${API_BASE}/Notification/unread?user=${encodeURIComponent(user)}`)
       .then(r => r.json())
       .then(async (notifs) => {
         if (!Array.isArray(notifs) || notifs.length === 0) return;
@@ -154,7 +139,7 @@ function App() {
           }
         }
         // 알림 읽음 처리
-        fetch(`${API_BASE}/Notification/read?user=${encodeURIComponent(user)}`, { method: 'POST' });
+        authFetch(`${API_BASE}/Notification/read?user=${encodeURIComponent(user)}`, { method: 'POST' });
       }).catch(() => {});
   }, [user]);
 

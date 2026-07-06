@@ -65,3 +65,13 @@
 - **사실**: RAGaaS react 18.3.1 vs 플랫폼 셸 19.x — singleton 공유 불가 조합.
 - **결정**: 플랫폼 표준(19.x)을 유지하고 RAGaaS 가 합류 전 React 19 로 상향한다. 온보딩 A2 의 선행 조건으로 명시.
 - **근거**: 셸/GoJIRA 가 이미 19 기반이고, 18→19 는 전방 이동(3개 앱 중 1개만 이동)이며 singleton 다운그레이드는 퇴행.
+
+## D10. 인증 런타임 바인딩 채널 = MF expose + in-page 게시(window.__platformAuth) 이중화 (P2-A 구현)
+
+- **결정**: 셸 auth 모듈(Platform-App/src/platform/auth.ts)은 MF `platformApp/auth` 로 expose 하면서, 로드 시
+  `window.__platformAuth` 에도 게시한다. remote 어댑터는 **게시본을 1순위**로 소비(호출 시점 조회) — remote 는 항상
+  셸 페이지 안에서 실행되므로 결정적이고, MF cross-runtime 인스턴스 바인딩 문제를 회피한다. (02-auth-contract.md §5)
+- **근거**: MF 2.0 에서 remote→host 역방향 import 는 remote 측 런타임 인스턴스에 host entry 등록이 필요해 취약.
+  게시본은 monkey-patch 와 달리 primitive 오버라이드가 아닌 명시적 단일 게시 지점. 게시 주체는 셸 하나, remote 쓰기 금지.
+- **동반 수리**: fetch monkey-patch 2곳 제거(16파일 87개 호출부 authFetch 치환), D6 버그 3건 해소
+  (platform-app entrypoint USE_SSO/DEV_USER 직렬화, DEV_USER 런타임 키 REACT_APP_DEV_USER 승격, 미정의 config 참조 소멸).

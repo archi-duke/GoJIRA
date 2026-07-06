@@ -7,6 +7,7 @@ import DiffAnalysis from './DiffAnalysis';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import './DocEditor.css';
+import { authFetch } from '../platform/auth';
 
 const API = config.API_BASE + '/DocRepo';
 const PLATFORM_API = config.API_BASE;
@@ -47,13 +48,13 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   async function refreshDocState(retry = 0) {
     const branch = `docs/${user}`;
     try {
-      const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
+      const mRes = await authFetch(`${API}/${projectCode}/tree?ref=main`);
       if (!mRes.ok) throw new Error(`main tree ${mRes.status}`);
       const mTree = await mRes.json();
       if (!mTree?.tree) throw new Error('invalid main tree');
       setMainTree(mTree);
 
-      const uRes = await fetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`);
+      const uRes = await authFetch(`${API}/${projectCode}/tree?ref=${encodeURIComponent(branch)}`);
       if (!uRes.ok) throw new Error('user tree failed');
       const uTree = await uRes.json();
       setUserTree(uTree);
@@ -106,7 +107,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   async function handleFileClick(path, isMainOnly) {
     // mainOnly 파일이면 main에서 조회
     const ref = isMainOnly ? 'main' : (activeTab === 'workspace' ? `docs/${user}` : 'main');
-    const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
+    const res = await authFetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
     if (res.ok) {
       const d = await res.json();
       const text = d.content ? decodeBase64(d.content) : '';
@@ -123,7 +124,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       const status = fileStatus[selectedFile];
       let mainText = '';
       if (status !== 'added') {
-        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
+        const res = await authFetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
         if (res.ok) {
           const d = await res.json();
           mainText = d.content ? decodeBase64(d.content) : '';
@@ -318,7 +319,7 @@ function DocGitGraph({ projectCode }) {
   const limit = 20;
 
   useEffect(() => {
-    fetch(`${API}/${projectCode}/graph?offset=${offset}&limit=${limit}`)
+    authFetch(`${API}/${projectCode}/graph?offset=${offset}&limit=${limit}`)
       .then(r => r.json()).then(d => {
         const shaToCommit = {};
         (d.commits || []).forEach(c => { shaToCommit[c.sha] = c; });
