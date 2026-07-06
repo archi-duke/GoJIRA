@@ -646,6 +646,10 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
             </g>
           </svg>
         </div>
+
+        {/* "과제" 컬럼 ↔ 헤더/그래프 구분선 — sidebar/header 자식이 아닌 pm-container 최상위
+            레이어로 두어 그래프 SVG 컨텐츠에 묻히지 않게 한다 (ProjectMap.css 주석 참조). */}
+        <div className="pm-column-divider" />
       </div>
 
       {/* Context Menu */}
