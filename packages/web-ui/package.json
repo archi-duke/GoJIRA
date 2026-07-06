@@ -1,0 +1,7 @@
+{
+  "name": "@platform/web-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "플랫폼 공통 UI/런타임 — docs/platform-contract/04. 1단계: 소스 패키지(Vite alias 소비). Kendo 도입 시 진짜 패키지+MF singleton 으로 승격.",
+  "main": "src/index.js"
+}

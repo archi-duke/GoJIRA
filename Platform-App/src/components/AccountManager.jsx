@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
-import { modalAlert } from './AlertModal';
+import { modalAlert } from '@platform/web-ui/components/AlertModal';
 import './AccountManager.css';
 import { authFetch } from '../platform/auth';
 

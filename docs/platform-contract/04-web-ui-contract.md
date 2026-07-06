@@ -26,7 +26,11 @@ RAGaaS 실사용 버전에서 출발하고, RAGaaS 의 Kendo 의존은 합류 �
 
 ## 2. 배포 형태 (폐쇄망 전제)
 
-- 레포 내 **workspace 패키지** (`packages/web-ui`) 로 시작한다 — npm 레지스트리 불필요, 폐쇄망 오프라인 빌드와 호환.
+- 레포 내 **소스 패키지** (`packages/web-ui`) 로 시작한다 — npm 레지스트리 불필요, 폐쇄망 오프라인 빌드와 호환.
+- **(1단계, 2026-07-06 구현 — D11)** 앱은 vite `resolve.alias('@platform/web-ui' → packages/web-ui/src)` 로 소스를 직접
+  컴파일해 번들에 포함한다 — lockfile/build-cache 무변경, Dockerfile 은 `COPY packages/` 한 줄. 이 단계에선 MF singleton
+  공유를 하지 않는다(각 앱 번들 포함 — 기존과 동일한 런타임 격리). **Kendo 도입 시점에 진짜 패키지(npm workspaces +
+  MF shared singleton, §3)로 승격** — 라이선스/테마/모달 레지스트리 단일화가 그때 필요해진다.
 - RAGaaS 등 외부 레포 제품은: ① MF shared singleton 으로 런타임 공유(아래 §3)를 기본으로 하고,
   ② 빌드타임 타입/authoring 이 필요하면 tarball(`npm pack`) 반입 또는 사내 레지스트리 등록. (Kendo 라이선스 특성상
   소스 vendoring 금지 — 패키지 단위로만 이동.)

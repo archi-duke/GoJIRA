@@ -4,11 +4,11 @@ import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
-import AlertModal, { modalConfirm, modalAlert } from './components/AlertModal';
+import AlertModal, { modalConfirm, modalAlert } from '@platform/web-ui/components/AlertModal';
 import config from './config';
-import { detectLauncher, requestSessions, requestChat } from './utils/launcher';
-import { subscribe } from './utils/sseManager';
-import { createEventQueue } from './utils/eventQueue';
+import { detectLauncher, requestSessions, requestChat } from '@platform/web-ui/runtime/launcher';
+import { subscribe } from '@platform/web-ui/runtime/sseManager';
+import { createEventQueue } from '@platform/web-ui/runtime/eventQueue';
 // 플랫폼 인증 어댑터 (계약 02 §5) — 셸 게시본(window.__platformAuth) 우선, standalone 로컬 폴백.
 // 구 window.fetch monkey-patch 를 대체: 플랫폼 API 호출은 authFetch 로 명시.
 import { authFetch } from './platform/auth';

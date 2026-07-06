@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import CommonBar from './CommonBar';
+import CommonBar from '@platform/web-ui/components/CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
 import config from '../config';
 import './IssueList.css';

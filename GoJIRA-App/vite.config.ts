@@ -1,6 +1,18 @@
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { federation } from '@module-federation/vite';
+
+// @platform/web-ui — 레포 내 소스 패키지 (계약 04, 1단계: alias 소비)
+const webUiSrc = fileURLToPath(new URL('../packages/web-ui/src', import.meta.url));
+// web-ui 소스가 import 하는 서드파티는 앱 밖 경로라 bare 해석이 안 됨 → 앱 node_modules 로 고정.
+// (react/react-dom 은 MF shared 변환이 처리하므로 alias 금지)
+const require = createRequire(import.meta.url);
+const webUiDeps = {
+  html2canvas: require.resolve('html2canvas'),
+  diff: require.resolve('diff'),
+};
 
 // GoJIRA-App — MF remote (플랫폼 통합 계약 docs/platform-contract/01 §2)
 // - expose './App' 표준 (구 './GoJIRAApp' 개명)
@@ -23,6 +35,9 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    alias: { '@platform/web-ui': webUiSrc, ...webUiDeps },
+  },
   // CRA 의 REACT_APP_* env 관례 유지 (dev .env 호환)
   envPrefix: ['REACT_APP_', 'VITE_'],
   server: {

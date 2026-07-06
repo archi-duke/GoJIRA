@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import config from '../config';
-import { subscribe } from '../utils/sseManager';
+import { PLATFORM_API } from '../runtime/env';
+import { subscribe } from '../runtime/sseManager';
+import { authFetch } from '../runtime/auth';
 import './NoticePopup.css';
-import { authFetch } from '../platform/auth';
 
-const API = config.API_BASE + '/Notice';
+const API = PLATFORM_API + '/Notice';
 export default function NoticePopup({ user }) {
   const HIDE_KEY = `gojira_notice_hide_until_${user || 'anon'}`;
   const [notices, setNotices] = useState([]);

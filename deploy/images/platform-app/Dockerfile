@@ -13,6 +13,9 @@ RUN cp -r /cache/Platform-App/node_modules ./node_modules && \
     cp /cache/Platform-App/package.json ./package.json && \
     cp /cache/Platform-App/package-lock.json* ./ 2>/dev/null || true
 COPY Platform-App/ ./
+# @platform/web-ui 소스 패키지 — vite.config 이 ../packages/web-ui/src 로 alias 해석
+# (/src 의 상위 = /packages). 신규 npm 의존성이 아니므로 build-cache-node 는 무관.
+COPY packages/ /packages/
 RUN npm run build
 
 FROM nginx:alpine

@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useCallback, Suspense, Component } from 'react';
 import AccountManager from './components/AccountManager';
 import NoticeManager from './components/NoticeManager';
-import NoticePopup from './components/NoticePopup';
+import NoticePopup from '@platform/web-ui/components/NoticePopup';
 import DocManager from './components/DocManager';
-import AlertModal from './components/AlertModal';
-import { getAuthUser } from './utils/auth';
-import { subscribe, onStatus } from './utils/sseManager';
-import { modalAlert } from './components/AlertModal';
+import AlertModal from '@platform/web-ui/components/AlertModal';
+import { getAuthUser } from '@platform/web-ui/utils/authUser';
+import { subscribe, onStatus } from '@platform/web-ui/runtime/sseManager';
+import { modalAlert } from '@platform/web-ui/components/AlertModal';
 import appRegistry from './apps/registry';
 import config from './config';
-import { detectLauncher, requestChat } from './utils/launcher';
+import { detectLauncher, requestChat } from '@platform/web-ui/runtime/launcher';
 // 셸 인증 런타임 (계약 02) — 모듈 로드 시 window.__platformAuth 게시까지 수행.
 // 구 window.fetch monkey-patch 를 대체: 플랫폼 API 호출은 authFetch 로 명시.
 import { authFetch, __setSession } from './platform/auth';
