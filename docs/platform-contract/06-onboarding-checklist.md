@@ -7,7 +7,8 @@
 
 - [ ] **A1. 툴체인**: Vite + TypeScript + `@module-federation/vite` 로 빌드 구성 ([01](01-mf-host-contract.md))
 - [ ] **A2. MF remote 설정**: `name: '<App>'`, `filename: 'remoteEntry.js'`, `exposes: { './App': ... }`,
-      shared singleton = react / react-dom / @platform/web-ui ([01](01-mf-host-contract.md) §2, §4)
+      shared singleton = react / react-dom / @platform/web-ui ([01](01-mf-host-contract.md) §2, §4).
+      **선행 조건: react/react-dom 을 플랫폼 메이저(현재 19.x)로 정렬** — RAGaaS 는 18.3.1 → 19 상향 필요 (D9)
 - [ ] **A3. 마운트 컴포넌트**: `./App` 이 `RemoteAppProps { user, authority, resetKey?, basePath?, onNavigate? }` 를 받는
       default export React 컴포넌트 ([01](01-mf-host-contract.md) §2)
 - [ ] **A4. 인증 소비**: `platformApp/auth` 어댑터 작성 (axios 는 인터셉터 패턴, [02](02-auth-contract.md) §3) —
