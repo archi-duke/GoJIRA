@@ -101,8 +101,11 @@ X-Service-Token: <env SERVICE_TOKEN, 설정돼 있으면>
 - **백엔드 API 베이스 경로는 `/api/v2` 를 표준**으로 한다. 프론트 설정 조립 규칙 = `{gateway}/<제품>/api/v2`
   (공용은 `{gateway}/platform/api/v2`).
 - **주의(셸 딥링크와의 구분)**: 셸 탭 딥링크는 슬래시 없는 `/<제품>`(예: `/ragaas`) — 프리픽스 location 에
-  안 걸려 셸로 간다. 슬래시 있는 `/<제품>/…` 부터 remote standalone/자산 경로.
-- **구 경로(v1) alias**: `/platform/api/`·`/gojira/api/`·`/gojira/`·`/ragaas/api/`·`/ragaas/` 는
+  안 걸려 셸로 간다. 슬래시 있는 `/<제품>/…` 는 셸이 로드하는 remote 자산·env.js·API 경로.
+- **standalone HTML 진입은 없다** (2026-07-07 D4): `location = /<제품>/` exact match 가 셸 딥링크
+  `/<제품>` 으로 302 — remote 는 바디 전용(계약 01 §2)이라 단독 화면에 크롬이 없기 때문.
+  자산/remoteEntry/API 는 exact match 에 안 걸려 그대로 통과. 제품 단독 실행은 dev 서버 전용.
+- **구 경로(v1) alias**: `/platform-api/`·`/gojira-api/`·`/gojira-app/`·`/ragaas-api/`·`/ragaas-app/` 는
   구버전 런처(≤0.1.15) 호환을 위한 deprecated alias — 런처 fleet 업데이트 후 제거 예정. 신규 구현은 v2 만 사용.
 
 ## 5. 런타임 env 주입 (재빌드 없는 폐쇄망 배포)

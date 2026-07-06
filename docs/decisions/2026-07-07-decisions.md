@@ -29,6 +29,17 @@
   무시(현재 탭 유지). ctx.projectCode 는 항상 반영. 계약 01 §2 에 명문화.
 - **대안 기각**: registry 에 제품별 subPages 등록 — 셸이 remote 내부 라우트를 알아야 해서 결합 증가.
 
+## D4. Remote = 바디 전용 표준 + standalone HTML 진입 폐지 (셸로 302 수렴)
+
+- **문제**: `/gojira/`·`/ragaas/` standalone 진입 시 반쪽 화면 — GoJIRA 는 구식 자체 타이틀바(플랫폼
+  메뉴 없음), RAGaaS 는 크롬 전무. 플랫폼 메뉴/사용자 표시가 P2 에서 셸로 이관됐기 때문.
+- **결정**: remote `./App` 은 바디 전용(이미 그 형태), 크롬은 셸 단독 소유로 계약 01 §2 에 확정.
+  게이트웨이 `location = /<제품>/` (exact) 가 셸 딥링크 `/<제품>` 으로 302 — 자산/remoteEntry/API 는
+  exact match 에 안 걸려 통과. 사용자 진입점 = 셸 하나. 제품 단독 실행은 dev 서버 전용.
+- **효과**: 제품 코드 변경 0 (GoJIRA 자체 타이틀바는 dev 전용으로 잔존 — 유저 전환기 유용).
+  RAGaaS base 수정 지시는 필수→선택 다운그레이드 (통지문 §0 갱신).
+- **기각**: standalone 에 플랫폼 크롬 이식 — 제품별 중복 구현, 크롬 변경마다 전 제품 재배포.
+
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 
 - Phase 1 (A1~A12) 전부 완료, React 19.2.7 상향 포함. frontend shared-net 조인 완료(`/ragaas/` 관통).

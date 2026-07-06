@@ -1,16 +1,27 @@
 # [통지] 셸 탭 활성화 완료 + standalone 자산 경로 이슈 1건 (2026-07-07)
 
 > **대상**: RAGaaS 팀. `ragaas-status-reply-2026-07-06.md` 회신 잘 받았습니다.
-> **요지**: ① 셸 탭 **활성화 완료** — C1~C3 합동 검증 가능. ② 단, **standalone `/ragaas/` 진입이
-> 흰 화면**입니다 — 원인·수정법 아래 (GoJIRA-App 도 같은 문제라 오늘 같은 방식으로 수정했습니다).
+> **요지**: ① 셸 탭 **활성화 완료** — C1~C3 합동 검증 가능. ② standalone `/ragaas/` 진입 흰 화면
+> 이슈가 있었으나, **아키텍처 결정(아래 §0)으로 그쪽 조치는 불필요**해졌습니다 — §2 는 선택 사항.
 > ③ 문의 4건(tarball 경로 / WS 인증 / Kendo 라이선스 / dev 포트) 답변 포함.
+
+## 0. (갱신 2026-07-07) standalone 진입 폐지 — remote 는 바디 전용
+
+셸에서 RAGaaS 탭 렌더 확인 결과(Knowledge Bases 정상), remote 가 바디 전용인 현 구조를 표준으로
+확정했습니다 (계약 01 §2 갱신): **크롬(타이틀바·플랫폼 메뉴·사용자 표시)은 셸 단독 소유, 브라우저
+사용자용 standalone 화면은 없음.** 게이트웨이가 `location = /ragaas/` (exact) 를 셸 딥링크
+`/ragaas` 로 302 수렴시킵니다 — 자산(`/ragaas/assets/…`)·remoteEntry·API 는 그대로 통과.
+
+**따라서 §2 의 base 수정은 필수가 아닙니다.** 하고 싶으면 위생 차원(게이트웨이 미경유 직접 접근
+대비)으로 해도 무해하나, C1~C3 합동 검증으로 직행하셔도 됩니다. 제품 단독 실행은 dev 서버(:3002)
+기준으로 유지하면 됩니다 (C5 는 dev 서버 검증으로 충족).
 
 ## 1. 셸 탭 활성화 완료
 
 플랫폼 게이트웨이 스택의 env 에 `REACT_APP_RAGAAS_APP_REMOTE={scheme}://{host}:{port}/ragaas` 반영
 완료 — 셸(`/`)에 RAGaaS 탭이 노출되고 remoteEntry 를 로드합니다. **C1~C3 합동 검증 진행 가능합니다.**
 
-## 2. 이슈: standalone `/ragaas/` 흰 화면 — Vite `base` 필요
+## 2. (선택 — §0 참조) standalone `/ragaas/` 흰 화면 — Vite `base`
 
 ### 증상 / 원인
 

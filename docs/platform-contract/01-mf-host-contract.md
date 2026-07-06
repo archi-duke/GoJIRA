@@ -48,6 +48,10 @@ interface RemoteAppProps {
 }
 ```
 
+- **remote `./App` 은 바디 전용이다** (2026-07-07 D4). 크롬 — 타이틀바·전역 네비(플랫폼 메뉴)·
+  로그인 사용자 표시 — 은 셸 단독 소유. remote 는 자기 컨텐츠 영역만 렌더한다.
+  브라우저 사용자용 standalone 화면은 없다: 게이트웨이가 `/<제품>/` HTML 진입을 셸 딥링크
+  `/<제품>` 으로 302 수렴시킨다. 제품 단독 실행은 dev 서버(vite) 전용.
 - **onNavigate 의 page 키는 remote 자유.** 셸은 자기가 아는 키(탭 키·registry 에 등록된
   subPages)만 탭 활성 판정에 반영하고, **모르는 키는 무시한다(현재 탭 유지)** — remote 는 내부
   라우트 키를 그대로 보고해도 안전하다. ctx.projectCode 는 키와 무관하게 항상 반영된다.
