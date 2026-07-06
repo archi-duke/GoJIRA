@@ -176,9 +176,9 @@ X-Service-Token: <env SERVICE_TOKEN>
 
 ### 2.7 백엔드 API 베이스 경로
 
-`/api/v2/...` 로 노출하세요 (게이트웨이가 `/ragaas-api/` 프리픽스를 strip 하고 넘겨줍니다 — 예:
-`GET /ragaas-api/api/v2/graph` → 백엔드는 `/api/v2/graph` 로 받음). 이 규약을 따르면 프론트 설정 조립 규칙
-(`{gateway}/ragaas-api/api/v2`) 이 GoJIRA/Platform 과 동일해져 셸 쪽 작업이 단순해집니다.
+`/api/v2/...` 로 노출하세요 (게이트웨이가 `/ragaas/api/` 프리픽스를 strip 하고 넘겨줍니다 — 예:
+`GET /ragaas/api/v2/graph` → 백엔드는 `/api/v2/graph` 로 받음). 이 규약을 따르면 프론트 설정 조립 규칙
+(`{gateway}/ragaas/api/v2`) 이 GoJIRA/Platform 과 동일해져 셸 쪽 작업이 단순해집니다.
 
 ### 2.8 런타임 env
 
@@ -216,13 +216,13 @@ npm install ./platform-web-ui-0.1.0.tgz
 ## 5. GoJIRA(플랫폼) 쪽 준비 상태 — 2026-07-06 완료분
 
 - ✅ 셸 registry 에 RAGaaS 엔트리 등록 (env `REACT_APP_RAGAAS_APP_REMOTE` 설정 시 탭 자동 노출, `/ragaas` 딥링크 포함)
-- ✅ 게이트웨이 `/ragaas-app/`(→ragaas-frontend:80), `/ragaas-api/`(→ragaas-backend:8000) — **`/ragaas-api/` 는
+- ✅ 게이트웨이 `/ragaas/`(→ragaas-frontend:80), `/ragaas/api/`(→ragaas-backend:8000) — **`/ragaas/api/` 는
   이미 라이브 관통 확인됨** (RAGaaS API 루트 응답 수신)
 - ✅ `@platform/web-ui` tarball 반입 경로 (§3)
 - ⏳ SERVICE_TOKEN 공유 — SSO 모드 전환 시점에 양쪽 .env 동일 값 배포
 
 **RAGaaS 쪽에 필요한 compose 수정 1건 (검증 중 발견)**: `frontend` 서비스가 shared-net 에 미조인이라
-게이트웨이가 `/ragaas-app/` 을 프록시하지 못합니다(현재 502). backend 처럼 추가해주세요:
+게이트웨이가 `/ragaas/` 을 프록시하지 못합니다(현재 502). backend 처럼 추가해주세요:
 
 ```yaml
   frontend:

@@ -16,7 +16,7 @@
 - [ ] **A5. standalone 폴백**: 셸 없이 단독 실행 시 auth 폴백 동작 ([02](02-auth-contract.md) §5)
 - [ ] **A6. 디자인시스템**: UI 는 `@platform/web-ui` 컴포넌트 사용. `@progress/kendo-*` 직접 의존 금지 ([04](04-web-ui-contract.md))
 - [ ] **A7. 공지**: 자체 공지 UI 금지. 필요 시 `platformApp/notice` 의 NoticeCenter 마운트만 ([03](03-notice-contract.md))
-- [ ] **A8. 자산 경로**: publicPath 상대 해석 확인 — `/<app>-app/` 프리픽스 아래에서 chunk/이미지 로드 검증 ([01](01-mf-host-contract.md) §5)
+- [ ] **A8. 자산 경로**: publicPath 상대 해석 확인 — `/<app>/` 프리픽스 아래에서 chunk/이미지 로드 검증 ([01](01-mf-host-contract.md) §5)
 - [ ] **A9. 런타임 env**: 앱이 소비하는 키를 `window._env_` 우선으로 읽는 config 로더 적용, 컨테이너 entrypoint 가
       해당 키 전부를 env.js 로 직렬화 ([05](05-backend-contract.md) §5)
 - [ ] **A10. 백엔드 미들웨어**: 신원 확정 알고리즘 구현 — introspect / X-Service-Token / dev 폴백 ([05](05-backend-contract.md) §1~3).
@@ -30,8 +30,8 @@
       (`REACT_APP_RAGAAS_APP_REMOTE` 미설정 시 탭 미노출). 딥링크 경로(TAB_PATHS)는 registry 에서 자동 파생
 - [x] **B2. remote URL env**: `REACT_APP_RAGAAS_APP_REMOTE` — compose `x-react-env`(`RAGAAS_APP_REMOTE` 변수,
       기본 빈값) + platform-app entrypoint.sh 직렬화 완료. 활성화 = deploy/.env 에
-      `RAGAAS_APP_REMOTE=${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/ragaas-app` 지정
-- [x] **B3. 게이트웨이**: `/ragaas-app/`(→ragaas-frontend:80), `/ragaas-api/`(→ragaas-backend:8000, WS/SSE 대응).
+      `RAGAAS_APP_REMOTE=${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/ragaas` 지정
+- [x] **B3. 게이트웨이**: `/ragaas/`(→ragaas-frontend:80), `/ragaas/api/`(→ragaas-backend:8000, WS/SSE 대응).
       RAGaaS 컨테이너는 별도 스택이므로 **런타임 DNS(resolver 127.0.0.11 + 변수 proxy_pass)** 로 해석 —
       미배포 환경에서도 게이트웨이 기동에 영향 없음(해당 경로만 502). gateway 가 shared-net 조인
 - [x] ~~B4. compose 서비스 추가~~ → **불필요로 확정**: RAGaaS 컨테이너는 RAGaaS 레포의 자체 compose 로 배포되고
@@ -43,8 +43,8 @@
       외부 Vite 프로젝트에서 tarball 설치→서브패스 import→빌드까지 **검증 완료** ([04](04-web-ui-contract.md) §2)
 
 > **RAGaaS 쪽 전달사항 (검증 중 발견)**: `ragaas-frontend` 컨테이너가 shared-net 에 미조인 상태 —
-> compose 의 frontend 서비스에 `networks: [default, shared-net]` 추가해야 `/ragaas-app/` 프록시가 도달함
-> (backend 는 이미 조인되어 `/ragaas-api/` 관통 확인됨).
+> compose 의 frontend 서비스에 `networks: [default, shared-net]` 추가해야 `/ragaas/` 프록시가 도달함
+> (backend 는 이미 조인되어 `/ragaas/api/` 관통 확인됨).
 
 ## C. 합류 검증 (완료 판정)
 

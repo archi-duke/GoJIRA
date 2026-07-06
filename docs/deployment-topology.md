@@ -80,7 +80,7 @@
 | 머신 | IP | 무엇 |
 |---|---|---|
 | Mac 호스트 | **10.211.55.2** | OpenCode (port 4096), 사용자 IDE/브라우저 |
-| Parallels Ubuntu VM | **10.211.55.3** | Docker compose 전체 (platform-api/gojira-api/agent-service/...) |
+| Parallels Ubuntu VM | **10.211.55.3** | Docker compose 전체 (platform-api/gojira/api/agent-service/...) |
 | MongoDB / Gitea | 사내 또는 별도 호스트 | `.env` 의 `MONGODB_SERVER` 등에 명시 |
 
 **알려진 한계** (dev 한정):

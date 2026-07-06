@@ -79,24 +79,31 @@ X-Service-Token: <env SERVICE_TOKEN, 설정돼 있으면>
 
 참조 구현: GoJIRA-API/handlers/platform.go:26-50 (`callPlatform`).
 
-## 4. 게이트웨이 라우팅 규약 (nginx 단일 진입점)
+## 4. 게이트웨이 라우팅 규약 (nginx 단일 진입점) — 경로 체계 v2 (2026-07-06)
 
-경로 프리픽스로 라우팅하고 **프리픽스를 strip** 해서 upstream 에 전달한다 (`proxy_pass http://svc:port/` 끝 슬래시).
+**제품 하나 = 프리픽스 하나.** 프리픽스 아래에서 `/` 는 프론트, `/api/…` 는 백엔드로 분기한다
+(nginx prefix location 최장일치 — `/gojira/api/` 가 `/gojira/` 보다 우선).
 
-| 경로 프리픽스 | 종류 | 예 (현재) |
+| 경로 | 종류 | upstream (프리픽스 strip 후 수신 경로) |
 |---|---|---|
 | `/` (fallback) | 셸 SPA | platform-app:3000 |
-| `/<제품>-app/` | remote 프론트 (remoteEntry.js 포함) | `/gojira-app/` → gojira-app:3001 |
-| `/<서비스>-api/` | 백엔드 API | `/platform-api/` → platform-api:9000, `/gojira-api/` → gojira-api:9001 |
+| `/platform/api/…` | 공용 Platform-API | platform-api:9000 → `/api/…` |
+| `/<제품>/` | remote 프론트 (remoteEntry.js 포함) | 예: `/gojira/` → gojira-app:3001 → `/…` |
+| `/<제품>/api/…` | 제품 백엔드 API | 예: `/gojira/api/v2/X` → gojira-api:9001 → `/api/v2/X` |
 | (부속 서비스) | 자유 | `/pumlex/` → pumlex-server:3030 |
 
-- 신규 제품은 `/<제품>-app/` + `/<제품>-api/` 두 블록을 `deploy/images/gateway/locations.conf` 에 추가한다
-  (예: `/ragaas-app/`, `/ragaas-api/`).
+- 게이트웨이는 **`/<제품>` 세그먼트만 strip** 한다 — 백엔드는 `/api/v2/…` 그대로 수신 (기존과 동일).
+- 신규 제품은 `/<제품>/api/` + `/<제품>/` 두 블록을 `deploy/images/gateway/locations.conf` 에 추가한다
+  (예: `/ragaas/api/`, `/ragaas/`). 타 스택 컨테이너는 런타임 DNS(resolver+변수 proxy_pass)로 해석.
 - API 블록엔 WebSocket/SSE 대응 필수: `proxy_http_version 1.1`, `Upgrade/Connection` 헤더, SSE 는 `proxy_buffering off`.
 - `client_max_body_size 100m` (게이트웨이 전역).
-- 예: 브라우저 `GET /platform-api/api/v2/Account/me` → upstream `platform-api:9000/api/v2/Account/me`.
-- **백엔드 API 베이스 경로는 `/api/v2` 를 표준**으로 한다 (프리픽스 strip 후 기준). RAGaaS-API 도 `/api/v2/...` 로 노출 권장 —
-  프론트 설정 조립 규칙(`{gateway}/{svc}-api/api/v2`)이 단순해진다.
+- 예: 브라우저 `GET /platform/api/v2/Account/me` → upstream `platform-api:9000/api/v2/Account/me`.
+- **백엔드 API 베이스 경로는 `/api/v2` 를 표준**으로 한다. 프론트 설정 조립 규칙 = `{gateway}/<제품>/api/v2`
+  (공용은 `{gateway}/platform/api/v2`).
+- **주의(셸 딥링크와의 구분)**: 셸 탭 딥링크는 슬래시 없는 `/<제품>`(예: `/ragaas`) — 프리픽스 location 에
+  안 걸려 셸로 간다. 슬래시 있는 `/<제품>/…` 부터 remote standalone/자산 경로.
+- **구 경로(v1) alias**: `/platform/api/`·`/gojira/api/`·`/gojira/`·`/ragaas/api/`·`/ragaas/` 는
+  구버전 런처(≤0.1.15) 호환을 위한 deprecated alias — 런처 fleet 업데이트 후 제거 예정. 신규 구현은 v2 만 사용.
 
 ## 5. 런타임 env 주입 (재빌드 없는 폐쇄망 배포)
 
@@ -137,7 +144,7 @@ exec nginx -g 'daemon off;'
 |----|--------|------|
 | `REACT_APP_USE_SSO` | 셸(+standalone remote) | SSO 로그인 흐름 활성화 |
 | `REACT_APP_SSO_URL` | 셸 | SSO 서버 (ADFSLogin/exchange/introspect) |
-| `REACT_APP_PLATFORM_API` | 전체 | Platform-API 베이스 (`{gateway}/platform-api/api/v2`) |
+| `REACT_APP_PLATFORM_API` | 전체 | Platform-API 베이스 (`{gateway}/platform/api/v2`) |
 | `REACT_APP_GOJIRA_API` | GoJIRA | GoJIRA-API 베이스 |
 | `REACT_APP_<제품>_APP_REMOTE` | 셸 | 각 remote 의 origin (remoteEntry.js 로드 기준) |
 | `REACT_APP_LAUNCHER_BASE` | 전체 | 로컬 런처 (`http://127.0.0.1:5599`) |

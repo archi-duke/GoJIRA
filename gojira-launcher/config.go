@@ -210,9 +210,12 @@ func applyDefaults(cfg *Config) {
 // webOrigins 를 손으로 채우지 않아도 되게 하는 자동화의 핵심.
 //
 //   gateway = https://gojira-host:44300  →
-//     backend.platformApi = https://gojira-host:44300/platform-api/api/v2  (미설정 시)
-//     backend.gojiraApi   = https://gojira-host:44300/gojira-api/api/v2    (미설정 시)
-//     webOrigins          += https://gojira-host:44300                      (중복 제거)
+//     backend.platformApi = https://gojira-host:44300/platform/api/v2  (미설정 시)
+//     backend.gojiraApi   = https://gojira-host:44300/gojira/api/v2    (미설정 시)
+//     webOrigins          += https://gojira-host:44300                  (중복 제거)
+//
+// 경로 체계 v2 (2026-07-06): /<서비스>-api/api/v2 → /<제품>/api/v2 로 단순화.
+// 게이트웨이는 구 경로를 한시적 alias 로 유지하므로 구버전 런처도 계속 동작한다.
 //
 // backend.* 가 이미 명시돼 있으면 존중(수동 override 우선). gateway 가 비면 no-op —
 // 기존(gateway 이전) launcher.json 은 그대로 동작한다.
@@ -226,10 +229,10 @@ func deriveGateway(cfg *Config) {
 		return
 	}
 	if cfg.Backend.PlatformAPI == "" {
-		cfg.Backend.PlatformAPI = origin + "/platform-api/api/v2"
+		cfg.Backend.PlatformAPI = origin + "/platform/api/v2"
 	}
 	if cfg.Backend.GojiraAPI == "" {
-		cfg.Backend.GojiraAPI = origin + "/gojira-api/api/v2"
+		cfg.Backend.GojiraAPI = origin + "/gojira/api/v2"
 	}
 	// webOrigins 에 gateway origin 추가(WebOrigin/WebOrigins 어디에도 없을 때만).
 	seen := strings.TrimRight(cfg.WebOrigin, "/") == origin

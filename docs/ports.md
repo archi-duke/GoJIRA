@@ -54,17 +54,17 @@ OpenCode 는 어디서든 띄울 수 있다 (단일 호스트 / 게스트→호�
 | gateway 경로 | 대상 컨테이너 |
 |---|---|
 | `/` | Platform-App (3000) |
-| `/gojira-app/` | GoJIRA-App (3001, Module Federation remote) |
-| `/platform-api/` | Platform-API (9000) |
-| `/gojira-api/` | GoJIRA-API (9001) |
+| `/gojira/` | GoJIRA-App (3001, Module Federation remote) |
+| `/platform/api/` | Platform-API (9000) |
+| `/gojira/api/` | GoJIRA-API (9001) |
 | `/pumlex/` | pumlex (3030) |
 
 `URL_SCHEME=https` 면 gateway 가 인증서(`TLS_CERT_DIR`)로 TLS 종단하고 모든 URL 이
 https/wss 로 조합된다. `http`(기본)면 평문. 백엔드는 항상 컨테이너 내부 HTTP.
 
 스킬 / 외부 클라이언트(런처 주입)가 사용하는 URL 도 gateway 경로 기준:
-- `${URL_SCHEME}://<gojira-host>:<GATEWAY_PORT>/platform-api/api/v2` — Platform-API
-- `${URL_SCHEME}://<gojira-host>:<GATEWAY_PORT>/gojira-api/api/v2` — GoJIRA-API
+- `${URL_SCHEME}://<gojira-host>:<GATEWAY_PORT>/platform/api/v2` — Platform-API
+- `${URL_SCHEME}://<gojira-host>:<GATEWAY_PORT>/gojira/api/v2` — GoJIRA-API
 
 자세한 배포 토폴로지: `docs/deployment-topology.md`
 
@@ -91,7 +91,7 @@ MongoDB 는 `shared-infra` 스택의 `shared-mongo` 로 일원화 (호스트 270
 | 27017 | shared-mongo | 공용 (gojira/ragaas DB 분리) |
 | 3030 | shared-fuseki | RAGaaS |
 | 19530, 9091 | shared-milvus | RAGaaS |
-| **9000, 9001** | shared-minio | ⚠️ Windows dev 에서 platform-api(9000)/gojira-api(9001) exe 와 **localhost 포트가 겹침** — WSL2 포트포워딩 때문에 dev exe 미기동 시 localhost:9000/9001 이 MinIO 로 연결돼 혼동 가능(프론트는 S3 XML 403 을 받음). **방침(2026-07-06 확정): GoJIRA 는 9000/9001 을 유지하고, 포트 조정은 RAGaaS(shared-infra MinIO) 쪽에서 수행한다.** 그때까지의 임시 우회: dev exe 를 `PLATFORM_SERVER_PORT=:9100` / `GOJIRA_SERVER_PORT=:9101`(+`GOJIRA_PLATFORM_API=http://localhost:9100/api/v2`) 로 띄우고 두 앱 `public/env.js`(git-ignored) 에 `REACT_APP_PLATFORM_API/GOJIRA_API` 를 9100/9101 로 주입 — 커밋 코드/기본값은 9000/9001 불변 |
+| **9000, 9001** | shared-minio | ⚠️ Windows dev 에서 platform-api(9000)/gojira/api(9001) exe 와 **localhost 포트가 겹침** — WSL2 포트포워딩 때문에 dev exe 미기동 시 localhost:9000/9001 이 MinIO 로 연결돼 혼동 가능(프론트는 S3 XML 403 을 받음). **방침(2026-07-06 확정): GoJIRA 는 9000/9001 을 유지하고, 포트 조정은 RAGaaS(shared-infra MinIO) 쪽에서 수행한다.** 그때까지의 임시 우회: dev exe 를 `PLATFORM_SERVER_PORT=:9100` / `GOJIRA_SERVER_PORT=:9101`(+`GOJIRA_PLATFORM_API=http://localhost:9100/api/v2`) 로 띄우고 두 앱 `public/env.js`(git-ignored) 에 `REACT_APP_PLATFORM_API/GOJIRA_API` 를 9100/9101 로 주입 — 커밋 코드/기본값은 9000/9001 불변 |
 | 7474, 7687 | shared-neo4j | RAGaaS |
 | 6379 | shared-redis | RAGaaS (GoJIRA 도 사용 가능) |
 | (예정) 3300 | shared-gitea | GoJIRA — Mac Gitea 데이터 이관과 동시 활성화 (아래 참조) |

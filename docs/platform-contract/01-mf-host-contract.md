@@ -9,8 +9,8 @@
 |------|------|----|
 | 호스트 컨테이너 이름 | `platformApp` (고정) | — |
 | remote 컨테이너 이름 | `<제품명 camelCase>App` | `gojiraApp`, `ragaasApp` |
-| remote 엔트리 파일 | `remoteEntry.js` (앱 웹루트 직하) | `http://…/ragaas-app/remoteEntry.js` |
-| 게이트웨이 경로 | `/<제품명>-app/` ([05](05-backend-contract.md) §4) | `/gojira-app/`, `/ragaas-app/` |
+| remote 엔트리 파일 | `remoteEntry.js` (앱 웹루트 직하) | `http://…/ragaas/remoteEntry.js` |
+| 게이트웨이 경로 | `/<제품명>/` — 프론트, `/<제품명>/api/…` — 백엔드 ([05](05-backend-contract.md) §4) | `/gojira/`, `/ragaas/` |
 | 런타임 env 키 | `REACT_APP_<제품명 대문자>_APP_REMOTE` | `REACT_APP_RAGAAS_APP_REMOTE` |
 
 > env 키의 `REACT_APP_` 접두사는 CRA 잔재지만 **런타임 env(window._env_) 조회는 접두사 무관**하므로
@@ -101,7 +101,7 @@ shared: {
 
 - remote 의 chunk/이미지 등 부속 자산은 **remoteEntry.js 가 로드된 origin+경로 기준으로 상대 해석**되어야 한다
   (webpack `publicPath: 'auto'` 상당 — MF 2.0 `getPublicPath` 지원). **절대경로(`/static/…`) 인라인 금지** —
-  게이트웨이의 `/<app>-app/` 프리픽스 아래에서 깨진다.
+  게이트웨이의 `/<app>/` 프리픽스 아래에서 깨진다.
 - 게이트웨이는 remote 정적 자산에 CORS 헤더를 붙여 셸 origin 에서의 로드를 허용한다 (동일 origin 게이트웨이 경유가 기본이라
   통상 불필요하나, dev 크로스포트(3000→3001) 대비 nginx 설정 유지).
 
