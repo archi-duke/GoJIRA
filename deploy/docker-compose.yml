@@ -29,6 +29,8 @@ x-react-env: &react-env
   REACT_APP_PUMLEX_SERVER: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/pumlex"
   REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
   REACT_APP_USE_SSO: "${REACT_APP_USE_SSO:-false}"
+  # dev 폴백 신원 — 백엔드 DEV_USER 와 같은 소스 (계약 05 §6)
+  REACT_APP_DEV_USER: "${DEV_USER:-duke.kimm}"
 
 # 백엔드 SSO 인증 env (auth 미들웨어). USE_SSO 는 프론트 토글과 동일 소스라 같이 켜진다.
 # USE_SSO=false(기본)면 X-User-Id/DEV_USER 폴백 → 동작 무변. SSO 모드 켤 때:

@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import config from '../config';
 import './LauncherInstallModal.css';
+import { authFetch } from '../platform/auth';
 
 const PLATFORM_API = config.PLATFORM_API;
 
@@ -47,7 +48,7 @@ export default function LauncherInstallModal({ onClose, onRetry }) {
   const [loadErr, setLoadErr] = useState('');
 
   useEffect(() => {
-    fetch(`${PLATFORM_API}/launcher/manifest`)
+    authFetch(`${PLATFORM_API}/launcher/manifest`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(d => setManifest(d.platforms || []))
       .catch(e => setLoadErr(e.message));

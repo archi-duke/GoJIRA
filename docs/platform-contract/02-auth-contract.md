@@ -88,26 +88,34 @@ api.interceptors.response.use(undefined, (err) => {
 - **loginid 는 클라이언트에 저장하지 않는다** (자가발급 신원 = 사칭 가능). 매 세션 introspect 로 도출.
 - 신원 확정(`user`)과 권한 로드(`authority`) 전에는 remote 를 마운트하지 않는다.
 
-## 5. Standalone 폴백 (remote 의무)
+## 5. Standalone 폴백과 셸 바인딩 (remote 의무)
 
-remote 단독 실행 시 `platformApp/auth` 가 없다. remote 는 **어댑터 한 겹**으로 이를 흡수한다:
+remote 앱 코드의 유일한 인증 소비 지점은 **자기 레포의 어댑터 한 겹**(`src/platform/auth`)이다.
+어댑터의 셸 바인딩은 다음 우선순위를 따른다:
 
-```ts
-// src/platform/auth.ts — remote 쪽 유일한 소비 지점 (앱 코드는 이 파일만 import)
-import type { PlatformAuth } from './types';
+1. **in-page 게시본 `window.__platformAuth`** — 셸의 auth 모듈이 로드 시점에 스스로 게시한다.
+   remote 는 항상 셸 페이지 *안*에서 실행되므로(마운트 전에 셸이 반드시 로드됨) 이 경로가
+   결정적이고 네트워크 왕복이 없다. **호출 시점마다 조회**해 모듈 로드 순서에 무관하게 동작시킨다.
+2. (선택) MF import `import('platformApp/auth')` — 셸 remoteEntry URL 을 아는 외부 소비자용.
+   같은 구현 객체가 반환된다.
+3. 둘 다 없으면 **standalone 로컬 구현** — 단독 실행 모드.
 
-let impl: PlatformAuth;
-try {
-  impl = await import('platformApp/auth');          // 셸 안에서 실행 중
-} catch {
-  impl = createStandaloneAuth();                     // 단독 실행 — 아래 규칙
-}
-export const { getToken, getUser, authFetch, requireLogin, onSessionChange, getAuthority } = impl;
+```js
+// src/platform/auth.js — remote 쪽 유일한 소비 지점 (앱 코드는 이 파일만 import)
+const shell = () => (typeof window !== 'undefined' && window.__platformAuth) || null;
+
+export const getToken  = () => (shell()?.getToken  ?? localGetToken)();
+export const authFetch = (input, init) => (shell()?.authFetch ?? localAuthFetch)(input, init);
+// ... getUser / getAuthority / requireLogin / onSessionChange 동일 패턴
 ```
 
-standalone 구현 규칙 (셸과 동일 의미 보장):
+> `window.__platformAuth` 는 monkey-patch 가 아니다 — 플랫폼 primitive 를 덮지 않는 **명시적 단일
+> 게시 지점**이며, 게시 주체는 셸 auth 모듈 하나뿐이다. remote 가 이 키에 쓰는 것은 금지.
+
+standalone 로컬 구현 규칙 (셸과 동일 의미 보장):
 - `USE_SSO=true` 환경: `SSO_SESSION` 쿠키 → introspect 로 신원 확정 (셸 §4 와 동일 절차의 축소판).
-- dev 환경: `window._env_`/설정의 dev 사용자로 `getUser()` 를 채우고 `getToken()` 은 null.
+- dev 환경: 설정의 dev 사용자로 `getUser()` 를 채우고 `getToken()` 은 null → authFetch 가 `X-User-Id` 부착.
+- 참조 구현: GoJIRA-App/src/platform/auth.js
 
 ## 6. 폐기되는 패턴 (P2 에서 제거)
 

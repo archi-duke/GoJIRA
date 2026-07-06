@@ -11,6 +11,7 @@ import { subscribe } from '../utils/sseManager';
 import { detectLauncher, requestEdit, requestPush, requestFiles, requestLocalFile, requestSync, requestWrite, requestPullFromMain, requestDelete, requestRename } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import './DocEditor.css';
+import { authFetch } from '../platform/auth';
 
 const API = config.PLATFORM_API + '/DocRepo';
 const PLATFORM_API = config.PLATFORM_API;
@@ -165,7 +166,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   // fileStatus 는 main sha vs local sha 비교. sha 포맷이 동일한 git blob 해시라 그대로 매칭됨.
   async function refreshDocState(retry = 0) {
     try {
-      const mRes = await fetch(`${API}/${projectCode}/tree?ref=main`);
+      const mRes = await authFetch(`${API}/${projectCode}/tree?ref=main`);
       if (!mRes.ok) throw new Error(`main tree ${mRes.status}`);
       const mTree = await mRes.json();
       if (!mTree?.tree) throw new Error('invalid main tree');
@@ -236,7 +237,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     try {
       let text = '';
       if (selectedMainOnly || activeTab === 'main') {
-        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
+        const res = await authFetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
         if (!res.ok) return;
         const d = await res.json();
         text = d.content ? decodeBase64(d.content) : '';
@@ -444,7 +445,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     }
     let text = '';
     if (isMainOnly || activeTab === 'main') {
-      const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
+      const res = await authFetch(`${API}/${projectCode}/file?path=${encodeURIComponent(path)}&ref=main`);
       if (!res.ok) return;
       const d = await res.json();
       text = d.content ? decodeBase64(d.content) : '';
@@ -467,7 +468,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
       const status = fileStatus[selectedFile];
       let mainText = '';
       if (status !== 'added') {
-        const res = await fetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
+        const res = await authFetch(`${API}/${projectCode}/file?path=${encodeURIComponent(selectedFile)}&ref=main`);
         if (res.ok) {
           const d = await res.json();
           mainText = d.content ? decodeBase64(d.content) : '';
@@ -561,7 +562,7 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
     if (!await modalConfirm(`origin/docs/${user} 변경을 발행 신청(PR)하시겠습니까?`)) return;
     setPublishing(true);
     try {
-      const res = await fetch(`${API}/${projectCode}/pr`, {
+      const res = await authFetch(`${API}/${projectCode}/pr`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': user },
         body: JSON.stringify({
@@ -888,7 +889,7 @@ function DocGitGraph({ projectCode }) {
   const limit = 30;
 
   useEffect(() => {
-    fetch(`${API}/${projectCode}/graph?offset=${offset}&limit=${limit}`)
+    authFetch(`${API}/${projectCode}/graph?offset=${offset}&limit=${limit}`)
       .then(r => r.json()).then(d => {
         const shaToCommit = {};
         (d.commits || []).forEach(c => { shaToCommit[c.sha] = c; });

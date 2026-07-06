@@ -11,7 +11,12 @@ export default defineConfig({
     react(),
     federation({
       name: 'platformApp',
+      filename: 'remoteEntry.js',
       dts: false, // JS 앱 — 타입 산출물(@mf-types) 생성 안 함
+      // 셸 런타임 제공 모듈 (계약 02·03) — remote 는 어댑터 한 겹으로 소비
+      exposes: {
+        './auth': './src/platform/auth',
+      },
       remotes: {
         gojiraApp: {
           type: 'module',

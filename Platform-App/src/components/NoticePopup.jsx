@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import config from '../config';
 import { subscribe } from '../utils/sseManager';
 import './NoticePopup.css';
+import { authFetch } from '../platform/auth';
 
 const API = config.API_BASE + '/Notice';
 export default function NoticePopup({ user }) {
@@ -17,7 +18,7 @@ export default function NoticePopup({ user }) {
     setCurrentIdx(0);
     setVisible(true);
     data.forEach(n => {
-      fetch(`${API}/${n._id}/view`, { method: 'POST' }).catch(() => {});
+      authFetch(`${API}/${n._id}/view`, { method: 'POST' }).catch(() => {});
     });
   }, []);
 
@@ -26,7 +27,7 @@ export default function NoticePopup({ user }) {
     const hideUntil = localStorage.getItem(HIDE_KEY);
     if (hideUntil && new Date(hideUntil) > new Date()) return;
 
-    fetch(`${API}/active`)
+    authFetch(`${API}/active`)
       .then(r => r.json())
       .then(showNotices)
       .catch(() => {});

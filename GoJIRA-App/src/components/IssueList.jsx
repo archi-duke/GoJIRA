@@ -3,6 +3,7 @@ import CommonBar from './CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
 import config from '../config';
 import './IssueList.css';
+import { authFetch } from '../platform/auth';
 
 const API_BASE = config.API_BASE;
 
@@ -51,7 +52,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
 
   const fetchIssues = useCallback(() => {
     setLoading(true);
-    return fetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
+    return authFetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
       .then((res) => res.json())
       .then((data) => setIssues(Array.isArray(data) ? data : []))
       .catch(() => setIssues([]))
@@ -62,7 +63,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
 
   const handlePull = useCallback(async () => {
     try {
-      await fetch(`${API_BASE}/Issue/fetch`, {
+      await authFetch(`${API_BASE}/Issue/fetch`, {
         headers: { XBody: JSON.stringify({ prjID: projectCode }) },
       });
       await fetchIssues();
@@ -105,7 +106,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
 
   async function handleDetailSave(key, data) {
     try {
-      await fetch(`${API_BASE}/Issue`, {
+      await authFetch(`${API_BASE}/Issue`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, data }),
@@ -123,7 +124,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
       : `"${issue.key}"는 타 과제 이슈입니다. 이 과제 목록에서만 제거하시겠습니까?`;
     if (!window.confirm(msg)) return;
     try {
-      await fetch(`${API_BASE}/Issue`, {
+      await authFetch(`${API_BASE}/Issue`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: issue.key, prjID: projectCode }),
@@ -136,7 +137,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
 
   function handleSummaryBlur(issue, newSummary) {
     if (newSummary === issue.summary) return;
-    fetch(`${API_BASE}/Issue`, {
+    authFetch(`${API_BASE}/Issue`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),
@@ -150,7 +151,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
     const oldName = oldVal && typeof oldVal === 'object' ? oldVal.name : oldVal || '';
     if (newName === oldName) return;
     const newVal = { ...(typeof oldVal === 'object' ? oldVal : {}), name: newName };
-    fetch(`${API_BASE}/Issue`, {
+    authFetch(`${API_BASE}/Issue`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: issue.key, data: { [field]: newVal } }),

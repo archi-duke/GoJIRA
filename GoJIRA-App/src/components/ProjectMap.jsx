@@ -6,6 +6,7 @@ import { modalAlert, modalPrompt } from './AlertModal';
 import config from '../config';
 import { detectLauncher, requestPrewarm } from '../utils/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
+import { authFetch } from '../platform/auth';
 
 const API_BASE = config.API_BASE;
 const PLATFORM_API = config.PLATFORM_API;
@@ -88,7 +89,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
   const containerRef = useRef(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/Project`, {
+    authFetch(`${API_BASE}/Project`, {
       headers: { XBody: JSON.stringify({}) },
     })
       .then((res) => res.json())
@@ -98,7 +99,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       .catch(() => setProjects([]));
 
     // 프로젝트 알림 상태 조회
-    fetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
+    authFetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) {
@@ -133,7 +134,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
           });
         } else if (data.type === 'pr_update') {
           // PR 상태 변경 시 alerts 재조회
-          fetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
+          authFetch(`${API_BASE}/Project/alerts?user=${encodeURIComponent(user || '')}`)
             .then((res) => res.json())
             .then((arr) => {
               if (Array.isArray(arr)) {
@@ -174,7 +175,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
         );
         if (input !== project.name) return;
         try {
-          const res = await fetch(`${PLATFORM_API}/Project/${encodeURIComponent(code)}/archive`, {
+          const res = await authFetch(`${PLATFORM_API}/Project/${encodeURIComponent(code)}/archive`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-User-Id': user || 'batman' },
             body: JSON.stringify({ confirm: true }),
@@ -252,7 +253,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       sub: isNew ? '설계문서 저장소 자동 생성을 포함해 수 초 걸릴 수 있습니다.' : '',
     });
     try {
-      const res = await fetch(`${API_BASE}/Project`, {
+      const res = await authFetch(`${API_BASE}/Project`, {
         method: isNew ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
@@ -272,7 +273,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
         }
       }
       // 성공 — 목록 재조회
-      const list = await fetch(`${API_BASE}/Project`, { headers: { XBody: JSON.stringify({}) } }).then((r) => r.json());
+      const list = await authFetch(`${API_BASE}/Project`, { headers: { XBody: JSON.stringify({}) } }).then((r) => r.json());
       if (Array.isArray(list)) setProjects(list.filter((p) => p.status !== 'Deleted'));
     } catch (e) {
       await modalAlert((isNew ? '과제 생성 오류: ' : '과제 저장 오류: ') + (e.message || e));

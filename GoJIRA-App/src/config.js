@@ -19,7 +19,8 @@ const config = {
   SSO_URL: pick('REACT_APP_SSO_URL', 'https://10.227.37.90:443'),
   // .env(REACT_APP_USE_SSO=true) 로 활성화. env 값은 문자열이므로 'true' 비교.
   USE_SSO: pick('REACT_APP_USE_SSO', 'false') === 'true',
-  DEV_USER: 'duke.kimm',
+  // dev 폴백 신원 — 런타임 키로 주입 가능 (백엔드 env DEV_USER 와 짝, 계약 05 §6)
+  DEV_USER: pick('REACT_APP_DEV_USER', 'duke.kimm'),
 };
 
 export default config;
