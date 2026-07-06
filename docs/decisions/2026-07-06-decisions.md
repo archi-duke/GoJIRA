@@ -88,3 +88,14 @@
   ② 공지 "3일 보지 않기" 키가 user별(`gojira_notice_hide_until_<user>`)로 통일 — 기존 standalone 사용자 1회 리셋.
 - **부수 효과**: web-ui runtime/env.js 가 캐노니컬 env 키의 단일 소비 지점 — 앱별 config 키 분기(API_BASE 의미 상이)가
   공유 모듈로 번지던 원인 제거. web-ui 는 앱 config.js import 금지.
+
+## D12. 셸↔remote 상태 채널 전환 구현 + 셸 URL 딥링크는 탭 수준 (P2-C)
+
+- **구현**: D3 결정 이행 — 셸이 sessionStorage(`gojira_page`/`gojira_project`)를 읽던 암묵 계약 제거.
+  remote 는 `onNavigate(page, { projectCode })` 로 페이지 전환마다 + **마운트 직후(복원 동기화)** 보고,
+  셸은 탭 활성 판정과 에이전트 소환용 현재 과제 추적(activeProjectCode state)에만 사용.
+- **remote 세션키 유지**: `gojira_*` 키는 remote 내부 새로고침 복원 전용으로 존치 (`<app>_` 접두사 규칙 충족,
+  셸 미참조). 제거가 아니라 "채널로 쓰지 않음"이 계약의 본질.
+- **URL 딥링크 범위 = 탭 수준**: `/account`·`/notice`·`/repository`(맵=`/`) 를 history API(pushState/popstate)로 동기화.
+  라우터 라이브러리 미도입 — 탭 4개에 라우터는 과함(ADR-1 유지). remote 내부 페이지 URL 은 remote 별 딥링크 수요가
+  생기면 `basePath` 계약으로 확장. 배포는 기존 nginx `try_files /index.html` SPA 폴백으로 즉시 호환.

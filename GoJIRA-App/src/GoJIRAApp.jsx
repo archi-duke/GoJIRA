@@ -13,7 +13,9 @@ import { createEventQueue } from '@platform/web-ui/runtime/eventQueue';
 // 구 window.fetch monkey-patch 를 대체: 플랫폼 API 호출은 authFetch 로 명시.
 import { authFetch } from './platform/auth';
 
-export default function GoJIRAApp({ user, authority, resetKey }) {
+// onNavigate: 셸이 주입하는 보고 콜백 (계약 01 §2) — 내부 페이지 전환을 (page, { projectCode })
+// 로 알린다. 셸은 탭 활성 판정과 에이전트 소환용 현재 과제 추적에만 사용. standalone 에선 없음.
+export default function GoJIRAApp({ user, authority, resetKey, onNavigate: onShellNavigate }) {
   const [page, setPage] = useState(() => sessionStorage.getItem('gojira_page') || 'map');
   const [projectAlert, setProjectAlert] = useState(null);
 
@@ -32,13 +34,22 @@ export default function GoJIRAApp({ user, authority, resetKey }) {
     catch { return null; }
   });
 
+  // sessionStorage 키(gojira_*)는 remote 내부 새로고침 복원 전용 — 셸은 읽지 않는다 (D12).
   const navigate = useCallback((p, project) => {
     setPage(p);
     setSelectedProject(project ?? null);
     sessionStorage.setItem('gojira_page', p);
     if (project) sessionStorage.setItem('gojira_project', JSON.stringify(project));
     else sessionStorage.removeItem('gojira_project');
-  }, []);
+    onShellNavigate?.(p, { projectCode: project?.jiraCodes?.main?.jiraCode || '' });
+  }, [onShellNavigate]);
+
+  // 마운트 시 초기 상태 보고 — 새로고침 후 remote 가 복원한 페이지/과제를 셸과 동기화.
+  useEffect(() => {
+    onShellNavigate?.(page, {
+      projectCode: selectedProject?.jiraCodes?.main?.jiraCode || '',
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Design B 과제전환: 에이전트가 "다른 과제" 에 열려 있는 상태에서 현재 과제가 바뀌면,
   // 사용자에게 확인한 뒤 옛 에이전트를 닫고 새 과제로 다시 띄운다(단일 "현재 과제" 에이전트).

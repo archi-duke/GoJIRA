@@ -41,14 +41,19 @@ interface RemoteAppProps {
   resetKey?: number;
   /** 셸이 remote 에 배정한 URL 프리픽스 (라우팅 표준 도입 시). 예: '/ragaas' */
   basePath?: string;
-  /** remote 내부 페이지 전환을 셸에 알림 — 셸 탭 활성화 판정·URL 동기화용 */
-  onNavigate?: (page: string) => void;
+  /** remote 내부 페이지 전환을 셸에 알림 — 셸 탭 활성화 판정·현재 과제 추적용.
+   *  ctx.projectCode: 현재 선택된 과제 코드 (없으면 ''). remote 는 페이지 전환마다 +
+   *  마운트 직후(복원 상태 동기화) 호출한다 */
+  onNavigate?: (page: string, ctx?: { projectCode?: string }) => void;
 }
 ```
 
 - **상태 공유는 이 props 와 콜백이 전부다.** sessionStorage 를 셸↔remote 채널로 쓰지 않는다
-  (기존 `gojira_page`/`gojira_project` magic string 은 P2 에서 이 계약으로 대체).
+  (기존 `gojira_page`/`gojira_project` magic string 채널은 2026-07-06 D12 로 제거 — 셸은 더 이상 읽지 않는다).
 - remote 내부 전용 UI 상태(sessionStorage)는 자유이나 키에 `<제품명>_` 접두사를 붙여 네임스페이스를 분리한다.
+  remote 의 새로고침 복원(자기 세션키 사용)은 내부 구현으로 허용 — 복원 후 마운트 보고(onNavigate)로 셸과 동기화.
+- **셸 URL**: 셸이 탭 수준 딥링크(`/account` 등, history API)를 소유한다. remote 내부 페이지는 URL 에 반영하지
+  않는다 — remote 별 딥링크가 필요해지면 `basePath` 계약으로 확장.
 
 ## 3. 셸이 remote 에 노출하는 것 (호스트 expose — MF 2.0 양방향)
 
