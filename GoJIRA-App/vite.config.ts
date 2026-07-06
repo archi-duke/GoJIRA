@@ -18,7 +18,11 @@ const webUiDeps = {
 // - expose './App' 표준 (구 './GoJIRAApp' 개명)
 // - shared singleton: react/react-dom (requiredVersion 은 package.json range 자동)
 // - 런타임 env(window._env_/env.js) 패턴은 그대로 — 빌드 산출물은 host-agnostic
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // standalone 진입(게이트웨이 /gojira/)용 base — 절대 자산 경로(/assets/…)가
+  // 게이트웨이 최장일치로 셸(/)에 새는 것을 막는다 (경로 v2, 계약 05 §4).
+  // dev 서버(:3001 루트)와 셸 remote 로드(remoteEntry 기준 상대 해석)는 영향 없음.
+  base: command === 'build' ? '/gojira/' : '/',
   plugins: [
     react(),
     federation({
@@ -51,4 +55,4 @@ export default defineConfig({
     target: 'chrome89', // MF 2.0 (top-level await) 요구
     outDir: 'build',    // CRA 산출 경로 유지 — deploy Dockerfile 무변경
   },
-});
+}));
