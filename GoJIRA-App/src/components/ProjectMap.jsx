@@ -961,8 +961,12 @@ function ProjectRow({ project, rowIdx, dateToX, totalWidth, rangeStart, rangeEnd
         const rectRightPad = 2; // 텍스트 우측 ↔ 흰 rect 우측 여백
         const hasIcon = !!alertColor;
         const blockW = (hasIcon ? iconLeftPad + iconWidth + iconGap : 0) + textW + rectRightPad;
-        const desired = firstVisibleX - MILESTONE_R - 10;
-        const nameX = Math.max(desired, blockW - rectRightPad);
+        // 마일스톤 왼쪽에 이름을 놓는다. 공간이 부족한 경우(예: 첫 마일스톤 날짜가 조회 시작
+        // 이전이라 그래프 좌측 여백이 거의 없을 때) 예전에는 Math.max 로 강제로 밀어넣어
+        // 마일스톤 원과 겹쳤다. 이제는 밀어넣지 않고 blockLeft 가 음수로 나가게 둔다 —
+        // <g clipPath="url(#graphClip)"> (x>=0 만 표시) 가 자동으로 잘라내므로, 공간이
+        // 없으면 이름이 "과제" 사이드바 뒤로 가려진 것처럼 자연스럽게 안 보이게 된다.
+        const nameX = firstVisibleX - MILESTONE_R - 10;
         const blockLeft = nameX - (blockW - rectRightPad);
         const iconX = blockLeft + iconLeftPad;
         return (
