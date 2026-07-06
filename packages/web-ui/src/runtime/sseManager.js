@@ -1,7 +1,7 @@
-import config from '../config';
+import { PLATFORM_API } from './env';
 
 // SSE → WebSocket 전환 (HTTP/1.1 연결 한도 문제 해결)
-const WS_URL = config.PLATFORM_API.replace(/^http/, 'ws') + '/Notice/ws';
+const WS_URL = PLATFORM_API.replace(/^http/, 'ws') + '/Notice/ws';
 const WIN_KEY = '__gojira_ws__';
 
 function getState() {
@@ -26,14 +26,20 @@ function ensureConnection() {
 
   const ws = new WebSocket(WS_URL);
 
-  ws.onopen = () => { notifyStatus(true); };
+  ws.onopen = () => {
+    notifyStatus(true);
+  };
 
   ws.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
       if (msg.event === 'connected') return;
+      // 디버그: 수신 메시지 표시 (테스트 시 주석 해제)
+      // try { const d = JSON.parse(msg.data); window.alert(`[WS] ${msg.event}: ${d.type || ''} ${d.projectCode || ''} ${d.action || ''}`); } catch {}
+      // SSE 호환: event명으로 라우팅, data는 JSON 문자열
       const cbs = state.listeners[msg.event];
       if (cbs) {
+        // SSE Event 객체와 동일한 형태로 콜백 호출
         const fakeEvent = { data: msg.data };
         cbs.forEach(cb => { try { cb(fakeEvent); } catch {} });
       }
@@ -43,18 +49,25 @@ function ensureConnection() {
   ws.onclose = () => {
     notifyStatus(false);
     state.ws = null;
+    // 3초 후 자동 재연결
     setTimeout(() => ensureConnection(), 3000);
   };
 
-  ws.onerror = () => { notifyStatus(false); };
+  ws.onerror = () => {
+    notifyStatus(false);
+  };
 
   state.ws = ws;
 }
 
+// 앱 시작 시 즉시 연결
 if (typeof window !== 'undefined') {
   ensureConnection();
 }
 
+/**
+ * 이벤트 구독 (SSE subscribe와 동일한 인터페이스)
+ */
 export function subscribe(event, callback) {
   const state = getState();
   if (!state.listeners[event]) {
@@ -70,6 +83,9 @@ export function subscribe(event, callback) {
   };
 }
 
+/**
+ * 연결 상태 구독
+ */
 export function onStatus(cb) {
   const state = getState();
   state.statusCbs.add(cb);

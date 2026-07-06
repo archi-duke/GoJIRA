@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import CommonBar from './CommonBar';
+import CommonBar from '@platform/web-ui/components/CommonBar';
 import IssueDetailDialog from './IssueDetailDialog';
-import { exportContent } from '../utils/exportUtils';
+import { exportContent } from '@platform/web-ui/utils/exportUtils';
 import config from '../config';
 import './RelationMap.css';
 import { authFetch } from '../platform/auth';

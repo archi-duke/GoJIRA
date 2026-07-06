@@ -16,6 +16,9 @@ RUN cp -r /cache/GoJIRA-App/node_modules ./node_modules && \
 COPY GoJIRA-App/ ./
 # 위 COPY 가 package.json 도 덮어쓰지만 lock 과 일관되도록 유지 (캐시 이미지가 같은 lock 사용 가정)
 # 새 의존성 추가 시 build-cache-node 도 갱신 필요.
+# @platform/web-ui 소스 패키지 — vite.config 이 ../packages/web-ui/src 로 alias 해석
+# (/src 의 상위 = /packages). 신규 npm 의존성이 아니므로 build-cache-node 는 무관.
+COPY packages/ /packages/
 RUN npm run build
 
 FROM nginx:alpine

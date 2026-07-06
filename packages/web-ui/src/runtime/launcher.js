@@ -7,9 +7,9 @@
 //
 // 토큰 핸드셰이크(§6 PoC): /health 는 Origin 이 런처의 webOrigin 과 일치하는
 // 요청에만 token 을 돌려준다. 그 토큰을 이후 /edit·/open 의 인증 헤더로 보낸다.
-import config from '../config';
+import { LAUNCHER_BASE } from './env';
 
-const BASE = (config.LAUNCHER_BASE || 'http://127.0.0.1:5599').replace(/\/$/, '');
+const BASE = (LAUNCHER_BASE || 'http://127.0.0.1:5599').replace(/\/$/, '');
 const TOKEN_HEADER = 'X-Gojira-Launcher-Token';
 // SSO 세션토큰을 런처에 전달(Phase 4 C) — 런처가 백엔드 호출/에이전트 env 에 Bearer 로 쓴다.
 const SESSION_HEADER = 'X-Gojira-Session';

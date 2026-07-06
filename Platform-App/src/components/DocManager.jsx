@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../config';
-import { subscribe } from '../utils/sseManager';
-import { modalAlert, modalConfirm, modalPrompt } from './AlertModal';
+import { subscribe } from '@platform/web-ui/runtime/sseManager';
+import { modalAlert, modalConfirm, modalPrompt } from '@platform/web-ui/components/AlertModal';
 import './DocManager.css';
 import { authFetch } from '../platform/auth';
 

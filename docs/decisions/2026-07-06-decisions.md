@@ -75,3 +75,16 @@
   게시본은 monkey-patch 와 달리 primitive 오버라이드가 아닌 명시적 단일 게시 지점. 게시 주체는 셸 하나, remote 쓰기 금지.
 - **동반 수리**: fetch monkey-patch 2곳 제거(16파일 87개 호출부 authFetch 치환), D6 버그 3건 해소
   (platform-app entrypoint USE_SSO/DEV_USER 직렬화, DEV_USER 런타임 키 REACT_APP_DEV_USER 승격, 미정의 config 참조 소멸).
+
+## D11. @platform/web-ui 1단계 = 소스 패키지 + Vite alias 소비 (workspace/MF singleton 은 Kendo 도입 시 승격)
+
+- **결정**: packages/web-ui 를 소스 패키지로 신설하고 앱이 `resolve.alias` 로 직접 컴파일 소비. npm workspaces 는
+  도입하지 않음 — 폐쇄망 build-cache-node(/cache/<App>/node_modules 레이아웃)와 lockfile 을 건드리지 않기 위함.
+  Dockerfile 은 `COPY packages/` 한 줄 추가. MF singleton 공유(계약 04 §3)는 Kendo 도입(라이선스/테마 단일화가
+  실제로 필요해지는 시점)에 진짜 패키지로 승격하며 수행. (04-web-ui-contract.md §2)
+- **판 선정**: AlertModal(GoJIRA 슈퍼셋 — dangerous/confirmLabel/validate), CommonBar(GoJIRA — alert-pr/alert-diff
+  아이콘이 라이브), launcher(GoJIRA 15함수 슈퍼셋), NoticePopup/sseManager(Platform — WS subscribe + user별 HIDE_KEY).
+- **의도적 동작 통일 2건**: ① GoJIRA standalone 공지도 EventSource 대신 WS(sseManager) 사용(ADR-4 근거 확장)
+  ② 공지 "3일 보지 않기" 키가 user별(`gojira_notice_hide_until_<user>`)로 통일 — 기존 standalone 사용자 1회 리셋.
+- **부수 효과**: web-ui runtime/env.js 가 캐노니컬 env 키의 단일 소비 지점 — 앱별 config 키 분기(API_BASE 의미 상이)가
+  공유 모듈로 번지던 원인 제거. web-ui 는 앱 config.js import 금지.

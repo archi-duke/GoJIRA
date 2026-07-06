@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { modalAlert, modalConfirm } from './AlertModal';
-import CommonBar from './CommonBar';
-import DiffAnalysis from './DiffAnalysis';
+import { modalAlert, modalConfirm } from '@platform/web-ui/components/AlertModal';
+import CommonBar from '@platform/web-ui/components/CommonBar';
+import DiffAnalysis from '@platform/web-ui/components/DiffAnalysis';
 import config from '../config';
-import { subscribe } from '../utils/sseManager';
+import { subscribe } from '@platform/web-ui/runtime/sseManager';
 import './DocEditor.css';
 import { authFetch } from '../platform/auth';
 

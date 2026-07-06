@@ -4,9 +4,9 @@ import IssueList from './components/IssueList';
 import RelationMap from './components/RelationMap';
 import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
-import AlertModal from './components/AlertModal';
-import NoticePopup from './components/NoticePopup';
-import { getAuthUser } from './utils/auth';
+import AlertModal from '@platform/web-ui/components/AlertModal';
+import NoticePopup from '@platform/web-ui/components/NoticePopup';
+import { getAuthUser } from '@platform/web-ui/utils/authUser';
 import config from './config';
 import './App.css';
 import { authFetch } from './platform/auth';
@@ -138,7 +138,7 @@ function App() {
       </div>
       <div className="app-body">{content}</div>
       <AlertModal />
-      <NoticePopup />
+      <NoticePopup user={user} />
     </div>
   );
 }

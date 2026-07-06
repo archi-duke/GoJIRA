@@ -2,9 +2,9 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from
 import './ProjectMap.css';
 import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
-import { modalAlert, modalPrompt } from './AlertModal';
+import { modalAlert, modalPrompt } from '@platform/web-ui/components/AlertModal';
 import config from '../config';
-import { detectLauncher, requestPrewarm } from '../utils/launcher';
+import { detectLauncher, requestPrewarm } from '@platform/web-ui/runtime/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import { authFetch } from '../platform/auth';
 
