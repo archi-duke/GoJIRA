@@ -52,6 +52,19 @@
   cursor: pointer;
 }
 .am-add-btn:hover { opacity: 0.8; }
+.am-toolbar-actions { display: flex; align-items: center; gap: 8px; }
+/* 필터 행 토글 — 평소 outline, 켜지면 add-btn 과 같은 톤으로 반전 */
+.am-filter-btn {
+  padding: 6px 14px;
+  border: 1px solid #2c3e50;
+  border-radius: 4px;
+  background: #fff;
+  color: #2c3e50;
+  font-size: 13px;
+  cursor: pointer;
+}
+.am-filter-btn:hover { opacity: 0.8; }
+.am-filter-btn-on { background: #2c3e50; color: #fff; }
 
 .am-table {
   width: 100%;

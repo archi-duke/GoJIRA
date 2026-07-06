@@ -6,13 +6,15 @@
 //   columns:     [{ field, title, width?, cell?, filterable?, sortable? }] — GridColumn 에 그대로 전달
 //   initialSort: [{ field, dir }] (선택)
 //   pageSize:    지정 시 페이징 활성 (선택, 기본 비활성)
+//   filterable:  필터 행 표시 여부 (기본 true). false 로 바뀌면 걸려있던 필터도 해제 —
+//                숨은 필터가 몰래 적용된 채 남는 혼동 방지 (토글 UI 용)
 // 나머지 props 는 Grid 로 전달.
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Grid, GridColumn } from '@progress/kendo-react-grid';
 import { process } from '@progress/kendo-data-query';
 import '@progress/kendo-theme-bootstrap/dist/all.css';
 
-export default function DataGrid({ data, columns, initialSort = [], pageSize, children, ...rest }) {
+export default function DataGrid({ data, columns, initialSort = [], pageSize, filterable = true, children, ...rest }) {
   const [dataState, setDataState] = useState({
     sort: initialSort,
     filter: undefined,
@@ -20,13 +22,17 @@ export default function DataGrid({ data, columns, initialSort = [], pageSize, ch
     take: pageSize,
   });
 
+  useEffect(() => {
+    if (!filterable) setDataState((s) => (s.filter ? { ...s, filter: undefined } : s));
+  }, [filterable]);
+
   const result = process(data || [], dataState);
 
   return (
     <Grid
       data={result}
       sortable
-      filterable
+      filterable={filterable}
       pageable={!!pageSize}
       {...dataState}
       onDataStateChange={(e) => setDataState(e.dataState)}

@@ -118,6 +118,8 @@ export default function AccountManager({ user }) {
 
 // --- Users 테이블 (Kendo Grid — 소팅/필터, 계약 04 web-ui DataGrid 소비) ---
 function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) {
+  // 필터 행은 기본 숨김 — 툴바 "필터" 버튼으로 토글 (끄면 걸린 필터도 해제됨, DataGrid 규약)
+  const [showFilter, setShowFilter] = useState(false);
   // 파생 표시 필드를 행에 미리 평탄화 — 소팅/필터가 표시 문자열 기준으로 동작하게 한다.
   const rows = useMemo(() => {
     const groupMap = {};
@@ -141,10 +143,20 @@ function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) 
     <>
       <div className="am-toolbar">
         <span className="am-count">{users.length}명</span>
-        <button className="am-add-btn" onClick={onCreate}>+ 사용자 추가</button>
+        <span className="am-toolbar-actions">
+          <button
+            className={`am-filter-btn ${showFilter ? 'am-filter-btn-on' : ''}`}
+            onClick={() => setShowFilter(f => !f)}
+            title={showFilter ? '필터 행 숨기기 (걸린 필터 해제)' : '필터 행 표시'}
+          >
+            필터
+          </button>
+          <button className="am-add-btn" onClick={onCreate}>+ 사용자 추가</button>
+        </span>
       </div>
       <DataGrid
         data={rows}
+        filterable={showFilter}
         initialSort={[{ field: 'knoxId', dir: 'asc' }]}
         columns={[
           { field: 'knoxId', title: 'Knox ID', width: '160px' },
