@@ -21,6 +21,16 @@ COPY Platform-App/package.json Platform-App/package-lock.json* Platform-App/
 RUN cd GoJIRA-App && npm ci --no-audit --no-fund
 RUN cd Platform-App && npm ci --no-audit --no-fund
 
+# @platform/web-ui — Kendo 의존을 단독 소유하는 소스 패키지 (계약 04).
+# .npmrc(legacy-peer-deps)가 react 자동설치를 막는다 — react 가 web-ui/node_modules
+# 에 생기면 앱과 이중 인스턴스가 되므로 반드시 함께 복사.
+# Kendo 라이선스: 외부망 캐시 빌드 시 TELERIK_LICENSE build-arg(선택) — 미지정이어도
+# 5.x 는 경고만 하고 설치는 진행된다.
+ARG TELERIK_LICENSE
+ENV TELERIK_LICENSE=${TELERIK_LICENSE}
+COPY packages/web-ui/package.json packages/web-ui/package-lock.json* packages/web-ui/.npmrc packages/web-ui/
+RUN cd packages/web-ui && npm ci --no-audit --no-fund
+
 # pumlex (vendored workspace: pex-core + pex-server) — npm 레지스트리 접근을
 # 빌드 시점에서 제거하기 위해 소스 전체 + 설치된 node_modules 를 캐시에 담는다.
 # workspace 심링크(@archi-duke/pex-core → ../packages/pex-core) 때문에 node_modules

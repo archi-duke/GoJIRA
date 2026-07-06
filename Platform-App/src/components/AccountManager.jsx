@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import config from '../config';
 import { modalAlert } from '@platform/web-ui/components/AlertModal';
+import DataGrid from '@platform/web-ui/components/DataGrid';
 import './AccountManager.css';
 import { authFetch } from '../platform/auth';
 
@@ -115,12 +116,26 @@ export default function AccountManager({ user }) {
   );
 }
 
-// --- Users 테이블 ---
+// --- Users 테이블 (Kendo Grid — 소팅/필터, 계약 04 web-ui DataGrid 소비) ---
 function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) {
-  const groupMap = {};
-  authGroups.forEach(g => { groupMap[g._id] = g.name; });
-  const orgMap = {};
-  orgUnits.forEach(o => { orgMap[o._id] = o.name; });
+  // 파생 표시 필드를 행에 미리 평탄화 — 소팅/필터가 표시 문자열 기준으로 동작하게 한다.
+  const rows = useMemo(() => {
+    const groupMap = {};
+    authGroups.forEach(g => { groupMap[g._id] = g.name; });
+    return users.map(u => ({
+      ...u,
+      groupNames: (u.authGroupIds || []).map(id => groupMap[id] || id).join(', '),
+      orgPath: sortOrgUnits((u.orgUnitIds || []).map(id => orgUnits.find(o => o._id === id)).filter(Boolean))
+        .map(o => o.name).join(' > '),
+    }));
+  }, [users, authGroups, orgUnits]);
+
+  const ActionsCell = (props) => (
+    <td className="am-actions">
+      <button onClick={() => onEdit(props.dataItem)}>편집</button>
+      <button onClick={() => onDelete(props.dataItem._id)}>삭제</button>
+    </td>
+  );
 
   return (
     <>
@@ -128,28 +143,18 @@ function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) 
         <span className="am-count">{users.length}명</span>
         <button className="am-add-btn" onClick={onCreate}>+ 사용자 추가</button>
       </div>
-      <table className="am-table">
-        <thead>
-          <tr>
-            <th>Knox ID</th><th>이름</th><th>이메일</th><th>권한그룹</th><th>조직</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map(u => (
-            <tr key={u._id}>
-              <td>{u.knoxId}</td>
-              <td>{u.name}</td>
-              <td>{u.email}</td>
-              <td>{(u.authGroupIds || []).map(id => groupMap[id] || id).join(', ')}</td>
-              <td>{sortOrgUnits((u.orgUnitIds || []).map(id => orgUnits.find(o => o._id === id)).filter(Boolean)).map(o => o.name).join(' > ')}</td>
-              <td className="am-actions">
-                <button onClick={() => onEdit(u)}>편집</button>
-                <button onClick={() => onDelete(u._id)}>삭제</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataGrid
+        data={rows}
+        initialSort={[{ field: 'knoxId', dir: 'asc' }]}
+        columns={[
+          { field: 'knoxId', title: 'Knox ID', width: '160px' },
+          { field: 'name', title: '이름', width: '140px' },
+          { field: 'email', title: '이메일' },
+          { field: 'groupNames', title: '권한그룹' },
+          { field: 'orgPath', title: '조직' },
+          { title: ' ', cell: ActionsCell, filterable: false, sortable: false, width: '130px' },
+        ]}
+      />
     </>
   );
 }

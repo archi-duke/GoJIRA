@@ -17,8 +17,11 @@ COPY GoJIRA-App/ ./
 # 위 COPY 가 package.json 도 덮어쓰지만 lock 과 일관되도록 유지 (캐시 이미지가 같은 lock 사용 가정)
 # 새 의존성 추가 시 build-cache-node 도 갱신 필요.
 # @platform/web-ui 소스 패키지 — vite.config 이 ../packages/web-ui/src 로 alias 해석
-# (/src 의 상위 = /packages). 신규 npm 의존성이 아니므로 build-cache-node 는 무관.
+# (/src 의 상위 = /packages). web-ui 는 자체 node_modules(Kendo)를 가지므로,
+# fresh clone(없음)이면 캐시에서 보충한다. (GoJIRA-App 은 현재 Kendo 모듈을 import
+# 하지 않지만 web-ui 소비 표면 확장에 대비해 동일 처리)
 COPY packages/ /packages/
+RUN [ -d /packages/web-ui/node_modules ] || cp -r /cache/packages/web-ui/node_modules /packages/web-ui/node_modules
 RUN npm run build
 
 FROM nginx:alpine
