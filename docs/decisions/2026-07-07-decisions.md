@@ -40,6 +40,21 @@
   RAGaaS base 수정 지시는 필수→선택 다운그레이드 (통지문 §0 갱신).
 - **기각**: standalone 에 플랫폼 크롬 이식 — 제품별 중복 구현, 크롬 변경마다 전 제품 재배포.
 
+## D5. 브랜디드 스코프 + remote './manifest' (제품이 타이틀바 메뉴를 소유)
+
+- **요구**: `/` = 플랫폼 브랜드(임시 NETRIX) + 전체 메뉴, `/gojira` = GoJIRA 아이콘/이름 + GoJIRA
+  메뉴(Project)만, `/ragaas` = RAGaaS 브랜드 + 그 메뉴만(현재 없음).
+- **결정**:
+  - remote 는 선택적으로 `./manifest` expose: `{ name, icon(base 상대), menus:[{key,label,pages?,authCode?,authLevel?}] }`.
+    셸이 기동 시 로드, 실패/미노출 → registry 폴백(단일 탭). 제품 메뉴 변경 = 제품 재배포만.
+  - 셸 스코프 = URL 1st 세그먼트: 제품 세그먼트면 그 제품 브랜드+메뉴만, 아니면 플랫폼.
+    RemoteAppProps 에 `page?: string` 추가 — 메뉴 클릭 키를 remote 에 전달.
+  - **URL 의미 변경**: 제품 세그먼트 URL = 스코프 진입점. 플랫폼 스코프의 제품 탭 전환은
+    URL 불변(구 D12 의 탭 딥링크 의미를 대체). `/account` 등 내장 딥링크는 유지.
+  - 플랫폼 브랜드명은 REACT_APP_PLATFORM_NAME(env, 기본 NETRIX) — 확정 시 .env 만 교체.
+- **적용**: 셸(App.jsx 스코프/manifest 로드/브랜딩) + GoJIRA-App manifest('Project') + 계약 01 §2.
+  RAGaaS 는 무수정 폴백 동작, manifest 추가는 그쪽 선택.
+
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 
 - Phase 1 (A1~A12) 전부 완료, React 19.2.7 상향 포함. frontend shared-net 조인 완료(`/ragaas/` 관통).

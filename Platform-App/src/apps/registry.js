@@ -22,7 +22,8 @@ function makeRemote(name, base) {
 }
 
 // GoJIRA 앱 — 1호 remote. dev 폴백 :3001.
-const GoJIRAApp = makeRemote('gojiraApp', remoteBaseFromEnv('REACT_APP_GOJIRA_APP_REMOTE', 'http://localhost:3001'));
+const gojiraBase = remoteBaseFromEnv('REACT_APP_GOJIRA_APP_REMOTE', 'http://localhost:3001');
+const GoJIRAApp = makeRemote('gojiraApp', gojiraBase);
 
 // RAGaaS 앱 — 2호 remote (온보딩 B1/B2). env 미설정이면 탭 자체를 노출하지 않는다 —
 // RAGaaS 스택이 배포되기 전의 셸이 죽은 탭을 보여주지 않게 하는 게이트.
@@ -38,6 +39,12 @@ const appRegistry = [
     authCode: null,          // 전체 접근
     authLevel: 0,
     subPages: ['docs', 'issues', 'relationMap', 'satam'],
+    // 브랜디드 스코프 (D5): /<product> 진입 시 이 제품만의 타이틀바를 구성.
+    // productLabel 은 manifest(name) 로드 전/실패 시의 브랜드명 폴백.
+    product: 'gojira',
+    productLabel: 'GoJIRA',
+    mfName: 'gojiraApp',
+    base: gojiraBase,
   },
   // RAGaaS — env 로 remote 가 지정된 경우에만 등록 (미배포 환경에서 탭 숨김)
   ...(RagaasApp
@@ -47,6 +54,10 @@ const appRegistry = [
         component: RagaasApp,
         authCode: null,      // 알파: 전체 접근. 권한 게이트가 필요해지면 authCode 신설(온보딩 B6)
         authLevel: 0,
+        product: 'ragaas',
+        productLabel: 'RAGaaS',
+        mfName: 'ragaasApp',
+        base: ragaasBase,
       }]
     : []),
   {
@@ -73,3 +84,17 @@ const appRegistry = [
 ];
 
 export default appRegistry;
+
+/**
+ * remote 의 './manifest' (선택 expose, 계약 01 §2) 로드 — { name, icon, menus } 메타.
+ * 미노출/로드 실패는 null (셸은 registry 의 productLabel/단일 탭으로 폴백).
+ */
+export async function loadAppManifest(entry) {
+  if (!entry || !entry.mfName) return null;
+  try {
+    const m = await loadRemote(`${entry.mfName}/manifest`);
+    return (m && (m.default ?? m)) || null;
+  } catch {
+    return null;
+  }
+}

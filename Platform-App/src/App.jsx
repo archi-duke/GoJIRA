@@ -7,7 +7,7 @@ import AlertModal from '@platform/web-ui/components/AlertModal';
 import { getAuthUser } from '@platform/web-ui/utils/authUser';
 import { subscribe, onStatus } from '@platform/web-ui/runtime/sseManager';
 import { modalAlert } from '@platform/web-ui/components/AlertModal';
-import appRegistry from './apps/registry';
+import appRegistry, { loadAppManifest } from './apps/registry';
 import config from './config';
 import { detectLauncher, requestChat } from '@platform/web-ui/runtime/launcher';
 // 셸 인증 런타임 (계약 02) — 모듈 로드 시 window.__platformAuth 게시까지 수행.
@@ -39,19 +39,47 @@ class RemoteErrorBoundary extends Component {
   }
 }
 
-// 셸 탭 ↔ URL 경로 동기화 (딥링크/뒤로가기, D12). URL 은 탭 키 수준만 반영 —
-// remote 내부 페이지(docs/issues 등)는 remote 소유이고 onNavigate 보고로 탭 활성만 동기화.
-// 탭 키는 registry 에서 파생 — 신규 remote(RAGaaS 등) 등록 시 딥링크도 자동 지원.
-const TAB_PATHS = appRegistry.map((a) => a.key);
+// URL 의미 체계 (D5 — 브랜디드 스코프):
+//   /                    → 플랫폼 스코프 (브랜드 = PLATFORM_NAME, 전 제품 탭 + 내장 메뉴)
+//   /account 등          → 플랫폼 스코프의 내장 페이지 딥링크
+//   /<product> (/gojira) → 제품 스코프: 그 제품의 브랜드(아이콘+이름)와 메뉴만 노출
+// 제품 스코프 안의 메뉴 전환은 URL 을 바꾸지 않는다 (URL = 스코프 진입점).
+// 플랫폼 스코프의 제품 탭 전환도 URL 을 바꾸지 않는다 — 제품 세그먼트 URL 은
+// '그 제품만의 화면' 을 뜻하므로 (탭 딥링크였던 구 D12 의미를 D5 가 대체).
+const PLATFORM_PAGES = ['account', 'notice', 'repository'];
+const PRODUCT_SEGMENTS = appRegistry.filter((a) => a.product).map((a) => a.product);
+const seg0 = () => window.location.pathname.replace(/^\//, '').split('/')[0];
+const scopeFromPath = () => (PRODUCT_SEGMENTS.includes(seg0()) ? seg0() : 'platform');
 const pageFromPath = () => {
-  const seg = window.location.pathname.replace(/^\//, '').split('/')[0];
-  return TAB_PATHS.includes(seg) ? seg : 'map';
+  const seg = seg0();
+  if (PRODUCT_SEGMENTS.includes(seg)) {
+    return appRegistry.find((a) => a.product === seg)?.key || 'map';
+  }
+  return PLATFORM_PAGES.includes(seg) ? seg : 'map';
 };
 
 function App() {
   const [user, setUser] = useState(() => getAuthUser());
   const [authority, setAuthority] = useState(null);
   const [page, setPage] = useState(pageFromPath);
+  // 브랜디드 스코프 (D5) — 'platform' | product 키. URL 이 진실 (popstate 로 동기화).
+  const [scope, setScope] = useState(scopeFromPath);
+  // remote './manifest' (선택) — { name, icon, menus }. product 키로 적재, 실패는 미기재.
+  const [manifests, setManifests] = useState({});
+
+  useEffect(() => {
+    appRegistry.filter((a) => a.product).forEach((entry) => {
+      loadAppManifest(entry).then((m) => {
+        if (m) setManifests((prev) => ({ ...prev, [entry.product]: m }));
+      });
+    });
+  }, []);
+
+  // 브라우저 탭 제목 = 현재 스코프 브랜드
+  useEffect(() => {
+    const sApp = scope !== 'platform' ? appRegistry.find(a => a.product === scope) : null;
+    document.title = sApp ? (manifests[scope]?.name || sApp.productLabel || sApp.label) : config.PLATFORM_NAME;
+  }, [scope, manifests]);
   const [allUsers, setAllUsers] = useState([]);
   const [mapResetCount, setMapResetCount] = useState(0);
   const [sseConnected, setSseConnected] = useState(false);
@@ -174,23 +202,25 @@ function App() {
 
   const navigate = useCallback((p) => {
     setPage(p);
-    if (TAB_PATHS.includes(p)) {
-      const path = p === 'map' ? '/' : `/${p}`;
+    // URL 은 플랫폼 스코프의 내장 페이지만 반영 (D5) — 제품 탭/메뉴 전환은 URL 불변.
+    // 제품 스코프에서는 URL 자체가 스코프 진입점(/gojira 등)이라 건드리지 않는다.
+    if (scope === 'platform') {
+      const path = PLATFORM_PAGES.includes(p) ? `/${p}` : '/';
       if (window.location.pathname !== path) window.history.pushState(null, '', path);
     }
     if (p === 'map') setMapResetCount(c => c + 1);
-  }, []);
+  }, [scope]);
 
   function switchUser(knoxId) {
     document.cookie = `ADSSO_USER=${encodeURIComponent(knoxId)}; path=/; max-age=${60*60*24*365}`;
     setUser(knoxId);
     setAuthority(null);
-    navigate('map');
+    navigate(scope === 'platform' ? 'map' : (appRegistry.find(a => a.product === scope)?.key || 'map'));
   }
 
-  // 브라우저 뒤로/앞으로 — URL 이 진실
+  // 브라우저 뒤로/앞으로 — URL 이 진실 (스코프 + 페이지 동시 동기화)
   useEffect(() => {
-    const onPop = () => setPage(pageFromPath());
+    const onPop = () => { setScope(scopeFromPath()); setPage(pageFromPath()); };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -198,12 +228,13 @@ function App() {
   // remote 의 내부 페이지 전환 보고 (계약 01 §2 onNavigate) — 탭 활성 판정 + 현재 과제 추적.
   // URL 은 탭 수준만 쓰므로 remote 내부 페이지는 pushState 하지 않는다.
   const handleRemoteNavigate = useCallback((p, ctx) => {
-    // 계약 01 §2 는 page 키 집합을 강제하지 않는다 — 셸이 모르는 remote 내부 라우트 키
-    // (RAGaaS 등 registry 에 subPages 미등록)는 컨텐츠 상태에 반영하지 않고 현재 탭 유지.
-    // 반영하면 컨텐츠 분기가 entry 를 못 찾아 placeholder 로 떨어진다.
-    if (appRegistry.some(a => a.key === p || (a.subPages && a.subPages.includes(p)))) setPage(p);
+    // 계약 01 §2 는 page 키 집합을 강제하지 않는다. 제품 스코프에서는 컨텐츠가 항상
+    // 그 제품 remote 라 어떤 키든 안전(메뉴 하이라이트에만 쓰임). 플랫폼 스코프에서는
+    // 셸이 모르는 키를 반영하면 컨텐츠 분기가 entry 를 못 찾아 placeholder 로 떨어지므로
+    // 아는 키(탭/subPages)만 반영하고 나머지는 무시(현재 탭 유지).
+    if (scope !== 'platform' || appRegistry.some(a => a.key === p || (a.subPages && a.subPages.includes(p)))) setPage(p);
     if (ctx && 'projectCode' in ctx) setActiveProjectCode(ctx.projectCode || '');
-  }, []);
+  }, [scope]);
 
   // 로고/타이틀 클릭 — 활성 프로젝트가 있으면 그 로컬 clone 에서, 없으면 일반 repoRoot 에서 에이전트 spawn.
   // 활성 프로젝트는 remote 가 onNavigate(page, { projectCode }) 로 보고 (계약 01 §2).
@@ -268,28 +299,57 @@ function App() {
     return <div className="app-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#888' }}>인증 확인 중...</div>;
   }
 
-  // 권한 기반 메뉴 필터링
+  // ── 브랜디드 스코프 파생값 (D5) ──
+  const scopeApp = scope !== 'platform' ? appRegistry.find(a => a.product === scope) : null;
+  const scopeManifest = scopeApp ? manifests[scope] : null;
+  const brandName = scopeApp ? (scopeManifest?.name || scopeApp.productLabel || scopeApp.label) : config.PLATFORM_NAME;
+  const brandIcon = scopeApp && scopeManifest?.icon
+    ? `${scopeApp.base}/${scopeManifest.icon.replace(/^\//, '')}`
+    : '/icons/platform-logo.svg';
+
+  // 권한 기반 메뉴 필터링 — 플랫폼 스코프: 전 앱 탭, 제품 스코프: 그 제품 manifest 메뉴만
   const visibleApps = appRegistry.filter(app => {
     if (!app.authCode) return true;
     return authority && (authority[app.authCode] || 0) >= app.authLevel;
   });
+  const scopeMenus = scopeApp
+    ? (scopeManifest?.menus || []).filter(m =>
+        !m.authCode || (authority && (authority[m.authCode] || 0) >= (m.authLevel || 0)))
+    : [];
 
-  // 현재 활성 탭 판별
+  // 현재 활성 탭/메뉴 판별
   const activeKey = appRegistry.find(app =>
     app.key === page || (app.subPages && app.subPages.includes(page))
   )?.key || 'map';
+  const activeMenuKey = scopeMenus.find(m =>
+    m.key === page || (m.pages && m.pages.includes(page))
+  )?.key || null;
 
-  // 권한 미달 시 리다이렉트
-  const currentApp = appRegistry.find(a => a.key === page || (a.subPages && a.subPages.includes(page)));
+  // 권한 미달 시 리다이렉트 (플랫폼 스코프의 내장/탭 페이지만 해당)
+  const currentApp = scope === 'platform'
+    ? appRegistry.find(a => a.key === page || (a.subPages && a.subPages.includes(page)))
+    : null;
   if (currentApp && currentApp.authCode && authority !== null) {
     if ((authority[currentApp.authCode] || 0) < currentApp.authLevel) {
       navigate('map');
     }
   }
 
-  // 컨텐츠 렌더링
+  // 컨텐츠 렌더링 — 제품 스코프는 항상 그 제품 remote (메뉴 키는 page prop 으로 전달)
   let content;
-  if (page === 'account') {
+  if (scopeApp) {
+    const AppComponent = scopeApp.component;
+    content = AppComponent ? (
+      <RemoteErrorBoundary label={brandName}>
+        <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
+          <AppComponent user={user} authority={authority} resetKey={mapResetCount}
+            page={page} onNavigate={handleRemoteNavigate} />
+        </Suspense>
+      </RemoteErrorBoundary>
+    ) : (
+      <div className="app-placeholder">페이지를 찾을 수 없습니다</div>
+    );
+  } else if (page === 'account') {
     content = <AccountManager user={user} />;
   } else if (page === 'notice') {
     content = <NoticeManager user={user} />;
@@ -303,7 +363,7 @@ function App() {
         <RemoteErrorBoundary label={appEntry.label}>
           <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
             <AppComponent user={user} authority={authority} resetKey={mapResetCount}
-              onNavigate={handleRemoteNavigate} />
+              page={page} onNavigate={handleRemoteNavigate} />
           </Suspense>
         </RemoteErrorBoundary>
       );
@@ -315,22 +375,32 @@ function App() {
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon app-logo-clickable"
+        <img src={brandIcon} alt={brandName} className="app-logo-icon app-logo-clickable"
           onClick={launchAgentChat}
           title="에이전트 채팅 띄우기" />
         <span className="app-logo app-logo-clickable"
           onClick={launchAgentChat}
-          title="에이전트 채팅 띄우기">GoJIRA</span>
+          title="에이전트 채팅 띄우기">{brandName}</span>
         <nav className="app-nav">
-          {visibleApps.map((app) => (
-            <button
-              key={app.key}
-              className={`app-nav-btn ${activeKey === app.key ? 'app-nav-active' : ''}`}
-              onClick={() => navigate(app.key)}
-            >
-              {app.label}
-            </button>
-          ))}
+          {scopeApp
+            ? scopeMenus.map((m) => (
+                <button
+                  key={m.key}
+                  className={`app-nav-btn ${activeMenuKey === m.key ? 'app-nav-active' : ''}`}
+                  onClick={() => navigate(m.key)}
+                >
+                  {m.label}
+                </button>
+              ))
+            : visibleApps.map((app) => (
+                <button
+                  key={app.key}
+                  className={`app-nav-btn ${activeKey === app.key ? 'app-nav-active' : ''}`}
+                  onClick={() => navigate(app.key)}
+                >
+                  {app.label}
+                </button>
+              ))}
         </nav>
         <span className="app-sse-indicator" title={sseConnected ? 'SSE 연결됨' : 'SSE 연결 끊김'}
           style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:sseConnected?'#27ae60':'#aaa',marginRight:6,verticalAlign:'middle'}} />

@@ -24,6 +24,8 @@ x-build-context: &build-context
 # (WebSocket 은 프론트가 http→ws 치환하므로 자동으로 wss). http(기본)면 평문.
 # 경로 체계 v2 (2026-07-06): /<제품>/ = 프론트, /<제품>/api/v2 = 백엔드, /platform/api/v2 = 공용
 x-react-env: &react-env
+  # 플랫폼 브랜드명 (셸 타이틀바, D5) — 확정 전 임시 NETRIX
+  REACT_APP_PLATFORM_NAME: "${PLATFORM_NAME:-NETRIX}"
   REACT_APP_PLATFORM_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/platform/api/v2"
   REACT_APP_GOJIRA_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira/api/v2"
   REACT_APP_GOJIRA_APP_REMOTE: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira"

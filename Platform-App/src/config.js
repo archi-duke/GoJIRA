@@ -7,6 +7,9 @@ const pick = (key, fallback) =>
   e[key] || (import.meta.env && import.meta.env[key]) || fallback;
 
 const config = {
+  // 플랫폼 브랜드명 — 루트(/) 진입 시 타이틀바에 표시. 확정 전 임시 'NETRIX' (D5).
+  // 폐쇄망에서 deploy/.env PLATFORM_NAME 만 바꾸면 재빌드 없이 교체된다.
+  PLATFORM_NAME: pick('REACT_APP_PLATFORM_NAME', 'NETRIX'),
   // 공통 플랫폼 API (인증, 계정, 공지)
   API_BASE: pick('REACT_APP_PLATFORM_API', 'http://localhost:9000/api/v2'),
   // GoJIRA 앱 API (이슈, 프로젝트)

@@ -32,6 +32,7 @@ export default defineConfig(({ command }) => ({
 
       exposes: {
         './App': './src/GoJIRAApp',
+        './manifest': './src/manifest', // 제품 메타 (name/icon/menus) — 계약 01 §2, D5
       },
       shared: {
         react: { singleton: true },

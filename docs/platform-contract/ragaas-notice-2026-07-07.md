@@ -83,6 +83,17 @@ curl -s http://{gateway}/ragaas/ | grep -o 'src="[^"]*"'   # 전부 /ragaas/ 프
 | **Kendo 라이선스** | 이해하신 대로입니다. web-ui 이관(Phase 2) 시 플랫폼 소유 라이선스로 일원화 — 실키는 어느 레포에도 커밋하지 않고 **빌드 시점 주입**(CI/빌드 머신의 `TELERIK_LICENSE`)입니다. 미등록 모드 워터마크는 Phase 2 에서 자연 해소. |
 | **dev 포트 3002** | 셸 registry 는 RAGaaS 를 env 게이트로만 등록합니다(dev 폴백 없음 — 미기동 환경에서 죽은 탭 방지). dev 합동 검증 시 Platform-App 쪽 `.env` 에 `REACT_APP_RAGAAS_APP_REMOTE=http://localhost:3002` 한 줄이면 됩니다. |
 
+## 3.5. (추가 2026-07-07) 계약 확장 — `./manifest` 로 타이틀바 브랜딩/메뉴 등록 (선택)
+
+계약 01 §2 에 선택 expose `./manifest` 가 추가됐습니다: `{ name, icon, menus }`.
+`/ragaas` 진입 시 셸이 RAGaaS 브랜드(아이콘+이름)와 RAGaaS 가 선언한 메뉴만 노출하는
+**브랜디드 스코프**가 생겼습니다 (플랫폼 루트 `/` 는 전 제품 통합 뷰 유지).
+
+- **안 하면**: 지금처럼 동작 (브랜드명 'RAGaaS' 폴백, 메뉴 없음 — 바디 전체 화면). 블로커 아님.
+- **하면**: `exposes: { './manifest': './src/manifest' }` + 순수 데이터 default export.
+  타이틀바 메뉴(예: Knowledge Bases / Jobs)를 직접 소유하게 되고, 메뉴 클릭 키는 `page` prop
+  (RemoteAppProps 추가됨) 으로 들어옵니다. 상세는 계약 01 §2 갱신본 참조.
+
 ## 4. 다음 단계
 
 1. RAGaaS: `base: '/ragaas/'` 반영 + basename/SPA fallback 확인 → 재빌드·재배포 → §2 검증 커맨드 통과
