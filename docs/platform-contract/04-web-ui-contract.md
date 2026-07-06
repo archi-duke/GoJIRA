@@ -33,9 +33,12 @@ RAGaaS 의 Kendo 의존은 합류 시 web-ui 로 이관한다.
   컴파일해 번들에 포함한다 — lockfile/build-cache 무변경, Dockerfile 은 `COPY packages/` 한 줄. 이 단계에선 MF singleton
   공유를 하지 않는다(각 앱 번들 포함 — 기존과 동일한 런타임 격리). **Kendo 도입 시점에 진짜 패키지(npm workspaces +
   MF shared singleton, §3)로 승격** — 라이선스/테마/모달 레지스트리 단일화가 그때 필요해진다.
-- RAGaaS 등 외부 레포 제품은: ① MF shared singleton 으로 런타임 공유(아래 §3)를 기본으로 하고,
-  ② 빌드타임 타입/authoring 이 필요하면 tarball(`npm pack`) 반입 또는 사내 레지스트리 등록. (Kendo 라이선스 특성상
-  소스 vendoring 금지 — 패키지 단위로만 이동.)
+- **외부 레포 제품(RAGaaS 등)의 소비 = tarball (2026-07-06 구현·검증)**: `deploy/scripts/pack-web-ui.sh` →
+  `deploy/dist/platform-web-ui-<ver>.tgz` → 소비측 `npm install ./platform-web-ui-<ver>.tgz`.
+  package.json 의 `exports` 맵이 서브패스(`/components/DataGrid` 등)를 소스 파일로 해석하고, 소비측 Vite 가
+  node_modules 안의 .jsx 를 컴파일한다(외부 Vite 프로젝트에서 설치→import→빌드 검증 완료). Kendo 는 tarball
+  dependencies 로 함께 설치, react/react-dom 은 peer. (Kendo 라이선스 특성상 소스 vendoring 금지 — 패키지 단위로만 이동.)
+  MF shared singleton 런타임 공유(아래 §3)는 2단계 승격(D11/D13 트리거) 시 적용.
 
 ## 3. MF 공유 규약
 

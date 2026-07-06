@@ -91,3 +91,6 @@ gojira-launcher/out-*
 
 # 폐쇄망 배포 tar 산출물 (거대 — 커밋 X)
 *.tar
+
+# 패키징 산출물 (deploy/scripts/pack-web-ui.sh 의 tarball 등) — 커밋 X
+deploy/dist/

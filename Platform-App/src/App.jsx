@@ -22,11 +22,12 @@ class RemoteErrorBoundary extends Component {
   static getDerivedStateFromError() { return { hasError: true }; }
   render() {
     if (this.state.hasError) {
+      const label = this.props.label || 'remote 앱';
       return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', gap: 12 }}>
           <span style={{ fontSize: 40 }}>⚠</span>
-          <span style={{ fontSize: 15, fontWeight: 600 }}>GoJIRA-App에 연결할 수 없습니다</span>
-          <span style={{ fontSize: 13 }}>GoJIRA-App (:3001)이 실행 중인지 확인해주세요</span>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>{label}에 연결할 수 없습니다</span>
+          <span style={{ fontSize: 13 }}>{label} 서비스가 실행 중인지 확인해주세요</span>
           <button onClick={() => this.setState({ hasError: false })}
             style={{ marginTop: 8, padding: '6px 16px', border: 'none', background: '#ddd', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>
             다시 시도
@@ -40,7 +41,8 @@ class RemoteErrorBoundary extends Component {
 
 // 셸 탭 ↔ URL 경로 동기화 (딥링크/뒤로가기, D12). URL 은 탭 키 수준만 반영 —
 // remote 내부 페이지(docs/issues 등)는 remote 소유이고 onNavigate 보고로 탭 활성만 동기화.
-const TAB_PATHS = ['map', 'account', 'notice', 'repository'];
+// 탭 키는 registry 에서 파생 — 신규 remote(RAGaaS 등) 등록 시 딥링크도 자동 지원.
+const TAB_PATHS = appRegistry.map((a) => a.key);
 const pageFromPath = () => {
   const seg = window.location.pathname.replace(/^\//, '').split('/')[0];
   return TAB_PATHS.includes(seg) ? seg : 'map';
@@ -295,7 +297,7 @@ function App() {
     if (appEntry && appEntry.component) {
       const AppComponent = appEntry.component;
       content = (
-        <RemoteErrorBoundary>
+        <RemoteErrorBoundary label={appEntry.label}>
           <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
             <AppComponent user={user} authority={authority} resetKey={mapResetCount}
               onNavigate={handleRemoteNavigate} />

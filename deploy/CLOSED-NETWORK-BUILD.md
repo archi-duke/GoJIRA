@@ -159,7 +159,7 @@ docker compose build launcher-dist && docker compose up -d
 grep -nE "^FROM " deploy/images/*/Dockerfile
 # 기대값:
 #   build-cache-go/node/py  : FROM golang/node/python                 (캐시 이미지 자신)
-#   platform-api/gojira-api : builder=gojira/build-cache-go,   runtime=gojira/build-cache-alpine
+#   platform-api/gojira/api : builder=gojira/build-cache-go,   runtime=gojira/build-cache-alpine
 #   launcher-dist           : builder=gojira/build-cache-go,   runtime=alpine:3.20 (apk add 없음)
 #   gojira-app/platform-app : builder=gojira/build-cache-node, runtime=nginx:alpine
 #   pumlex-server           : builder=gojira/build-cache-node, runtime=node:lts-alpine

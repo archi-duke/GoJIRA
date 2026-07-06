@@ -57,7 +57,7 @@ func TestGatewayOrigin(t *testing.T) {
 	cases := map[string]string{
 		"https://gojira-host:44300":              "https://gojira-host:44300",
 		"http://10.0.0.1:3000/":                  "http://10.0.0.1:3000",
-		"https://g.corp:443/platform-api/api/v2": "https://g.corp:443",
+		"https://g.corp:443/platform/api/v2": "https://g.corp:443",
 		"  https://g.corp  ":                     "https://g.corp",
 		"gojira-host:44300":                      "", // scheme 없음 → 무효
 		"":                                       "",
@@ -73,10 +73,10 @@ func TestDeriveGateway(t *testing.T) {
 	// gateway 만 있을 때 backend + webOrigins 파생
 	c := &Config{Gateway: "https://gojira-host:44300"}
 	deriveGateway(c)
-	if c.Backend.PlatformAPI != "https://gojira-host:44300/platform-api/api/v2" {
+	if c.Backend.PlatformAPI != "https://gojira-host:44300/platform/api/v2" {
 		t.Errorf("platformApi=%q", c.Backend.PlatformAPI)
 	}
-	if c.Backend.GojiraAPI != "https://gojira-host:44300/gojira-api/api/v2" {
+	if c.Backend.GojiraAPI != "https://gojira-host:44300/gojira/api/v2" {
 		t.Errorf("gojiraApi=%q", c.Backend.GojiraAPI)
 	}
 	if len(c.WebOrigins) != 1 || c.WebOrigins[0] != "https://gojira-host:44300" {
@@ -93,7 +93,7 @@ func TestDeriveGateway(t *testing.T) {
 	if c2.Backend.PlatformAPI != "https://manual/api" {
 		t.Errorf("override 무시됨: %q", c2.Backend.PlatformAPI)
 	}
-	if c2.Backend.GojiraAPI != "https://g:443/gojira-api/api/v2" {
+	if c2.Backend.GojiraAPI != "https://g:443/gojira/api/v2" {
 		t.Errorf("gojiraApi=%q", c2.Backend.GojiraAPI)
 	}
 	if len(c2.WebOrigins) != 1 {

@@ -263,9 +263,9 @@ docker compose up -d
 source .env
 B="${URL_SCHEME:-http}://localhost:${GATEWAY_PORT}"
 curl -sS  ${B}/                          # Platform-App → HTML (shell)
-curl -sS  ${B}/gojira-app/remoteEntry.js # GoJIRA-App remote → JS
-curl -sS  ${B}/platform-api/             # Platform-API → 404 OK (gateway→9000)
-curl -sS  ${B}/gojira-api/               # GoJIRA-API   → 404 OK (gateway→9001)
+curl -sS  ${B}/gojira/remoteEntry.js # GoJIRA-App remote → JS
+curl -sS  ${B}/platform/api/             # Platform-API → 404 OK (gateway→9000)
+curl -sS  ${B}/gojira/api/               # GoJIRA-API   → 404 OK (gateway→9001)
 curl -sS  ${B}/pumlex/                   # pumlex       → HTML
 
 # 백엔드 컨테이너 자체를 직접 보려면 내부에서:
@@ -287,7 +287,7 @@ docker compose logs gojira-api    | head -30
 ${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/               # Platform-App (계정/공지/문서)
 ${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/ 내에서 이동    # GoJIRA-App (이슈/프로젝트/채팅, MF remote)
 ```
-(gateway 단일 origin — GoJIRA-App 은 Platform-App shell 안에서 `/gojira-app/` remote 로 로드됨)
+(gateway 단일 origin — GoJIRA-App 은 Platform-App shell 안에서 `/gojira/` remote 로 로드됨)
 
 체크리스트:
 - [ ] Platform-App 로그인 / 프로젝트 목록 표시
@@ -382,7 +382,7 @@ docker image prune                     # 옛 이미지 정리
 | Platform-API startup 시 `mkdir /data/repos: permission denied` | 위와 동일 — bind mount 호스트 디렉토리 권한 확인 |
 | 백엔드 startup 시 `MongoDB connect timeout` | `MONGODB_SERVER` / `MONGO_USER` / `MONGO_PASS` 확인. 비밀번호에 `@` / `:` / `/` 들어가면 URL encoding 필요 (`@` → `%40`) |
 | 브라우저 콘솔 `ERR_CONNECTION_REFUSED` | env.js 가 비었거나 `GATEWAY_HOST`/`GATEWAY_PORT` 오설정. `docker compose exec platform-app cat /usr/share/nginx/html/env.js` 로 확인 후 `docker compose up -d platform-app gojira-app gateway` |
-| Module Federation `remoteEntry.js` 실패 | `${GATEWAY_HOST}:${GATEWAY_PORT}/gojira-app/remoteEntry.js` 가 브라우저에서 200 인지 확인 (gateway 라우팅) |
+| Module Federation `remoteEntry.js` 실패 | `${GATEWAY_HOST}:${GATEWAY_PORT}/gojira/remoteEntry.js` 가 브라우저에서 200 인지 확인 (gateway 라우팅) |
 | HTTPS 인 데 `ERR_SSL` / 인증서 경고 | 인증서 CN/SAN 이 `GATEWAY_HOST` 와 불일치하거나 체인 누락. `deploy/certs/fullchain.pem` 은 leaf+중간 체인 연결본이어야 함 |
 | gateway 가 502 Bad Gateway | 대상 백엔드 컨테이너 미기동. `docker compose ps` 로 상태 확인, `docker compose logs <service>` |
 | LLM 호출 시 `unauthorized` | `OPENAI_API_KEY` / `PLATFORM_LLM_TICKET` 확인. `GOJIRA_ENC_KEY` 가 `ENC:` 값 암호화 시 사용한 키와 동일한지 |

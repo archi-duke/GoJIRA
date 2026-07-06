@@ -22,15 +22,20 @@ x-build-context: &build-context
 # 모든 URL 은 gateway 단일 진입점(GATEWAY_HOST:GATEWAY_PORT) + 경로 프리픽스로 조합.
 # URL_SCHEME=https 면 gateway 가 TLS 종단하고 여기 URL 이 https 로 조합된다
 # (WebSocket 은 프론트가 http→ws 치환하므로 자동으로 wss). http(기본)면 평문.
+# 경로 체계 v2 (2026-07-06): /<제품>/ = 프론트, /<제품>/api/v2 = 백엔드, /platform/api/v2 = 공용
 x-react-env: &react-env
-  REACT_APP_PLATFORM_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/platform-api/api/v2"
-  REACT_APP_GOJIRA_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira-api/api/v2"
-  REACT_APP_GOJIRA_APP_REMOTE: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira-app"
+  REACT_APP_PLATFORM_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/platform/api/v2"
+  REACT_APP_GOJIRA_API: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira/api/v2"
+  REACT_APP_GOJIRA_APP_REMOTE: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/gojira"
   REACT_APP_PUMLEX_SERVER: "${URL_SCHEME:-http}://${GATEWAY_HOST:?required}:${GATEWAY_PORT:?required}/pumlex"
   REACT_APP_SSO_URL: "${REACT_APP_SSO_URL:-https://10.227.37.90:443}"
   REACT_APP_USE_SSO: "${REACT_APP_USE_SSO:-false}"
   # dev 폴백 신원 — 백엔드 DEV_USER 와 같은 소스 (계약 05 §6)
   REACT_APP_DEV_USER: "${DEV_USER:-duke.kimm}"
+  # RAGaaS remote origin (온보딩 B2) — 기본 빈값 = 셸에 RAGaaS 탭 미노출.
+  # RAGaaS 스택 합류 시 .env 에 RAGAAS_APP_REMOTE 지정 (게이트웨이 경유 권장:
+  # RAGAAS_APP_REMOTE=${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/ragaas)
+  REACT_APP_RAGAAS_APP_REMOTE: "${RAGAAS_APP_REMOTE:-}"
 
 # 백엔드 SSO 인증 env (auth 미들웨어). USE_SSO 는 프론트 토글과 동일 소스라 같이 켜진다.
 # USE_SSO=false(기본)면 X-User-Id/DEV_USER 폴백 → 동작 무변. SSO 모드 켤 때:
@@ -226,6 +231,13 @@ services:
       - platform-api
       - gojira-api
       - pumlex-server
+    # shared-net 조인 — /ragaas-app/, /ragaas-api/ 프록시가 RAGaaS 스택 컨테이너
+    # (ragaas-frontend/ragaas-backend, 별도 compose)에 도달하기 위함 (온보딩 B3).
+    # RAGaaS 미배포 환경에서도 무해: locations.conf 가 런타임 DNS(resolver)로 해석해
+    # 컨테이너 부재 시 해당 경로만 502, 게이트웨이 기동엔 영향 없음.
+    networks:
+      - default
+      - shared-net
 
 # 볼륨
 # - launcher-dist: launcher-dist init job 이 채우고 platform-api 가 read-only 로 서빙.
