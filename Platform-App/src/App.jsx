@@ -198,7 +198,10 @@ function App() {
   // remote 의 내부 페이지 전환 보고 (계약 01 §2 onNavigate) — 탭 활성 판정 + 현재 과제 추적.
   // URL 은 탭 수준만 쓰므로 remote 내부 페이지는 pushState 하지 않는다.
   const handleRemoteNavigate = useCallback((p, ctx) => {
-    setPage(p);
+    // 계약 01 §2 는 page 키 집합을 강제하지 않는다 — 셸이 모르는 remote 내부 라우트 키
+    // (RAGaaS 등 registry 에 subPages 미등록)는 컨텐츠 상태에 반영하지 않고 현재 탭 유지.
+    // 반영하면 컨텐츠 분기가 entry 를 못 찾아 placeholder 로 떨어진다.
+    if (appRegistry.some(a => a.key === p || (a.subPages && a.subPages.includes(p)))) setPage(p);
     if (ctx && 'projectCode' in ctx) setActiveProjectCode(ctx.projectCode || '');
   }, []);
 

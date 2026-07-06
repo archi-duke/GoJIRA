@@ -19,6 +19,16 @@
 - 방향: 첫 메시지 토큰 방식 유력(쿼리파라미터는 액세스 로그 노출 우려). 초안은 플랫폼 쪽 작성.
 - 그전까지 게이트웨이/셸 경유 전제로 현행 수용 (블로커 아님).
 
+## D3. 셸 onNavigate — 모르는 page 키는 무시 (현재 탭 유지)
+
+- **문제**: 셸에서 RAGaaS 탭 클릭 시 "페이지를 찾을 수 없습니다"(셸 placeholder). RAGaaS 가 계약대로
+  마운트 직후 onNavigate(내부 라우트 키)를 호출하는데, 셸 handleRemoteNavigate 가 무조건 setPage →
+  registry 에 없는 키라 컨텐츠 분기가 entry 를 못 찾음. GoJIRA 는 subPages(docs/issues…)가 등록돼
+  있어 우연히 무증상이었다.
+- **결정**: 계약 01 §2 는 page 키 집합을 강제하지 않으므로, 셸은 아는 키만 setPage 하고 모르는 키는
+  무시(현재 탭 유지). ctx.projectCode 는 항상 반영. 계약 01 §2 에 명문화.
+- **대안 기각**: registry 에 제품별 subPages 등록 — 셸이 remote 내부 라우트를 알아야 해서 결합 증가.
+
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 
 - Phase 1 (A1~A12) 전부 완료, React 19.2.7 상향 포함. frontend shared-net 조인 완료(`/ragaas/` 관통).

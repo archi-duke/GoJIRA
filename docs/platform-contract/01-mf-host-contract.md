@@ -48,6 +48,9 @@ interface RemoteAppProps {
 }
 ```
 
+- **onNavigate 의 page 키는 remote 자유.** 셸은 자기가 아는 키(탭 키·registry 에 등록된
+  subPages)만 탭 활성 판정에 반영하고, **모르는 키는 무시한다(현재 탭 유지)** — remote 는 내부
+  라우트 키를 그대로 보고해도 안전하다. ctx.projectCode 는 키와 무관하게 항상 반영된다.
 - **상태 공유는 이 props 와 콜백이 전부다.** sessionStorage 를 셸↔remote 채널로 쓰지 않는다
   (기존 `gojira_page`/`gojira_project` magic string 채널은 2026-07-06 D12 로 제거 — 셸은 더 이상 읽지 않는다).
 - remote 내부 전용 UI 상태(sessionStorage)는 자유이나 키에 `<제품명>_` 접두사를 붙여 네임스페이스를 분리한다.
