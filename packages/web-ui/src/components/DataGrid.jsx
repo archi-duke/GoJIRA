@@ -5,10 +5,10 @@
 //   data:        원본 배열 (필터/소트 전)
 //   columns:     [{ field, title, width?, cell?, filterable?, sortable? }] — GridColumn 에 그대로 전달
 //   initialSort: [{ field, dir }] (선택)
-//   pageSize:    지정 시 페이징 활성 (선택, 기본 비활성)
+//   pageSize:    지정 시 페이징 활성 — 페이지 크기 선택(10/20/50/100) 포함 (선택, 기본 비활성)
 //   filterable:  필터 행 표시 여부 (기본 true). false 로 바뀌면 걸려있던 필터도 해제 —
 //                숨은 필터가 몰래 적용된 채 남는 혼동 방지 (토글 UI 용)
-// 나머지 props 는 Grid 로 전달.
+// 나머지 props 는 Grid 로 전달. 필터 변경 시 1페이지로 복귀.
 import React, { useState, useEffect } from 'react';
 import { Grid, GridColumn } from '@progress/kendo-react-grid';
 import { process } from '@progress/kendo-data-query';
@@ -33,9 +33,15 @@ export default function DataGrid({ data, columns, initialSort = [], pageSize, fi
       data={result}
       sortable
       filterable={filterable}
-      pageable={!!pageSize}
+      pageable={pageSize ? { pageSizes: [10, 20, 50, 100], buttonCount: 5, info: true } : false}
       {...dataState}
-      onDataStateChange={(e) => setDataState(e.dataState)}
+      onDataStateChange={(e) =>
+        setDataState(
+          e.dataState.filter !== dataState.filter
+            ? { ...e.dataState, skip: 0 } // 필터가 바뀌면 1페이지로
+            : e.dataState
+        )
+      }
       {...rest}
     >
       {columns.map((c) => (

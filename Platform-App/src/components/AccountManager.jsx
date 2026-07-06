@@ -116,11 +116,43 @@ export default function AccountManager({ user }) {
   );
 }
 
-// --- Users 테이블 (Kendo Grid — 소팅/필터, 계약 04 web-ui DataGrid 소비) ---
+// --- 공통: 그리드 툴바(건수 + 검색 토글 + 추가) / 액션 셀 / 페이지 크기 ---
+const PAGE_SIZE = 20;
+
+function GridToolbar({ count, unit, addLabel, onCreate, searchOn, onToggleSearch }) {
+  return (
+    <div className="am-toolbar">
+      <span className="am-count">{count}{unit}</span>
+      <span className="am-toolbar-actions">
+        <button
+          className={`am-filter-btn ${searchOn ? 'am-filter-btn-on' : ''}`}
+          onClick={onToggleSearch}
+          title={searchOn ? '검색 행 숨기기 (걸린 조건 해제)' : '컬럼별 검색 행 표시'}
+        >
+          검색
+        </button>
+        <button className="am-add-btn" onClick={onCreate}>{addLabel}</button>
+      </span>
+    </div>
+  );
+}
+
+function makeActionsCell(onEdit, onDelete) {
+  return function ActionsCell(props) {
+    return (
+      <td className="am-actions">
+        <button onClick={() => onEdit(props.dataItem)}>편집</button>
+        <button onClick={() => onDelete(props.dataItem._id)}>삭제</button>
+      </td>
+    );
+  };
+}
+
+// --- Users 테이블 (Kendo Grid — 소팅/검색/페이징, 계약 04 web-ui DataGrid 소비) ---
 function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) {
-  // 필터 행은 기본 숨김 — 툴바 "필터" 버튼으로 토글 (끄면 걸린 필터도 해제됨, DataGrid 규약)
-  const [showFilter, setShowFilter] = useState(false);
-  // 파생 표시 필드를 행에 미리 평탄화 — 소팅/필터가 표시 문자열 기준으로 동작하게 한다.
+  // 검색(필터) 행은 기본 숨김 — 툴바 "검색" 버튼으로 토글 (끄면 걸린 조건 해제, DataGrid 규약)
+  const [searchOn, setSearchOn] = useState(false);
+  // 파생 표시 필드를 행에 미리 평탄화 — 소팅/검색이 표시 문자열 기준으로 동작하게 한다.
   const rows = useMemo(() => {
     const groupMap = {};
     authGroups.forEach(g => { groupMap[g._id] = g.name; });
@@ -132,31 +164,16 @@ function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) 
     }));
   }, [users, authGroups, orgUnits]);
 
-  const ActionsCell = (props) => (
-    <td className="am-actions">
-      <button onClick={() => onEdit(props.dataItem)}>편집</button>
-      <button onClick={() => onDelete(props.dataItem._id)}>삭제</button>
-    </td>
-  );
+  const ActionsCell = useMemo(() => makeActionsCell(onEdit, onDelete), [onEdit, onDelete]);
 
   return (
     <>
-      <div className="am-toolbar">
-        <span className="am-count">{users.length}명</span>
-        <span className="am-toolbar-actions">
-          <button
-            className={`am-filter-btn ${showFilter ? 'am-filter-btn-on' : ''}`}
-            onClick={() => setShowFilter(f => !f)}
-            title={showFilter ? '필터 행 숨기기 (걸린 필터 해제)' : '필터 행 표시'}
-          >
-            필터
-          </button>
-          <button className="am-add-btn" onClick={onCreate}>+ 사용자 추가</button>
-        </span>
-      </div>
+      <GridToolbar count={users.length} unit="명" addLabel="+ 사용자 추가" onCreate={onCreate}
+        searchOn={searchOn} onToggleSearch={() => setSearchOn(f => !f)} />
       <DataGrid
         data={rows}
-        filterable={showFilter}
+        filterable={searchOn}
+        pageSize={PAGE_SIZE}
         initialSort={[{ field: 'knoxId', dir: 'asc' }]}
         columns={[
           { field: 'knoxId', title: 'Knox ID', width: '160px' },
@@ -173,73 +190,73 @@ function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) 
 
 // --- AuthGroups 테이블 ---
 function AuthGroupTable({ authGroups, onEdit, onDelete, onCreate }) {
-  function renderAuth(authority) {
-    if (!authority) return '-';
-    return Object.entries(authority).map(([code, bits]) => {
-      const perms = Object.entries(PERM_LABELS).filter(([, b]) => bits & b).map(([l]) => l).join('');
-      return `${code}:${perms}`;
-    }).join(', ');
-  }
+  const [searchOn, setSearchOn] = useState(false);
+
+  // 권한 비트를 표시 문자열로 평탄화 — 검색/소팅 대상
+  const rows = useMemo(() => authGroups.map(g => ({
+    ...g,
+    authStr: g.authority
+      ? Object.entries(g.authority).map(([code, bits]) => {
+          const perms = Object.entries(PERM_LABELS).filter(([, b]) => bits & b).map(([l]) => l).join('');
+          return `${code}:${perms}`;
+        }).join(', ')
+      : '-',
+  })), [authGroups]);
+
+  const ActionsCell = useMemo(() => makeActionsCell(onEdit, onDelete), [onEdit, onDelete]);
 
   return (
     <>
-      <div className="am-toolbar">
-        <span className="am-count">{authGroups.length}개</span>
-        <button className="am-add-btn" onClick={onCreate}>+ 권한그룹 추가</button>
-      </div>
-      <table className="am-table">
-        <thead>
-          <tr><th>코드</th><th>이름</th><th>설명</th><th>권한</th><th></th></tr>
-        </thead>
-        <tbody>
-          {authGroups.map(g => (
-            <tr key={g._id}>
-              <td>{g.code}</td>
-              <td>{g.name}</td>
-              <td>{g.description}</td>
-              <td className="am-auth-cell">{renderAuth(g.authority)}</td>
-              <td className="am-actions">
-                <button onClick={() => onEdit(g)}>편집</button>
-                <button onClick={() => onDelete(g._id)}>삭제</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <GridToolbar count={authGroups.length} unit="개" addLabel="+ 권한그룹 추가" onCreate={onCreate}
+        searchOn={searchOn} onToggleSearch={() => setSearchOn(f => !f)} />
+      <DataGrid
+        data={rows}
+        filterable={searchOn}
+        pageSize={PAGE_SIZE}
+        initialSort={[{ field: 'code', dir: 'asc' }]}
+        columns={[
+          { field: 'code', title: '코드', width: '140px' },
+          { field: 'name', title: '이름', width: '180px' },
+          { field: 'description', title: '설명' },
+          { field: 'authStr', title: '권한', className: 'am-auth-cell' },
+          { title: ' ', cell: ActionsCell, filterable: false, sortable: false, width: '130px' },
+        ]}
+      />
     </>
   );
 }
 
 // --- OrgUnits 테이블 ---
 function OrgUnitTable({ orgUnits, onEdit, onDelete, onCreate }) {
-  const parentMap = {};
-  orgUnits.forEach(o => { parentMap[o._id] = o.name; });
-  const sorted = sortOrgUnits(orgUnits);
+  const [searchOn, setSearchOn] = useState(false);
+
+  // 조직 유형 순(company→division→team→group)으로 미리 정렬 + 상위 조직명 평탄화
+  const rows = useMemo(() => {
+    const parentMap = {};
+    orgUnits.forEach(o => { parentMap[o._id] = o.name; });
+    return sortOrgUnits(orgUnits).map(o => ({
+      ...o,
+      parentName: parentMap[o.parentOrgUnitId] || o.parentOrgUnitId || '-',
+    }));
+  }, [orgUnits]);
+
+  const ActionsCell = useMemo(() => makeActionsCell(onEdit, onDelete), [onEdit, onDelete]);
 
   return (
     <>
-      <div className="am-toolbar">
-        <span className="am-count">{orgUnits.length}개</span>
-        <button className="am-add-btn" onClick={onCreate}>+ 조직 추가</button>
-      </div>
-      <table className="am-table">
-        <thead>
-          <tr><th>이름</th><th>유형</th><th>상위 조직</th><th></th></tr>
-        </thead>
-        <tbody>
-          {sorted.map(o => (
-            <tr key={o._id}>
-              <td>{o.name}</td>
-              <td>{o.type}</td>
-              <td>{parentMap[o.parentOrgUnitId] || o.parentOrgUnitId || '-'}</td>
-              <td className="am-actions">
-                <button onClick={() => onEdit(o)}>편집</button>
-                <button onClick={() => onDelete(o._id)}>삭제</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <GridToolbar count={orgUnits.length} unit="개" addLabel="+ 조직 추가" onCreate={onCreate}
+        searchOn={searchOn} onToggleSearch={() => setSearchOn(f => !f)} />
+      <DataGrid
+        data={rows}
+        filterable={searchOn}
+        pageSize={PAGE_SIZE}
+        columns={[
+          { field: 'name', title: '이름' },
+          { field: 'type', title: '유형', width: '140px' },
+          { field: 'parentName', title: '상위 조직' },
+          { title: ' ', cell: ActionsCell, filterable: false, sortable: false, width: '130px' },
+        ]}
+      />
     </>
   );
 }
