@@ -20,7 +20,7 @@ import (
 	"sync"
 )
 
-const version = "0.1.16"
+const version = "0.1.17"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -771,6 +771,56 @@ func blobShaRaw(path string, size int64) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// GET /issues?code=&user= — 로컬 clone 의 data/issues/*.yaml(.yml) 을 raw 로 일괄 반환
+// (Phase 1 — 웹 이슈 뷰 이원화 §3 "내 작업본"). 응답 shape:
+//
+//	{ issues: [{path:"data/issues/VOS_001.yaml", content:"<raw yaml>"}], count, source:"local" }
+//
+// 읽기 전용 — EnsureRepo 를 호출하지 않는다(clone 자동 생성 금지). clone 이 없거나
+// data/issues 가 없으면 404 + {"error":...} — 웹은 이를 보고 공식본(Mongo)으로 폴백한다.
+// user 는 /files 와 동일하게 받되(파라미터 검증 일관성), 경로 해석에는 code 만 쓰인다 —
+// 로컬 clone 은 code 당 1개이고 현재 체크아웃된 브랜치 그대로 반환한다(사용자 전환/
+// 브랜치 정렬은 /files 등 다른 조회 경로가 이미 책임짐).
+func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	user := r.URL.Query().Get("user")
+	if err := validateName("code", code); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateName("user", user); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	repoPath := s.repoPath(code)
+	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
+		writeErr(w, http.StatusNotFound, "로컬 clone 이 없습니다: "+code)
+		return
+	}
+	issuesDir := filepath.Join(repoPath, "data", "issues")
+	files, err := readIssueFiles(issuesDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if files == nil {
+		writeErr(w, http.StatusNotFound, "data/issues 디렉터리가 없습니다: "+code)
+		return
+	}
+	issues := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		issues = append(issues, map[string]any{
+			"path":    "data/issues/" + f.Name,
+			"content": f.Content,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issues": issues,
+		"count":  len(issues),
+		"source": "local",
+	})
 }
 
 // GET /status?code= — 로컬 작업/브랜치 진행 상태 (§2.1).

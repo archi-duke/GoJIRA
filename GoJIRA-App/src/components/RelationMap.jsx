@@ -5,6 +5,7 @@ import { exportContent } from '@platform/web-ui/utils/exportUtils';
 import config from '../config';
 import './RelationMap.css';
 import { authFetch } from '../platform/auth';
+import useIssueSource from '../hooks/useIssueSource';
 
 const API_BASE = config.API_BASE;
 
@@ -129,8 +130,11 @@ const NAV_ITEMS = [
 ];
 
 export default function RelationMap({ project, user, onBack, currentPage, onNavigate }) {
-  const [issues, setIssues] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const projectCode = project.jiraCodes?.main?.jiraCode || '';
+  // 웹 이슈 뷰 이원화 Phase 1 — 공식본(main/Mongo) ↔ 내 작업본(로컬 런처) 전환.
+  // 런처 미감지/로컬 clone 없음이면 sourceAvailable=false → 토글 미노출, 기존 동작과 동일.
+  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta } =
+    useIssueSource({ projectCode, user });
   // 웹은 조회 전용 (local-agent-issue-model.md §3.3). 편집/링크/생성/삭제는 로컬로
   // 이전 → editMode 항상 false, 편집 토글 미노출.
   const [editMode] = useState(false);
@@ -152,31 +156,20 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   const contentRef = useRef(null);
   const cardElems = useRef({});
 
-  const projectCode = project.jiraCodes?.main?.jiraCode || '';
   const handleExport = useCallback((type) => exportContent(contentRef.current, type, `RelationMap_${projectCode}`), [projectCode]);
 
-  /* fetch issues */
-  const fetchIssues = useCallback(() => {
-    setLoading(true);
-    return authFetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
-      .then((r) => r.json())
-      .then((data) => setIssues(Array.isArray(data) ? data : []))
-      .catch(() => setIssues([]))
-      .finally(() => setLoading(false));
-  }, [projectCode]);
-
-  useEffect(() => { fetchIssues(); }, [fetchIssues]);
-
+  /* Pull — 공식본(Mongo)을 origin/main 기준으로 재동기화 후 현재 뷰 재조회.
+     내 작업본 보는 중이면 로컬 YAML 은 이미 실시간이라 재조회는 사실상 no-op. */
   const handlePull = useCallback(async () => {
     try {
       await authFetch(`${API_BASE}/Issue/fetch`, {
         headers: { XBody: JSON.stringify({ prjID: projectCode }) },
       });
-      await fetchIssues();
+      await refetch();
     } catch (err) {
       alert('Pull 실패: ' + err.message);
     }
-  }, [projectCode, fetchIssues]);
+  }, [projectCode, refetch]);
 
   /* filter issues based on options */
   const filteredIssues = issues.filter((i) => {
@@ -290,7 +283,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: issue.key, data: { labels: newLabels } }),
       });
-      setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, labels: newLabels } : i)));
+      refetch();
     } catch (err) {
       alert('라벨 업데이트 실패: ' + err.message);
     }
@@ -304,7 +297,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: issue.key, prjID: projectCode }),
       });
-      setIssues((prev) => prev.filter((i) => i.key !== issue.key));
+      refetch();
     } catch (err) {
       alert('삭제 실패: ' + err.message);
     }
@@ -317,7 +310,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inwardKey: fromKey, outwardKey: toKey }),
       });
-      fetchIssues();
+      refetch();
     } catch (err) {
       alert('연결 생성 실패: ' + err.message);
     }
@@ -332,7 +325,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linkId: conn.linkId, fromKey: conn.from, toKey: conn.to }),
       });
-      fetchIssues();
+      refetch();
     } catch (err) {
       alert('연결 삭제 실패: ' + err.message);
     }
@@ -383,7 +376,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           body: JSON.stringify(payload),
         });
         if (res.ok) {
-          fetchIssues();
+          refetch();
           return;
         }
         const errData = await res.json().catch(() => ({}));
@@ -413,7 +406,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, data }),
       });
-      setIssues((prev) => prev.map((i) => (i.key === key ? { ...i, ...data } : i)));
+      refetch();
     } catch (err) {
       alert('저장 실패: ' + err.message);
     }
@@ -426,7 +419,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),
     })
-      .then(() => setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, summary: newSummary } : i))))
+      .then(() => refetch())
       .catch((err) => alert('수정 실패: ' + err.message));
   }
 
@@ -454,6 +447,12 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
   })) : [];
 
+  // 웹 이슈 뷰 이원화 Phase 1 — 런처 감지 + 로컬 clone 있을 때만 토글 노출(그 외는 현행과 동일).
+  const sourceOptions = sourceAvailable ? [
+    { label: '공식본', active: source === 'main', handler: () => setSource('main') },
+    { label: '내 작업본', active: source === 'local', handler: () => setSource('local') },
+  ] : [];
+
   if (loading) {
     return (
       <div className="rm-wrapper">
@@ -463,6 +462,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           onPull={handlePull}
           nav={nav}
           options={[
+            ...sourceOptions,
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
             { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
             { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
@@ -481,12 +481,19 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
         onPull={handlePull}
         nav={nav}
         options={[
+          ...sourceOptions,
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
           { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
         ]}
         onExport={editMode ? undefined : handleExport}
       />
+      {/* 내 작업본 출처 배지 — 눈에 띄되 과하지 않게 */}
+      {source === 'local' && (
+        <div className="rm-source-badge">
+          내 작업본 (로컬, 미발행 변경 포함){localMeta ? ` · 이슈 ${localMeta.count}건` : ''}
+        </div>
+      )}
 
       {/* content area */}
       <div

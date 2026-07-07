@@ -36,9 +36,11 @@
 }
 
 .cb-opt-btn {
-  width: 28px;
+  /* 한 글자 토글(A/R/T)은 정사각, 긴 라벨(공식본/내 작업본 등)은 가로로 늘어난다 */
+  min-width: 28px;
   height: 28px;
-  padding: 0;
+  padding: 0 8px;
+  white-space: nowrap;
   border: none;
   border-radius: 4px;
   background: lightgray;

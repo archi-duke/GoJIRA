@@ -5,6 +5,7 @@ import { exportContent } from '@platform/web-ui/utils/exportUtils';
 import config from '../config';
 import './SATAM.css';
 import { authFetch } from '../platform/auth';
+import useIssueSource from '../hooks/useIssueSource';
 
 const API_BASE = config.API_BASE;
 
@@ -579,8 +580,10 @@ const NAV_ITEMS = [
 ];
 
 export default function SATAM({ project, user, onBack, currentPage, onNavigate }) {
-  const [issues, setIssues] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const projectCode = project.jiraCodes?.main?.jiraCode || '';
+  // 웹 이슈 뷰 이원화 Phase 1 — 공식본(main/Mongo) ↔ 내 작업본(로컬 런처) 전환.
+  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta } =
+    useIssueSource({ projectCode, user });
   // 웹은 조회 전용 (local-agent-issue-model.md §3.3). 편집/링크/생성/삭제는 로컬로
   // 이전 → editMode 항상 false, 편집 토글 미노출(셀 클릭은 readonly 팝업).
   const [editMode] = useState(false);
@@ -599,32 +602,20 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   const [hoverCell, setHoverCell] = useState(null); // { row: reqKey, col: designKey }
   const [detailIssue, setDetailIssue] = useState(null);
 
-  const projectCode = project.jiraCodes?.main?.jiraCode || '';
   const contentRef = useRef(null);
   const handleExport = useCallback((type) => exportContent(contentRef.current, type, `SATAM_${projectCode}`), [projectCode]);
 
-  /* fetch issues */
-  const fetchIssues = useCallback(() => {
-    setLoading(true);
-    return authFetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
-      .then((r) => r.json())
-      .then((data) => setIssues(Array.isArray(data) ? data : []))
-      .catch(() => setIssues([]))
-      .finally(() => setLoading(false));
-  }, [projectCode]);
-
-  useEffect(() => { fetchIssues(); }, [fetchIssues]);
-
+  /* Pull — 공식본(Mongo) 재동기화 후 현재 뷰 재조회. */
   const handlePull = useCallback(async () => {
     try {
       await authFetch(`${API_BASE}/Issue/fetch`, {
         headers: { XBody: JSON.stringify({ prjID: projectCode }) },
       });
-      await fetchIssues();
+      await refetch();
     } catch (err) {
       alert('Pull 실패: ' + err.message);
     }
-  }, [projectCode, fetchIssues]);
+  }, [projectCode, refetch]);
 
   /* 디자인/요구사항 분리, 필터링, 정렬 */
   const designIssues = useMemo(() =>
@@ -717,7 +708,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           body: JSON.stringify(payload),
         });
         if (res.ok) {
-          fetchIssues();
+          refetch();
           return;
         }
         const errData = await res.json().catch(() => ({}));
@@ -748,7 +739,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, data }),
       });
-      setIssues((prev) => prev.map((i) => (i.key === key ? { ...i, ...data } : i)));
+      refetch();
     } catch (err) {
       alert('저장 실패: ' + err.message);
     }
@@ -763,7 +754,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inwardKey: fromKey, outwardKey: toKey }),
       });
-      fetchIssues();
+      refetch();
     } catch (err) {
       alert('연결 생성 실패: ' + err.message);
     }
@@ -777,7 +768,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linkId, fromKey, toKey }),
       });
-      fetchIssues();
+      refetch();
     } catch (err) {
       alert('연결 삭제 실패: ' + err.message);
     }
@@ -842,6 +833,12 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
     ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
   })) : [];
 
+  // 웹 이슈 뷰 이원화 Phase 1 — 런처 감지 + 로컬 clone 있을 때만 토글 노출(그 외는 현행과 동일).
+  const sourceOptions = sourceAvailable ? [
+    { label: '공식본', active: source === 'main', handler: () => setSource('main') },
+    { label: '내 작업본', active: source === 'local', handler: () => setSource('local') },
+  ] : [];
+
   if (loading) {
     return (
       <div className="satam-wrapper">
@@ -851,6 +848,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           onPull={handlePull}
           nav={nav}
           options={[
+            ...sourceOptions,
             { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
             { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
             { label: 'S', active: onlyDecision, handler: () => setOnlyDecision((v) => !v) },
@@ -871,6 +869,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         onPull={handlePull}
         nav={nav}
         options={[
+          ...sourceOptions,
           { label: 'A', active: filterASR, handler: () => setFilterASR((v) => !v) },
           { label: 'F', active: showFR, handler: () => setShowFR((v) => !v) },
           { label: 'S', active: onlyDecision, handler: () => setOnlyDecision((v) => !v) },
@@ -879,6 +878,12 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         ]}
         onExport={editMode ? undefined : handleExport}
       />
+      {/* 내 작업본 출처 배지 — 눈에 띄되 과하지 않게 */}
+      {source === 'local' && (
+        <div className="satam-source-badge">
+          내 작업본 (로컬, 미발행 변경 포함){localMeta ? ` · 이슈 ${localMeta.count}건` : ''}
+        </div>
+      )}
 
       <div className="satam-content" ref={contentRef}>
         {/* 프로젝트 라벨 */}

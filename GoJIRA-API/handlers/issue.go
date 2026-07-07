@@ -125,7 +125,9 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 		doc["reqtype"] = req.ReqType
 	}
 
-	yamlBytes, err := yaml.Marshal(doc)
+	// doc 은 요청 JSON 유래라 bson.D 오염 가능성은 낮지만, 일관성을 위해
+	// 다른 두 지점(link.go/IssueUpdateHandler)과 동일하게 정규화한다.
+	yamlBytes, err := yaml.Marshal(normalizeBsonValue(doc))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "yaml marshal: "+err.Error())
 		return
@@ -261,7 +263,9 @@ func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	merged["updated"] = time.Now().Format("2006-01-02T15:04:05.000+0900")
 
-	yamlBytes, err := yaml.Marshal(merged)
+	// NBBALL 사고 재발 방지: Mongo 조회 결과의 중첩 bson.D 를 순수 맵/배열로
+	// 정규화한 뒤 직렬화한다 (bson_normalize.go 주석 참고).
+	yamlBytes, err := yaml.Marshal(normalizeBsonDoc(merged))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "yaml marshal: "+err.Error())
 		return

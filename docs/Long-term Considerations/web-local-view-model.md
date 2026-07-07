@@ -45,7 +45,13 @@
   key/issueType 필수 등. 위반 시 400 + 로그 (NBBALL 류 오염 재발 차단).
 - 현행 dual-write 는 아직 유지 — 이 단계는 안전망만 추가.
 
-### Phase 1 — 읽기 로컬뷰 (런처 v0.1.17 + 웹)
+### Phase 1 — 읽기 로컬뷰 ✅ 완료 (2026-07-07, 런처 v0.1.17)
+
+> **구현 중 근본 원인 발견**: NBBALL 오염의 진원지는 GoJIRA-API 의 YAML 재생성이었다 —
+> Mongo 에서 읽은 문서의 **중첩 bson.D 를 yaml.Marshal 에 그대로 넣으면 `[{key,value}]` 리스트로
+> 직렬화**된다 (saveLinkYamlFor / IssueUpdateHandler). 이 오염 YAML 이 localWrites 로 로컬 클론에
+> 기록되고 재-ingest 로 Mongo 까지 오염시키는 순환. `handlers/bson_normalize.go` 로 수정(3개
+> Marshal 지점 normalize + 회귀 테스트). 로컬 클론의 오염 YAML 49파일도 복구 완료.
 1. **런처**: `GET /issues?code&user` 신설 — 로컬 클론의 이슈 YAML 을 raw 로 일괄 반환
    (`[{path, content}]` 한 번의 응답). YAML 파싱은 웹에서(js-yaml) — 런처는 얇게 유지.
    기존 /files + /file 반복 호출로도 가능하지만 이슈 수십 개 × HTTP 왕복이라 벌크가 낫다.
