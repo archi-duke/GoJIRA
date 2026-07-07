@@ -15,12 +15,17 @@ import (
 	"platform-api/github"
 )
 
+// reqApp — 앱 스코프 쿼리 파라미터 (D8). 미지정은 'platform' (하위호환).
+func reqApp(r *http.Request) string {
+	return db.NormalizeApp(r.URL.Query().Get("app"))
+}
+
 // === Users ===
 
 func UserListHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	users, err := db.FindAllUsers(ctx)
+	users, err := db.FindAllUsers(ctx, reqApp(r))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -150,7 +155,7 @@ func UserAuthorityHandler(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	auth, err := db.CalcUserAuthority(ctx, id)
+	auth, err := db.CalcUserAuthority(ctx, id, reqApp(r))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -182,7 +187,7 @@ func UserMeHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		userID = fmt.Sprintf("%v", id)
 	}
-	auth, _ := db.CalcUserAuthority(ctx, userID)
+	auth, _ := db.CalcUserAuthority(ctx, userID, reqApp(r))
 	respondJSON(w, http.StatusOK, bson.M{"user": user, "authority": auth})
 }
 
@@ -191,7 +196,7 @@ func UserMeHandler(w http.ResponseWriter, r *http.Request) {
 func AuthGroupListHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	groups, err := db.FindAllAuthGroups(ctx)
+	groups, err := db.FindAllAuthGroups(ctx, reqApp(r))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -204,6 +209,10 @@ func AuthGroupCreateHandler(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &doc); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	// 앱 스코프 (D8) — body 의 app 우선, 없으면 쿼리 파라미터/기본값
+	if _, ok := doc["app"].(string); !ok {
+		doc["app"] = reqApp(r)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()

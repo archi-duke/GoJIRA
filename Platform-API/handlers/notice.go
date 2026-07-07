@@ -19,7 +19,7 @@ func NoticeListHandler(w http.ResponseWriter, r *http.Request) {
 	// 상태 자동 갱신
 	db.UpdateNoticeStatuses(ctx)
 
-	notices, err := db.FindAllNotices(ctx)
+	notices, err := db.FindAllNotices(ctx, reqApp(r))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -47,7 +47,7 @@ func NoticeActiveHandler(w http.ResponseWriter, r *http.Request) {
 
 	db.UpdateNoticeStatuses(ctx)
 
-	notices, err := db.FindActiveNotices(ctx)
+	notices, err := db.FindActiveNotices(ctx, reqApp(r))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -61,6 +61,10 @@ func NoticeCreateHandler(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSON(r, &doc); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	// 앱 스코프 (D8)
+	if _, ok := doc["app"].(string); !ok {
+		doc["app"] = reqApp(r)
 	}
 	// 날짜 문자열 → time.Time 변환
 	if s, ok := doc["startDate"].(string); ok {

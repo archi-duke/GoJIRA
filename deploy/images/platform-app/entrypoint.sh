@@ -14,6 +14,7 @@ esc() { printf '%s' "${1:-}" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 cat > "$ENV_JS" <<EOF
 // Generated at container startup by entrypoint.sh — DO NOT EDIT
 window._env_ = {
+  REACT_APP_PLATFORM_NAME: "$(esc "${REACT_APP_PLATFORM_NAME:-}")",
   REACT_APP_PLATFORM_API: "$(esc "${REACT_APP_PLATFORM_API:-}")",
   REACT_APP_GOJIRA_API: "$(esc "${REACT_APP_GOJIRA_API:-}")",
   REACT_APP_GOJIRA_APP_REMOTE: "$(esc "${REACT_APP_GOJIRA_APP_REMOTE:-}")",

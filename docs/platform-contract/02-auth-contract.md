@@ -30,7 +30,10 @@ export interface PlatformAuth {
   /** introspect 로 확정된 사용자. 셸이 마운트 전에 확정하므로 remote 에선 null 아님 */
   getUser(): { loginid: string } | null;
 
-  /** GET /Account/me 의 authority 맵 스냅샷. 예: { USR: 15, GITRP: 4 } */
+  /** GET /Account/me?app=<scope> 의 authority 맵 스냅샷. 예: { USR: 15, GITRP: 4 }.
+   *  D8(2026-07-07): 같은 사용자도 앱 스코프마다 다른 authGroup 에 속할 수 있어, 이 값은
+   *  **remote 자신의 스코프 기준**이다 — 셸은 remote 를 그 스코프에서만 마운트하므로
+   *  remote 입장에선 "자기 앱의 authority" 로 취급하면 된다. 다른 앱의 권한은 알 수 없다. */
   getAuthority(): Record<string, number> | null;
 
   /** fetch 호환 래퍼 — 인증 헤더(아래 §3 규칙)를 붙여 호출. fetch 사용 앱은 이것만 쓰면 됨 */

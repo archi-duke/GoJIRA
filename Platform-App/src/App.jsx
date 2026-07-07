@@ -7,7 +7,7 @@ import AlertModal from '@platform/web-ui/components/AlertModal';
 import { getAuthUser } from '@platform/web-ui/utils/authUser';
 import { subscribe, onStatus } from '@platform/web-ui/runtime/sseManager';
 import { modalAlert } from '@platform/web-ui/components/AlertModal';
-import appRegistry from './apps/registry';
+import appRegistry, { loadAppManifest } from './apps/registry';
 import config from './config';
 import { detectLauncher, requestChat } from '@platform/web-ui/runtime/launcher';
 // 셸 인증 런타임 (계약 02) — 모듈 로드 시 window.__platformAuth 게시까지 수행.
@@ -39,19 +39,56 @@ class RemoteErrorBoundary extends Component {
   }
 }
 
-// 셸 탭 ↔ URL 경로 동기화 (딥링크/뒤로가기, D12). URL 은 탭 키 수준만 반영 —
-// remote 내부 페이지(docs/issues 등)는 remote 소유이고 onNavigate 보고로 탭 활성만 동기화.
-// 탭 키는 registry 에서 파생 — 신규 remote(RAGaaS 등) 등록 시 딥링크도 자동 지원.
-const TAB_PATHS = appRegistry.map((a) => a.key);
+// URL 의미 체계 (D5 브랜디드 스코프, D6 로 플랫폼 스코프 순수화):
+//   /                    → 플랫폼 스코프. 브랜드 = PLATFORM_NAME, 타이틀바는 플랫폼 내장
+//                          메뉴(Account/Notice/Repository)만 — 제품 탭 없음. 바디 기본값은
+//                          제품 링크 목록('home') — 클릭 전까지 어떤 remote 도 연결하지 않는다.
+//   /account 등          → 플랫폼 스코프의 내장 페이지 딥링크
+//   /<product> (/gojira) → 제품 스코프: 그 제품의 브랜드(아이콘+이름)와 메뉴만 노출
+// 제품 스코프 안의 메뉴 전환은 URL 을 바꾸지 않는다 (URL = 스코프 진입점).
+const PLATFORM_PAGES = ['account', 'notice', 'repository'];
+const PRODUCT_SEGMENTS = appRegistry.filter((a) => a.product).map((a) => a.product);
+// 플랫폼 스코프(/)는 registry 항목이 아니라 셸 자신이므로 별도 설정 (D7).
+// titlebarAction: 'agent'(로컬 에이전트 호출) | 'home'(그 스코프 기본 화면 복귀).
+// platformMenus: 이 스코프에서 노출할 셸 내장 메뉴 키(권한 필터는 별도 적용).
+const PLATFORM_SCOPE_CONFIG = { titlebarAction: 'home', platformMenus: ['account', 'notice'] };
+const seg0 = () => window.location.pathname.replace(/^\//, '').split('/')[0];
+const scopeFromPath = () => (PRODUCT_SEGMENTS.includes(seg0()) ? seg0() : 'platform');
 const pageFromPath = () => {
-  const seg = window.location.pathname.replace(/^\//, '').split('/')[0];
-  return TAB_PATHS.includes(seg) ? seg : 'map';
+  const seg = seg0();
+  if (PRODUCT_SEGMENTS.includes(seg)) {
+    return appRegistry.find((a) => a.product === seg)?.key || 'home';
+  }
+  return PLATFORM_PAGES.includes(seg) ? seg : 'home';
 };
 
 function App() {
   const [user, setUser] = useState(() => getAuthUser());
   const [authority, setAuthority] = useState(null);
   const [page, setPage] = useState(pageFromPath);
+  // 브랜디드 스코프 (D5) — 'platform' | product 키. URL 이 진실 (popstate 로 동기화).
+  const [scope, setScope] = useState(scopeFromPath);
+  // remote './manifest' (선택) — { name, icon, menus }. product 키로 적재, 실패는 미기재.
+  const [manifests, setManifests] = useState({});
+
+  // 현재 스코프의 제품 manifest 만 로드 (D6) — 플랫폼 스코프('/')는 어떤 remote 도
+  // 연결하지 않는다. loadRemote 가 실제 remoteEntry.js fetch 를 트리거하므로, 여기를
+  // 스코프로 게이트하지 않으면 루트 방문만으로 모든 제품이 조용히 "연결"돼 버린다.
+  useEffect(() => {
+    if (scope === 'platform') return;
+    if (manifests[scope]) return; // 이미 적재됨
+    const entry = appRegistry.find((a) => a.product === scope);
+    if (!entry) return;
+    loadAppManifest(entry).then((m) => {
+      if (m) setManifests((prev) => ({ ...prev, [scope]: m }));
+    });
+  }, [scope]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 브라우저 탭 제목 = 현재 스코프 브랜드
+  useEffect(() => {
+    const sApp = scope !== 'platform' ? appRegistry.find(a => a.product === scope) : null;
+    document.title = sApp ? (manifests[scope]?.name || sApp.productLabel || sApp.label) : config.PLATFORM_NAME;
+  }, [scope, manifests]);
   const [allUsers, setAllUsers] = useState([]);
   const [mapResetCount, setMapResetCount] = useState(0);
   const [sseConnected, setSseConnected] = useState(false);
@@ -118,21 +155,27 @@ function App() {
     return onStatus(setSseConnected);
   }, []);
 
+  // 앱 스코프별 authority 재조회 (D8) — 같은 사용자도 스코프(플랫폼/gojira/ragaas)마다
+  // 다른 authGroup 에 속할 수 있어 스코프 전환마다 다시 계산해야 한다.
   useEffect(() => {
     if (!user || user === '__pending__') return; // introspect 완료 전 임시값이면 보류
-    authFetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}`)
+    authFetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}&app=${encodeURIComponent(scope)}`)
       .then(r => r.json())
       .then(data => {
         setAuthority(data.authority || {});
-        // 마스터 그룹이면 전체 사용자 목록 로드
+        // 마스터 그룹이면 (이 스코프의) 전체 사용자 목록 로드 — platform 스코프는 전체
+        // 사용자 전환이 가능해야 하므로 app=all 로 조회한다(D9, 다른 앱 스코프는 기존대로).
         if ((data.authority?.USR || 0) >= 15) {
-          authFetch(`${API_BASE}/Account/users`)
+          const usersApp = scope === 'platform' ? 'all' : scope;
+          authFetch(`${API_BASE}/Account/users?app=${encodeURIComponent(usersApp)}`)
             .then(r => r.json())
             .then(d => setAllUsers(Array.isArray(d) ? d : []));
+        } else {
+          setAllUsers([]);
         }
       })
       .catch(() => setAuthority({}));
-  }, [user]);
+  }, [user, scope]);
 
   // 접속 시 미읽은 알림 확인 (반려 등)
   useEffect(() => {
@@ -174,23 +217,25 @@ function App() {
 
   const navigate = useCallback((p) => {
     setPage(p);
-    if (TAB_PATHS.includes(p)) {
-      const path = p === 'map' ? '/' : `/${p}`;
+    // URL 은 플랫폼 스코프의 내장 페이지만 반영 (D5) — 제품 탭/메뉴 전환은 URL 불변.
+    // 제품 스코프에서는 URL 자체가 스코프 진입점(/gojira 등)이라 건드리지 않는다.
+    if (scope === 'platform') {
+      const path = PLATFORM_PAGES.includes(p) ? `/${p}` : '/';
       if (window.location.pathname !== path) window.history.pushState(null, '', path);
     }
     if (p === 'map') setMapResetCount(c => c + 1);
-  }, []);
+  }, [scope]);
 
   function switchUser(knoxId) {
     document.cookie = `ADSSO_USER=${encodeURIComponent(knoxId)}; path=/; max-age=${60*60*24*365}`;
     setUser(knoxId);
     setAuthority(null);
-    navigate('map');
+    navigate(scope === 'platform' ? 'home' : (appRegistry.find(a => a.product === scope)?.key || 'home'));
   }
 
-  // 브라우저 뒤로/앞으로 — URL 이 진실
+  // 브라우저 뒤로/앞으로 — URL 이 진실 (스코프 + 페이지 동시 동기화)
   useEffect(() => {
-    const onPop = () => setPage(pageFromPath());
+    const onPop = () => { setScope(scopeFromPath()); setPage(pageFromPath()); };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -198,9 +243,13 @@ function App() {
   // remote 의 내부 페이지 전환 보고 (계약 01 §2 onNavigate) — 탭 활성 판정 + 현재 과제 추적.
   // URL 은 탭 수준만 쓰므로 remote 내부 페이지는 pushState 하지 않는다.
   const handleRemoteNavigate = useCallback((p, ctx) => {
-    setPage(p);
+    // 계약 01 §2 는 page 키 집합을 강제하지 않는다. 제품 스코프에서는 컨텐츠가 항상
+    // 그 제품 remote 라 어떤 키든 안전(메뉴 하이라이트에만 쓰임). 플랫폼 스코프에서는
+    // 셸이 모르는 키를 반영하면 컨텐츠 분기가 entry 를 못 찾아 placeholder 로 떨어지므로
+    // 아는 키(탭/subPages)만 반영하고 나머지는 무시(현재 탭 유지).
+    if (scope !== 'platform' || appRegistry.some(a => a.key === p || (a.subPages && a.subPages.includes(p)))) setPage(p);
     if (ctx && 'projectCode' in ctx) setActiveProjectCode(ctx.projectCode || '');
-  }, []);
+  }, [scope]);
 
   // 로고/타이틀 클릭 — 활성 프로젝트가 있으면 그 로컬 clone 에서, 없으면 일반 repoRoot 에서 에이전트 spawn.
   // 활성 프로젝트는 remote 가 onNavigate(page, { projectCode }) 로 보고 (계약 01 §2).
@@ -265,69 +314,145 @@ function App() {
     return <div className="app-placeholder" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#888' }}>인증 확인 중...</div>;
   }
 
-  // 권한 기반 메뉴 필터링
-  const visibleApps = appRegistry.filter(app => {
-    if (!app.authCode) return true;
-    return authority && (authority[app.authCode] || 0) >= app.authLevel;
-  });
+  // ── 브랜디드 스코프 파생값 (D5) ──
+  const scopeApp = scope !== 'platform' ? appRegistry.find(a => a.product === scope) : null;
+  const scopeManifest = scopeApp ? manifests[scope] : null;
+  const brandName = scopeApp ? (scopeManifest?.name || scopeApp.productLabel || scopeApp.label) : config.PLATFORM_NAME;
+  const brandIcon = scopeApp && scopeManifest?.icon
+    ? `${scopeApp.base}/${scopeManifest.icon.replace(/^\//, '')}`
+    : '/icons/platform-logo.svg';
 
-  // 현재 활성 탭 판별
-  const activeKey = appRegistry.find(app =>
-    app.key === page || (app.subPages && app.subPages.includes(page))
-  )?.key || 'map';
+  // 스코프별 설정 (D7) — 타이틀 아이콘 동작 + 노출할 플랫폼 내장 메뉴.
+  // 플랫폼 스코프는 registry 항목이 아니므로 PLATFORM_SCOPE_CONFIG 로 대체.
+  const activeScopeConfig = scopeApp || PLATFORM_SCOPE_CONFIG;
+  const titlebarAction = activeScopeConfig.titlebarAction || 'agent';
+  const titlebarTitle = titlebarAction === 'agent' ? '에이전트 채팅 띄우기' : '홈으로 이동';
+  const handleTitlebarClick = () => {
+    if (titlebarAction === 'agent') { launchAgentChat(); return; }
+    navigate(scopeApp ? scopeApp.key : 'home');
+  };
 
-  // 권한 미달 시 리다이렉트
-  const currentApp = appRegistry.find(a => a.key === page || (a.subPages && a.subPages.includes(page)));
+  // 플랫폼 내장 메뉴(Account/Notice/Repository — component 없는 registry 항목) —
+  // 스코프의 platformMenus 목록 + 개별 권한(authCode/authLevel) 이중 필터.
+  // 플랫폼 스코프 타이틀바와, 제품 스코프에서 마스터에게 이어붙는 메뉴가 공유한다.
+  const platformMenuEntries = appRegistry.filter(a => !a.product);
+  const allowedPlatformKeys = activeScopeConfig.platformMenus || [];
+  const visiblePlatformMenus = platformMenuEntries
+    .filter(app => allowedPlatformKeys.includes(app.key))
+    .filter(app => {
+      if (!app.authCode) return true;
+      return authority && (authority[app.authCode] || 0) >= app.authLevel;
+    });
+  const scopeMenus = scopeApp
+    ? (scopeManifest?.menus || []).filter(m =>
+        !m.authCode || (authority && (authority[m.authCode] || 0) >= (m.authLevel || 0)))
+    : [];
+  // 제품 스코프에서 마스터(USR≥15)에게는 셸 내장 플랫폼 메뉴도 이어서 노출.
+  const isMaster = !!authority && (authority.USR || 0) >= 15;
+  const scopePlatformMenus = scopeApp && isMaster ? visiblePlatformMenus : [];
+
+  // 현재 활성 메뉴 판별 (제품 스코프)
+  const activeMenuKey = scopeMenus.find(m =>
+    m.key === page || (m.pages && m.pages.includes(page))
+  )?.key || null;
+
+  // 권한 미달 시 리다이렉트 — 플랫폼 스코프 전체 + 제품 스코프의 내장 페이지
+  const currentApp = (scope === 'platform' || PLATFORM_PAGES.includes(page))
+    ? platformMenuEntries.find(a => a.key === page)
+    : null;
   if (currentApp && currentApp.authCode && authority !== null) {
     if ((authority[currentApp.authCode] || 0) < currentApp.authLevel) {
-      navigate('map');
+      navigate(scopeApp ? scopeApp.key : 'home');
     }
   }
 
-  // 컨텐츠 렌더링
+  // 컨텐츠 렌더링 — 제품 스코프는 그 제품 remote (내장 페이지 선택 시는 그 화면).
+  // 플랫폼 스코프 기본( page==='home' )은 제품 링크 목록 — remote 를 전혀 연결하지 않는다 (D6).
+  // 메뉴 키는 page prop 으로 remote 에 전달.
   let content;
-  if (page === 'account') {
-    content = <AccountManager user={user} />;
+  if (scopeApp && !PLATFORM_PAGES.includes(page)) {
+    const AppComponent = scopeApp.remote?.getComponent();
+    content = AppComponent ? (
+      <RemoteErrorBoundary label={brandName}>
+        <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
+          <AppComponent user={user} authority={authority} resetKey={mapResetCount}
+            page={page} onNavigate={handleRemoteNavigate} />
+        </Suspense>
+      </RemoteErrorBoundary>
+    ) : (
+      <div className="app-placeholder">페이지를 찾을 수 없습니다</div>
+    );
+  } else if (page === 'account') {
+    content = <AccountManager user={user} app={scope} />;
   } else if (page === 'notice') {
-    content = <NoticeManager user={user} />;
+    content = <NoticeManager user={user} app={scope} />;
   } else if (page === 'repository') {
     content = <DocManager user={user} />;
+  } else if (scope === 'platform') {
+    const products = appRegistry.filter(a => a.product && (
+      !a.authCode || (authority && (authority[a.authCode] || 0) >= a.authLevel)
+    ));
+    content = (
+      <div className="app-home">
+        <div className="app-home-grid">
+          {products.map(p => (
+            <a key={p.product} className="app-home-card" href={`/${p.product}`}>
+              {p.localIcon
+                ? <span className="app-home-card-icon"><img src={p.localIcon} alt={p.productLabel || p.label} /></span>
+                : <span className="app-home-card-badge">{(p.productLabel || p.label || '?')[0]}</span>}
+              <span className="app-home-card-label">{p.productLabel || p.label}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    );
   } else {
-    const appEntry = appRegistry.find(a => a.key === page || (a.subPages && a.subPages.includes(page)));
-    if (appEntry && appEntry.component) {
-      const AppComponent = appEntry.component;
-      content = (
-        <RemoteErrorBoundary label={appEntry.label}>
-          <Suspense fallback={<div className="app-placeholder">로딩 중...</div>}>
-            <AppComponent user={user} authority={authority} resetKey={mapResetCount}
-              onNavigate={handleRemoteNavigate} />
-          </Suspense>
-        </RemoteErrorBoundary>
-      );
-    } else {
-      content = <div className="app-placeholder">페이지를 찾을 수 없습니다</div>;
-    }
+    content = <div className="app-placeholder">페이지를 찾을 수 없습니다</div>;
   }
 
   return (
     <div className="app-root">
       <div className="app-titlebar">
-        <img src="/icons/gojira-logo.svg" alt="GoJIRA" className="app-logo-icon app-logo-clickable"
-          onClick={launchAgentChat}
-          title="에이전트 채팅 띄우기" />
+        <img src={brandIcon} alt={brandName} className="app-logo-icon app-logo-clickable"
+          onClick={handleTitlebarClick}
+          title={titlebarTitle} />
         <span className="app-logo app-logo-clickable"
-          onClick={launchAgentChat}
-          title="에이전트 채팅 띄우기">GoJIRA</span>
+          onClick={handleTitlebarClick}
+          title={titlebarTitle}>{brandName}</span>
         <nav className="app-nav">
-          {visibleApps.map((app) => (
-            <button
-              key={app.key}
-              className={`app-nav-btn ${activeKey === app.key ? 'app-nav-active' : ''}`}
-              onClick={() => navigate(app.key)}
-            >
-              {app.label}
-            </button>
-          ))}
+          {scopeApp
+            ? [
+                ...scopeMenus.map((m) => (
+                  <button
+                    key={m.key}
+                    className={`app-nav-btn ${activeMenuKey === m.key ? 'app-nav-active' : ''}`}
+                    onClick={() => navigate(m.key)}
+                  >
+                    {m.label}
+                  </button>
+                )),
+                ...(scopePlatformMenus.length > 0
+                  ? [<span key="__divider" className="app-nav-divider" />]
+                  : []),
+                ...scopePlatformMenus.map((app) => (
+                  <button
+                    key={app.key}
+                    className={`app-nav-btn ${page === app.key ? 'app-nav-active' : ''}`}
+                    onClick={() => navigate(app.key)}
+                  >
+                    {app.label}
+                  </button>
+                )),
+              ]
+            : visiblePlatformMenus.map((app) => (
+                <button
+                  key={app.key}
+                  className={`app-nav-btn ${page === app.key ? 'app-nav-active' : ''}`}
+                  onClick={() => navigate(app.key)}
+                >
+                  {app.label}
+                </button>
+              ))}
         </nav>
         <span className="app-sse-indicator" title={sseConnected ? 'SSE 연결됨' : 'SSE 연결 끊김'}
           style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:sseConnected?'#27ae60':'#aaa',marginRight:6,verticalAlign:'middle'}} />
@@ -347,7 +472,7 @@ function App() {
         )}
       </div>
       <div className="app-body">{content}</div>
-      <NoticePopup user={user} />
+      <NoticePopup user={user} app={scope} />
       <AlertModal />
       {launching && (
         <div className="app-launching-overlay">

@@ -16,17 +16,17 @@ func SeedAccountData() {
 	// AuthGroups
 	seedAuthGroups := []bson.M{
 		{
-			"_id": "ag_master", "code": "MASTER", "name": "Master",
+			"_id": "ag_master", "code": "MASTER", "name": "Master", "app": "platform",
 			"description": "전체 관리 권한",
 			"authority":   bson.M{"ALLPRJ": 15, "USR": 15, "ORG": 15, "PRJ": 15, "NOTICE": 15, "GITRP": 15},
 		},
 		{
-			"_id": "ag_editor", "code": "EDITOR", "name": "Editor",
+			"_id": "ag_editor", "code": "EDITOR", "name": "Editor", "app": "platform",
 			"description": "조회 + 수정 권한",
 			"authority":   bson.M{"ALLPRJ": 6, "USR": 4, "ORG": 4, "PRJ": 6},
 		},
 		{
-			"_id": "ag_viewer", "code": "VIEWER", "name": "Viewer",
+			"_id": "ag_viewer", "code": "VIEWER", "name": "Viewer", "app": "platform",
 			"description": "조회 전용",
 			"authority":   bson.M{"ALLPRJ": 4, "USR": 4, "ORG": 4, "PRJ": 4},
 		},

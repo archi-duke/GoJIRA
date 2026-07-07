@@ -21,13 +21,49 @@
 ```js
 // remote 의 module federation 설정
 exposes: {
-  './App': './src/App',        // 필수 — 마운트 진입점
+  './App': './src/App',            // 필수 — 마운트 진입점
+  './manifest': './src/manifest',  // 선택 — 제품 메타 (브랜딩/타이틀바 메뉴, D5)
 }
 ```
 
 - **`./App` 은 필수**이며 default export 로 React 컴포넌트를 내보낸다.
-- 추가 expose 는 자유이나 셸이 의존하는 것은 `./App` 뿐이다.
-- (이행기) GoJIRA-App 의 기존 `./GoJIRAApp` 은 Vite 이전 시 `./App` 으로 표준화한다.
+- **`./manifest` 는 선택** — 순수 데이터 default export (컴포넌트/사이드이펙트 금지, 초경량 청크):
+
+  ```js
+  export default {
+    name: 'GoJIRA',                  // 브랜디드 스코프의 타이틀바 브랜드명
+    icon: 'icons/gojira-logo.svg',   // remote base 상대 경로 (public/ 자산)
+    menus: [                         // 셸 타이틀바에 등록할 메뉴
+      { key: 'map', label: 'Project',
+        pages: ['docs', 'issues'],   // 이 메뉴를 활성으로 유지할 내부 페이지 키 (선택)
+        authCode: 'X', authLevel: 4  // 권한 게이트 (선택 — 셸이 노출을 거른다)
+      },
+    ],
+  };
+  ```
+
+  미노출/로드 실패 시 셸은 registry 폴백(단일 탭, 제품 라벨)으로 동작 — 기존 remote 무수정 호환.
+  메뉴 클릭 시 셸은 `page` prop 으로 `key` 를 전달하고, remote 는 내부 라우트로 매핑한다.
+- 그 외 추가 expose 는 자유이나 셸이 의존하는 것은 위 둘뿐이다.
+- (이행기) GoJIRA-App 의 기존 `./GoJIRAApp` 은 Vite 이전 시 `./App` 으로 표준화한다. (완료)
+
+### 브랜디드 스코프 (D5) — 진입 URL 이 타이틀바를 결정
+
+| 진입 | 브랜드 (아이콘+이름) | 타이틀바 메뉴 |
+|---|---|---|
+| `/` | 플랫폼 (`PLATFORM_NAME` env, 임시 NETRIX) | 셸 내장 메뉴만 (Account/Notice/Repository, 권한 필터). **제품 탭 없음** — 바디 기본값은 제품 링크 카드 목록(클릭 전까지 어떤 remote 도 연결하지 않는다, D6) |
+| `/<제품>` (예: `/gojira`) | 제품 manifest 의 name/icon | **그 제품의 manifest menus** (+ 마스터 USR≥15 에게는 구분선 뒤 셸 내장 메뉴) |
+
+- 두 스코프 모두 로그인 사용자 표시/인증/공지는 셸이 동일 제공.
+- 제품 스코프 안의 메뉴 전환은 URL 을 바꾸지 않는다 — URL 은 스코프 진입점. 플랫폼 스코프의
+  제품 카드 클릭은 **전체 페이지 네비게이션**(`<a href="/<제품>">`)으로 그 제품 스코프에 진입한다.
+  셸 내장 페이지 딥링크(`/account` 등)는 플랫폼 스코프에서 유지.
+- 게이트웨이의 `/<제품>/` → `/<제품>` 302 (D4) 와 결합: 어느 주소로 와도 브랜드 있는 화면.
+- **제품 연결(remote 등록/fetch)은 그 제품 스코프 진입 시점에만 일어난다** (D6). remote 등록은
+  MF 런타임에 `registerRemotes`를 호출하는 순간 곧 연결(remoteEntry.js fetch)이므로, 셸은 이를
+  스코프 진입 시점까지 지연한다 — **빌드타임 federation config 에 정적 `remotes` 를 선언하면 이
+  지연이 무력화**되니(host bootstrap 이 스코프 무관하게 즉시 fetch) 셸 vite.config 에는 정적
+  `remotes` 를 선언하지 않는다.
 
 ### 마운트 컴포넌트 계약 (props)
 
@@ -39,6 +75,10 @@ interface RemoteAppProps {
   authority: Record<string, number> | null;
   /** 셸 탭 재클릭 등으로 초기 화면 복귀를 요구할 때 증가하는 카운터 */
   resetKey?: number;
+  /** 셸이 선택한 현재 메뉴/페이지 키 (manifest.menus 의 key 네임스페이스).
+   *  타이틀바 메뉴 클릭 시 갱신 — remote 는 이 값을 내부 라우트로 매핑한다.
+   *  단일 메뉴 제품(현 GoJIRA)은 무시해도 무방 */
+  page?: string;
   /** 셸이 remote 에 배정한 URL 프리픽스 (라우팅 표준 도입 시). 예: '/ragaas' */
   basePath?: string;
   /** remote 내부 페이지 전환을 셸에 알림 — 셸 탭 활성화 판정·현재 과제 추적용.
@@ -48,6 +88,13 @@ interface RemoteAppProps {
 }
 ```
 
+- **remote `./App` 은 바디 전용이다** (2026-07-07 D4). 크롬 — 타이틀바·전역 네비(플랫폼 메뉴)·
+  로그인 사용자 표시 — 은 셸 단독 소유. remote 는 자기 컨텐츠 영역만 렌더한다.
+  브라우저 사용자용 standalone 화면은 없다: 게이트웨이가 `/<제품>/` HTML 진입을 셸 딥링크
+  `/<제품>` 으로 302 수렴시킨다. 제품 단독 실행은 dev 서버(vite) 전용.
+- **onNavigate 의 page 키는 remote 자유.** 셸은 자기가 아는 키(탭 키·registry 에 등록된
+  subPages)만 탭 활성 판정에 반영하고, **모르는 키는 무시한다(현재 탭 유지)** — remote 는 내부
+  라우트 키를 그대로 보고해도 안전하다. ctx.projectCode 는 키와 무관하게 항상 반영된다.
 - **상태 공유는 이 props 와 콜백이 전부다.** sessionStorage 를 셸↔remote 채널로 쓰지 않는다
   (기존 `gojira_page`/`gojira_project` magic string 채널은 2026-07-06 D12 로 제거 — 셸은 더 이상 읽지 않는다).
 - remote 내부 전용 UI 상태(sessionStorage)는 자유이나 키에 `<제품명>_` 접두사를 붙여 네임스페이스를 분리한다.

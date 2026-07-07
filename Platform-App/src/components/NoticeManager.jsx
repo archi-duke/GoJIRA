@@ -3,23 +3,35 @@ import config from '../config';
 import './NoticeManager.css';
 import { authFetch } from '../platform/auth';
 
-const API = config.API_BASE + '/Notice';
+const BASE_API = config.API_BASE + '/Notice';
 
 const STATUS_LABEL = { draft: '게시전', active: '게시중', expired: '게시종료' };
 const STATUS_COLOR = { draft: '#888', active: '#2ecc71', expired: '#e74c3c' };
 
-export default function NoticeManager({ user }) {
+// 앱 스코프 목록 (D9) — platform 관리 화면의 앱 선택 select 옵션. 신규 앱 추가 시 여기만 갱신.
+const APPS = ['platform', 'gojira', 'ragaas'];
+
+// app: 앱 스코프(D8) — 이 스코프의 공지만 조회/작성한다. platform 스코프는 전체 조회(D9).
+export default function NoticeManager({ user, app = 'platform' }) {
   const [notices, setNotices] = useState([]);
   const [editItem, setEditItem] = useState(null);
 
+  const isPlatform = app === 'platform';
+  const listApp = isPlatform ? 'all' : app;
+
+  const withApp = useCallback((path = '') => `${BASE_API}${path}${path.includes('?') ? '&' : '?'}app=${encodeURIComponent(listApp)}`, [listApp]);
+
   const fetchNotices = useCallback(() => {
-    authFetch(API).then(r => r.json()).then(d => setNotices(Array.isArray(d) ? d : [])).catch(() => {});
-  }, []);
+    authFetch(withApp()).then(r => r.json()).then(d => setNotices(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [withApp]);
 
   useEffect(() => { fetchNotices(); }, [fetchNotices]);
 
   async function handleSave(mode, data) {
-    const url = mode === 'create' ? API : `${API}/${data._id}`;
+    // platform 스코프의 생성/수정은 쿼리 파라미터 없이 body.app 에 의존, 앱 스코프는
+    // 기존대로 withApp(쿼리 app=<scope>)가 body.app 없을 때 채운다 (D9).
+    const path = mode === 'create' ? '' : `/${data._id}`;
+    const url = isPlatform ? `${BASE_API}${path}` : withApp(path);
     const method = mode === 'create' ? 'POST' : 'PUT';
     const body = { ...data };
     if (mode === 'edit') {
@@ -35,7 +47,7 @@ export default function NoticeManager({ user }) {
 
   async function handleDelete(id) {
     if (!window.confirm('삭제하시겠습니까?')) return;
-    await authFetch(`${API}/${id}`, { method: 'DELETE' });
+    await authFetch(`${BASE_API}/${id}`, { method: 'DELETE' });
     fetchNotices();
   }
 
@@ -45,6 +57,7 @@ export default function NoticeManager({ user }) {
     return {
       title: '', body: '', bodyType: 'markdown', status: 'draft', isEmergency: false,
       startDate: now.toISOString().slice(0, 16), endDate: end.toISOString().slice(0, 16),
+      ...(isPlatform ? { app: 'platform' } : {}),
     };
   }
 
@@ -57,7 +70,9 @@ export default function NoticeManager({ user }) {
       <table className="nm-table">
         <thead>
           <tr>
-            <th>상태</th><th>제목</th><th>작성자</th><th>게시기간</th><th>조회수</th><th>작성일</th><th></th>
+            <th>상태</th><th>제목</th>
+            {isPlatform && <th>앱</th>}
+            <th>작성자</th><th>게시기간</th><th>조회수</th><th>작성일</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -71,6 +86,7 @@ export default function NoticeManager({ user }) {
               <td className="nm-title-cell" onClick={() => setEditItem({ mode: 'edit', data: { ...n, startDate: (n.startDate || '').slice(0, 16), endDate: (n.endDate || '').slice(0, 16) } })}>
                 {n.title}
               </td>
+              {isPlatform && <td>{n.app || 'platform'}</td>}
               <td>{n.createdBy}</td>
               <td className="nm-date-cell">
                 {(n.startDate || '').slice(0, 10)} ~ {(n.endDate || '').slice(0, 10)}
@@ -85,7 +101,7 @@ export default function NoticeManager({ user }) {
                     const msg = next ? `"${n.title}" 공지를 비상 공지로 게시하시겠습니까?` : `"${n.title}" 비상 공지를 해제하시겠습니까?`;
                     if (!window.confirm(msg)) return;
                     const updates = next ? { isEmergency: true, status: 'active' } : { isEmergency: false };
-                    await authFetch(`${API}/${n._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+                    await authFetch(`${BASE_API}/${n._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
                     fetchNotices();
                   }}
                 >비상</button>
@@ -100,6 +116,7 @@ export default function NoticeManager({ user }) {
         <NoticeEditDialog
           mode={editItem.mode}
           data={editItem.data}
+          isPlatform={isPlatform}
           onClose={() => setEditItem(null)}
           onSave={(data) => handleSave(editItem.mode, data)}
         />
@@ -108,7 +125,7 @@ export default function NoticeManager({ user }) {
   );
 }
 
-function NoticeEditDialog({ mode, data, onClose, onSave }) {
+function NoticeEditDialog({ mode, data, isPlatform, onClose, onSave }) {
   const [form, setForm] = useState(data);
   const isCreate = mode === 'create';
 
@@ -130,6 +147,17 @@ function NoticeEditDialog({ mode, data, onClose, onSave }) {
           <button className="nm-dlg-close" onClick={onClose}>X</button>
         </div>
         <div className="nm-dlg-body">
+          {isPlatform && (
+            <label>앱
+              {isCreate ? (
+                <select value={form.app || 'platform'} onChange={e => set('app', e.target.value)}>
+                  {APPS.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              ) : (
+                <input value={form.app || 'platform'} disabled />
+              )}
+            </label>
+          )}
           <label>제목<input value={form.title || ''} onChange={e => set('title', e.target.value)} /></label>
           <div className="nm-row">
             <label>상태

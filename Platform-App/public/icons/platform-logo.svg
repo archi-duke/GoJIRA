@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- 플랫폼(NETRIX 임시) 로고 — 셸 레이어 위에 제품이 얹히는 형상 -->
+  <g fill="none" stroke-linejoin="round">
+    <path d="M12 2 L21 7 L12 12 L3 7 Z" fill="#4a6cf7"/>
+    <path d="M3 12 L12 17 L21 12" stroke="#7b93f9" stroke-width="1.8" fill="none"/>
+    <path d="M3 16.5 L12 21.5 L21 16.5" stroke="#b3c2fb" stroke-width="1.8" fill="none"/>
+  </g>
+</svg>

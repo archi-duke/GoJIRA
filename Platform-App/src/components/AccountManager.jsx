@@ -5,7 +5,7 @@ import DataGrid from '@platform/web-ui/components/DataGrid';
 import './AccountManager.css';
 import { authFetch } from '../platform/auth';
 
-const API = config.API_BASE + '/Account';
+const BASE_API = config.API_BASE + '/Account';
 
 const TABS = [
   { key: 'users', label: 'Users' },
@@ -18,27 +18,42 @@ const PERM_LABELS = { C: 8, R: 4, U: 2, D: 1 };
 const ORG_TYPE_ORDER = { company: 0, division: 1, team: 2, group: 3 };
 const ORG_TYPES = ['company', 'division', 'team', 'group'];
 
+// 앱 스코프 목록 (D9) — platform 관리 화면의 앱 선택 select 옵션. 신규 앱 추가 시 여기만 갱신.
+const APPS = ['platform', 'gojira', 'ragaas'];
+
 function sortOrgUnits(units) {
   return [...units].sort((a, b) => (ORG_TYPE_ORDER[a.type] ?? 99) - (ORG_TYPE_ORDER[b.type] ?? 99));
 }
 
-export default function AccountManager({ user }) {
+// app: 앱 스코프(D8) — 'platform'(기본) | 'gojira' | 'ragaas'. authGroups/notices 는
+// 이 스코프로 분리 관리된다(전역 신원 + 앱별 권한). orgUnits/userProject/connection 은
+// 조직도처럼 전역 성격이라 스코프하지 않는다(계약 미확정이면 이 함수 시그니처만 바뀜).
+export default function AccountManager({ user, app = 'platform' }) {
   const [tab, setTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [authGroups, setAuthGroups] = useState([]);
   const [orgUnits, setOrgUnits] = useState([]);
   const [editItem, setEditItem] = useState(null); // { mode: 'create'|'edit', tab, data }
 
+  // platform 스코프 = 전체 조회(메타 관리 콘솔), 그 외 스코프는 자기 앱 것만 (D9).
+  const isPlatform = app === 'platform';
+  const listApp = isPlatform ? 'all' : app;
+
+  const withApp = useCallback((path) => `${BASE_API}${path}${path.includes('?') ? '&' : '?'}app=${encodeURIComponent(listApp)}`, [listApp]);
+
   const fetchAll = useCallback(() => {
-    authFetch(`${API}/users`).then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
-    authFetch(`${API}/authGroups`).then(r => r.json()).then(d => setAuthGroups(Array.isArray(d) ? d : [])).catch(() => {});
-    authFetch(`${API}/orgUnits`).then(r => r.json()).then(d => setOrgUnits(Array.isArray(d) ? d : [])).catch(() => {});
-  }, []);
+    authFetch(withApp('/users')).then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(withApp('/authGroups')).then(r => r.json()).then(d => setAuthGroups(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(`${BASE_API}/orgUnits`).then(r => r.json()).then(d => setOrgUnits(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [withApp]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   async function handleSave(tabKey, mode, data) {
-    const url = mode === 'create' ? `${API}/${tabKey}` : `${API}/${tabKey}/${data._id}`;
+    const path = mode === 'create' ? `/${tabKey}` : `/${tabKey}/${data._id}`;
+    // authGroups 생성/수정: platform 스코프는 body.app 에 의존(쿼리 파라미터 없음),
+    // 앱 스코프는 기존대로 쿼리 파라미터(app=<scope>)가 body.app 없을 때 채운다 (D9).
+    const url = tabKey === 'authGroups' && !isPlatform ? withApp(path) : `${BASE_API}${path}`;
     const method = mode === 'create' ? 'POST' : 'PUT';
     // 수정 시 메타 필드 제거
     const body = { ...data };
@@ -62,7 +77,7 @@ export default function AccountManager({ user }) {
 
   async function handleDelete(tabKey, id) {
     if (!window.confirm('비활성화 하시겠습니까?')) return;
-    await authFetch(`${API}/${tabKey}/${id}`, { method: 'DELETE' });
+    await authFetch(`${BASE_API}/${tabKey}/${id}`, { method: 'DELETE' });
     fetchAll();
   }
 
@@ -79,7 +94,7 @@ export default function AccountManager({ user }) {
       <div className="am-content">
         {tab === 'users' && (
           <UserTable
-            users={users} authGroups={authGroups} orgUnits={orgUnits}
+            users={users} authGroups={authGroups} orgUnits={orgUnits} isPlatform={isPlatform}
             onEdit={(u) => setEditItem({ mode: 'edit', tab: 'users', data: { ...u } })}
             onDelete={(id) => handleDelete('users', id)}
             onCreate={() => setEditItem({ mode: 'create', tab: 'users', data: { knoxId: '', name: '', email: '', authGroupIds: [], orgUnitIds: [] } })}
@@ -87,10 +102,12 @@ export default function AccountManager({ user }) {
         )}
         {tab === 'authGroups' && (
           <AuthGroupTable
-            authGroups={authGroups}
+            authGroups={authGroups} isPlatform={isPlatform}
             onEdit={(g) => setEditItem({ mode: 'edit', tab: 'authGroups', data: { ...g } })}
             onDelete={(id) => handleDelete('authGroups', id)}
-            onCreate={() => setEditItem({ mode: 'create', tab: 'authGroups', data: { code: '', name: '', description: '', authority: {} } })}
+            onCreate={() => setEditItem({ mode: 'create', tab: 'authGroups', data: isPlatform
+              ? { code: '', name: '', description: '', authority: {}, app: 'platform' }
+              : { code: '', name: '', description: '', authority: {} } })}
           />
         )}
         {tab === 'orgUnits' && (
@@ -108,6 +125,7 @@ export default function AccountManager({ user }) {
           item={editItem}
           authGroups={authGroups}
           orgUnits={orgUnits}
+          isPlatform={isPlatform}
           onClose={() => setEditItem(null)}
           onSave={(data) => handleSave(editItem.tab, editItem.mode, data)}
         />
@@ -117,18 +135,33 @@ export default function AccountManager({ user }) {
 }
 
 // --- Users 테이블 (Kendo Grid — 소팅/필터, 계약 04 web-ui DataGrid 소비) ---
-function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) {
+function UserTable({ users, authGroups, orgUnits, isPlatform, onEdit, onDelete, onCreate }) {
   // 파생 표시 필드를 행에 미리 평탄화 — 소팅/필터가 표시 문자열 기준으로 동작하게 한다.
   const rows = useMemo(() => {
     const groupMap = {};
-    authGroups.forEach(g => { groupMap[g._id] = g.name; });
-    return users.map(u => ({
-      ...u,
-      groupNames: (u.authGroupIds || []).map(id => groupMap[id] || id).join(', '),
-      orgPath: sortOrgUnits((u.orgUnitIds || []).map(id => orgUnits.find(o => o._id === id)).filter(Boolean))
-        .map(o => o.name).join(' > '),
-    }));
-  }, [users, authGroups, orgUnits]);
+    authGroups.forEach(g => { groupMap[g._id] = g; });
+    return users.map(u => {
+      const ids = u.authGroupIds || [];
+      // 매핑에 없는 id(다른 앱 그룹 등, platform 스코프가 아니면 로드 안 됨)는 표시하지 않는다 —
+      // raw id 노출 방지 (D9). platform 스코프에서는 그룹이 다 로드되므로 전부 이름으로 뜬다.
+      const groupNames = ids.map(id => {
+        const g = groupMap[id];
+        if (!g) return null;
+        return isPlatform ? `${g.name}(${g.app})` : g.name;
+      }).filter(Boolean).join(', ');
+      // platform 스코프 전용 "소속 앱" 컬럼 — 사용자가 속한 그룹들의 app distinct
+      const apps = isPlatform
+        ? [...new Set(ids.map(id => groupMap[id]?.app).filter(Boolean))].join(', ')
+        : undefined;
+      return {
+        ...u,
+        groupNames,
+        apps,
+        orgPath: sortOrgUnits((u.orgUnitIds || []).map(id => orgUnits.find(o => o._id === id)).filter(Boolean))
+          .map(o => o.name).join(' > '),
+      };
+    });
+  }, [users, authGroups, orgUnits, isPlatform]);
 
   const ActionsCell = (props) => (
     <td className="am-actions">
@@ -136,6 +169,16 @@ function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) 
       <button onClick={() => onDelete(props.dataItem._id)}>삭제</button>
     </td>
   );
+
+  const columns = [
+    { field: 'knoxId', title: 'Knox ID', width: '160px' },
+    { field: 'name', title: '이름', width: '140px' },
+    { field: 'email', title: '이메일' },
+    { field: 'groupNames', title: '권한그룹' },
+    ...(isPlatform ? [{ field: 'apps', title: '소속 앱', width: '140px' }] : []),
+    { field: 'orgPath', title: '조직' },
+    { title: ' ', cell: ActionsCell, filterable: false, sortable: false, width: '130px' },
+  ];
 
   return (
     <>
@@ -146,21 +189,15 @@ function UserTable({ users, authGroups, orgUnits, onEdit, onDelete, onCreate }) 
       <DataGrid
         data={rows}
         initialSort={[{ field: 'knoxId', dir: 'asc' }]}
-        columns={[
-          { field: 'knoxId', title: 'Knox ID', width: '160px' },
-          { field: 'name', title: '이름', width: '140px' },
-          { field: 'email', title: '이메일' },
-          { field: 'groupNames', title: '권한그룹' },
-          { field: 'orgPath', title: '조직' },
-          { title: ' ', cell: ActionsCell, filterable: false, sortable: false, width: '130px' },
-        ]}
+        columns={columns}
       />
     </>
   );
 }
 
-// --- AuthGroups 테이블 ---
-function AuthGroupTable({ authGroups, onEdit, onDelete, onCreate }) {
+// --- AuthGroups 테이블 --- (platform 스코프에서만 ID/앱 컬럼 노출 — 여러 앱 그룹이 섞여
+// 보이므로 구분자가 필요하다. D9)
+function AuthGroupTable({ authGroups, isPlatform, onEdit, onDelete, onCreate }) {
   function renderAuth(authority) {
     if (!authority) return '-';
     return Object.entries(authority).map(([code, bits]) => {
@@ -177,13 +214,18 @@ function AuthGroupTable({ authGroups, onEdit, onDelete, onCreate }) {
       </div>
       <table className="am-table">
         <thead>
-          <tr><th>코드</th><th>이름</th><th>설명</th><th>권한</th><th></th></tr>
+          <tr>
+            <th>이름</th><th>코드</th>
+            {isPlatform && <th>앱</th>}
+            <th>설명</th><th>권한</th><th></th>
+          </tr>
         </thead>
         <tbody>
           {authGroups.map(g => (
             <tr key={g._id}>
-              <td>{g.code}</td>
               <td>{g.name}</td>
+              <td>{g.code}</td>
+              {isPlatform && <td>{g.app}</td>}
               <td>{g.description}</td>
               <td className="am-auth-cell">{renderAuth(g.authority)}</td>
               <td className="am-actions">
@@ -233,7 +275,7 @@ function OrgUnitTable({ orgUnits, onEdit, onDelete, onCreate }) {
 }
 
 // --- 편집 다이얼로그 ---
-function EditDialog({ item, authGroups, orgUnits, onClose, onSave }) {
+function EditDialog({ item, authGroups, orgUnits, isPlatform, onClose, onSave }) {
   const [form, setForm] = useState(item.data);
   const isCreate = item.mode === 'create';
   const title = isCreate ? '추가' : '편집';
@@ -289,7 +331,9 @@ function EditDialog({ item, authGroups, orgUnits, onClose, onSave }) {
               <select className="am-tag-select" value="" onChange={e => { if (e.target.value) toggleArrayItem('authGroupIds', e.target.value); }}>
                 <option value="">권한그룹 추가...</option>
                 {authGroups.filter(g => !(form.authGroupIds || []).includes(g._id)).map(g => (
-                  <option key={g._id} value={g._id}>{g.name} ({g.code})</option>
+                  <option key={g._id} value={g._id}>
+                    {isPlatform ? `${g.name} (${g.code}, ${g.app})` : `${g.name} (${g.code})`}
+                  </option>
                 ))}
               </select>
               <label>조직</label>
@@ -311,6 +355,17 @@ function EditDialog({ item, authGroups, orgUnits, onClose, onSave }) {
           )}
           {item.tab === 'authGroups' && (
             <>
+              {isPlatform && (
+                <label>앱
+                  {isCreate ? (
+                    <select value={form.app || 'platform'} onChange={e => set('app', e.target.value)}>
+                      {APPS.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                  ) : (
+                    <input value={form.app || 'platform'} disabled />
+                  )}
+                </label>
+              )}
               <label>코드<input value={form.code || ''} onChange={e => set('code', e.target.value)} disabled={!isCreate} /></label>
               <label>이름<input value={form.name || ''} onChange={e => set('name', e.target.value)} /></label>
               <label>설명<input value={form.description || ''} onChange={e => set('description', e.target.value)} /></label>

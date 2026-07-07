@@ -65,6 +65,14 @@
   font-weight: 600;
   border-bottom: 2px solid tomato;
 }
+/* 제품 스코프에서 제품 메뉴 | 플랫폼 내장 메뉴(마스터) 구분선 */
+.app-nav-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 0 6px;
+  align-self: center;
+}
 
 .app-user {
   font-size: 13px;
@@ -84,6 +92,65 @@
 .app-user-switch option {
   color: #000;
   background: #fff;
+}
+
+/* 플랫폼 스코프 홈 — 제품 링크 목록 (D6). 클릭 전까지 remote 를 연결하지 않는다. */
+.app-home {
+  height: 100%;
+  overflow: auto;
+  padding: 48px;
+  box-sizing: border-box;
+}
+.app-home-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.app-home-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 140px;
+  height: 120px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  background: #fff;
+  text-decoration: none;
+  color: #333;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.app-home-card:hover {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  transform: translateY(-2px);
+}
+/* 아이콘/글자배지 공통 원형 칩 — 셸 로고 상당수가 밝은/흰색이라 흰 카드 배경에
+   묻힌다(titlebar 는 어두운 배경이라 무증상). 칩 배경을 titlebar 색과 맞춰 항상 보이게 */
+.app-home-card-icon,
+.app-home-card-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #2c3e50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.app-home-card-icon img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+.app-home-card-badge {
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+}
+.app-home-card-label {
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .app-body {

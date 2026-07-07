@@ -101,8 +101,11 @@ X-Service-Token: <env SERVICE_TOKEN, 설정돼 있으면>
 - **백엔드 API 베이스 경로는 `/api/v2` 를 표준**으로 한다. 프론트 설정 조립 규칙 = `{gateway}/<제품>/api/v2`
   (공용은 `{gateway}/platform/api/v2`).
 - **주의(셸 딥링크와의 구분)**: 셸 탭 딥링크는 슬래시 없는 `/<제품>`(예: `/ragaas`) — 프리픽스 location 에
-  안 걸려 셸로 간다. 슬래시 있는 `/<제품>/…` 부터 remote standalone/자산 경로.
-- **구 경로(v1) alias**: `/platform/api/`·`/gojira/api/`·`/gojira/`·`/ragaas/api/`·`/ragaas/` 는
+  안 걸려 셸로 간다. 슬래시 있는 `/<제품>/…` 는 셸이 로드하는 remote 자산·env.js·API 경로.
+- **standalone HTML 진입은 없다** (2026-07-07 D4): `location = /<제품>/` exact match 가 셸 딥링크
+  `/<제품>` 으로 302 — remote 는 바디 전용(계약 01 §2)이라 단독 화면에 크롬이 없기 때문.
+  자산/remoteEntry/API 는 exact match 에 안 걸려 그대로 통과. 제품 단독 실행은 dev 서버 전용.
+- **구 경로(v1) alias**: `/platform-api/`·`/gojira-api/`·`/gojira-app/`·`/ragaas-api/`·`/ragaas-app/` 는
   구버전 런처(≤0.1.15) 호환을 위한 deprecated alias — 런처 fleet 업데이트 후 제거 예정. 신규 구현은 v2 만 사용.
 
 ## 5. 런타임 env 주입 (재빌드 없는 폐쇄망 배포)
@@ -125,6 +128,58 @@ exec nginx -g 'daemon off;'
 - `esc()` 로 `\` 와 `"` 를 escape.
 - **규칙: 앱이 소비하는 모든 런타임 키는 entrypoint 직렬화 목록에 반드시 포함** — 현재 platform-app entrypoint 가
   `REACT_APP_USE_SSO` 를 누락한 버그가 이 규칙 위반 사례 (P2 수정 대상).
+- **규칙(2026-07-07, RAGaaS 제안 수용): remote 의 자기 API 폴백은 빌드 base 기준 상대경로** —
+  예: `import.meta.env.BASE_URL + 'api/v2/'` → `/ragaas/api/v2/`. 셸 탭에서 remote 가 읽는
+  `window._env_` 는 **셸의 env.js** 라 제품 API 키가 없다 — 루트 절대 폴백(`/api/v2/`)은 셸로
+  새므로 금지. base 상대 폴백은 게이트웨이 단일 origin 전제에서 셸/standalone/직접/dev 진입을
+  모두 관통한다. (셸 env.js 에 제품별 키를 싣는 대안은 셸-remote 결합 증가로 기각.)
+
+## 5.5 Account/Notice 앱 스코핑 (D8, 2026-07-07 / D9 갱신, 2026-07-07)
+
+**계정 관리와 공지는 여전히 Platform-API 단독 소유·구현**이다(RAGaaS 등 신규 제품이 각자
+Account/Notice 를 재구현하지 않는다 — 04/03 계약 그대로). 다만 데이터는 앱별로 분리된다.
+
+- **신원은 전역, 권한은 앱별** — 한 사람(knoxId)이 여러 앱에서 같은 신원으로 존재하되, 앱마다
+  다른 authGroup(따라서 다른 authority)에 속할 수 있다. `User` 컬렉션은 전역 그대로, `AuthGroup`
+  과 `Notice` 에 `app` 필드(`'platform'|'gojira'|'ragaas'…`, 미지정/레거시는 `'platform'`)가 추가됐다.
+- **쿼리 파라미터 `app`** — `GET /Account/me`, `/Account/users`, `/Account/authGroups`,
+  `POST /Account/authGroups`, `GET|POST /Notice`, `GET /Notice/active` 가 `?app=<scope>` 를
+  받는다. 생략 시 `'platform'`. `POST` 는 body 의 `app` 을 우선하고 없으면 쿼리로 채운다.
+  **특수값 `app=all`**(D9) — platform 관리 화면(메타 관리 콘솔) 전용, 필터 없이 전체 문서를
+  반환한다. `Account/me`/`Account/authGroups(POST)` 등 개별 리소스에 쓰는 API 에는 의미가
+  없고(대상이 하나뿐이거나 body.app 이 우선), 목록 API(`Account/users`, `Account/authGroups`,
+  `Notice`, `Notice/active`)에서만 쓰인다.
+- **platform 스코프 = 전체 조회 모델**(D9) — platform 은 더 이상 "app='platform' 데이터만
+  보는 또 하나의 앱 스코프"가 아니라, 전체 앱의 데이터를 다 보는 메타 관리 콘솔이다. 플랫폼
+  관리 화면이 목록 조회 시 `app=all` 을 사용해 이 역할을 구현한다. 이에 따라 **D8 의 신규 앱
+  부트스트랩 폴백 2단(권한 계산 폴백 + `Account/users` 온보딩 후보 폴백)은 완전히 제거됐다**
+  — platform 화면에서 전체 그룹/사용자가 항상 보이므로, 관리자가 신규 앱의 authGroup 을 직접
+  만들고 그 자리에서 바로 기존 사용자를 배정할 수 있어 폴백이 불필요해졌다. 신규 앱 온보딩은
+  이제 **platform 스코프 관리 화면에서 그 앱의 authGroup 생성 + 사용자 배정**으로 수행한다 —
+  배정 전까지 그 앱 스코프의 Account/Notice 관리 메뉴가 안 보이는 것은 정상 흐름이다.
+- **RAGaaS(외부 제품) 쪽 구현**: 이 API 들을 직접 만들 필요 없음 — 셸의 Account/Notice 관리
+  화면이 이미 `app='ragaas'`(또는 platform 스코프에서 `app=all`) 로 호출한다. RAGaaS 코드가
+  할 일은 없음(문의 시 참고용).
+
+Go 참조 구현: `Platform-API/db/account.go`(`appFilter`, `FindAllUsers`, `CalcUserAuthority`),
+`Platform-API/db/notice.go`.
+
+## 5.6 MongoDB 데이터베이스 분리 (D8)
+
+Platform-API 소유 데이터(users/authGroups/orgUnits/userProjects/userConnections/notices)는
+**`platform` DB** 로 분리됐다 (이전엔 GoJIRA-API 와 물리적으로 같은 `gojira` DB 를 공유했다).
+
+- `PLATFORM_MONGO_DB` 기본값 `platform` (구 기본값 `gojira`). `PLATFORM_GOJIRA_MONGO_DB`
+  (기본 `gojira`) 는 Platform-API 의 DocRepo 기능이 GoJIRA 소유 `projects` 컬렉션의
+  `documents` 필드를 직접 갱신하는 **역방향 결합 전용** 핸들 — 신규 코드는 쓰지 말 것
+  (제품 데이터는 그 제품 API 경유가 원칙, 이건 과거부터 있던 예외).
+- Mongo 계정(`gojira_app`)에 `platform` DB `dbOwner` role grant 필요 — 최초 1회
+  `deploy/scripts/migrate-platform-db.js` 실행(root 계정)이 grant + 기존 컬렉션 이관 +
+  기존 데이터 `app:'platform'` 태그 + GoJIRA 연속성(authGroup `_gojira` 복제, 사용자 링크)까지
+  수행한다. 신규 반입 환경에서도 최초 1회 실행 필요.
+- GoJIRA-API 는 무변경 — 자체 `GOJIRA_MONGO_DB`(기본 `gojira`) 그대로. GoJIRA-API 가 과거
+  Account/Notice 컬렉션에 직접 Mongo 접근하던 죽은 코드(`db/account.go` 등, 라우터 미등록 확인)는
+  제거했다 — 그 기능은 Platform-API HTTP API 로만 제공된다.
 
 ## 6. ENV 키 표
 
@@ -137,6 +192,9 @@ exec nginx -g 'daemon off;'
 | `SSO_INSECURE_TLS` | `false` | introspect TLS 검증 우회 토글 |
 | `SERVICE_TOKEN` | (없음) | 서비스간 공유비밀. 미설정 시 서비스토큰 경로 전면 거부 |
 | `DEV_USER` | 서비스별 | dev 폴백 최종 신원 |
+| `PLATFORM_MONGO_DB` | `platform` | Platform-API 전용 DB명 (D8, 구 기본값 `gojira`) |
+| `PLATFORM_GOJIRA_MONGO_DB` | `gojira` | Platform-API 의 DocRepo `projects` 역방향 결합용 (§5.6) |
+| `GOJIRA_MONGO_DB` | `gojira` | GoJIRA-API 전용 DB명 (무변경) |
 
 ### 프론트 (런타임 env.js 키 — 셸 + remote)
 
