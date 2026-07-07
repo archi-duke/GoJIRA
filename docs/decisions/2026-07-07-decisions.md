@@ -54,6 +54,9 @@
   - 플랫폼 브랜드명은 REACT_APP_PLATFORM_NAME(env, 기본 NETRIX) — 확정 시 .env 만 교체.
 - **적용**: 셸(App.jsx 스코프/manifest 로드/브랜딩) + GoJIRA-App manifest('Project') + 계약 01 §2.
   RAGaaS 는 무수정 폴백 동작, manifest 추가는 그쪽 선택.
+- **보강(같은 날)**: 제품 스코프에서 **마스터(USR≥15)** 에게는 구분선 뒤에 셸 내장 플랫폼 메뉴
+  (Account/Notice/Repository, 개별 authCode 필터 중첩)도 노출 — 클릭 시 같은 스코프 안에서
+  해당 내장 화면 렌더(브랜드 유지, URL 불변). 비마스터는 제품 메뉴만.
 
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 

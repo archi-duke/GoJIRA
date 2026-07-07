@@ -52,7 +52,7 @@ exposes: {
 | 진입 | 브랜드 (아이콘+이름) | 타이틀바 메뉴 |
 |---|---|---|
 | `/` | 플랫폼 (`PLATFORM_NAME` env, 임시 NETRIX) | 전 제품 탭 + 셸 내장 (Account/Notice/Repository) |
-| `/<제품>` (예: `/gojira`) | 제품 manifest 의 name/icon | **그 제품의 manifest menus 만** |
+| `/<제품>` (예: `/gojira`) | 제품 manifest 의 name/icon | **그 제품의 manifest menus** (+ 마스터 USR≥15 에게는 구분선 뒤 셸 내장 메뉴) |
 
 - 두 스코프 모두 로그인 사용자 표시/인증/공지는 셸이 동일 제공.
 - 제품 스코프 안의 메뉴 전환·플랫폼 스코프의 제품 탭 전환은 URL 을 바꾸지 않는다 —

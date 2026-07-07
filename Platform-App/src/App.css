@@ -65,6 +65,14 @@
   font-weight: 600;
   border-bottom: 2px solid tomato;
 }
+/* 제품 스코프에서 제품 메뉴 | 플랫폼 내장 메뉴(마스터) 구분선 */
+.app-nav-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 0 6px;
+  align-self: center;
+}
 
 .app-user {
   font-size: 13px;

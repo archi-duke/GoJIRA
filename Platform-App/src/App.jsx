@@ -316,6 +316,12 @@ function App() {
     ? (scopeManifest?.menus || []).filter(m =>
         !m.authCode || (authority && (authority[m.authCode] || 0) >= (m.authLevel || 0)))
     : [];
+  // 제품 스코프에서 마스터(USR≥15)에게는 셸 내장 플랫폼 메뉴도 이어서 노출.
+  // (개별 메뉴의 authCode 필터는 visibleApps 에서 이미 적용됨)
+  const isMaster = !!authority && (authority.USR || 0) >= 15;
+  const scopePlatformMenus = scopeApp && isMaster
+    ? visibleApps.filter(a => !a.component && !a.product)
+    : [];
 
   // 현재 활성 탭/메뉴 판별
   const activeKey = appRegistry.find(app =>
@@ -325,19 +331,20 @@ function App() {
     m.key === page || (m.pages && m.pages.includes(page))
   )?.key || null;
 
-  // 권한 미달 시 리다이렉트 (플랫폼 스코프의 내장/탭 페이지만 해당)
-  const currentApp = scope === 'platform'
+  // 권한 미달 시 리다이렉트 — 플랫폼 스코프 전체 + 제품 스코프의 내장 페이지
+  const currentApp = (scope === 'platform' || PLATFORM_PAGES.includes(page))
     ? appRegistry.find(a => a.key === page || (a.subPages && a.subPages.includes(page)))
     : null;
   if (currentApp && currentApp.authCode && authority !== null) {
     if ((authority[currentApp.authCode] || 0) < currentApp.authLevel) {
-      navigate('map');
+      navigate(scopeApp ? scopeApp.key : 'map');
     }
   }
 
-  // 컨텐츠 렌더링 — 제품 스코프는 항상 그 제품 remote (메뉴 키는 page prop 으로 전달)
+  // 컨텐츠 렌더링 — 제품 스코프는 그 제품 remote (내장 페이지 선택 시는 그 화면).
+  // 메뉴 키는 page prop 으로 remote 에 전달.
   let content;
-  if (scopeApp) {
+  if (scopeApp && !PLATFORM_PAGES.includes(page)) {
     const AppComponent = scopeApp.component;
     content = AppComponent ? (
       <RemoteErrorBoundary label={brandName}>
@@ -383,15 +390,29 @@ function App() {
           title="에이전트 채팅 띄우기">{brandName}</span>
         <nav className="app-nav">
           {scopeApp
-            ? scopeMenus.map((m) => (
-                <button
-                  key={m.key}
-                  className={`app-nav-btn ${activeMenuKey === m.key ? 'app-nav-active' : ''}`}
-                  onClick={() => navigate(m.key)}
-                >
-                  {m.label}
-                </button>
-              ))
+            ? [
+                ...scopeMenus.map((m) => (
+                  <button
+                    key={m.key}
+                    className={`app-nav-btn ${activeMenuKey === m.key ? 'app-nav-active' : ''}`}
+                    onClick={() => navigate(m.key)}
+                  >
+                    {m.label}
+                  </button>
+                )),
+                ...(scopePlatformMenus.length > 0
+                  ? [<span key="__divider" className="app-nav-divider" />]
+                  : []),
+                ...scopePlatformMenus.map((app) => (
+                  <button
+                    key={app.key}
+                    className={`app-nav-btn ${page === app.key ? 'app-nav-active' : ''}`}
+                    onClick={() => navigate(app.key)}
+                  >
+                    {app.label}
+                  </button>
+                )),
+              ]
             : visibleApps.map((app) => (
                 <button
                   key={app.key}
