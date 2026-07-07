@@ -9,6 +9,15 @@
   background: #fafbfc;
 }
 
+/* 웹 이슈 뷰 이원화 Phase 1 — "내 작업본(로컬)" 출처 배지. 눈에 띄되 과하지 않게. */
+.rm-source-badge {
+  padding: 4px 24px;
+  font-size: 12px;
+  color: #8a5a00;
+  background: #fff6e0;
+  border-bottom: 1px solid #f0d999;
+}
+
 /* ===== Content ===== */
 .rm-content {
   flex: 1;

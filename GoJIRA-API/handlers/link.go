@@ -37,7 +37,9 @@ func saveLinkYamlFor(ctx context.Context, key string) (*localWrite, error) {
 	}
 	merged["updated"] = time.Now().Format("2006-01-02T15:04:05.000+0900")
 
-	yamlBytes, err := yaml.Marshal(merged)
+	// NBBALL 사고 재발 방지: Mongo 조회 결과의 중첩 bson.D 를 순수 맵/배열로
+	// 정규화한 뒤 직렬화한다 (bson_normalize.go 주석 참고).
+	yamlBytes, err := yaml.Marshal(normalizeBsonDoc(merged))
 	if err != nil {
 		return nil, fmt.Errorf("yaml marshal %s: %w", key, err)
 	}

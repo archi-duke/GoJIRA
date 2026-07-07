@@ -4,6 +4,7 @@ import IssueDetailDialog from './IssueDetailDialog';
 import config from '../config';
 import './IssueList.css';
 import { authFetch } from '../platform/auth';
+import useIssueSource from '../hooks/useIssueSource';
 
 const API_BASE = config.API_BASE;
 
@@ -27,8 +28,10 @@ const TYPE_FILTER = {
 };
 
 export default function IssueList({ project, user, onBack, currentPage, onNavigate }) {
-  const [issues, setIssues] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const projectCode = project.jiraCodes?.main?.jiraCode || '';
+  // 웹 이슈 뷰 이원화 Phase 1 — 공식본(main/Mongo) ↔ 내 작업본(로컬 런처) 전환.
+  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta } =
+    useIssueSource({ projectCode, user });
   // 웹은 이슈 조회 전용 (local-agent-issue-model.md §3.3). 편집·생성·삭제는 로컬
   // (런처→VS Code+CLI)로 이전 → editMode 는 항상 false, 편집 토글 미노출.
   const [editMode] = useState(false);
@@ -48,29 +51,17 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
   useEffect(() => { sessionStorage.setItem('gojira_il_A', String(showA)); }, [showA]);
   useEffect(() => { sessionStorage.setItem('gojira_il_D', String(showD)); }, [showD]);
 
-  const projectCode = project.jiraCodes?.main?.jiraCode || '';
-
-  const fetchIssues = useCallback(() => {
-    setLoading(true);
-    return authFetch(`${API_BASE}/Issue`, { headers: { XBody: JSON.stringify({ prjID: projectCode, infoType: '' }) } })
-      .then((res) => res.json())
-      .then((data) => setIssues(Array.isArray(data) ? data : []))
-      .catch(() => setIssues([]))
-      .finally(() => setLoading(false));
-  }, [projectCode]);
-
-  useEffect(() => { fetchIssues(); }, [fetchIssues]);
-
+  /* Pull — 공식본(Mongo) 재동기화 후 현재 뷰 재조회. */
   const handlePull = useCallback(async () => {
     try {
       await authFetch(`${API_BASE}/Issue/fetch`, {
         headers: { XBody: JSON.stringify({ prjID: projectCode }) },
       });
-      await fetchIssues();
+      await refetch();
     } catch (err) {
       alert('Pull 실패: ' + err.message);
     }
-  }, [projectCode, fetchIssues]);
+  }, [projectCode, refetch]);
 
   // 허용된 issueType 목록
   const allowedTypes = [
@@ -111,7 +102,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, data }),
       });
-      setIssues((prev) => prev.map((i) => (i.key === key ? { ...i, ...data } : i)));
+      refetch();
     } catch (err) {
       alert('저장 실패: ' + err.message);
     }
@@ -129,7 +120,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: issue.key, prjID: projectCode }),
       });
-      setIssues((prev) => prev.filter((i) => i.key !== issue.key));
+      refetch();
     } catch (err) {
       alert('삭제 실패: ' + err.message);
     }
@@ -142,7 +133,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),
     })
-      .then(() => setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, summary: newSummary } : i))))
+      .then(() => refetch())
       .catch((err) => alert('수정 실패: ' + err.message));
   }
 
@@ -156,7 +147,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: issue.key, data: { [field]: newVal } }),
     })
-      .then(() => setIssues((prev) => prev.map((i) => (i.key === issue.key ? { ...i, [field]: newVal } : i))))
+      .then(() => refetch())
       .catch((err) => alert('수정 실패: ' + err.message));
   }
 
@@ -183,6 +174,12 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
     ...n, active: n.key === currentPage, handler: () => onNavigate(n.key),
   })) : [];
 
+  // 웹 이슈 뷰 이원화 Phase 1 — 런처 감지 + 로컬 clone 있을 때만 토글 노출(그 외는 현행과 동일).
+  const sourceOptions = sourceAvailable ? [
+    { label: '공식본', active: source === 'main', handler: () => setSource('main') },
+    { label: '내 작업본', active: source === 'local', handler: () => setSource('local') },
+  ] : [];
+
   return (
     <div className="il-wrapper">
       <CommonBar
@@ -191,6 +188,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
         onPull={handlePull}
         nav={nav}
         options={[
+          ...sourceOptions,
           { label: 'V', active: showV, handler: () => setShowV((v) => !v) },
           { label: 'F', active: showF, handler: () => setShowF((v) => !v) },
           { label: 'R', active: showR, handler: () => setShowR((v) => !v) },
@@ -198,6 +196,12 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
           { label: 'D', active: showD, handler: () => setShowD((v) => !v) },
         ]}
       />
+      {/* 내 작업본 출처 배지 — 눈에 띄되 과하지 않게 */}
+      {source === 'local' && (
+        <div className="il-source-badge">
+          내 작업본 (로컬, 미발행 변경 포함){localMeta ? ` · 이슈 ${localMeta.count}건` : ''}
+        </div>
+      )}
 
       <div className="il-grid-container">
         {loading ? (

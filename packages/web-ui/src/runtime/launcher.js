@@ -157,6 +157,15 @@ export async function requestLocalFile({ code, user, path, token }) {
   return get(`/file?${q}`, token);
 }
 
+/**
+ * 로컬 clone 의 이슈 YAML 일괄 조회 (웹 이슈 뷰 이원화 Phase 1 — "내 작업본").
+ * 응답 shape: { issues: [{path, content(raw yaml)}], count, source:"local" }.
+ * clone 없음/data/issues 없음이면 ok:false, error — 호출측이 공식본(Mongo)으로 폴백.
+ */
+export async function requestIssues({ code, user, token }) {
+  return get(`/issues?code=${encodeURIComponent(code)}&user=${encodeURIComponent(user)}`, token);
+}
+
 // 읽기(GET /files·/file — 로컬 디스크)는 30s.
 // 쓰기(POST — /sync·/push·/pull·/open 은 최초 clone/느린 Gitea push 포함)는 180s:
 // 사내 폐쇄망에서 첫 EnsureRepo clone 이 30s 를 넘겨 브라우저가 요청을 abort
