@@ -5,6 +5,7 @@ import config from '../config';
 import './IssueList.css';
 import { authFetch } from '../platform/auth';
 import useIssueSource from '../hooks/useIssueSource';
+import { localUpdateIssue, localDeleteIssue } from '../utils/localIssueWrite';
 
 const API_BASE = config.API_BASE;
 
@@ -30,11 +31,14 @@ const TYPE_FILTER = {
 export default function IssueList({ project, user, onBack, currentPage, onNavigate }) {
   const projectCode = project.jiraCodes?.main?.jiraCode || '';
   // 웹 이슈 뷰 이원화 Phase 1 — 공식본(main/Mongo) ↔ 내 작업본(로컬 런처) 전환.
-  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta } =
+  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta, launcherToken } =
     useIssueSource({ projectCode, user });
-  // 웹은 이슈 조회 전용 (local-agent-issue-model.md §3.3). 편집·생성·삭제는 로컬
-  // (런처→VS Code+CLI)로 이전 → editMode 는 항상 false, 편집 토글 미노출.
-  const [editMode] = useState(false);
+  // 웹 이슈 뷰 이원화 Phase 3 — 편집 브릿지는 내 작업본(로컬) 뷰에서만 재개방된다.
+  // 공식본에서는 CommonBar 에 onEditChange 를 넘기지 않아 토글 자체가 안 보인다(현행 유지).
+  const [editMode, setEditMode] = useState(false);
+  useEffect(() => {
+    if (source !== 'local' && editMode) setEditMode(false);
+  }, [source, editMode]);
   const [sortKey, setSortKey] = useState('key');
   const [sortAsc, setSortAsc] = useState(true);
   const [detailIssue, setDetailIssue] = useState(null);
@@ -96,12 +100,9 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
   }
 
   async function handleDetailSave(key, data) {
+    const issue = issues.find((i) => i.key === key);
     try {
-      await authFetch(`${API_BASE}/Issue`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, data }),
-      });
+      await localUpdateIssue({ projectCode, user, token: launcherToken, issue, data });
       refetch();
     } catch (err) {
       alert('저장 실패: ' + err.message);
@@ -115,40 +116,36 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
       : `"${issue.key}"는 타 과제 이슈입니다. 이 과제 목록에서만 제거하시겠습니까?`;
     if (!window.confirm(msg)) return;
     try {
-      await authFetch(`${API_BASE}/Issue`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: issue.key, prjID: projectCode }),
-      });
+      await localDeleteIssue({ projectCode, user, token: launcherToken, issue });
       refetch();
     } catch (err) {
       alert('삭제 실패: ' + err.message);
     }
   }
 
-  function handleSummaryBlur(issue, newSummary) {
+  async function handleSummaryBlur(issue, newSummary) {
     if (newSummary === issue.summary) return;
-    authFetch(`${API_BASE}/Issue`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),
-    })
-      .then(() => refetch())
-      .catch((err) => alert('수정 실패: ' + err.message));
+    try {
+      await localUpdateIssue({ projectCode, user, token: launcherToken, issue, data: { summary: newSummary } });
+      refetch();
+    } catch (err) {
+      alert('수정 실패: ' + err.message);
+    }
   }
 
-  function handleSelectChange(issue, field, newName) {
+  async function handleSelectChange(issue, field, newName) {
     const oldVal = issue[field];
     const oldName = oldVal && typeof oldVal === 'object' ? oldVal.name : oldVal || '';
     if (newName === oldName) return;
-    const newVal = { ...(typeof oldVal === 'object' ? oldVal : {}), name: newName };
-    authFetch(`${API_BASE}/Issue`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: issue.key, data: { [field]: newVal } }),
-    })
-      .then(() => refetch())
-      .catch((err) => alert('수정 실패: ' + err.message));
+    // shape 보존: 로컬 YAML 스키마는 status/priority 가 스칼라 — 원래 객체({name})였을 때만
+    // 객체 유지(구 Mongo/JIRA 캐시 shape), 스칼라였으면 스칼라로 쓴다(IssueDetailDialog 와 동일 규칙).
+    const newVal = oldVal && typeof oldVal === 'object' ? { ...oldVal, name: newName } : newName;
+    try {
+      await localUpdateIssue({ projectCode, user, token: launcherToken, issue, data: { [field]: newVal } });
+      refetch();
+    } catch (err) {
+      alert('수정 실패: ' + err.message);
+    }
   }
 
   const columns = [
@@ -183,6 +180,7 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
   return (
     <div className="il-wrapper">
       <CommonBar
+        key={source}
         title={barTitle}
         onBack={onBack}
         onPull={handlePull}
@@ -195,11 +193,13 @@ export default function IssueList({ project, user, onBack, currentPage, onNaviga
           { label: 'A', active: showA, handler: () => setShowA((v) => !v) },
           { label: 'D', active: showD, handler: () => setShowD((v) => !v) },
         ]}
+        onEditChange={source === 'local' ? setEditMode : undefined}
       />
       {/* 내 작업본 출처 배지 — 눈에 띄되 과하지 않게 */}
       {source === 'local' && (
         <div className="il-source-badge">
           내 작업본 (로컬, 미발행 변경 포함){localMeta ? ` · 이슈 ${localMeta.count}건` : ''}
+          {editMode && ' · 편집 중 — 저장은 내 로컬 작업본에만 반영, 등록→PR 로 공식화'}
         </div>
       )}
 

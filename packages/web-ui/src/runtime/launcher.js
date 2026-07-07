@@ -166,6 +166,18 @@ export async function requestIssues({ code, user, token }) {
   return get(`/issues?code=${encodeURIComponent(code)}&user=${encodeURIComponent(user)}`, token);
 }
 
+/**
+ * 이슈 변경 저널 기록 (웹 이슈 뷰 이원화 Phase 3 — 편집 브릿지). 웹에서 발생한 로컬뷰
+ * 생성/수정/삭제/링크 변경을 런처가 클론 내 저널에 누적 기록해, 그 과제 에이전트가 세션
+ * 시작/작업 중 영향 분석을 할 수 있게 한다. best-effort — 실패해도 편집 자체는 막지 않는다
+ * (호출측이 실패를 콘솔 경고로만 처리).
+ * @param {{code:string, user:string, entry:{op:string, keys:string[], summary?:string, fields?:string[]}, token:string}} args
+ * @returns {Promise<{ok:boolean, data?:{status:string}, error?:string}>}
+ */
+export async function requestJournal({ code, user, entry, token }) {
+  return post('/issue-journal', { code, user, entry }, token);
+}
+
 // 읽기(GET /files·/file — 로컬 디스크)는 30s.
 // 쓰기(POST — /sync·/push·/pull·/open 은 최초 clone/느린 Gitea push 포함)는 180s:
 // 사내 폐쇄망에서 첫 EnsureRepo clone 이 30s 를 넘겨 브라우저가 요청을 abort

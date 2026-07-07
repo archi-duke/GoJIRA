@@ -26,6 +26,8 @@ RUN rm -rf gojira-launcher/assets/.claude gojira-launcher/assets/.opencode gojir
 COPY .claude/skills/      gojira-launcher/assets/.claude/skills/
 COPY opencode.json        gojira-launcher/assets/opencode.json
 COPY .opencode/agents/    gojira-launcher/assets/.opencode/agents/
+# clone 배포용 프로젝트 메모리(웹발 이슈 변경 저널 계약) — build-launcher.sh 와 동일 동기화.
+COPY gojira-launcher/assets-extra/CLAUDE.md gojira-launcher/assets/.claude/CLAUDE.md
 
 # cross-compile 3종 + manifest. gojira-launcher 는 독립 모듈 → GOWORK=off.
 # 산출 레이아웃은 Platform-API/handlers/launcher.go 가 읽는 형태와 일치해야 한다:

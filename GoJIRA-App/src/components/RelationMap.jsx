@@ -6,6 +6,9 @@ import config from '../config';
 import './RelationMap.css';
 import { authFetch } from '../platform/auth';
 import useIssueSource from '../hooks/useIssueSource';
+import {
+  localUpdateIssue, localCreateIssue, localDeleteIssue, localCreateLink, localDeleteLink,
+} from '../utils/localIssueWrite';
 
 const API_BASE = config.API_BASE;
 
@@ -133,11 +136,14 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   const projectCode = project.jiraCodes?.main?.jiraCode || '';
   // 웹 이슈 뷰 이원화 Phase 1 — 공식본(main/Mongo) ↔ 내 작업본(로컬 런처) 전환.
   // 런처 미감지/로컬 clone 없음이면 sourceAvailable=false → 토글 미노출, 기존 동작과 동일.
-  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta } =
+  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta, launcherToken } =
     useIssueSource({ projectCode, user });
-  // 웹은 조회 전용 (local-agent-issue-model.md §3.3). 편집/링크/생성/삭제는 로컬로
-  // 이전 → editMode 항상 false, 편집 토글 미노출.
-  const [editMode] = useState(false);
+  // 웹 이슈 뷰 이원화 Phase 3 — 편집 브릿지는 내 작업본(로컬) 뷰에서만 재개방된다.
+  // 공식본에서는 CommonBar 에 onEditChange 를 넘기지 않아 토글 자체가 안 보인다(현행 유지).
+  const [editMode, setEditMode] = useState(false);
+  useEffect(() => {
+    if (source !== 'local' && editMode) setEditMode(false);
+  }, [source, editMode]);
   const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_rm_A') === 'true');
   const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_rm_R') !== 'false');
   const [showTest, setShowTest] = useState(() => sessionStorage.getItem('gojira_rm_T') === 'true');
@@ -271,18 +277,15 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     else delete cardElems.current[key];
   }, []);
 
-  /* ---------- edit mode actions ---------- */
+  /* ---------- edit mode actions (로컬뷰 전용 — localIssueWrite 가 launcher 로 자기
+     로컬 clone 만 갱신, Mongo/공식본 무접촉) ---------- */
 
   async function toggleLabel(issue, label) {
     const labels = issue.labels || [];
     const has = labels.includes(label);
     const newLabels = has ? labels.filter((l) => l !== label) : [...labels, label];
     try {
-      await authFetch(`${API_BASE}/Issue`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: issue.key, data: { labels: newLabels } }),
-      });
+      await localUpdateIssue({ projectCode, user, token: launcherToken, issue, data: { labels: newLabels } });
       refetch();
     } catch (err) {
       alert('라벨 업데이트 실패: ' + err.message);
@@ -292,11 +295,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   async function deleteIssue(issue) {
     if (!window.confirm(`"${issue.key}" 이슈를 삭제하시겠습니까?`)) return;
     try {
-      await authFetch(`${API_BASE}/Issue`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: issue.key, prjID: projectCode }),
-      });
+      await localDeleteIssue({ projectCode, user, token: launcherToken, issue });
       refetch();
     } catch (err) {
       alert('삭제 실패: ' + err.message);
@@ -304,12 +303,10 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   }
 
   async function createLink(fromKey, toKey) {
+    const fromIssue = issues.find((i) => i.key === fromKey);
+    const toIssue = issues.find((i) => i.key === toKey);
     try {
-      await authFetch(`${API_BASE}/Issue/link`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inwardKey: fromKey, outwardKey: toKey }),
-      });
+      await localCreateLink({ projectCode, user, token: launcherToken, fromIssue, toIssue });
       refetch();
     } catch (err) {
       alert('연결 생성 실패: ' + err.message);
@@ -317,37 +314,13 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   }
 
   async function deleteLink(conn) {
-    console.log('[deleteLink] clicked:', conn.id, 'linkId:', conn.linkId, 'from:', conn.from, 'to:', conn.to);
     if (!window.confirm('이 연결을 삭제하시겠습니까?')) return;
     try {
-      await authFetch(`${API_BASE}/Issue/link`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linkId: conn.linkId, fromKey: conn.from, toKey: conn.to }),
-      });
+      await localDeleteLink({ projectCode, user, token: launcherToken, linkId: conn.linkId, issues });
       refetch();
     } catch (err) {
       alert('연결 삭제 실패: ' + err.message);
     }
-  }
-
-  const SUBKEY_PREFIX = {
-    VOS: 'VOS', Feature: 'UC',
-    QA: 'QA', CNST: 'CNST', FR: 'FR',
-    ADSN: 'ADSN', DDSN: 'DDSN',
-  };
-
-  function getNextSubKey(subtype) {
-    const prefix = (SUBKEY_PREFIX[subtype] || subtype) + '_';
-    let maxNum = 0;
-    issues.forEach((i) => {
-      const sk = i.subkey || '';
-      if (sk.startsWith(prefix)) {
-        const num = parseInt(sk.substring(prefix.length), 10);
-        if (!isNaN(num) && num > maxNum) maxNum = num;
-      }
-    });
-    return prefix + String(maxNum + 1).padStart(3, '0');
   }
 
   async function addIssue(subtype) {
@@ -361,66 +334,38 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
       case 'DDSN':    issueType = 'Detailed Design'; break;
       default:        issueType = subtype;
     }
-    const subkey = getNextSubKey(subtype);
-    const payload = {
+    // subkey 는 넘기지 않는다 — 서버(counters.go) 원자 할당. 클라이언트 계산은 다중 사용자
+    // 충돌 위험(web-local-view-model.md §Phase 2 D11).
+    const body = {
       projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
       labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
-      subkey,
     };
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const res = await authFetch(`${API_BASE}/Issue`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) {
-          refetch();
-          return;
-        }
-        const errData = await res.json().catch(() => ({}));
-        if (attempt === 3) {
-          const action = window.confirm(
-            `이슈 생성 실패 (${attempt}회 시도)\n${errData.error || res.statusText}\n\n확인: 재시도 / 취소: 삭제`
-          );
-          if (action) { attempt = 0; continue; } // 재시도
-          return; // 삭제 (서버에 저장 안 됨)
-        }
-      } catch (err) {
-        if (attempt === 3) {
-          const action = window.confirm(
-            `이슈 생성 실패 (${attempt}회 시도)\n${err.message}\n\n확인: 재시도 / 취소: 삭제`
-          );
-          if (action) { attempt = 0; continue; }
-          return;
-        }
-      }
+    try {
+      await localCreateIssue({ projectCode, user, token: launcherToken, body });
+      refetch();
+    } catch (err) {
+      alert('이슈 생성 실패: ' + err.message);
     }
   }
 
   async function handleDetailSave(key, data) {
+    const issue = issues.find((i) => i.key === key);
     try {
-      await authFetch(`${API_BASE}/Issue`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, data }),
-      });
+      await localUpdateIssue({ projectCode, user, token: launcherToken, issue, data });
       refetch();
     } catch (err) {
       alert('저장 실패: ' + err.message);
     }
   }
 
-  function handleSummaryBlur(issue, newSummary) {
+  async function handleSummaryBlur(issue, newSummary) {
     if (newSummary === issue.summary) return;
-    authFetch(`${API_BASE}/Issue`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: issue.key, data: { summary: newSummary } }),
-    })
-      .then(() => refetch())
-      .catch((err) => alert('수정 실패: ' + err.message));
+    try {
+      await localUpdateIssue({ projectCode, user, token: launcherToken, issue, data: { summary: newSummary } });
+      refetch();
+    } catch (err) {
+      alert('수정 실패: ' + err.message);
+    }
   }
 
   /* link drawing dots */
@@ -457,6 +402,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
     return (
       <div className="rm-wrapper">
         <CommonBar
+          key={source}
           title={barTitle}
           onBack={onBack}
           onPull={handlePull}
@@ -467,6 +413,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
             { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
             { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
           ]}
+          onEditChange={source === 'local' ? setEditMode : undefined}
         />
         <div className="rm-loading">로딩 중...</div>
       </div>
@@ -476,6 +423,7 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
   return (
     <div className="rm-wrapper">
       <CommonBar
+        key={source}
         title={barTitle}
         onBack={onBack}
         onPull={handlePull}
@@ -487,11 +435,13 @@ export default function RelationMap({ project, user, onBack, currentPage, onNavi
           { label: 'T', active: showTest, handler: () => setShowTest((v) => !v) },
         ]}
         onExport={editMode ? undefined : handleExport}
+        onEditChange={source === 'local' ? setEditMode : undefined}
       />
       {/* 내 작업본 출처 배지 — 눈에 띄되 과하지 않게 */}
       {source === 'local' && (
         <div className="rm-source-badge">
           내 작업본 (로컬, 미발행 변경 포함){localMeta ? ` · 이슈 ${localMeta.count}건` : ''}
+          {editMode && ' · 편집 중 — 저장은 내 로컬 작업본에만 반영, 등록→PR 로 공식화'}
         </div>
       )}
 

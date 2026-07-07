@@ -20,7 +20,7 @@ import (
 	"sync"
 )
 
-const version = "0.1.18"
+const version = "0.1.19"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -244,7 +244,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	env := s.agentEnv(spawnDir, req.User)
+	env := s.agentEnv(spawnDir, req.User, req.Code)
 	label := chatLabel(req.Code)
 	log.Printf("[TEMP-DEBUG] handleChat about to spawn agent=%q spawnDir=%q label=%q envCount=%d", agent, spawnDir, label, len(env))
 	sessionID, err := s.SpawnAgent(agent, spawnDir, label, req.Code, env)
@@ -810,6 +810,52 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		"count":  len(issues),
 		"source": "local",
 	})
+}
+
+type issueJournalReq struct {
+	Code  string            `json:"code"`
+	User  string            `json:"user"`
+	Entry JournalEntryInput `json:"entry"`
+}
+
+// POST /issue-journal — 웹 로컬뷰("내 작업본")에서 발생한 이슈 변경(생성/수정/삭제/링크)을
+// ~/.gojira/journal/<code>.yaml 에 append 한다 (D10 Phase 3 §옵션(a), web-local-view-model.md).
+// 클론 안이 아니라 런처 영역에 두는 이유: 프로젝트 레포에 .gitignore 가 없어 append 결과가
+// 그대로 PR 에 새어 들어가기 때문. 에이전트 세션은 spawn.go agentEnv 가 주입하는
+// GOJIRA_ISSUE_JOURNAL env 로 이 파일을 찾아 설계 영향(SATAM/유스케이스/설계문서)을 검토한다.
+func (s *Server) handleIssueJournal(w http.ResponseWriter, r *http.Request) {
+	var req issueJournalReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	if err := validateName("code", req.Code); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateName("user", req.User); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !validJournalOps[req.Entry.Op] {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("entry.op 이 올바르지 않습니다: %q (create|update|delete|link|unlink)", req.Entry.Op))
+		return
+	}
+	if len(req.Entry.Keys) == 0 {
+		writeErr(w, http.StatusBadRequest, "entry.keys 누락")
+		return
+	}
+	if strings.TrimSpace(req.Entry.Summary) == "" {
+		writeErr(w, http.StatusBadRequest, "entry.summary 누락")
+		return
+	}
+	path, err := s.appendJournalEntry(req.Code, req.User, req.Entry)
+	if err != nil {
+		log.Printf("/issue-journal 실패 code=%s user=%s: %v", req.Code, req.User, err)
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "path": path})
 }
 
 // GET /status?code= — 로컬 작업/브랜치 진행 상태 (§2.1).
