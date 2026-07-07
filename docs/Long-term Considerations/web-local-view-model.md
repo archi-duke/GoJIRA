@@ -39,7 +39,7 @@
 
 ## 3. 단계별 계획
 
-### Phase 0 — ingest 검증 (즉시, 독립적, ~반나절)
+### Phase 0 — ingest 검증 ✅ 완료 (2026-07-07, 커밋 089d449)
 - `/Issue/ingest` · `/Project/{code}/issues/ingest` 저장 직전에 구조 검증:
   issueLinks 는 반드시 `{id, type:{name}, outwardIssue|inwardIssue:{key}}` shape 의 객체 배열,
   key/issueType 필수 등. 위반 시 400 + 로그 (NBBALL 류 오염 재발 차단).
