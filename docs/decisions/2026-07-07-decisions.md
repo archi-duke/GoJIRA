@@ -58,6 +58,31 @@
   (Account/Notice/Repository, 개별 authCode 필터 중첩)도 노출 — 클릭 시 같은 스코프 안에서
   해당 내장 화면 렌더(브랜드 유지, URL 불변). 비마스터는 제품 메뉴만.
 
+## D6. 플랫폼 스코프(/) 순수화 — 제품 미연결, 제품 링크 목록만
+
+- **요구**: `/` 접속 시 플랫폼 메뉴(Account/Notice/Repository)만 보이고, 어떤 제품(GoJIRA/RAGaaS)도
+  연결하지 않는다. 단, 플랫폼 권한 없는 일반 사용자가 막히지 않도록 제품 링크 카드 목록 제공.
+- **결정**:
+  - pageFromPath 기본값 `'map'` → `'home'`. 플랫폼 스코프 타이틀바는 `visiblePlatformMenus`
+    (Account/Notice/Repository, 권한 필터)만 — 제품 탭 제거.
+  - 바디 기본(`page==='home'`)은 제품 카드 목록(`<a href="/<product>">`, 전체 페이지 네비게이션) —
+    remote 를 렌더하지 않으므로 연결 안 함. 아이콘은 셸 로컬 자산(`localIcon`)이나 글자 배지.
+  - manifest 로딩 effect 를 `scope` 로 게이트(이미 D5 작업 중 시도) — **했음에도 GoJIRA remoteEntry.js
+    가 루트에서 계속 fetch 되는 걸 발견**: 원인은 `Platform-App/vite.config.ts` federation 설정의
+    **빌드타임 정적 `remotes: { gojiraApp: {...} }` 선언** — MF 런타임이 host bootstrap(hostInit)
+    시점에 정적 remotes 를 스코프 무관하게 즉시 fetch. **제거**가 진짜 수정. registry.js 의 런타임
+    지연 등록(`ensureRegistered`, 스코프 진입 시 1회)만으로 충분 — dev 폴백은 여전히
+    `remoteBaseFromEnv` 기본값(`localhost:3001`)이 담당.
+  - registry.js: `component`(즉시 생성 lazy) → `remote.getComponent()`(호출 시점에만
+    registerRemotes+React.lazy, 메모이즈) 로 리팩터. `loadAppManifest` 도 같은
+    `ensureRegistered()` 경유.
+- **검증**(실브라우저, request 트레이스): `/` 방문 시 remoteEntry.js 요청은 셸 자신뿐(GoJIRA/RAGaaS
+  0건). `/gojira` 방문 시 GoJIRA remoteEntry 만, RAGaaS 는 0건 (역도 마찬가지) — 스코프별 완전
+  격리 확인.
+- **교훈**: MF 2.0 vite 플러그인의 빌드타임 `remotes` 선언은 "dev 폴백 힌트"가 아니라 host
+  bootstrap 이 실제로 소비하는 즉시-연결 목록이다. 런타임 동적 등록과 병행 선언하면 정적 쪽이
+  이긴다 — 순수 런타임 제어가 목적이면 정적 `remotes` 를 아예 비워야 한다.
+
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 
 - Phase 1 (A1~A12) 전부 완료, React 19.2.7 상향 포함. frontend shared-net 조인 완료(`/ragaas/` 관통).

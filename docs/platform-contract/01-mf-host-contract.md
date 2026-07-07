@@ -51,13 +51,19 @@ exposes: {
 
 | 진입 | 브랜드 (아이콘+이름) | 타이틀바 메뉴 |
 |---|---|---|
-| `/` | 플랫폼 (`PLATFORM_NAME` env, 임시 NETRIX) | 전 제품 탭 + 셸 내장 (Account/Notice/Repository) |
+| `/` | 플랫폼 (`PLATFORM_NAME` env, 임시 NETRIX) | 셸 내장 메뉴만 (Account/Notice/Repository, 권한 필터). **제품 탭 없음** — 바디 기본값은 제품 링크 카드 목록(클릭 전까지 어떤 remote 도 연결하지 않는다, D6) |
 | `/<제품>` (예: `/gojira`) | 제품 manifest 의 name/icon | **그 제품의 manifest menus** (+ 마스터 USR≥15 에게는 구분선 뒤 셸 내장 메뉴) |
 
 - 두 스코프 모두 로그인 사용자 표시/인증/공지는 셸이 동일 제공.
-- 제품 스코프 안의 메뉴 전환·플랫폼 스코프의 제품 탭 전환은 URL 을 바꾸지 않는다 —
-  URL 은 스코프 진입점. 셸 내장 페이지 딥링크(`/account` 등)는 플랫폼 스코프에서 유지.
+- 제품 스코프 안의 메뉴 전환은 URL 을 바꾸지 않는다 — URL 은 스코프 진입점. 플랫폼 스코프의
+  제품 카드 클릭은 **전체 페이지 네비게이션**(`<a href="/<제품>">`)으로 그 제품 스코프에 진입한다.
+  셸 내장 페이지 딥링크(`/account` 등)는 플랫폼 스코프에서 유지.
 - 게이트웨이의 `/<제품>/` → `/<제품>` 302 (D4) 와 결합: 어느 주소로 와도 브랜드 있는 화면.
+- **제품 연결(remote 등록/fetch)은 그 제품 스코프 진입 시점에만 일어난다** (D6). remote 등록은
+  MF 런타임에 `registerRemotes`를 호출하는 순간 곧 연결(remoteEntry.js fetch)이므로, 셸은 이를
+  스코프 진입 시점까지 지연한다 — **빌드타임 federation config 에 정적 `remotes` 를 선언하면 이
+  지연이 무력화**되니(host bootstrap 이 스코프 무관하게 즉시 fetch) 셸 vite.config 에는 정적
+  `remotes` 를 선언하지 않는다.
 
 ### 마운트 컴포넌트 계약 (props)
 

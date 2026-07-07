@@ -94,6 +94,58 @@
   background: #fff;
 }
 
+/* 플랫폼 스코프 홈 — 제품 링크 목록 (D6). 클릭 전까지 remote 를 연결하지 않는다. */
+.app-home {
+  height: 100%;
+  overflow: auto;
+  padding: 48px;
+  box-sizing: border-box;
+}
+.app-home-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.app-home-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 140px;
+  height: 120px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  background: #fff;
+  text-decoration: none;
+  color: #333;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.app-home-card:hover {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  transform: translateY(-2px);
+}
+.app-home-card-icon {
+  width: 36px;
+  height: 36px;
+}
+.app-home-card-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #4a6cf7;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-home-card-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .app-body {
   flex: 1;
   overflow: hidden;

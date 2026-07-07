@@ -11,31 +11,46 @@ function remoteBaseFromEnv(key, fallback = '') {
   return v ? v.replace(/\/$/, '') : '';
 }
 
-// remote 를 MF 런타임에 등록하고 lazy 컴포넌트를 만든다.
-// vite.config.ts 에 선언된 entry 는 초기값일 뿐, 여기서 force 재등록해 덮어쓴다.
-function makeRemote(name, base) {
-  registerRemotes(
-    [{ name, entry: `${base}/remoteEntry.js`, type: 'module' }],
-    { force: true }
-  );
-  return React.lazy(() => loadRemote(`${name}/App`).then((m) => ({ default: m.default ?? m })));
+// registerRemotes(force) 는 MF 런타임이 공유 스코프(react 싱글턴 등) 협상을 위해
+// remoteEntry.js 를 즉시 fetch 한다 — 즉 "등록 = 연결" 이다 (D6). 그래서 등록을 모듈
+// 로드 시 전부 해버리면, 플랫폼 스코프(/) 방문만으로 모든 제품이 조용히 연결된다.
+// 대신 제품별로 지연 등록: 그 제품이 실제로 필요해지는 시점(스코프 진입/manifest 조회)에만
+// 최초 1회 registerRemotes 한다.
+function makeRemoteEntry(name, base) {
+  let registered = false;
+  let Comp = null;
+  return {
+    mfName: name,
+    base,
+    ensureRegistered() {
+      if (registered) return;
+      registerRemotes([{ name, entry: `${base}/remoteEntry.js`, type: 'module' }], { force: true });
+      registered = true;
+    },
+    getComponent() {
+      this.ensureRegistered();
+      if (!Comp) Comp = React.lazy(() => loadRemote(`${name}/App`).then((m) => ({ default: m.default ?? m })));
+      return Comp;
+    },
+  };
 }
 
 // GoJIRA 앱 — 1호 remote. dev 폴백 :3001.
 const gojiraBase = remoteBaseFromEnv('REACT_APP_GOJIRA_APP_REMOTE', 'http://localhost:3001');
-const GoJIRAApp = makeRemote('gojiraApp', gojiraBase);
+const gojiraRemote = makeRemoteEntry('gojiraApp', gojiraBase);
 
 // RAGaaS 앱 — 2호 remote (온보딩 B1/B2). env 미설정이면 탭 자체를 노출하지 않는다 —
 // RAGaaS 스택이 배포되기 전의 셸이 죽은 탭을 보여주지 않게 하는 게이트.
 // 활성화: 컨테이너 env REACT_APP_RAGAAS_APP_REMOTE (또는 dev .env / public/env.js) 설정.
 const ragaasBase = remoteBaseFromEnv('REACT_APP_RAGAAS_APP_REMOTE');
-const RagaasApp = ragaasBase ? makeRemote('ragaasApp', ragaasBase) : null;
+const ragaasRemote = ragaasBase ? makeRemoteEntry('ragaasApp', ragaasBase) : null;
 
 const appRegistry = [
   {
     key: 'map',
     label: 'Project',
-    component: GoJIRAApp,
+    isRemote: true,          // 컨텐츠 렌더링이 remote.getComponent() 로 지연 연결 (D6)
+    remote: gojiraRemote,
     authCode: null,          // 전체 접근
     authLevel: 0,
     subPages: ['docs', 'issues', 'relationMap', 'satam'],
@@ -45,13 +60,16 @@ const appRegistry = [
     productLabel: 'GoJIRA',
     mfName: 'gojiraApp',
     base: gojiraBase,
+    // 플랫폼 스코프 홈(D6) 카드 아이콘 — 셸 자체 자산이라 remote 연결 없이 표시 가능.
+    localIcon: '/icons/gojira-logo.svg',
   },
   // RAGaaS — env 로 remote 가 지정된 경우에만 등록 (미배포 환경에서 탭 숨김)
-  ...(RagaasApp
+  ...(ragaasRemote
     ? [{
         key: 'ragaas',
         label: 'RAGaaS',
-        component: RagaasApp,
+        isRemote: true,
+        remote: ragaasRemote,
         authCode: null,      // 알파: 전체 접근. 권한 게이트가 필요해지면 authCode 신설(온보딩 B6)
         authLevel: 0,
         product: 'ragaas',
@@ -90,8 +108,9 @@ export default appRegistry;
  * 미노출/로드 실패는 null (셸은 registry 의 productLabel/단일 탭으로 폴백).
  */
 export async function loadAppManifest(entry) {
-  if (!entry || !entry.mfName) return null;
+  if (!entry || !entry.remote) return null;
   try {
+    entry.remote.ensureRegistered();
     const m = await loadRemote(`${entry.mfName}/manifest`);
     return (m && (m.default ?? m)) || null;
   } catch {

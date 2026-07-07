@@ -15,9 +15,11 @@ const webUiDeps = {
 };
 
 // Platform-App — MFE 셸(호스트) (플랫폼 통합 계약 docs/platform-contract/01)
-// remote URL 은 빌드에 inline 하지 않는다 — 여기 entry 는 dev 폴백일 뿐이고,
-// 부트스트랩(src/apps/registry.js)이 window._env_.REACT_APP_GOJIRA_APP_REMOTE 로
-// registerRemotes(force) 하여 런타임에 결정한다. 폐쇄망에서 env.js 만 바꾸면 반영.
+// remote 는 여기(빌드타임 federation config)에 정적 선언하지 않는다 — MF 런타임이
+// host bootstrap(hostInit) 시점에 정적 remotes 를 스코프 무관하게 즉시 fetch 해버려서
+// (D6: 플랫폼 스코프(/)만 방문해도 GoJIRA 가 조용히 "연결"되는 버그의 원인이었다).
+// registry.js 가 window._env_.REACT_APP_GOJIRA_APP_REMOTE 로 런타임에, 그것도 해당
+// 제품 스코프 진입 시점에만 지연 registerRemotes(force) 한다.
 export default defineConfig({
   plugins: [
     react(),
@@ -28,13 +30,6 @@ export default defineConfig({
       // 셸 런타임 제공 모듈 (계약 02·03) — remote 는 어댑터 한 겹으로 소비
       exposes: {
         './auth': './src/platform/auth',
-      },
-      remotes: {
-        gojiraApp: {
-          type: 'module',
-          name: 'gojiraApp',
-          entry: 'http://localhost:3001/remoteEntry.js',
-        },
       },
       shared: {
         react: { singleton: true },
