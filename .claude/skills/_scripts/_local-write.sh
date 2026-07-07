@@ -51,3 +51,35 @@ gj_apply_local_writes() {
     fi
   done
 }
+
+# gj_find_issue_yaml <key> — data/issues 안에서 `key: <key>` 라인을 가진 YAML 파일 경로를
+# 출력한다(Phase 2: PUT/DELETE/link 시 baseYaml 동봉용). 못 찾으면 빈 출력 + rc=1.
+gj_find_issue_yaml() {
+  local key="$1"
+  local root dir
+  root=$(gj_repo_root) || return 1
+  dir="${root}/data/issues"
+  [[ -d "$dir" ]] || return 1
+  local files=()
+  shopt -s nullglob
+  files=("$dir"/*.yaml "$dir"/*.yml)
+  shopt -u nullglob
+  [[ ${#files[@]} -eq 0 ]] && return 1
+  grep -lE "^key:[[:space:]]*['\"]?${key}['\"]?[[:space:]]*\$" "${files[@]}" 2>/dev/null
+}
+
+# gj_find_link_files <linkId> — data/issues 안에서 해당 linkId 를 참조하는 YAML 파일(들)의
+# 경로를 출력한다(Phase 2: DELETE /Issue/link 시 baseFiles 동봉용). 못 찾으면 빈 출력 + rc=1.
+gj_find_link_files() {
+  local linkId="$1"
+  local root dir
+  root=$(gj_repo_root) || return 1
+  dir="${root}/data/issues"
+  [[ -d "$dir" ]] || return 1
+  local files=()
+  shopt -s nullglob
+  files=("$dir"/*.yaml "$dir"/*.yml)
+  shopt -u nullglob
+  [[ ${#files[@]} -eq 0 ]] && return 1
+  grep -lE "id:[[:space:]]*['\"]?${linkId}['\"]?" "${files[@]}" 2>/dev/null
+}

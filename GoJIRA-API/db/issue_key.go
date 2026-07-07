@@ -9,10 +9,12 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-// NextIssueNum — `{code}-NNN` 형식의 다음 번호 반환.
-// Mongo 캐시에서 현재 최대 번호 + 1. YAML 진실 원천과 캐시가 일치한다는 전제.
+// seedIssueNum — issues 컬렉션 max 스캔으로 `{code}-NNN` 의 다음 번호를 계산한다.
+// counters 컬렉션 첫 초기화(seed) 전용 — 이후 발급은 counters.go 의 원자적
+// NextIssueNum 이 담당한다 (localOnly 생성은 issues 에 upsert 되지 않으므로
+// max 스캔만으로는 중복 발급됨. 또한 최신 이슈 삭제 후 생성 시 키 재사용 버그도 있음).
 // Python 측 skills/helpers.py:get_next_issue_num 과 동일 규칙.
-func NextIssueNum(ctx context.Context, code string) (int, error) {
+func seedIssueNum(ctx context.Context, code string) (int, error) {
 	filter := bson.M{"key": bson.M{"$regex": fmt.Sprintf("^%s-", regexp.QuoteMeta(code))}}
 	cur, err := Issues().Find(ctx, filter)
 	if err != nil {
@@ -36,9 +38,11 @@ func NextIssueNum(ctx context.Context, code string) (int, error) {
 	return mx + 1, nil
 }
 
-// NextSubkey — `{prefix}_NNN` (3자리 zero-pad) 다음 값 반환.
-// Python 측 skills/helpers.py:next_subkey 와 동일.
-func NextSubkey(ctx context.Context, code, prefix string) (string, error) {
+// seedSubkeyNum — issues 컬렉션 max 스캔으로 `{prefix}_NNN` 의 다음 번호(int)를 계산한다.
+// counters 컬렉션 첫 초기화(seed) 전용 — 이후 발급은 counters.go 의 원자적
+// NextSubkey 가 담당한다 (seedIssueNum 주석 참고).
+// Python 측 skills/helpers.py:next_subkey 와 동일 규칙.
+func seedSubkeyNum(ctx context.Context, code, prefix string) (int, error) {
 	pat := fmt.Sprintf("^%s_(\\d+)$", regexp.QuoteMeta(prefix))
 	filter := bson.M{
 		"key":    bson.M{"$regex": fmt.Sprintf("^%s-", regexp.QuoteMeta(code))},
@@ -46,7 +50,7 @@ func NextSubkey(ctx context.Context, code, prefix string) (string, error) {
 	}
 	cur, err := Issues().Find(ctx, filter)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 	defer cur.Close(ctx)
 	rx := regexp.MustCompile(pat)
@@ -63,7 +67,7 @@ func NextSubkey(ctx context.Context, code, prefix string) (string, error) {
 			}
 		}
 	}
-	return fmt.Sprintf("%s_%03d", prefix, mx+1), nil
+	return mx + 1, nil
 }
 
 // SubkeyPrefix — issueType + reqtype → subkey prefix.

@@ -142,43 +142,61 @@ func ProjectIssuesIngestHandler(w http.ResponseWriter, r *http.Request) {
 
 	ingested := map[string]bool{}
 	failed := []map[string]string{}
+	// 실패 파일의 키 — reconcile 삭제 보호 대상. 검증/저장 실패는 "YAML 집합에 부재"가
+	// 아니라 "상태 불명"이므로 캐시에서 지우면 안 된다 (2026-07-07 NBBALL resync 사고:
+	// main 의 오염 YAML 49건이 검증 거부 → reconcile 이 정상 캐시 49건을 삭제).
+	failedKeys := map[string]bool{}
+	unparseable := 0 // 키조차 모르는 실패 — 어느 이슈인지 알 수 없음.
 	for _, y := range req.Files {
 		doc, key, err := parseIssueYAML(y)
 		if err != nil {
 			failed = append(failed, map[string]string{"error": err.Error()})
+			unparseable++
 			continue
 		}
 		if err := validateIssueDoc(doc); err != nil {
 			log.Printf("issue ingest: validation rejected key=%s: %v", key, err)
 			failed = append(failed, map[string]string{"key": key, "error": err.Error()})
+			failedKeys[key] = true
 			continue
 		}
 		if err := upsertIssueCacheFromDoc(ctx, key, projectID, doc); err != nil {
 			failed = append(failed, map[string]string{"key": key, "error": err.Error()})
+			failedKeys[key] = true
 			continue
 		}
 		ingested[key] = true
 	}
 
 	removed := 0
+	reconcileSkipped := false
 	if req.Reconcile {
-		existing, _ := db.FindAllIssues(ctx, bson.M{"projectId": projectID})
-		prefix := code + "-"
-		for _, doc := range existing {
-			k, _ := doc["key"].(string)
-			// 이 과제 소속(key prefix=code)이면서 ingest 집합에 없으면 캐시에서 제거.
-			if k != "" && strings.HasPrefix(k, prefix) && !ingested[k] {
-				if err := db.DeleteIssueByKey(ctx, k); err == nil {
-					removed++
+		if unparseable > 0 {
+			// 키를 모르는 실패가 있으면 어떤 캐시 이슈가 그 파일이었는지 판별 불가 —
+			// 부분 집합으로 삭제하면 정상 이슈가 지워질 수 있으므로 제거 단계 전체를 건너뛴다.
+			reconcileSkipped = true
+			log.Printf("issue ingest: reconcile 제거 생략 code=%s — 파싱 불가 파일 %d건", code, unparseable)
+		} else {
+			existing, _ := db.FindAllIssues(ctx, bson.M{"projectId": projectID})
+			prefix := code + "-"
+			for _, doc := range existing {
+				k, _ := doc["key"].(string)
+				// 이 과제 소속(key prefix=code)이면서 ingest 집합에 없으면 캐시에서 제거.
+				// 단, 실패 파일의 키는 상태 불명이므로 보호.
+				if k != "" && strings.HasPrefix(k, prefix) && !ingested[k] && !failedKeys[k] {
+					if err := db.DeleteIssueByKey(ctx, k); err == nil {
+						removed++
+					}
 				}
 			}
 		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"ingested": len(ingested),
-		"removed":  removed,
-		"failed":   failed,
-		"syncedAt": time.Now(),
+		"ingested":         len(ingested),
+		"removed":          removed,
+		"reconcileSkipped": reconcileSkipped,
+		"failed":           failed,
+		"syncedAt":         time.Now(),
 	})
 }

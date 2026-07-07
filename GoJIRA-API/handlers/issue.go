@@ -140,9 +140,12 @@ func IssueCreateHandler(w http.ResponseWriter, r *http.Request) {
 		"localWrites": []localWrite{{Path: issueYamlPath(subkey), Content: string(yamlBytes)}},
 	}
 
-	// 5) Mongo 캐시 upsert (실패해도 YAML 이 진실이므로 경고만)
-	if err := upsertIssueCacheFromDoc(ctx, key, projectID, bson.M(doc)); err != nil {
-		log.Printf("cache upsert warn key=%s: %v", key, err)
+	// 5) Mongo 캐시 upsert — LocalOnly 요청은 건너뛴다(§Phase 2, 완전 로컬 쓰기).
+	// 실패해도 YAML 이 진실이므로 경고만.
+	if !req.LocalOnly {
+		if err := upsertIssueCacheFromDoc(ctx, key, projectID, bson.M(doc)); err != nil {
+			log.Printf("cache upsert warn key=%s: %v", key, err)
+		}
 	}
 
 	log.Printf("created issue %s subkey=%s user=%s (YAML)", key, subkey, user)
@@ -230,6 +233,21 @@ func IssueUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// §Phase 2 — BaseYaml 동봉 시 Mongo 무접촉 로컬 병합 경로. 기존 경로로 내려가지 않고
+	// 즉시 응답한다. BaseYaml 없는 구버전 요청은 아래 기존 Mongo 경로를 그대로 탄다.
+	if req.BaseYaml != "" {
+		lw, err := localMergeUpdate(req.BaseYaml, req.Key, req.Data)
+		if err != nil {
+			respondError(w, localWriteStatus(err), err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"key":         req.Key,
+			"localWrites": []localWrite{lw},
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
@@ -301,6 +319,21 @@ func IssueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Key == "" {
 		respondError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+
+	// §Phase 2 — BaseYaml 동봉 시 Mongo 무접촉 로컬 삭제 경로. 공식본 삭제(MoveIssueToTrash
+	// 등)는 머지 reconcile 이 수행하므로 여기서는 delete:true localWrite 만 반환한다.
+	if req.BaseYaml != "" {
+		lw, err := localDeleteIssue(req.BaseYaml)
+		if err != nil {
+			respondError(w, localWriteStatus(err), err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"key":         req.Key,
+			"localWrites": []localWrite{lw},
+		})
 		return
 	}
 

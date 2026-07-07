@@ -293,6 +293,19 @@ func handlePushEvent(payload map[string]interface{}) {
 		return
 	}
 
+	// §Phase 2 — data/issues/ 변경 시 GoJIRA-API 캐시 reconcile. 비동기 실행(웹훅 응답
+	// 지연 금지), 자체 로깅. commits[] 로 판별 불가하면(비어있음) 안전 측으로 실행한다.
+	if pushTouchesIssueData(payload) {
+		go func() {
+			result, err := ResyncProjectIssues(repoOwner, repoName, projectCode)
+			if err != nil {
+				log.Printf("webhook push: issue resync 실패 code=%s repo=%s: %v", projectCode, repoName, err)
+				return
+			}
+			log.Printf("webhook push: issue resync 완료 code=%s repo=%s result=%v", projectCode, repoName, result)
+		}()
+	}
+
 	// 모든 docs/* 브랜치 vs 새 main 비교
 	alerts := compareAllBranches(repoOwner, repoName, projectCode)
 	if alerts == nil {
@@ -314,6 +327,31 @@ func handlePushEvent(payload map[string]interface{}) {
 		"ref":          ref,
 		"branchAlerts": alerts,
 	})
+}
+
+// pushTouchesIssueData — commits[].added/modified/removed 중 data/issues/ prefix 경로가
+// 하나라도 있으면 true. commits 배열이 비어있어 판별 불가능하면 안전 측(true)으로 판단한다
+// (§Phase 2 — 놓쳐서 이슈 캐시가 stale 해지는 것보다 과도 실행이 낫다).
+func pushTouchesIssueData(payload map[string]interface{}) bool {
+	commits, ok := payload["commits"].([]interface{})
+	if !ok || len(commits) == 0 {
+		return true
+	}
+	for _, c := range commits {
+		cm, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, field := range []string{"added", "modified", "removed"} {
+			list, _ := cm[field].([]interface{})
+			for _, p := range list {
+				if ps, ok := p.(string); ok && strings.HasPrefix(ps, "data/issues/") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // UpdateBranchAlert 특정 사용자의 브랜치 알림 상태를 갱신하고 갱신된 전체 목록을 반환

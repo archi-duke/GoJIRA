@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -91,6 +93,51 @@ func repoRoot() (string, error) {
 		return "", fmt.Errorf("repo root 미확인: GOJIRA_REPO_ROOT 설정 또는 clone 안에서 실행 (%v)", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// findIssueYamlByKey — repoRoot()/data/issues 안의 *.yaml(.yml) 파일들을 이름순으로 스캔해
+// `key: <KEY>` 라인이 있는 파일을 찾는다(트랙 E Phase 2: PUT/DELETE/link 시 baseYaml 동봉용).
+// yaml 라이브러리 의존 없이 라인 정규식 매칭만으로 충분 — 이슈 YAML 은 항상 최상위에
+// `key: XXX-1` 형태 라인을 갖는다.
+func findIssueYamlByKey(key string) (string, string, error) {
+	root, err := repoRoot()
+	if err != nil {
+		return "", "", err
+	}
+	issuesDir := filepath.Join(root, "data", "issues")
+	entries, err := os.ReadDir(issuesDir)
+	if err != nil {
+		return "", "", fmt.Errorf("로컬 clone에서 이슈 YAML을 찾지 못함: %s — 과제 clone 안에서 실행했는지 확인 (%v)", key, err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		lower := strings.ToLower(e.Name())
+		if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+
+	pattern := fmt.Sprintf(`^key:\s*['"]?%s['"]?\s*$`, regexp.QuoteMeta(key))
+	re := regexp.MustCompile(pattern)
+	for _, name := range names {
+		full := filepath.Join(issuesDir, name)
+		data, err := os.ReadFile(full)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		for _, line := range strings.Split(content, "\n") {
+			if re.MatchString(strings.TrimRight(line, "\r")) {
+				rel := filepath.Join("data", "issues", name)
+				return rel, content, nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("로컬 clone에서 이슈 YAML을 찾지 못함: %s — 과제 clone 안에서 실행했는지 확인", key)
 }
 
 // applyLocalWrites — 서버 응답의 localWrites 배열을 로컬 clone 에 반영한다.

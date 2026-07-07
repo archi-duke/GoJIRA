@@ -142,6 +142,7 @@ func main() {
 			r.Get("/{code}/commits", handlers.DocRepoCommitsHandler)
 			r.Get("/{code}/branches", handlers.DocRepoBranchesHandler)
 			r.Post("/{code}/alerts/recompute", handlers.DocRepoAlertsRecomputeHandler)
+			r.Post("/{code}/issues/resync", handlers.DocRepoIssuesResyncHandler)
 			r.Get("/{code}/graph", handlers.DocRepoGraphHandler)
 			r.Post("/{code}/pr", handlers.DocRepoPRCreateHandler)
 			r.Get("/{code}/prs", handlers.DocRepoPRListHandler)

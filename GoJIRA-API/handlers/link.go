@@ -87,11 +87,28 @@ func LinkCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	// Generate a temporary link ID
 	linkID := fmt.Sprintf("tmp_%d", time.Now().UnixMilli())
+
+	// §Phase 2 — inwardYaml/outwardYaml 동봉 시 Mongo 무접촉 로컬 링크 추가 경로.
+	// 한쪽만 제공돼도 되지만(타 과제 이슈가 로컬 clone 에 없을 수 있음), 둘 다 없으면
+	// 기존 Mongo 경로(아래)를 그대로 탄다.
+	if req.InwardYaml != "" || req.OutwardYaml != "" {
+		writes, err := localAddLink(req.InwardYaml, req.OutwardYaml, req.InwardKey, req.OutwardKey, req.Source, linkID)
+		if err != nil {
+			respondError(w, localWriteStatus(err), err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status":      "link created",
+			"linkId":      linkID,
+			"localWrites": writes,
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// Add outwardIssue link to inward issue's issueLinks
 	inwardLink := bson.M{
@@ -147,6 +164,20 @@ func LinkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// §Phase 2 — baseFiles 동봉 시 Mongo 무접촉 로컬 링크 삭제 경로.
+	if len(req.BaseFiles) > 0 {
+		writes, err := localRemoveLink(req.BaseFiles, req.LinkID)
+		if err != nil {
+			respondError(w, localWriteStatus(err), err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status":      "link deleted",
+			"localWrites": writes,
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -175,6 +206,26 @@ func LinkDeleteByKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := resolveUser(r, ""); !ok {
 		respondError(w, http.StatusForbidden, "user required")
+		return
+	}
+
+	// body 는 기존 호출자(구버전)에게는 없었으므로 파싱 실패는 무시하고 optional 로 다룬다.
+	var body struct {
+		BaseFiles []string `json:"baseFiles"`
+	}
+	_ = decodeJSON(r, &body)
+
+	// §Phase 2 — baseFiles 동봉 시 Mongo 무접촉 로컬 링크 삭제 경로.
+	if len(body.BaseFiles) > 0 {
+		writes, err := localRemoveLink(body.BaseFiles, linkID)
+		if err != nil {
+			respondError(w, localWriteStatus(err), err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]interface{}{
+			"status":      "link deleted",
+			"localWrites": writes,
+		})
 		return
 	}
 
