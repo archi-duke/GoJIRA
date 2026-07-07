@@ -166,6 +166,21 @@
   정상 흐름이다. 신규 앱 온보딩은 항상 **platform 스코프 관리 화면**에서 그 앱의 authGroup 을
   만들고 사용자를 배정하는 방식으로 수행한다.
 
+## D10. 웹 이슈 뷰 이원화 설계 확정 — 공식본(main/Mongo) + 내 작업본(로컬 YAML)
+
+- **발단**: NBBALL Relation Map 연결선 실종 — 원인은 issueLinks 128건이 잘못된 shape 로 Mongo 에
+  ingest 된 데이터 오염 (repair-nbball-issuelinks.js 로 복구, GoJIRA-API 코드는 무혐의 — 외부 도구
+  usecase-analyze2 가 직접 쓴 것으로 추정). 이어서 "웹 편집 모드 부활" 논의 → 동시편집 문제 지적
+  → 사용자가 모델을 정리: "main 발행본만 공식 공유 버전, 편집 중에는 자기 로컬 작업본을 본다.
+  완료 시 등록→PR" (문서와 동일 모델을 이슈에도).
+- **결정**: 상세 설계는 docs/Long-term Considerations/web-local-view-model.md (§3.3 개정).
+  Phase 0(ingest shape 검증, 즉시) → 1(런처 /issues + 웹 공식본/작업본 토글) → 2(dual-write 의
+  즉시 ingest 를 PR 머지 웹훅 시점으로 이동) → 3(로컬뷰 한정 편집 브릿지 부활).
+- **기각**: 읽기 전체 런처 경유(공유 뷰가 각자 로컬 상태에 의존 + 런처 없으면 화면 불능),
+  웹 Mongo 직접쓰기 원복(YAML=진실 붕괴).
+- **상태**: 설계 확정·구현 보류 (착수 시 열린 결정 4건 — 특히 SATAM 의 usecase_artifacts 가
+  Mongo 전용이라 로컬뷰 범위 확인 필수 — 먼저 정리).
+
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 
 - Phase 1 (A1~A12) 전부 완료, React 19.2.7 상향 포함. frontend shared-net 조인 완료(`/ragaas/` 관통).
