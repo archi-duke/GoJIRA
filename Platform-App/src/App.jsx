@@ -163,9 +163,11 @@ function App() {
       .then(r => r.json())
       .then(data => {
         setAuthority(data.authority || {});
-        // 마스터 그룹이면 (이 스코프의) 전체 사용자 목록 로드
+        // 마스터 그룹이면 (이 스코프의) 전체 사용자 목록 로드 — platform 스코프는 전체
+        // 사용자 전환이 가능해야 하므로 app=all 로 조회한다(D9, 다른 앱 스코프는 기존대로).
         if ((data.authority?.USR || 0) >= 15) {
-          authFetch(`${API_BASE}/Account/users?app=${encodeURIComponent(scope)}`)
+          const usersApp = scope === 'platform' ? 'all' : scope;
+          authFetch(`${API_BASE}/Account/users?app=${encodeURIComponent(usersApp)}`)
             .then(r => r.json())
             .then(d => setAllUsers(Array.isArray(d) ? d : []));
         } else {

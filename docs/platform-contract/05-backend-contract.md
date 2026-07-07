@@ -134,7 +134,7 @@ exec nginx -g 'daemon off;'
   새므로 금지. base 상대 폴백은 게이트웨이 단일 origin 전제에서 셸/standalone/직접/dev 진입을
   모두 관통한다. (셸 env.js 에 제품별 키를 싣는 대안은 셸-remote 결합 증가로 기각.)
 
-## 5.5 Account/Notice 앱 스코핑 (D8, 2026-07-07)
+## 5.5 Account/Notice 앱 스코핑 (D8, 2026-07-07 / D9 갱신, 2026-07-07)
 
 **계정 관리와 공지는 여전히 Platform-API 단독 소유·구현**이다(RAGaaS 등 신규 제품이 각자
 Account/Notice 를 재구현하지 않는다 — 04/03 계약 그대로). 다만 데이터는 앱별로 분리된다.
@@ -145,17 +145,23 @@ Account/Notice 를 재구현하지 않는다 — 04/03 계약 그대로). 다만
 - **쿼리 파라미터 `app`** — `GET /Account/me`, `/Account/users`, `/Account/authGroups`,
   `POST /Account/authGroups`, `GET|POST /Notice`, `GET /Notice/active` 가 `?app=<scope>` 를
   받는다. 생략 시 `'platform'`. `POST` 는 body 의 `app` 을 우선하고 없으면 쿼리로 채운다.
-- **신규 앱 부트스트랩 폴백** — 어떤 앱에 authGroup 이 하나도 없으면(막 온보딩된 제품),
-  `Account/me` 의 권한 계산이 그 앱 대신 `'platform'` 권한으로 계산된다 — 플랫폼 마스터가
-  그 앱의 Account 화면에 처음 들어가 첫 authGroup 을 만들 수 있게 하기 위함. authGroup 목록/편집
-  API 자체는 폴백하지 않는다(플랫폼 그룹을 실수로 그 앱 소속처럼 편집하는 사고 방지).
-  같은 이유로 그 앱에 소속 사용자가 아직 없으면 `Account/users` 가 플랫폼 로스터를 온보딩
-  후보로 보여준다 — 첫 authGroup 이 생기고 누군가 실제로 그 그룹에 배정되는 순간부터
-  정상적으로 그 앱 스코프만 보인다.
+  **특수값 `app=all`**(D9) — platform 관리 화면(메타 관리 콘솔) 전용, 필터 없이 전체 문서를
+  반환한다. `Account/me`/`Account/authGroups(POST)` 등 개별 리소스에 쓰는 API 에는 의미가
+  없고(대상이 하나뿐이거나 body.app 이 우선), 목록 API(`Account/users`, `Account/authGroups`,
+  `Notice`, `Notice/active`)에서만 쓰인다.
+- **platform 스코프 = 전체 조회 모델**(D9) — platform 은 더 이상 "app='platform' 데이터만
+  보는 또 하나의 앱 스코프"가 아니라, 전체 앱의 데이터를 다 보는 메타 관리 콘솔이다. 플랫폼
+  관리 화면이 목록 조회 시 `app=all` 을 사용해 이 역할을 구현한다. 이에 따라 **D8 의 신규 앱
+  부트스트랩 폴백 2단(권한 계산 폴백 + `Account/users` 온보딩 후보 폴백)은 완전히 제거됐다**
+  — platform 화면에서 전체 그룹/사용자가 항상 보이므로, 관리자가 신규 앱의 authGroup 을 직접
+  만들고 그 자리에서 바로 기존 사용자를 배정할 수 있어 폴백이 불필요해졌다. 신규 앱 온보딩은
+  이제 **platform 스코프 관리 화면에서 그 앱의 authGroup 생성 + 사용자 배정**으로 수행한다 —
+  배정 전까지 그 앱 스코프의 Account/Notice 관리 메뉴가 안 보이는 것은 정상 흐름이다.
 - **RAGaaS(외부 제품) 쪽 구현**: 이 API 들을 직접 만들 필요 없음 — 셸의 Account/Notice 관리
-  화면이 이미 `app='ragaas'` 로 호출한다. RAGaaS 코드가 할 일은 없음(문의 시 참고용).
+  화면이 이미 `app='ragaas'`(또는 platform 스코프에서 `app=all`) 로 호출한다. RAGaaS 코드가
+  할 일은 없음(문의 시 참고용).
 
-Go 참조 구현: `Platform-API/db/account.go`(`appFilter`, `resolveAuthorityScope`, `FindAllUsers`),
+Go 참조 구현: `Platform-API/db/account.go`(`appFilter`, `FindAllUsers`, `CalcUserAuthority`),
 `Platform-API/db/notice.go`.
 
 ## 5.6 MongoDB 데이터베이스 분리 (D8)

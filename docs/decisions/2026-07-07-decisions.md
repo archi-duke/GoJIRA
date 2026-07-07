@@ -135,6 +135,37 @@
   Users 탭에 플랫폼 로스터 3명 표시. GoJIRA-API 삭제 후 `/gojira/api/v2/Project` 정상 200
   (프로젝트 기능 무영향 확인).
 
+## D9. platform 스코프 = 전체 조회 (메타 관리 콘솔) + 원본 정리
+
+> 사용자 결정: "계정/공지 데이터는 app 태그로 앱별 구분, 각 앱은 자기 것만 필터, platform 은
+> 전체 조회(메타 관리 콘솔)". D8 에서 만든 부트스트랩 폴백 2단은 이 모델에서 불필요해졌다.
+
+- **모델 전환**: 기존엔 platform 스코프도 `app='platform'` 데이터만 봤다(사실상 다른 앱과 동급
+  스코프). 이제 platform 은 **전체 조회** — `appFilter`/`FindAllUsers` 에 특수값 `app='all'`
+  을 추가해 필터 없이 전체 문서를 반환한다. 각 앱(gojira/ragaas 등) 스코프는 기존대로 자기
+  `app` 값만 필터.
+- **D8 부트스트랩 폴백 2단 제거**: `resolveAuthorityScope`(권한 계산을 platform 권한으로
+  폴백)와 `FindAllUsers` 끝의 "플랫폼 로스터 온보딩 후보" 폴백을 완전히 삭제했다. platform
+  전체 조회 모델에서는 플랫폼 관리자가 platform 화면에서 신규 앱의 authGroup 을 직접 만들고
+  기존 사용자를 바로 배정할 수 있어(전체 사용자/그룹이 다 보이므로) 폴백이 더 이상 필요 없다.
+- **UI**: AccountManager/NoticeManager 가 `app==='platform'` 이면 목록 조회를 `app=all` 로
+  호출. Users 탭은 권한그룹을 id→name 매핑하되 매핑에 없는 id(다른 스코프에서 로드 안 된 경우)
+  는 표시하지 않음(raw id 노출 방지) — platform 스코프에서만 전체 그룹이 로드되므로 `이름(앱)`
+  형식으로 표시하고, "소속 앱" 컬럼(authGroupIds → app distinct)도 추가. Auth Groups 탭은
+  name 을 첫 컬럼으로 옮기고 platform 스코프에서만 ID/앱 컬럼을 추가, 생성 다이얼로그에
+  앱 선택 select(`APPS` 상수: platform/gojira/ragaas, 기본 platform, 편집 시 disabled)를
+  추가했다. NoticeManager 도 동일하게 platform 전용 앱 컬럼 + 작성 다이얼로그 앱 선택.
+  App.jsx 의 마스터 사용자 전환 목록도 platform 스코프에서는 `app=all` 로 전체 사용자를 로드.
+- **DB 정리**: D8 이관(`migrate-platform-db.js`) 이후 `gojira` DB 에 남아있던 원본 7개
+  컬렉션(users/authGroups/orgUnits/notices/userProjects/userConnections/notifications)을
+  drop 하는 `deploy/scripts/cleanup-gojira-platform-collections.js` 를 추가했다. 안전 가드로
+  `platform` DB 쪽 문서 수가 `gojira` DB 쪽 이상일 때만 drop — 이관이 의심스러우면 경고만
+  출력하고 건너뛴다.
+- **부작용**: 신규 앱(예: 새로 온보딩되는 제품)은 authGroup 이 배정되기 전까지 그 앱 스코프의
+  Account/Notice 관리 메뉴가 정상적으로 "안 보이는" 상태가 된다 — 이건 이제 폴백이 아니라
+  정상 흐름이다. 신규 앱 온보딩은 항상 **platform 스코프 관리 화면**에서 그 앱의 authGroup 을
+  만들고 사용자를 배정하는 방식으로 수행한다.
+
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 
 - Phase 1 (A1~A12) 전부 완료, React 19.2.7 상향 포함. frontend shared-net 조인 완료(`/ragaas/` 관통).
