@@ -5,8 +5,10 @@ import { authFetch } from '../runtime/auth';
 import './NoticePopup.css';
 
 const API = PLATFORM_API + '/Notice';
-export default function NoticePopup({ user }) {
-  const HIDE_KEY = `gojira_notice_hide_until_${user || 'anon'}`;
+// app: 앱 스코프(D8) — 셸이 현재 스코프(플랫폼/제품)를 전달. 스코프 전환마다
+// 그 스코프의 공지를 새로 확인한다(예: /gojira → /ragaas 이동 시 RAGaaS 공지 표시).
+export default function NoticePopup({ user, app = 'platform' }) {
+  const HIDE_KEY = `gojira_notice_hide_until_${user || 'anon'}_${app}`;
   const [notices, setNotices] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [visible, setVisible] = useState(false);
@@ -22,16 +24,16 @@ export default function NoticePopup({ user }) {
     });
   }, []);
 
-  // 접속 시 게시중 공지 로딩
+  // 접속 시 게시중 공지 로딩 — 스코프 전환마다 재확인
   useEffect(() => {
     const hideUntil = localStorage.getItem(HIDE_KEY);
     if (hideUntil && new Date(hideUntil) > new Date()) return;
 
-    authFetch(`${API}/active`)
+    authFetch(`${API}/active?app=${encodeURIComponent(app)}`)
       .then(r => r.json())
       .then(showNotices)
       .catch(() => {});
-  }, [showNotices]);
+  }, [app, HIDE_KEY, showNotices]);
 
   // SSE: 비상 공지 실시간 수신
   useEffect(() => {

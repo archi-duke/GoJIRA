@@ -3,23 +3,26 @@ import config from '../config';
 import './NoticeManager.css';
 import { authFetch } from '../platform/auth';
 
-const API = config.API_BASE + '/Notice';
+const BASE_API = config.API_BASE + '/Notice';
 
 const STATUS_LABEL = { draft: '게시전', active: '게시중', expired: '게시종료' };
 const STATUS_COLOR = { draft: '#888', active: '#2ecc71', expired: '#e74c3c' };
 
-export default function NoticeManager({ user }) {
+// app: 앱 스코프(D8) — 이 스코프의 공지만 조회/작성한다.
+export default function NoticeManager({ user, app = 'platform' }) {
   const [notices, setNotices] = useState([]);
   const [editItem, setEditItem] = useState(null);
 
+  const withApp = useCallback((path = '') => `${BASE_API}${path}${path.includes('?') ? '&' : '?'}app=${encodeURIComponent(app)}`, [app]);
+
   const fetchNotices = useCallback(() => {
-    authFetch(API).then(r => r.json()).then(d => setNotices(Array.isArray(d) ? d : [])).catch(() => {});
-  }, []);
+    authFetch(withApp()).then(r => r.json()).then(d => setNotices(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [withApp]);
 
   useEffect(() => { fetchNotices(); }, [fetchNotices]);
 
   async function handleSave(mode, data) {
-    const url = mode === 'create' ? API : `${API}/${data._id}`;
+    const url = mode === 'create' ? withApp() : withApp(`/${data._id}`);
     const method = mode === 'create' ? 'POST' : 'PUT';
     const body = { ...data };
     if (mode === 'edit') {
@@ -35,7 +38,7 @@ export default function NoticeManager({ user }) {
 
   async function handleDelete(id) {
     if (!window.confirm('삭제하시겠습니까?')) return;
-    await authFetch(`${API}/${id}`, { method: 'DELETE' });
+    await authFetch(`${BASE_API}/${id}`, { method: 'DELETE' });
     fetchNotices();
   }
 
@@ -85,7 +88,7 @@ export default function NoticeManager({ user }) {
                     const msg = next ? `"${n.title}" 공지를 비상 공지로 게시하시겠습니까?` : `"${n.title}" 비상 공지를 해제하시겠습니까?`;
                     if (!window.confirm(msg)) return;
                     const updates = next ? { isEmergency: true, status: 'active' } : { isEmergency: false };
-                    await authFetch(`${API}/${n._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+                    await authFetch(`${BASE_API}/${n._id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
                     fetchNotices();
                   }}
                 >비상</button>

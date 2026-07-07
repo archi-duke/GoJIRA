@@ -5,7 +5,7 @@ import DataGrid from '@platform/web-ui/components/DataGrid';
 import './AccountManager.css';
 import { authFetch } from '../platform/auth';
 
-const API = config.API_BASE + '/Account';
+const BASE_API = config.API_BASE + '/Account';
 
 const TABS = [
   { key: 'users', label: 'Users' },
@@ -22,23 +22,29 @@ function sortOrgUnits(units) {
   return [...units].sort((a, b) => (ORG_TYPE_ORDER[a.type] ?? 99) - (ORG_TYPE_ORDER[b.type] ?? 99));
 }
 
-export default function AccountManager({ user }) {
+// app: 앱 스코프(D8) — 'platform'(기본) | 'gojira' | 'ragaas'. authGroups/notices 는
+// 이 스코프로 분리 관리된다(전역 신원 + 앱별 권한). orgUnits/userProject/connection 은
+// 조직도처럼 전역 성격이라 스코프하지 않는다(계약 미확정이면 이 함수 시그니처만 바뀜).
+export default function AccountManager({ user, app = 'platform' }) {
   const [tab, setTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [authGroups, setAuthGroups] = useState([]);
   const [orgUnits, setOrgUnits] = useState([]);
   const [editItem, setEditItem] = useState(null); // { mode: 'create'|'edit', tab, data }
 
+  const withApp = useCallback((path) => `${BASE_API}${path}${path.includes('?') ? '&' : '?'}app=${encodeURIComponent(app)}`, [app]);
+
   const fetchAll = useCallback(() => {
-    authFetch(`${API}/users`).then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
-    authFetch(`${API}/authGroups`).then(r => r.json()).then(d => setAuthGroups(Array.isArray(d) ? d : [])).catch(() => {});
-    authFetch(`${API}/orgUnits`).then(r => r.json()).then(d => setOrgUnits(Array.isArray(d) ? d : [])).catch(() => {});
-  }, []);
+    authFetch(withApp('/users')).then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(withApp('/authGroups')).then(r => r.json()).then(d => setAuthGroups(Array.isArray(d) ? d : [])).catch(() => {});
+    authFetch(`${BASE_API}/orgUnits`).then(r => r.json()).then(d => setOrgUnits(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [withApp]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   async function handleSave(tabKey, mode, data) {
-    const url = mode === 'create' ? `${API}/${tabKey}` : `${API}/${tabKey}/${data._id}`;
+    const path = mode === 'create' ? `/${tabKey}` : `/${tabKey}/${data._id}`;
+    const url = tabKey === 'authGroups' ? withApp(path) : `${BASE_API}${path}`;
     const method = mode === 'create' ? 'POST' : 'PUT';
     // 수정 시 메타 필드 제거
     const body = { ...data };
@@ -62,7 +68,7 @@ export default function AccountManager({ user }) {
 
   async function handleDelete(tabKey, id) {
     if (!window.confirm('비활성화 하시겠습니까?')) return;
-    await authFetch(`${API}/${tabKey}/${id}`, { method: 'DELETE' });
+    await authFetch(`${BASE_API}/${tabKey}/${id}`, { method: 'DELETE' });
     fetchAll();
   }
 

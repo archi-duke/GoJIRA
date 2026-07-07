@@ -22,6 +22,7 @@ var (
 	// 선택 — 서비스 내부 컨벤션
 	ServerPort    string
 	MongoDB       string
+	GojiraMongoDB string // DocRepo 의 projects 직접 갱신용 (D8 역방향 결합 — db/mongo.go 참조)
 	RepoBaseDir   string
 	WebhookURL    string
 	WebhookSecret string
@@ -54,7 +55,10 @@ func init() {
 
 	// 선택 항목 — default 허용
 	ServerPort = envOrDefault("PLATFORM_SERVER_PORT", ":9000")
-	MongoDB = envOrDefault("PLATFORM_MONGO_DB", "gojira")
+	// D8 (2026-07-07): 플랫폼 데이터(users/authGroups/orgUnits/notices 등)는 platform DB 로 분리.
+	// 기존 gojira DB 의 해당 컬렉션은 deploy/scripts/migrate-platform-db.js 로 이관.
+	MongoDB = envOrDefault("PLATFORM_MONGO_DB", "platform")
+	GojiraMongoDB = envOrDefault("PLATFORM_GOJIRA_MONGO_DB", "gojira")
 	RepoBaseDir = envOrDefault("PLATFORM_REPO_DIR", "./repos")
 	WebhookURL = envOrDefault("PLATFORM_WEBHOOK_URL", "")
 	WebhookSecret = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")

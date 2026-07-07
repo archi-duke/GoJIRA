@@ -12,7 +12,7 @@ import (
 
 // FindAllProjects projects 컬렉션 전체 조회
 func FindAllProjects(ctx context.Context) ([]bson.M, error) {
-	cursor, err := database.Collection("projects").Find(ctx, bson.M{})
+	cursor, err := gojiraDB.Collection("projects").Find(ctx, bson.M{})
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,7 @@ func FindAllProjects(ctx context.Context) ([]bson.M, error) {
 // FindProjectByCode jiraCode로 프로젝트 조회
 func FindProjectByCode(ctx context.Context, jiraCode string) (bson.M, error) {
 	var doc bson.M
-	err := database.Collection("projects").FindOne(ctx, bson.M{"jiraCodes.main.jiraCode": jiraCode}).Decode(&doc)
+	err := gojiraDB.Collection("projects").FindOne(ctx, bson.M{"jiraCodes.main.jiraCode": jiraCode}).Decode(&doc)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func FindProjectByCode(ctx context.Context, jiraCode string) (bson.M, error) {
 
 // UpdateProjectDocuments project.documents 필드 업데이트
 func UpdateProjectDocuments(ctx context.Context, jiraCode string, docs bson.M) error {
-	_, err := database.Collection("projects").UpdateOne(ctx,
+	_, err := gojiraDB.Collection("projects").UpdateOne(ctx,
 		bson.M{"jiraCodes.main.jiraCode": jiraCode},
 		bson.M{"$set": bson.M{"documents": docs}},
 	)
@@ -44,7 +44,7 @@ func UpdateProjectDocuments(ctx context.Context, jiraCode string, docs bson.M) e
 
 // UpdateProjectField 프로젝트의 단일 필드 업데이트
 func UpdateProjectField(ctx context.Context, jiraCode string, field string, value interface{}) error {
-	_, err := database.Collection("projects").UpdateOne(ctx,
+	_, err := gojiraDB.Collection("projects").UpdateOne(ctx,
 		bson.M{"jiraCodes.main.jiraCode": jiraCode},
 		bson.M{"$set": bson.M{field: value}},
 	)
@@ -53,7 +53,7 @@ func UpdateProjectField(ctx context.Context, jiraCode string, field string, valu
 
 // ClearProjectDocRepo project.documents를 빈 객체로 초기화
 func ClearProjectDocRepo(ctx context.Context, jiraCode string) {
-	database.Collection("projects").UpdateOne(ctx,
+	gojiraDB.Collection("projects").UpdateOne(ctx,
 		bson.M{"jiraCodes.main.jiraCode": jiraCode},
 		bson.M{"$set": bson.M{"documents": bson.M{}}},
 	)
@@ -112,7 +112,7 @@ func BsonGetStr(doc bson.M, key string) string {
 
 // UpdateProjectDocRepo project.documents에 repo 정보 설정
 func UpdateProjectDocRepo(ctx context.Context, jiraCode, repoName, repoOwner, repoUrl string) {
-	database.Collection("projects").UpdateOne(ctx,
+	gojiraDB.Collection("projects").UpdateOne(ctx,
 		bson.M{"jiraCodes.main.jiraCode": jiraCode},
 		bson.M{"$set": bson.M{
 			"documents.repoName":      repoName,

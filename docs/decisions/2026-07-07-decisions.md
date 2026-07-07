@@ -83,6 +83,58 @@
   bootstrap 이 실제로 소비하는 즉시-연결 목록이다. 런타임 동적 등록과 병행 선언하면 정적 쪽이
   이긴다 — 순수 런타임 제어가 목적이면 정적 `remotes` 를 아예 비워야 한다.
 
+## D7. 스코프별 타이틀 아이콘 동작 + 노출 플랫폼 메뉴 설정
+
+- **요구**: 앱마다 타이틀 아이콘 클릭 동작과 노출할 플랫폼 메뉴를 다르게. platform: home(초기화면)
+  + [account,notice]. gojira: agent(로컬 에이전트 채팅) + [account,notice,repository]. ragaas:
+  home(그 스코프 기본 화면 복귀) + [account,notice].
+- **결정**: registry 항목에 `titlebarAction`('agent'|'home')과 `platformMenus`(키 배열) 필드 추가.
+  플랫폼 스코프는 registry 항목이 아니므로 `PLATFORM_SCOPE_CONFIG` 상수로 별도 지정.
+  `visiblePlatformMenus` 계산을 `activeScopeConfig.platformMenus` (= scopeApp ?? PLATFORM_SCOPE_CONFIG)
+  로 필터링해 스코프별 메뉴 집합이 기존 authCode 권한 필터와 이중 적용으로 자연히 도출되게 단일화.
+- **검증**(실브라우저): 3 스코프 모두 메뉴 목록/타이틀 툴팁/아이콘 클릭 동작이 기대값과 일치.
+
+## D8. 사용자·공지 Platform 영역 이관 + 앱별 DB 분리
+
+> 요구: "notice 를 띄우는 역할은 platform app 이 담당(공용화), 계정 관리도 동일하게 platform 영역.
+> 데이터만 app 별로 구분." + "DB 이름이 gojira 인데 platform 이 관리하는 거면 platform 이름으로."
+
+- **신원 모델**: 전역 신원(knoxId/name/email 공유) + 앱별 권한(사용자 확인 질문에서 이 옵션 선택).
+  같은 사람이 gojira 에선 Master, ragaas 에선 무권한일 수 있음.
+- **기존 데이터 귀속**: `platform` (공용/메타 관리자 — 두 번째 확인 질문에서 선택). GoJIRA 는 이미
+  실사용 중이었으므로 연속성을 위해 platform 그룹을 `_gojira` 접미사로 복제하고 기존 사용자의
+  authGroupIds 에 대응 그룹을 추가 — 기존 GoJIRA 사용자 전원이 종전과 같은 권한을 유지한다.
+  RAGaaS 는 authGroup 0건으로 시작(진짜 빈 상태).
+- **DB 분리**: 기존엔 Platform-API/GoJIRA-API 가 기본값으로 같은 `gojira` DB 를 공유(교차 직접
+  접근까지 존재 — 아래 참조). `PLATFORM_MONGO_DB` 기본값을 `platform` 으로, GoJIRA-API 쪽은
+  `gojira` 유지. Mongo 계정(`gojira_app`, 종전엔 `gojira` DB 에만 dbOwner)에 `platform` dbOwner
+  role grant 필요(root 계정으로 1회) — `deploy/scripts/migrate-platform-db.js` 가 grant +
+  6개 컬렉션(users/authGroups/orgUnits/userProjects/userConnections/notices) 이관 +
+  `app:'platform'` 태그 + gojira 연속성 복제까지 멱등 수행.
+- **역방향 결합 잔존**: Platform-API 의 DocRepo(`db/docrepo.go`)가 GoJIRA 소유 `projects` 컬렉션의
+  `documents` 필드를 직접 Mongo 로 갱신한다 — 과거부터 있던 예외라 이번엔 유지하되, 별도
+  `gojiraDB` 핸들(`PLATFORM_GOJIRA_MONGO_DB`)로 명시적으로 분리해 `platform` DB 분리와 충돌하지
+  않게 함. 신규 코드는 이 패턴을 따르지 말 것.
+- **더 큰 발견**: GoJIRA-API 가 users/notices/authGroups/orgUnits/userProjects/userConnections
+  전부를 Platform-API HTTP API 경유 없이 **자기 Mongo 드라이버로 직접** 읽고 쓰는 코드
+  (`handlers/account_mgmt.go`, `handlers/notice.go`, `db/account.go`, `db/notice.go`,
+  `db/account_seed.go`)를 갖고 있었다. 조사 결과 이 핸들러들은 **main.go 라우터에 전혀
+  등록되지 않은 죽은 코드**였음을 확인 — 실서비스 영향 없이 안전하게 전부 삭제.
+  (다른 방식: HTTP 전환 옵션도 고려했으나 죽은 코드로 판명되어 불필요해짐.)
+- **앱 스코핑 API**: `AuthGroup`/`Notice` 에 `app` 필드, 관련 API 에 `?app=` 쿼리 파라미터
+  (계약 05 §5.5). **신규 앱 부트스트랩 폴백**: 그 앱에 authGroup 이 0건이면 권한 계산만
+  platform 권한으로 폴백(플랫폼 마스터가 그 앱 최초 진입 가능) — 목록/편집 API 는 폴백 안 함
+  (플랫폼 그룹 오조작 방지). 그 앱에 소속 사용자가 0명이면 `Account/users` 가 플랫폼 로스터를
+  온보딩 후보로 보여준다(첫 배정 전까지만) — 안 그러면 authGroup 을 막 만들어도 붙일 기존
+  사용자를 화면에서 찾을 방법이 없어 잠기는 2차 문제 발견·해결.
+- **프론트**: App.jsx 의 authority 조회에 `app=<scope>` 추가(스코프 전환마다 재계산 — 같은 사용자도
+  스코프마다 권한이 다르므로). AccountManager/NoticeManager/NoticePopup 에 `app` prop 추가.
+  NoticePopup 의 "3일간 보지 않기" localStorage 키도 앱별로 분리.
+- **검증**(실브라우저 + API): platform/gojira 스코프 Account 3명(마이그레이션 데이터), ragaas
+  스코프는 0명 → 부트스트랩 후 마스터 권한 확인(authority 전부 15) → Account 메뉴 노출 →
+  Users 탭에 플랫폼 로스터 3명 표시. GoJIRA-API 삭제 후 `/gojira/api/v2/Project` 정상 200
+  (프로젝트 기능 무영향 확인).
+
 ## 참고 — RAGaaS 온보딩 상태 (회신 2026-07-06 수신)
 
 - Phase 1 (A1~A12) 전부 완료, React 19.2.7 상향 포함. frontend shared-net 조인 완료(`/ragaas/` 관통).

@@ -19,6 +19,42 @@ func toID(id string) interface{} {
 	return id
 }
 
+// --- 앱 스코프 (D8) ---
+// authGroups/notices 는 app 필드로 제품별 분리 관리한다 ('platform'|'gojira'|'ragaas'…).
+// 'platform' 은 app 필드가 없는 레거시 문서(마이그레이션 전 데이터)도 포함해 하위호환.
+func appFilter(app string) bson.M {
+	if app == "" || app == "platform" {
+		return bson.M{"$or": []bson.M{{"app": "platform"}, {"app": bson.M{"$exists": false}}}}
+	}
+	return bson.M{"app": app}
+}
+
+// NormalizeApp 빈 app 파라미터를 기본 스코프로 정규화
+func NormalizeApp(app string) string {
+	if app == "" {
+		return "platform"
+	}
+	return app
+}
+
+// resolveAuthorityScope — 권한 "계산"에서만 쓰는 부트스트랩 폴백. 신규 제품은 authGroup 이
+// 하나도 없는 상태로 시작하는데(D8), 그 상태에서는 아무도 그 스코프의 마스터가 될 수 없어
+// Account/Notice 화면 자체가 영원히 안 보이는 잠금 상태가 된다. 그 앱에 authGroup 이 전혀
+// 없을 때만 플랫폼 권한으로 계산해 플랫폼 마스터가 그 앱의 첫 그룹을 만들 수 있게 한다.
+// 목록/편집(FindAllAuthGroups 등)에는 적용하지 않는다 — 적용하면 플랫폼 소유 그룹이
+// "그 앱 소속"인 것처럼 보여 마스터가 실수로 플랫폼 전역 그룹을 편집할 위험이 생긴다.
+func resolveAuthorityScope(ctx context.Context, app string) string {
+	norm := NormalizeApp(app)
+	if norm == "platform" {
+		return "platform"
+	}
+	count, _ := AuthGroups().CountDocuments(ctx, bson.M{"app": norm})
+	if count == 0 {
+		return "platform"
+	}
+	return norm
+}
+
 // --- 컬렉션 접근 ---
 
 func Users() *mongo.Collection       { return database.Collection("users") }
@@ -46,7 +82,16 @@ func InitAccountIndexes() {
 	}
 
 	createUnique(Users(), "knoxId")
-	createUnique(AuthGroups(), "code")
+
+	// authGroups: 구 code 단독 unique 를 (app, code) 복합 unique 로 교체 (D8 앱 스코핑)
+	_ = AuthGroups().Indexes().DropOne(ctx, "code_1")
+	_, errAG := AuthGroups().Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "app", Value: 1}, {Key: "code", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	if errAG != nil {
+		log.Printf("index authGroups compound (app,code): %v", errAG)
+	}
 
 	// orgUnits: 옛 code unique index 정리 (있으면 drop, 없으면 무시)
 	_ = OrgUnits().Indexes().DropOne(ctx, "code_1")
@@ -142,8 +187,34 @@ func softDelete(ctx context.Context, col *mongo.Collection, id string, by string
 
 // --- Users ---
 
-func FindAllUsers(ctx context.Context) ([]bson.M, error) {
-	return findAll(ctx, Users(), nil)
+// FindAllUsers 앱 스코프의 사용자 목록 — 신원은 전역이지만 "그 앱의 사용자"는
+// 그 앱의 authGroup 에 하나라도 속한 사용자로 정의한다 (D8: 전역 신원 + 앱별 권한).
+func FindAllUsers(ctx context.Context, app string) ([]bson.M, error) {
+	norm := NormalizeApp(app)
+	groups, err := FindAllAuthGroups(ctx, norm)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]interface{}, 0, len(groups)*2)
+	for _, g := range groups {
+		ids = append(ids, g["_id"])
+		if oid, ok := g["_id"].(bson.ObjectID); ok {
+			ids = append(ids, oid.Hex()) // 링크가 hex 문자열로 저장된 경우 대응
+		}
+	}
+	if len(ids) > 0 {
+		users, err := findAll(ctx, Users(), bson.M{"authGroupIds": bson.M{"$in": ids}})
+		if err != nil || len(users) > 0 || norm == "platform" {
+			return users, err
+		}
+	}
+	if norm == "platform" {
+		return []bson.M{}, nil
+	}
+	// 이 앱에 소속된 사용자가 아직 한 명도 없다 — 신규 앱 부트스트랩(D8): 플랫폼 로스터를
+	// 온보딩 후보로 보여준다. 화면의 편집 다이얼로그가 제시하는 권한그룹은 여전히 이 앱
+	// 스코프뿐이라(FindAllAuthGroups 는 폴백하지 않음), 실수로 다른 앱 그룹을 배정할 수는 없다.
+	return FindAllUsers(ctx, "platform")
 }
 
 func FindUserByID(ctx context.Context, id string) (bson.M, error) {
@@ -207,8 +278,8 @@ func SoftDeleteUser(ctx context.Context, id, by string) error {
 
 // --- AuthGroups ---
 
-func FindAllAuthGroups(ctx context.Context) ([]bson.M, error) {
-	return findAll(ctx, AuthGroups(), nil)
+func FindAllAuthGroups(ctx context.Context, app string) ([]bson.M, error) {
+	return findAll(ctx, AuthGroups(), appFilter(app))
 }
 
 func InsertAuthGroup(ctx context.Context, doc bson.M) error {
@@ -279,8 +350,10 @@ func UpdateConnection(ctx context.Context, id string, updates bson.M) error {
 
 // --- 권한 계산 ---
 
-// CalcUserAuthority 는 사용자의 authGroupIds로 authGroups를 조회하여 authority를 OR 연산
-func CalcUserAuthority(ctx context.Context, userID string) (map[string]int, error) {
+// CalcUserAuthority 는 사용자의 authGroupIds 중 해당 앱 스코프의 authGroups 만 조회하여
+// authority 를 OR 연산한다 (D8: 같은 사용자가 앱마다 다른 권한을 가진다).
+func CalcUserAuthority(ctx context.Context, userID string, app string) (map[string]int, error) {
+	app = resolveAuthorityScope(ctx, app) // 신규 앱 부트스트랩 폴백 (위 주석 참조)
 	user, err := FindUserByID(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -312,10 +385,10 @@ func CalcUserAuthority(ctx context.Context, userID string) (map[string]int, erro
 		}
 	}
 
-	cursor, err := AuthGroups().Find(ctx, bson.M{
-		"_id":      bson.M{"$in": convertedIDs},
-		"isActive": true,
-	})
+	groupFilter := appFilter(app)
+	groupFilter["_id"] = bson.M{"$in": convertedIDs}
+	groupFilter["isActive"] = true
+	cursor, err := AuthGroups().Find(ctx, groupFilter)
 	if err != nil {
 		return nil, err
 	}

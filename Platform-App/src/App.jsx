@@ -155,21 +155,25 @@ function App() {
     return onStatus(setSseConnected);
   }, []);
 
+  // 앱 스코프별 authority 재조회 (D8) — 같은 사용자도 스코프(플랫폼/gojira/ragaas)마다
+  // 다른 authGroup 에 속할 수 있어 스코프 전환마다 다시 계산해야 한다.
   useEffect(() => {
     if (!user || user === '__pending__') return; // introspect 완료 전 임시값이면 보류
-    authFetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}`)
+    authFetch(`${API_BASE}/Account/me?knoxId=${encodeURIComponent(user)}&app=${encodeURIComponent(scope)}`)
       .then(r => r.json())
       .then(data => {
         setAuthority(data.authority || {});
-        // 마스터 그룹이면 전체 사용자 목록 로드
+        // 마스터 그룹이면 (이 스코프의) 전체 사용자 목록 로드
         if ((data.authority?.USR || 0) >= 15) {
-          authFetch(`${API_BASE}/Account/users`)
+          authFetch(`${API_BASE}/Account/users?app=${encodeURIComponent(scope)}`)
             .then(r => r.json())
             .then(d => setAllUsers(Array.isArray(d) ? d : []));
+        } else {
+          setAllUsers([]);
         }
       })
       .catch(() => setAuthority({}));
-  }, [user]);
+  }, [user, scope]);
 
   // 접속 시 미읽은 알림 확인 (반려 등)
   useEffect(() => {
@@ -377,9 +381,9 @@ function App() {
       <div className="app-placeholder">페이지를 찾을 수 없습니다</div>
     );
   } else if (page === 'account') {
-    content = <AccountManager user={user} />;
+    content = <AccountManager user={user} app={scope} />;
   } else if (page === 'notice') {
-    content = <NoticeManager user={user} />;
+    content = <NoticeManager user={user} app={scope} />;
   } else if (page === 'repository') {
     content = <DocManager user={user} />;
   } else if (scope === 'platform') {
@@ -466,7 +470,7 @@ function App() {
         )}
       </div>
       <div className="app-body">{content}</div>
-      <NoticePopup user={user} />
+      <NoticePopup user={user} app={scope} />
       <AlertModal />
       {launching && (
         <div className="app-launching-overlay">

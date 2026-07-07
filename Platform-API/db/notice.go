@@ -25,10 +25,12 @@ func InitNoticeIndexes() {
 	log.Println("notice indexes initialized")
 }
 
-// FindAllNotices 전체 공지 조회 (isActive만, 최신순)
-func FindAllNotices(ctx context.Context) ([]bson.M, error) {
+// FindAllNotices 앱 스코프의 전체 공지 조회 (isActive만, 최신순) — D8 앱 스코핑
+func FindAllNotices(ctx context.Context, app string) ([]bson.M, error) {
+	filter := appFilter(app)
+	filter["isActive"] = true
 	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}})
-	cursor, err := Notices().Find(ctx, bson.M{"isActive": true}, opts)
+	cursor, err := Notices().Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -39,15 +41,14 @@ func FindAllNotices(ctx context.Context) ([]bson.M, error) {
 	return results, nil
 }
 
-// FindActiveNotices 현재 게시중인 공지 조회
-func FindActiveNotices(ctx context.Context) ([]bson.M, error) {
+// FindActiveNotices 앱 스코프의 현재 게시중인 공지 조회 (사용자 팝업용)
+func FindActiveNotices(ctx context.Context, app string) ([]bson.M, error) {
 	now := time.Now()
-	filter := bson.M{
-		"isActive":  true,
-		"status":    "active",
-		"startDate": bson.M{"$lte": now},
-		"endDate":   bson.M{"$gte": now},
-	}
+	filter := appFilter(app)
+	filter["isActive"] = true
+	filter["status"] = "active"
+	filter["startDate"] = bson.M{"$lte": now}
+	filter["endDate"] = bson.M{"$gte": now}
 	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}})
 	cursor, err := Notices().Find(ctx, filter, opts)
 	if err != nil {

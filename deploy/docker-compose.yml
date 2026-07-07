@@ -110,6 +110,10 @@ services:
     networks: [default, shared-net]
     environment:
       MONGO_URI: "mongodb://${MONGO_USER:?required}:${MONGO_PASS:?required}@${MONGODB_SERVER:?required}/?authSource=${MONGO_AUTH_SOURCE:-admin}"
+      # D8: 플랫폼 데이터는 platform DB (사전 요건: migrate-platform-db.js 실행 —
+      # 컬렉션 이관 + MONGO_USER 에 platform dbOwner grant)
+      PLATFORM_MONGO_DB: "${PLATFORM_MONGO_DB:-platform}"
+      PLATFORM_GOJIRA_MONGO_DB: "gojira"
       PLATFORM_GITHUB_TOKEN: "${PLATFORM_GITHUB_TOKEN:?required}"
       PLATFORM_GITHUB_ORG: "${PLATFORM_GITHUB_ORG:?required}"
       GITHUB_URL: "http://${GITEA_SERVER:?required}/"

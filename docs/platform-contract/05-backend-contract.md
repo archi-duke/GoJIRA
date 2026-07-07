@@ -134,6 +134,47 @@ exec nginx -g 'daemon off;'
   새므로 금지. base 상대 폴백은 게이트웨이 단일 origin 전제에서 셸/standalone/직접/dev 진입을
   모두 관통한다. (셸 env.js 에 제품별 키를 싣는 대안은 셸-remote 결합 증가로 기각.)
 
+## 5.5 Account/Notice 앱 스코핑 (D8, 2026-07-07)
+
+**계정 관리와 공지는 여전히 Platform-API 단독 소유·구현**이다(RAGaaS 등 신규 제품이 각자
+Account/Notice 를 재구현하지 않는다 — 04/03 계약 그대로). 다만 데이터는 앱별로 분리된다.
+
+- **신원은 전역, 권한은 앱별** — 한 사람(knoxId)이 여러 앱에서 같은 신원으로 존재하되, 앱마다
+  다른 authGroup(따라서 다른 authority)에 속할 수 있다. `User` 컬렉션은 전역 그대로, `AuthGroup`
+  과 `Notice` 에 `app` 필드(`'platform'|'gojira'|'ragaas'…`, 미지정/레거시는 `'platform'`)가 추가됐다.
+- **쿼리 파라미터 `app`** — `GET /Account/me`, `/Account/users`, `/Account/authGroups`,
+  `POST /Account/authGroups`, `GET|POST /Notice`, `GET /Notice/active` 가 `?app=<scope>` 를
+  받는다. 생략 시 `'platform'`. `POST` 는 body 의 `app` 을 우선하고 없으면 쿼리로 채운다.
+- **신규 앱 부트스트랩 폴백** — 어떤 앱에 authGroup 이 하나도 없으면(막 온보딩된 제품),
+  `Account/me` 의 권한 계산이 그 앱 대신 `'platform'` 권한으로 계산된다 — 플랫폼 마스터가
+  그 앱의 Account 화면에 처음 들어가 첫 authGroup 을 만들 수 있게 하기 위함. authGroup 목록/편집
+  API 자체는 폴백하지 않는다(플랫폼 그룹을 실수로 그 앱 소속처럼 편집하는 사고 방지).
+  같은 이유로 그 앱에 소속 사용자가 아직 없으면 `Account/users` 가 플랫폼 로스터를 온보딩
+  후보로 보여준다 — 첫 authGroup 이 생기고 누군가 실제로 그 그룹에 배정되는 순간부터
+  정상적으로 그 앱 스코프만 보인다.
+- **RAGaaS(외부 제품) 쪽 구현**: 이 API 들을 직접 만들 필요 없음 — 셸의 Account/Notice 관리
+  화면이 이미 `app='ragaas'` 로 호출한다. RAGaaS 코드가 할 일은 없음(문의 시 참고용).
+
+Go 참조 구현: `Platform-API/db/account.go`(`appFilter`, `resolveAuthorityScope`, `FindAllUsers`),
+`Platform-API/db/notice.go`.
+
+## 5.6 MongoDB 데이터베이스 분리 (D8)
+
+Platform-API 소유 데이터(users/authGroups/orgUnits/userProjects/userConnections/notices)는
+**`platform` DB** 로 분리됐다 (이전엔 GoJIRA-API 와 물리적으로 같은 `gojira` DB 를 공유했다).
+
+- `PLATFORM_MONGO_DB` 기본값 `platform` (구 기본값 `gojira`). `PLATFORM_GOJIRA_MONGO_DB`
+  (기본 `gojira`) 는 Platform-API 의 DocRepo 기능이 GoJIRA 소유 `projects` 컬렉션의
+  `documents` 필드를 직접 갱신하는 **역방향 결합 전용** 핸들 — 신규 코드는 쓰지 말 것
+  (제품 데이터는 그 제품 API 경유가 원칙, 이건 과거부터 있던 예외).
+- Mongo 계정(`gojira_app`)에 `platform` DB `dbOwner` role grant 필요 — 최초 1회
+  `deploy/scripts/migrate-platform-db.js` 실행(root 계정)이 grant + 기존 컬렉션 이관 +
+  기존 데이터 `app:'platform'` 태그 + GoJIRA 연속성(authGroup `_gojira` 복제, 사용자 링크)까지
+  수행한다. 신규 반입 환경에서도 최초 1회 실행 필요.
+- GoJIRA-API 는 무변경 — 자체 `GOJIRA_MONGO_DB`(기본 `gojira`) 그대로. GoJIRA-API 가 과거
+  Account/Notice 컬렉션에 직접 Mongo 접근하던 죽은 코드(`db/account.go` 등, 라우터 미등록 확인)는
+  제거했다 — 그 기능은 Platform-API HTTP API 로만 제공된다.
+
 ## 6. ENV 키 표
 
 ### 백엔드 (모든 언어 공통 의미)
@@ -145,6 +186,9 @@ exec nginx -g 'daemon off;'
 | `SSO_INSECURE_TLS` | `false` | introspect TLS 검증 우회 토글 |
 | `SERVICE_TOKEN` | (없음) | 서비스간 공유비밀. 미설정 시 서비스토큰 경로 전면 거부 |
 | `DEV_USER` | 서비스별 | dev 폴백 최종 신원 |
+| `PLATFORM_MONGO_DB` | `platform` | Platform-API 전용 DB명 (D8, 구 기본값 `gojira`) |
+| `PLATFORM_GOJIRA_MONGO_DB` | `gojira` | Platform-API 의 DocRepo `projects` 역방향 결합용 (§5.6) |
+| `GOJIRA_MONGO_DB` | `gojira` | GoJIRA-API 전용 DB명 (무변경) |
 
 ### 프론트 (런타임 env.js 키 — 셸 + remote)
 
