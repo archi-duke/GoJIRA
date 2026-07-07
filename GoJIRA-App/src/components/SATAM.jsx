@@ -835,8 +835,8 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
 
   // 웹 이슈 뷰 이원화 Phase 1 — 런처 감지 + 로컬 clone 있을 때만 토글 노출(그 외는 현행과 동일).
   const sourceOptions = sourceAvailable ? [
-    { label: '공식본', active: source === 'main', handler: () => setSource('main') },
-    { label: '내 작업본', active: source === 'local', handler: () => setSource('local') },
+    { label: '공식', active: source === 'main', handler: () => setSource('main') },
+    { label: '내작업', active: source === 'local', handler: () => setSource('local') },
   ] : [];
 
   if (loading) {
