@@ -63,15 +63,45 @@
 3. **선행 검증**: 로컬 이슈 YAML 스키마 ↔ 웹 기대 필드(key/subkey/issueType/labels/issueLinks/
    reqtype) 매핑 확인. 불일치 시 여기서 변환 계층 확정.
 
-### Phase 2 — 쓰기 시점 이동 (dual-write → 머지 시점 ingest)
-1. Platform-API 웹훅(이미 PR merged 이벤트 수신 중)에서 이슈 YAML 변경 파일을 감지해
-   GoJIRA-API `POST /Project/{code}/issues/ingest` (기존 벌크 엔드포인트 재사용, Phase 0 검증 적용)
-   호출 → Mongo 를 main 기준으로 갱신.
-2. 로컬 편집 도구(gojira-cli/이슈 스킬)의 즉시 ingest 호출 제거 — YAML write 만.
-   JIRA sync 도 머지 시점 흐름으로 이동.
-3. 전환기 호환: 구버전 CLI 가 ingest 를 계속 쏴도 검증만 통과하면 무해(멱등) — 웹훅 ingest 가
-   머지 시점에 어차피 main 기준으로 재기록. fleet 업데이트 후 엔드포인트 정리.
-4. 웹훅 유실 대비: 기존 수동 Pull(`/Issue/fetch`)/reconcile 경로 보존.
+### Phase 2 — 쓰기 시점 이동 ✅ 완료 (2026-07-07, 런처 v0.1.18)
+
+> **착수 검토에서 설계 보정 (D11)**: dual-write 의 실체는 "CLI 가 ingest 를 따로 호출"이
+> 아니라 **GoJIRA-API /Issue 핸들러가 Mongo 를 병합 base 로 읽고 캐시로 쓰는** 구조였다.
+> 단순히 Mongo 쓰기만 제거하면 연속 로컬 편집이 깨진다(두 번째 편집이 공식본 base 로
+> 병합돼 첫 편집 유실). 그래서 **base-from-client 프로토콜**로 확정: 로컬 쓰기 요청이
+> 자기 로컬 YAML(진실)을 동봉하면 서버는 순수 "작성 두뇌"(병합/링크/키할당)만 수행하고
+> Mongo 무접촉으로 localWrites 를 반환한다.
+
+1. **GoJIRA-API 새 프로토콜** (`handlers/issue_local.go`, 동봉 필드 없으면 기존 경로 —
+   전환기 호환):
+   - `PUT /Issue` + `baseYaml` / `DELETE /Issue` + `baseYaml` / `POST /Issue/link` +
+     `inwardYaml`·`outwardYaml`(한쪽만 허용 — 타 과제 이슈는 로컬에 없음) /
+     `DELETE /Issue/link*` + `baseFiles` / `POST /Issue` + `localOnly:true`.
+   - 모든 결과 doc 에 validateIssueDoc 적용(오염 원천 차단).
+   - **키 할당 원자화** (`db/counters.go`): 기존 NextIssueNum/NextSubkey 가 issues max
+     스캔이라 localOnly 생성 시 같은 키가 중복 발급되는 결함 발견 → counters 컬렉션
+     `$inc` 원자 발급으로 교체(첫 발급은 기존 max 스캔 seed). 삭제 후 키 재사용 잠재
+     버그도 함께 해소.
+2. **Platform-API 머지 시점 ingest** (`handlers/issue_resync.go`): main push 웹훅에서
+   commits[] 가 `data/issues/` 를 건드리면(판별 불가 시 안전 측 실행) main 트리의 이슈
+   YAML 전량을 읽어 벌크 ingest(reconcile=true) 비동기 호출. 부분 실패/truncated 트리면
+   ingest 자체를 중단(부분 집합 reconcile 금지). 수동 `POST /DocRepo/{code}/issues/resync`
+   병설(웹훅 유실 대비).
+   - **reconcile 삭제 보호**: 검증 실패 파일은 "부재"가 아니라 "상태 불명" — 해당 키는
+     캐시 제거에서 보호하고, 키조차 모르는 파싱 실패가 있으면 제거 단계 전체를 생략
+     (`reconcileSkipped`). *실사고: NBBALL main 의 오염 YAML 49건이 검증 거부되자
+     reconcile 이 정상 캐시 49건을 삭제 — 로컬 복구본 재-ingest 로 즉시 복원 후 보호
+     로직 추가.*
+3. **클라이언트**: gojira-cli(`findIssueYamlByKey`)·`issue-write.sh`/batch 스크립트
+   (`gj_find_issue_yaml`/`gj_find_link_files`)가 로컬 YAML 을 찾아 동봉. batch-create 의
+   생성 후 PUT 은 생성 응답의 localWrites content 를 baseYaml 로 사용(localOnly 생성이라
+   Mongo 에 없음 — 없으면 404 로 필드 유실). 런처 `/open`·`/edit` 콜드스타트 ingest 제거.
+4. 전환기 호환: 동봉 필드 없는 구버전 CLI/스킬/런처는 기존 경로 그대로 — 머지 웹훅이
+   어차피 main 기준으로 재수렴. JIRA sync 는 새 경로에서 호출 제거(레거시 경로 잔존,
+   머지 시점 이동은 JIRA 연동 실사용 확인 후).
+5. 웹훅 유실 대비: 수동 resync + 기존 Pull(`/Issue/fetch`) 보존.
+6. **잔여**: NBBALL main 의 오염 YAML 49건 — 로컬 복구본 등록(PR 머지) 시 웹훅 resync 가
+   공식본을 복구본 기준으로 갱신(웹훅 경로의 자연 E2E).
 
 ### Phase 3 — 편집 브릿지 부활 (§3.3 개정)
 - 로컬뷰에서만 editMode 활성. **범위는 편집만이 아니라 생성/삭제까지** — 링크 드래그 연결/해제,

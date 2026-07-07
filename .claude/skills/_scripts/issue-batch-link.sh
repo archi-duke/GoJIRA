@@ -46,6 +46,16 @@ for i in $(seq 0 $((COUNT - 1))); do
        {prjID:$p, inwardKey:$iw, outwardKey:$ow, linkType:$lt, user:$u, source:$src}
      end')
 
+  # Phase 2(이슈 쓰기 시점 이동): 양쪽 로컬 YAML 원문을 있는 쪽만 동봉 — 서버가 base 로 병합.
+  IWFILE=$(gj_find_issue_yaml "$IW" 2>/dev/null) || IWFILE=""
+  OWFILE=$(gj_find_issue_yaml "$OW" 2>/dev/null) || OWFILE=""
+  if [[ -n "$IWFILE" ]]; then
+    BODY=$(jq --rawfile y "$IWFILE" '. + {inwardYaml:$y}' <<< "$BODY")
+  fi
+  if [[ -n "$OWFILE" ]]; then
+    BODY=$(jq --rawfile y "$OWFILE" '. + {outwardYaml:$y}' <<< "$BODY")
+  fi
+
   STATUS=""
   for attempt in 1 2 3; do
     TMP=$(mktemp)

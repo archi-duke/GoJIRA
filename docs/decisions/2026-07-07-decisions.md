@@ -192,3 +192,31 @@
 - 셸 콘솔에 `http://localhost:3001/remoteEntry.js` ERR_CONNECTION_REFUSED 1건 — Platform-App
   vite.config 의 dev 초기 remote 선언을 MF 런타임이 선요청. registry 의 force 재등록이 덮어써
   기능 무해(실 remote 는 env 값으로 로드됨). 거슬리면 셸 config 의 정적 remote 선언 제거 검토.
+
+## D11. 이슈 쓰기 시점 이동 (D10 Phase 2) — base-from-client 프로토콜 + 원자 카운터
+
+- **설계 보정**: D10 Phase 2 요약("CLI 의 즉시 ingest 호출 제거")과 실제 코드가 달랐다 —
+  dual-write 의 실체는 GoJIRA-API /Issue 핸들러가 **Mongo 를 병합 base 로 읽고 캐시로 쓰는**
+  구조. Mongo 쓰기만 제거하면 연속 로컬 편집이 깨진다(2번째 편집이 공식본 base 로 병합돼
+  1번째 유실). → **base-from-client**: 로컬 쓰기 요청이 자기 로컬 YAML(진실)을 동봉
+  (`baseYaml`/`inwardYaml`·`outwardYaml`/`baseFiles`/`localOnly`), 서버는 병합·링크·키할당
+  "두뇌"만 수행하고 Mongo 무접촉으로 localWrites 반환. 동봉 없는 구버전 요청은 기존 경로
+  (전환기 호환). 공식본(Mongo)은 main push 웹훅의 reconcile ingest 로만 갱신.
+- **검증 중 발견 결함 2건 (Fable 검증 단계에서)**:
+  1. **키 할당 중복**: NextIssueNum/NextSubkey 가 issues 컬렉션 max 스캔 → localOnly 생성은
+     Mongo 에 안 쓰므로 연속 생성 시 같은 키 중복 발급(batch-create 전멸급). 삭제 후 키
+     재사용 잠재 버그도 동근원. → `db/counters.go` 원자 `$inc` 카운터(첫 발급은 max 스캔
+     seed, 경합은 duplicate key 감지 후 재시도)로 교체.
+  2. **reconcile 삭제 사고 (실사고)**: 수동 resync E2E 중 NBBALL main 의 오염 YAML 49건이
+     Phase 0 검증에서 거부되자, reconcile 이 "ingest 집합에 없음"으로 보고 정상 Mongo 캐시
+     49건을 삭제. 로컬 복구본 50건 재-ingest 로 즉시 복원. → **검증 실패 = 상태 불명**:
+     실패 파일의 키는 제거 보호, 키 미상(파싱 불가) 실패가 있으면 제거 단계 전체 생략
+     (`reconcileSkipped` 응답 필드).
+- **batch-create 함정**: 생성 후 PUT(추가 필드)이 baseYaml 없이 가면 legacy 경로가 Mongo 를
+  찾다 404(localOnly 생성이라 없음) → 필드 조용히 유실. 생성 응답의 localWrites[0].content 를
+  baseYaml 로 재사용해 해결.
+- **분업**: 계획/사양 Fable 5 → 코딩 Sonnet 5 에이전트 2개 병렬(서버/클라이언트) → 검증
+  Fable 5 (빌드·테스트·44300 E2E — localOnly 중복키·Mongo 무접촉·reconcile 보호 전부 실측).
+- **잔여**: NBBALL main 오염 YAML 49건은 로컬 복구본 등록(PR 머지) 시 웹훅 resync 로 공식본
+  갱신 — 웹훅 경로의 자연 E2E 겸용. 이 PC 런처 0.1.17→0.1.18 교체 필요(콜드스타트 ingest
+  제거는 0.1.18부터, 구버전은 전환기 무해).

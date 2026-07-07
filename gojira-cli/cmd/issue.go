@@ -81,6 +81,7 @@ func issueCreate(args []string) {
 	body := map[string]interface{}{
 		"key": project, "issueType": issueType, "summary": summary,
 		"description": description, "priority": priority, "reqtype": reqType,
+		"localOnly": true,
 	}
 	result, err := apiWriteLocal("POST", "/Issue", body)
 	if err != nil {
@@ -97,7 +98,11 @@ func issueUpdate(args []string) {
 	if key == "" {
 		fatal("--key is required")
 	}
-	data := map[string]interface{}{"key": key, "data": map[string]interface{}{}}
+	_, baseYaml, err := findIssueYamlByKey(key)
+	if err != nil {
+		fatal(err.Error())
+	}
+	data := map[string]interface{}{"key": key, "data": map[string]interface{}{}, "baseYaml": baseYaml}
 	fields := data["data"].(map[string]interface{})
 	for _, f := range []string{"summary", "description", "status", "priority", "assignee"} {
 		if v := parseFlag(args, f); v != "" {
@@ -119,7 +124,11 @@ func issueDelete(args []string) {
 	if key == "" {
 		fatal("--key is required")
 	}
-	result, err := apiWriteLocal("DELETE", "/Issue", map[string]string{"key": key})
+	_, baseYaml, err := findIssueYamlByKey(key)
+	if err != nil {
+		fatal(err.Error())
+	}
+	result, err := apiWriteLocal("DELETE", "/Issue", map[string]string{"key": key, "baseYaml": baseYaml})
 	if err != nil {
 		fatal(err.Error())
 	}
@@ -136,9 +145,21 @@ func issueLink(args []string) {
 	if from == "" || to == "" || linkType == "" {
 		fatal("--from, --to, --type are required")
 	}
-	result, err := apiWriteLocal("POST", "/Issue/link", map[string]string{
+	_, inwardYaml, inErr := findIssueYamlByKey(from)
+	_, outwardYaml, outErr := findIssueYamlByKey(to)
+	if inErr != nil && outErr != nil {
+		fatal(fmt.Sprintf("로컬 clone에서 이슈 YAML을 찾지 못함: %s, %s — 과제 clone 안에서 실행했는지 확인", from, to))
+	}
+	body := map[string]string{
 		"inwardKey": from, "outwardKey": to, "linkType": linkType,
-	})
+	}
+	if inErr == nil {
+		body["inwardYaml"] = inwardYaml
+	}
+	if outErr == nil {
+		body["outwardYaml"] = outwardYaml
+	}
+	result, err := apiWriteLocal("POST", "/Issue/link", body)
 	if err != nil {
 		fatal(err.Error())
 	}

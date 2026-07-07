@@ -27,6 +27,73 @@ BODY=$(cat)
 USER="${GOJIRA_USER:-}"
 [[ -z "$USER" ]] && USER=$(jq -r '.user // empty' <<< "$BODY" 2>/dev/null || true)
 
+# Phase 2(이슈 쓰기 시점 이동) — Mongo 는 PR 머지 시점에만 갱신되므로, 여기서 로컬 YAML
+# 원문을 body 에 동봉해 서버가 그걸 base 로 병합하게 한다(Mongo 무접촉).
+case "$METHOD" in
+  POST)
+    case "$APIPATH" in
+      /Issue)
+        BODY=$(jq '. + {localOnly:true}' <<< "$BODY")
+        ;;
+      /Issue/link)
+        IWKEY=$(jq -r '.inwardKey // empty' <<< "$BODY")
+        OWKEY=$(jq -r '.outwardKey // empty' <<< "$BODY")
+        IWFILE=$(gj_find_issue_yaml "$IWKEY" 2>/dev/null) || IWFILE=""
+        OWFILE=$(gj_find_issue_yaml "$OWKEY" 2>/dev/null) || OWFILE=""
+        if [[ -z "$IWFILE" && -z "$OWFILE" ]]; then
+          echo "ERROR: 로컬 clone에서 이슈 YAML을 찾지 못함: ${IWKEY:-?}, ${OWKEY:-?} — 과제 clone 안에서 실행했는지 확인" >&2
+          exit 1
+        fi
+        [[ -n "$IWFILE" ]] && BODY=$(jq --rawfile y "$IWFILE" '. + {inwardYaml:$y}' <<< "$BODY")
+        [[ -n "$OWFILE" ]] && BODY=$(jq --rawfile y "$OWFILE" '. + {outwardYaml:$y}' <<< "$BODY")
+        ;;
+    esac
+    ;;
+  PUT)
+    if [[ "$APIPATH" == "/Issue" ]]; then
+      KEY=$(jq -r '.key // empty' <<< "$BODY")
+      if [[ -z "$KEY" ]]; then
+        echo "ERROR: PUT /Issue 요청에 key 없음" >&2
+        exit 1
+      fi
+      YFILE=$(gj_find_issue_yaml "$KEY") || { echo "ERROR: 로컬 clone에서 이슈 YAML을 찾지 못함: $KEY — 과제 clone 안에서 실행했는지 확인" >&2; exit 1; }
+      BODY=$(jq --rawfile y "$YFILE" '. + {baseYaml:$y}' <<< "$BODY")
+    fi
+    ;;
+  DELETE)
+    if [[ "$APIPATH" == "/Issue" ]]; then
+      KEY=$(jq -r '.key // empty' <<< "$BODY")
+      if [[ -z "$KEY" ]]; then
+        echo "ERROR: DELETE /Issue 요청에 key 없음" >&2
+        exit 1
+      fi
+      YFILE=$(gj_find_issue_yaml "$KEY") || { echo "ERROR: 로컬 clone에서 이슈 YAML을 찾지 못함: $KEY — 과제 clone 안에서 실행했는지 확인" >&2; exit 1; }
+      BODY=$(jq --rawfile y "$YFILE" '. + {baseYaml:$y}' <<< "$BODY")
+    elif [[ "$APIPATH" == /Issue/link* ]]; then
+      LINKID=$(jq -r '.linkId // empty' <<< "$BODY")
+      if [[ -z "$LINKID" ]]; then
+        # /Issue/link/{linkId}/of/{key} 경로 세그먼트에서 추출.
+        LINKID=$(printf '%s' "$APIPATH" | sed -nE 's#^/Issue/link/([^/]+)(/of/.*)?$#\1#p')
+      fi
+      if [[ -z "$LINKID" ]]; then
+        echo "ERROR: DELETE link 요청에 linkId 없음(body 또는 path)" >&2
+        exit 1
+      fi
+      FILES=$(gj_find_link_files "$LINKID") || { echo "ERROR: 로컬 clone에서 linkId 관련 YAML을 찾지 못함: $LINKID — 과제 clone 안에서 실행했는지 확인" >&2; exit 1; }
+      BASEFILES_JSON="[]"
+      while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        BASEFILES_JSON=$(jq -n --argjson arr "$BASEFILES_JSON" --rawfile c "$f" '$arr + [$c]')
+      done <<< "$FILES"
+      if [[ "$BASEFILES_JSON" == "[]" ]]; then
+        echo "ERROR: 로컬 clone에서 linkId 관련 YAML을 찾지 못함: $LINKID — 과제 clone 안에서 실행했는지 확인" >&2
+        exit 1
+      fi
+      BODY=$(jq --argjson bf "$BASEFILES_JSON" '. + {baseFiles: $bf}' <<< "$BODY")
+    fi
+    ;;
+esac
+
 TMP=$(mktemp)
 # body 는 stdin(@-)으로 — argv 전달 시 Windows 네이티브 curl 이 UTF-8→ANSI 변환해 한글 깨짐.
 STATUS=$(curl -s -o "$TMP" -w '%{http_code}' -X "$METHOD" "${GOJIRA_API}${APIPATH}" \

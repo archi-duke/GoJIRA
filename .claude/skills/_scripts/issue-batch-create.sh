@@ -43,8 +43,9 @@ ERRORS=()
 for i in $(seq 0 $((COUNT - 1))); do
   ITEM=$(jq ".[$i]" <<< "$INPUT")
   SUM=$(jq -r '.summary' <<< "$ITEM")
+  # Phase 2(이슈 쓰기 시점 이동): localOnly:true 로 Mongo 캐시 upsert 를 생략시킨다(키 할당은 그대로).
   BODY=$(jq --arg p "$CODE" --arg u "$USER" \
-    '{prjID:$p, user:$u, issueType:.issueType, summary:.summary, desc:.desc}
+    '{prjID:$p, user:$u, issueType:.issueType, summary:.summary, desc:.desc, localOnly:true}
      + (if .reqType then {reqType:.reqType} else {} end)
      + (if .labels then {labels:.labels} else {} end)' <<< "$ITEM")
 
@@ -129,8 +130,12 @@ for i in $(seq 0 $((COUNT - 1))); do
     } | with_entries(select(.value != null and .value != ""))' <<< "$ITEM")
     if [[ "$(jq 'length' <<< "$EXTRA")" != "0" ]]; then
       PTMP=$(mktemp)
-      PUTBODY=$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson d "$EXTRA" \
-        '{prjID:$p, key:$k, user:$u, data:$d}')
+      # Phase 2: 생성이 localOnly 라 Mongo 에 이슈가 없다 — 방금 생성된 YAML(응답
+      # localWrites[0].content)을 baseYaml 로 동봉해 서버가 그걸 base 로 병합하게 한다.
+      # 없이 보내면 legacy(Mongo) 경로가 404 로 떨어져 추가 필드가 유실된다.
+      BASEY=$(jq -r '.localWrites[0].content // empty' <<< "$RESP")
+      PUTBODY=$(jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson d "$EXTRA" --arg by "$BASEY" \
+        '{prjID:$p, key:$k, user:$u, data:$d, baseYaml:$by}')
       # body 는 stdin(@-)으로 — argv 전달 시 Windows 에서 UTF-8 한글 깨짐(U+FFFD).
       curl -s -o "$PTMP" -X PUT "${GOJIRA_API}/Issue" \
         -H "Content-Type: application/json" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" -H "X-Local-Write: true" \

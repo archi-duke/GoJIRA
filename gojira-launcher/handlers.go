@@ -20,7 +20,7 @@ import (
 	"sync"
 )
 
-const version = "0.1.17"
+const version = "0.1.18"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -103,16 +103,11 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// 콜드스타트: 방금 내려받은 로컬 YAML → Mongo 캐시 동기화. YAML 이 진실이라 실패는 비치명적.
-	ingest, err := s.IngestIssues(req.Code, req.User)
-	if err != nil {
-		log.Printf("/open ingest 경고 code=%s: %v", req.Code, err)
-	}
 	if err := OpenInEditor(repoPath, ""); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "repoPath": repoPath, "ingest": ingest})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "repoPath": repoPath})
 }
 
 type editReq struct {
@@ -139,11 +134,6 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// 콜드스타트: 로컬 YAML → Mongo 캐시 동기화.
-	ingest, err := s.IngestIssues(req.Code, req.User)
-	if err != nil {
-		log.Printf("/edit ingest 경고 code=%s: %v", req.Code, err)
-	}
 	if err := OpenInEditor(repoPath, fullFile); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -151,7 +141,6 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":   "ok",
 		"repoPath": repoPath,
-		"ingest":   ingest,
 	})
 }
 
