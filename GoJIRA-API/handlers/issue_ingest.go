@@ -12,6 +12,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,10 @@ func ingestOneYAML(ctx context.Context, yamlContent string) (string, error) {
 	doc, key, err := parseIssueYAML(yamlContent)
 	if err != nil {
 		return "", err
+	}
+	if err := validateIssueDoc(doc); err != nil {
+		log.Printf("issue ingest: validation rejected key=%s: %v", key, err)
+		return "", fmt.Errorf("validation failed: %w", err)
 	}
 	code := keyToProjectCode(key)
 	if code == "" {
@@ -141,6 +146,11 @@ func ProjectIssuesIngestHandler(w http.ResponseWriter, r *http.Request) {
 		doc, key, err := parseIssueYAML(y)
 		if err != nil {
 			failed = append(failed, map[string]string{"error": err.Error()})
+			continue
+		}
+		if err := validateIssueDoc(doc); err != nil {
+			log.Printf("issue ingest: validation rejected key=%s: %v", key, err)
+			failed = append(failed, map[string]string{"key": key, "error": err.Error()})
 			continue
 		}
 		if err := upsertIssueCacheFromDoc(ctx, key, projectID, doc); err != nil {

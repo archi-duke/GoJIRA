@@ -320,9 +320,13 @@ function EditDialog({ item, authGroups, orgUnits, isPlatform, onClose, onSave })
               <div className="am-tag-list">
                 {(form.authGroupIds || []).map(id => {
                   const grp = authGroups.find(g => g._id === id);
+                  // 다른 앱 스코프의 그룹(현재 스코프에 로드 안 됨)은 raw id 를 노출하지 않고
+                  // 숨긴다 — Users 테이블의 groupNames 와 동일한 규칙(D9).
+                  if (!grp) return null;
+                  const label = isPlatform ? `${grp.name}(${grp.app})` : grp.name;
                   return (
                     <span key={id} className="am-tag">
-                      {grp ? `${grp.name} (${grp.code})` : id}
+                      {label}
                       <button className="am-tag-remove" onClick={() => toggleArrayItem('authGroupIds', id)}>x</button>
                     </span>
                   );
