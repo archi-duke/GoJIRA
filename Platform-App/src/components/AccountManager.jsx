@@ -216,7 +216,6 @@ function AuthGroupTable({ authGroups, isPlatform, onEdit, onDelete, onCreate }) 
         <thead>
           <tr>
             <th>이름</th><th>코드</th>
-            {isPlatform && <th>ID</th>}
             {isPlatform && <th>앱</th>}
             <th>설명</th><th>권한</th><th></th>
           </tr>
@@ -226,7 +225,6 @@ function AuthGroupTable({ authGroups, isPlatform, onEdit, onDelete, onCreate }) 
             <tr key={g._id}>
               <td>{g.name}</td>
               <td>{g.code}</td>
-              {isPlatform && <td>{g._id}</td>}
               {isPlatform && <td>{g.app}</td>}
               <td>{g.description}</td>
               <td className="am-auth-cell">{renderAuth(g.authority)}</td>
