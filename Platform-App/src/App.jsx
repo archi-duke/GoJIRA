@@ -374,7 +374,7 @@ function App() {
           {products.map(p => (
             <a key={p.product} className="app-home-card" href={`/${p.product}`}>
               {p.localIcon
-                ? <img src={p.localIcon} alt={p.productLabel || p.label} className="app-home-card-icon" />
+                ? <span className="app-home-card-icon"><img src={p.localIcon} alt={p.productLabel || p.label} /></span>
                 : <span className="app-home-card-badge">{(p.productLabel || p.label || '?')[0]}</span>}
               <span className="app-home-card-label">{p.productLabel || p.label}</span>
             </a>
