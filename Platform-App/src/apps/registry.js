@@ -62,6 +62,10 @@ const appRegistry = [
     base: gojiraBase,
     // 플랫폼 스코프 홈(D6) 카드 아이콘 — 셸 자체 자산이라 remote 연결 없이 표시 가능.
     localIcon: '/icons/gojira-logo.svg',
+    // 스코프별 타이틀 아이콘 동작 + 노출할 플랫폼 내장 메뉴 (D7).
+    // 'agent': 로컬 에이전트 채팅 호출. 'home': 그 스코프의 기본 화면으로 복귀.
+    titlebarAction: 'agent',
+    platformMenus: ['account', 'notice', 'repository'],
   },
   // RAGaaS — env 로 remote 가 지정된 경우에만 등록 (미배포 환경에서 탭 숨김)
   ...(ragaasRemote
@@ -76,6 +80,8 @@ const appRegistry = [
         productLabel: 'RAGaaS',
         mfName: 'ragaasApp',
         base: ragaasBase,
+        titlebarAction: 'home',
+        platformMenus: ['account', 'notice'],
       }]
     : []),
   {

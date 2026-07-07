@@ -48,6 +48,10 @@ class RemoteErrorBoundary extends Component {
 // 제품 스코프 안의 메뉴 전환은 URL 을 바꾸지 않는다 (URL = 스코프 진입점).
 const PLATFORM_PAGES = ['account', 'notice', 'repository'];
 const PRODUCT_SEGMENTS = appRegistry.filter((a) => a.product).map((a) => a.product);
+// 플랫폼 스코프(/)는 registry 항목이 아니라 셸 자신이므로 별도 설정 (D7).
+// titlebarAction: 'agent'(로컬 에이전트 호출) | 'home'(그 스코프 기본 화면 복귀).
+// platformMenus: 이 스코프에서 노출할 셸 내장 메뉴 키(권한 필터는 별도 적용).
+const PLATFORM_SCOPE_CONFIG = { titlebarAction: 'home', platformMenus: ['account', 'notice'] };
 const seg0 = () => window.location.pathname.replace(/^\//, '').split('/')[0];
 const scopeFromPath = () => (PRODUCT_SEGMENTS.includes(seg0()) ? seg0() : 'platform');
 const pageFromPath = () => {
@@ -312,13 +316,27 @@ function App() {
     ? `${scopeApp.base}/${scopeManifest.icon.replace(/^\//, '')}`
     : '/icons/platform-logo.svg';
 
-  // 플랫폼 내장 메뉴(Account/Notice/Repository — component 없는 registry 항목) 권한 필터.
+  // 스코프별 설정 (D7) — 타이틀 아이콘 동작 + 노출할 플랫폼 내장 메뉴.
+  // 플랫폼 스코프는 registry 항목이 아니므로 PLATFORM_SCOPE_CONFIG 로 대체.
+  const activeScopeConfig = scopeApp || PLATFORM_SCOPE_CONFIG;
+  const titlebarAction = activeScopeConfig.titlebarAction || 'agent';
+  const titlebarTitle = titlebarAction === 'agent' ? '에이전트 채팅 띄우기' : '홈으로 이동';
+  const handleTitlebarClick = () => {
+    if (titlebarAction === 'agent') { launchAgentChat(); return; }
+    navigate(scopeApp ? scopeApp.key : 'home');
+  };
+
+  // 플랫폼 내장 메뉴(Account/Notice/Repository — component 없는 registry 항목) —
+  // 스코프의 platformMenus 목록 + 개별 권한(authCode/authLevel) 이중 필터.
   // 플랫폼 스코프 타이틀바와, 제품 스코프에서 마스터에게 이어붙는 메뉴가 공유한다.
   const platformMenuEntries = appRegistry.filter(a => !a.product);
-  const visiblePlatformMenus = platformMenuEntries.filter(app => {
-    if (!app.authCode) return true;
-    return authority && (authority[app.authCode] || 0) >= app.authLevel;
-  });
+  const allowedPlatformKeys = activeScopeConfig.platformMenus || [];
+  const visiblePlatformMenus = platformMenuEntries
+    .filter(app => allowedPlatformKeys.includes(app.key))
+    .filter(app => {
+      if (!app.authCode) return true;
+      return authority && (authority[app.authCode] || 0) >= app.authLevel;
+    });
   const scopeMenus = scopeApp
     ? (scopeManifest?.menus || []).filter(m =>
         !m.authCode || (authority && (authority[m.authCode] || 0) >= (m.authLevel || 0)))
@@ -390,11 +408,11 @@ function App() {
     <div className="app-root">
       <div className="app-titlebar">
         <img src={brandIcon} alt={brandName} className="app-logo-icon app-logo-clickable"
-          onClick={launchAgentChat}
-          title="에이전트 채팅 띄우기" />
+          onClick={handleTitlebarClick}
+          title={titlebarTitle} />
         <span className="app-logo app-logo-clickable"
-          onClick={launchAgentChat}
-          title="에이전트 채팅 띄우기">{brandName}</span>
+          onClick={handleTitlebarClick}
+          title={titlebarTitle}>{brandName}</span>
         <nav className="app-nav">
           {scopeApp
             ? [
