@@ -103,22 +103,34 @@
 6. **잔여**: NBBALL main 의 오염 YAML 49건 — 로컬 복구본 등록(PR 머지) 시 웹훅 resync 가
    공식본을 복구본 기준으로 갱신(웹훅 경로의 자연 E2E).
 
-### Phase 3 — 편집 브릿지 부활 (§3.3 개정)
-- 로컬뷰에서만 editMode 활성. **범위는 편집만이 아니라 생성/삭제까지** — 링크 드래그 연결/해제,
-  이슈 생성(+Add 버튼류), 이슈 삭제, (범위 협의) IssueDetailDialog 필드 편집.
-- 쓰기는 전부 launcher `/write`/`/delete`(로컬 YAML 갱신) — 서버/Mongo 무접촉. 이후 등록→PR 은
-  기존 흐름.
-- YAML 갱신 로직(링크 추가/삭제·이슈 생성/삭제를 YAML 문서에 반영)은 웹 또는 런처 중 어디서
-  할지 착수 시 결정.
-- **에이전트 변경 전달 (2026-07-07 추가 요구)**: 웹에서 발생한 변경(생성/삭제/링크/필드)은 그
-  과제의 에이전트에게 전달되어, 에이전트가 **설계 내용이나 관련 문서의 수정 필요성을 판단**하게
-  해야 한다. 웹 편집은 "YAML 한 줄 고치기"로 끝나지 않고 설계 일관성(SATAM 매트릭스, 유스케이스
-  산출물, 설계 문서)에 파급될 수 있기 때문. 구현 옵션(착수 시 결정):
-  - (a) 변경 저널: 런처가 웹발 변경을 클론 내 저널 파일(예: `.gojira/pending-changes.yaml`)에
-    누적 기록 → 에이전트 스킬이 세션 시작/작업 중 이를 읽고 영향 분석. 세션이 안 떠 있어도 유실 없음.
-  - (b) 능동 통지: 변경 시 런처가 해당 과제 에이전트 세션에 검토 프롬프트를 전달(세션 없으면
-    spawn — 기존 /chat 재사용). 즉각적이나 세션 lifecycle 관리 필요.
-  - 권장 방향: (a) 를 기본으로 하고, 웹 UI 에 "에이전트 검토 요청" 버튼으로 (b) 를 선택 제공.
+### Phase 3 — 편집 브릿지 부활 ✅ 완료 (2026-07-07, 런처 v0.1.19, D12)
+
+> **부활 조사 결과**: 읽기전용화 커밋(9d32ebb)은 편집 UI 를 게이트로만 잠갔고 어떤 핸들러도
+> 삭제하지 않았다 — RelationMap 드래그 연결/해제·라벨토글·생성/삭제·summary 편집, SATAM 셀
+> RST 편집·Link-as-Solution·생성, IssueList 인라인 편집·삭제, IssueDetailDialog 전부 원형
+> 잔존. CommonBar(onEditChange)·IssueDetailDialog 는 무수정 재사용.
+
+- **게이트 재개방 — 로컬뷰 한정**: editMode 토글은 `source==='local'` 일 때만 CommonBar 에
+  노출(공식본은 계속 읽기 전용), 소스 전환 시 editMode 자동 해제. 편집 중 배지에
+  "저장은 내 로컬 작업본에만 반영, 등록→PR 로 공식화" 안내.
+- **쓰기 경로 = Phase 2 프로토콜 재사용** (`GoJIRA-App/src/utils/localIssueWrite.js`):
+  parseLocalIssues 가 각 이슈에 `_baseYaml`(raw 원문)/`_localPath` 를 보존 → 핸들러가
+  GoJIRA-API base-from-client 호출(Mongo 무접촉) → 응답 localWrites 를 launcher
+  `/write`/`/delete` 로 자기 로컬 clone 에 반영 → refetch. 서버 "작성 두뇌"(병합/링크/
+  키할당) 재사용으로 로직 중복 0. 생성은 클라이언트 subkey 계산 제거(서버 카운터 원자 할당).
+  status/priority 는 shape 보존(스칼라↔객체) — E2E 에서 `{name}` 강제 버그 발견·수정.
+- **에이전트 변경 전달 = (a) 저널 채택**: 위치는 클론 내가 아니라(프로젝트 레포에 .gitignore
+  없음 → PR 오염) **런처 영역 `~/.gojira/journal/<code>.yaml`**. 런처 `POST /issue-journal`
+  이 append(YAML 리스트: ts/user/op/keys/summary/fields), 웹 헬퍼가 쓰기 성공 후 best-effort
+  기록. spawn agentEnv 가 `GOJIRA_ISSUE_JOURNAL` 로 경로 주입, 에이전트 계약은 스킬 배포
+  라인(`.claude/skills/_shared/issue-journal.md` + clone 배포 `.claude/CLAUDE.md` —
+  gojira-launcher/assets-extra, build-launcher.sh·launcher-dist Dockerfile 양쪽 sync)으로
+  전달. 처리 항목은 에이전트가 저널에서 제거.
+  - (b) 능동 통지("에이전트 검토 요청" 버튼, /chat 재사용)는 후속 — 필요해지면 추가.
+- E2E(44300 실측): 공식뷰 토글 부재/내작업 노출/자동해제, priority 수정(스칼라 보존)·이슈
+  생성(VOS_009 파일 생성, NBBALL-53 카운터 키)·삭제(파일 제거) — 로컬 YAML/저널/Mongo 무접촉
+  전부 확인. 드래그 링크 UI 는 동일 파이프라인(localCreateLink/localDeleteLink — API 는
+  Phase 2 에서 실측)이라 코드 검토로 갈음.
 
 ## 4. 열린 결정 (착수 전 확정 필요)
 1. 로컬뷰 자동 진입 판별 — 에이전트 세션 기준(제안) 외에 "클론만 있고 세션 없음"을 어떻게 볼지.

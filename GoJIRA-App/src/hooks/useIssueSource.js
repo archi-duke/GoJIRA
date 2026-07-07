@@ -38,6 +38,7 @@ async function defaultMainFetch(projectCode) {
  *   loading: boolean,
  *   refetch: ()=>Promise<void>,
  *   localMeta: {count:number}|null,
+ *   launcherToken: string,
  * }}
  */
 export default function useIssueSource({ projectCode, user, mainFetch }) {
@@ -163,5 +164,10 @@ export default function useIssueSource({ projectCode, user, mainFetch }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectCode, user]);
 
-  return { source, setSource, sourceAvailable, issues, loading, refetch, localMeta };
+  // Phase 3 편집 브릿지 — 로컬 쓰기 헬퍼(utils/localIssueWrite.js)가 런처 호출(write/delete/
+  // issue-journal)에 쓸 토큰. launcherRef 는 마운트 시 detectLauncher 로 1회 채워지고, 이후
+  // 재렌더(setSourceAvailable 등) 시점엔 이미 채워져 있으므로 스냅샷으로 노출해도 안전.
+  const launcherToken = launcherRef.current?.token || '';
+
+  return { source, setSource, sourceAvailable, issues, loading, refetch, localMeta, launcherToken };
 }

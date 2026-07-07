@@ -6,6 +6,7 @@ import config from '../config';
 import './SATAM.css';
 import { authFetch } from '../platform/auth';
 import useIssueSource from '../hooks/useIssueSource';
+import { localUpdateIssue, localCreateIssue, localCreateLink, localDeleteLink } from '../utils/localIssueWrite';
 
 const API_BASE = config.API_BASE;
 
@@ -582,11 +583,15 @@ const NAV_ITEMS = [
 export default function SATAM({ project, user, onBack, currentPage, onNavigate }) {
   const projectCode = project.jiraCodes?.main?.jiraCode || '';
   // 웹 이슈 뷰 이원화 Phase 1 — 공식본(main/Mongo) ↔ 내 작업본(로컬 런처) 전환.
-  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta } =
+  const { source, setSource, sourceAvailable, issues, loading, refetch, localMeta, launcherToken } =
     useIssueSource({ projectCode, user });
-  // 웹은 조회 전용 (local-agent-issue-model.md §3.3). 편집/링크/생성/삭제는 로컬로
-  // 이전 → editMode 항상 false, 편집 토글 미노출(셀 클릭은 readonly 팝업).
-  const [editMode] = useState(false);
+  // 웹 이슈 뷰 이원화 Phase 3 — 편집 브릿지는 내 작업본(로컬) 뷰에서만 재개방된다.
+  // 공식본에서는 CommonBar 에 onEditChange 를 넘기지 않아 토글 자체가 안 보인다(셀 클릭은
+  // readonly 팝업 그대로).
+  const [editMode, setEditMode] = useState(false);
+  useEffect(() => {
+    if (source !== 'local' && editMode) setEditMode(false);
+  }, [source, editMode]);
   const [filterASR, setFilterASR] = useState(() => sessionStorage.getItem('gojira_sa_A') === 'true');
   const [showReserved, setShowReserved] = useState(() => sessionStorage.getItem('gojira_sa_R') !== 'false');
   const [showFR, setShowFR] = useState(() => sessionStorage.getItem('gojira_sa_F') !== 'false');
@@ -665,25 +670,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
     return resolved;
   }, [designIssues, dicts]);
 
-  /* 이슈 추가 (RelationMap과 동일) */
-  const SUBKEY_PREFIX = {
-    QA: 'QA', CNST: 'CNST', FR: 'FR',
-    ADSN: 'ADSN', DDSN: 'DDSN',
-  };
-
-  function getNextSubKey(subtype) {
-    const prefix = (SUBKEY_PREFIX[subtype] || subtype) + '_';
-    let maxNum = 0;
-    issues.forEach((i) => {
-      const sk = i.subkey || '';
-      if (sk.startsWith(prefix)) {
-        const num = parseInt(sk.substring(prefix.length), 10);
-        if (!isNaN(num) && num > maxNum) maxNum = num;
-      }
-    });
-    return prefix + String(maxNum + 1).padStart(3, '0');
-  }
-
+  /* 이슈 추가 — subkey 는 넘기지 않는다(서버 원자 할당, RelationMap 과 동일 정책). */
   async function addIssue(subtype) {
     let issueType, reqtype = '';
     switch (subtype) {
@@ -693,52 +680,23 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
       case 'DDSN': issueType = 'Detailed Design'; break;
       default: issueType = subtype;
     }
-    const subkey = getNextSubKey(subtype);
-    const payload = {
+    const body = {
       projectKey: projectCode, issueType, reqtype, summary: '새 이슈',
       labels: (subtype === 'QA' || subtype === 'CNST') ? ['ASR'] : [],
-      subkey,
     };
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const res = await authFetch(`${API_BASE}/Issue`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) {
-          refetch();
-          return;
-        }
-        const errData = await res.json().catch(() => ({}));
-        if (attempt === 3) {
-          const action = window.confirm(
-            `이슈 생성 실패 (${attempt}회 시도)\n${errData.error || res.statusText}\n\n확인: 재시도 / 취소: 삭제`
-          );
-          if (action) { attempt = 0; continue; }
-          return;
-        }
-      } catch (err) {
-        if (attempt === 3) {
-          const action = window.confirm(
-            `이슈 생성 실패 (${attempt}회 시도)\n${err.message}\n\n확인: 재시도 / 취소: 삭제`
-          );
-          if (action) { attempt = 0; continue; }
-          return;
-        }
-      }
+    try {
+      await localCreateIssue({ projectCode, user, token: launcherToken, body });
+      refetch();
+    } catch (err) {
+      alert('이슈 생성 실패: ' + err.message);
     }
   }
 
   /* 이슈 업데이트 */
   async function handleSave(key, data) {
+    const issue = issues.find((i) => i.key === key);
     try {
-      await authFetch(`${API_BASE}/Issue`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, data }),
-      });
+      await localUpdateIssue({ projectCode, user, token: launcherToken, issue, data });
       refetch();
     } catch (err) {
       alert('저장 실패: ' + err.message);
@@ -748,12 +706,10 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
 
   /* contains 링크 생성 */
   async function handleCreateLink(fromKey, toKey) {
+    const fromIssue = issues.find((i) => i.key === fromKey);
+    const toIssue = issues.find((i) => i.key === toKey);
     try {
-      await authFetch(`${API_BASE}/Issue/link`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inwardKey: fromKey, outwardKey: toKey }),
-      });
+      await localCreateLink({ projectCode, user, token: launcherToken, fromIssue, toIssue });
       refetch();
     } catch (err) {
       alert('연결 생성 실패: ' + err.message);
@@ -761,13 +717,9 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   }
 
   /* contains 링크 삭제 */
-  async function handleDeleteLink(linkId, fromKey, toKey) {
+  async function handleDeleteLink(linkId) {
     try {
-      await authFetch(`${API_BASE}/Issue/link`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linkId, fromKey, toKey }),
-      });
+      await localDeleteLink({ projectCode, user, token: launcherToken, linkId, issues });
       refetch();
     } catch (err) {
       alert('연결 삭제 실패: ' + err.message);
@@ -843,6 +795,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
     return (
       <div className="satam-wrapper">
         <CommonBar
+          key={source}
           title={barTitle}
           onBack={onBack}
           onPull={handlePull}
@@ -855,6 +808,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
             { label: 'D', active: showDDSN, handler: () => setShowDDSN((v) => !v) },
             { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
           ]}
+          onEditChange={source === 'local' ? setEditMode : undefined}
         />
         <div className="satam-loading">로딩 중...</div>
       </div>
@@ -864,6 +818,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   return (
     <div className="satam-wrapper">
       <CommonBar
+        key={source}
         title={barTitle}
         onBack={onBack}
         onPull={handlePull}
@@ -877,11 +832,13 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
           { label: 'R', active: showReserved, handler: () => setShowReserved((v) => !v) },
         ]}
         onExport={editMode ? undefined : handleExport}
+        onEditChange={source === 'local' ? setEditMode : undefined}
       />
       {/* 내 작업본 출처 배지 — 눈에 띄되 과하지 않게 */}
       {source === 'local' && (
         <div className="satam-source-badge">
           내 작업본 (로컬, 미발행 변경 포함){localMeta ? ` · 이슈 ${localMeta.count}건` : ''}
+          {editMode && ' · 편집 중 — 저장은 내 로컬 작업본에만 반영, 등록→PR 로 공식화'}
         </div>
       )}
 

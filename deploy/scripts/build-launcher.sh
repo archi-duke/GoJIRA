@@ -59,11 +59,20 @@ log "런처 버전 v${VERSION}"
 # ⚠️ .claude / .opencode 디렉터리 전체를 복사하면 안 된다 — 로컬 런타임 상태
 #    (.claude/projects, .opencode/node_modules 수만개, settings.local.json, 자격증명 등)가
 #    exe 에 박혀 수십 MB 로 부풀고 시크릿 유출 위험. 에이전트가 실제 읽는 것만 embed:
-#      .claude/skills/ · opencode.json · .opencode/agents/
-log "에이전트 자산 동기화 → gojira-launcher/assets/ (skills + opencode.json + agents 만)"
+#      .claude/skills/ · .claude/CLAUDE.md(assets-extra 원본) · opencode.json · .opencode/agents/
+log "에이전트 자산 동기화 → gojira-launcher/assets/ (skills + CLAUDE.md + opencode.json + agents 만)"
 rm -rf "${LAUNCHER_SRC}/assets/.claude" "${LAUNCHER_SRC}/assets/.opencode" "${LAUNCHER_SRC}/assets/opencode.json"
 mkdir -p "${LAUNCHER_SRC}/assets/.claude"
 cp -r "${ROOT_DIR}/.claude/skills" "${LAUNCHER_SRC}/assets/.claude/skills"
+# 프로젝트 메모리(CLAUDE.md) — 원본은 assets-extra/ (레포 루트 .claude/CLAUDE.md 는
+# GoJIRA 개발 세션용이 아니므로 절대 복사하지 않는다 — clone 전용 메모리는 별도 관리).
+# Claude Code 가 clone 의 .claude/CLAUDE.md 를 프로젝트 메모리로 자동 로드해,
+# 웹발 이슈 변경 저널(GOJIRA_ISSUE_JOURNAL) 검토를 세션 시작 시 인지시킨다 (D10 Phase 3).
+if [[ -e "${LAUNCHER_SRC}/assets-extra/CLAUDE.md" ]]; then
+  cp "${LAUNCHER_SRC}/assets-extra/CLAUDE.md" "${LAUNCHER_SRC}/assets/.claude/CLAUDE.md"
+else
+  warn "  assets-extra/CLAUDE.md 없음 — 스킵"
+fi
 if [[ -e "${ROOT_DIR}/opencode.json" ]]; then
   cp "${ROOT_DIR}/opencode.json" "${LAUNCHER_SRC}/assets/opencode.json"
 else
@@ -78,7 +87,7 @@ fi
 # 혹시 모를 OS 메타파일 제거(.DS_Store 등) — embed 청결 유지.
 find "${LAUNCHER_SRC}/assets" -name '.DS_Store' -delete 2>/dev/null || true
 ASSET_FILES="$(find "${LAUNCHER_SRC}/assets" -type f ! -name README.txt | wc -l | tr -d ' ')"
-log "  임베드 대상 ${ASSET_FILES}개 파일 (.claude/skills + opencode.json + .opencode/agents)"
+log "  임베드 대상 ${ASSET_FILES}개 파일 (.claude/skills + .claude/CLAUDE.md + opencode.json + .opencode/agents)"
 
 mkdir -p "$DIST_DIR"
 

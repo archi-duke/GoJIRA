@@ -85,7 +85,9 @@ func OpenInEditor(repoPath, fullFile string) error {
 //   GOJIRA_USER      — 이슈 write/ingest 의 X-User-Id
 //   GOJIRA_API / GOJIRA_API_URL  — gojira-api 주소 (스킬·CLI 둘 다 주입)
 //   PLATFORM_API / GOJIRA_PLATFORM_URL — platform-api 주소 (스킬·CLI 둘 다 주입)
-func (s *Server) agentEnv(repoPath, user string) []string {
+//   GOJIRA_ISSUE_JOURNAL — 웹 로컬뷰발 이슈 변경 저널(~/.gojira/journal/<code>.yaml) 절대경로
+//     (D10 Phase 3 §옵션(a)). code 가 빈 문자열(프로젝트 없는 일반 채팅)이면 미주입.
+func (s *Server) agentEnv(repoPath, user, code string) []string {
 	env := []string{"GOJIRA_REPO_ROOT=" + repoPath}
 	// UTF-8 강제 — Windows 콘솔 기본 코드페이지(한국어 환경 CP949 등)에서 한글이
 	// U+FFFD 로 깨져 저장되는 문제 방지. 에이전트가 띄우는 bash/jq/python(스킬 스크립트)
@@ -128,6 +130,13 @@ func (s *Server) agentEnv(repoPath, user string) []string {
 	// 스킬의 curl/jq/python3 블록이 시스템 설치 없이도 동작하도록(deps.go 참조).
 	if binDir, err := gojiraBinDir(); err == nil {
 		env = append(env, "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	// GOJIRA_ISSUE_JOURNAL(D10 Phase 3) — 웹 로컬뷰가 append 한 이슈 변경 저널의 절대경로.
+	// code 가 없으면(프로젝트 없는 일반 채팅) 저널 대상 과제가 없으므로 미주입.
+	if code != "" {
+		if p, err := journalPath(code); err == nil {
+			env = append(env, "GOJIRA_ISSUE_JOURNAL="+p)
+		}
 	}
 	return env
 }

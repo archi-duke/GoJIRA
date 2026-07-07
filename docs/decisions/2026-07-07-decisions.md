@@ -220,3 +220,26 @@
 - **잔여**: NBBALL main 오염 YAML 49건은 로컬 복구본 등록(PR 머지) 시 웹훅 resync 로 공식본
   갱신 — 웹훅 경로의 자연 E2E 겸용. 이 PC 런처 0.1.17→0.1.18 교체 필요(콜드스타트 ingest
   제거는 0.1.18부터, 구버전은 전환기 무해).
+
+## D12. 웹 편집 브릿지 부활 (D10 Phase 3) — 게이트 재개방 + 저널 방식(a)
+
+- **조사 선행**: 읽기전용화 커밋(9d32ebb, 2026-05-22)은 편집 UI 를 게이트로만 잠갔고 핸들러를
+  삭제하지 않았음을 확인 — "예전 편집기"는 git 역사가 아니라 현재 working tree 에 원형 보존.
+  부활 작업의 대부분은 게이트 재개방(세터 복원 + onEditChange 재전달)이었고, 진짜 신규는
+  ① 로컬 이슈 로드 시 raw YAML 보존(_baseYaml/_localPath — parseLocalIssues 가 버리고 있었음),
+  ② 쓰기 라우팅을 legacy(Mongo 직접)에서 Phase 2 base-from-client 프로토콜로 교체,
+  ③ 에이전트 변경 전달.
+- **아키텍처**: 웹 편집도 CLI/스킬과 동일한 base-from-client — 서버 "작성 두뇌" 재사용, 웹은
+  localWrites 를 launcher /write·/delete 로 자기 clone 에만 반영. 편집은 로컬뷰(내작업) 한정,
+  공식본은 계속 읽기 전용. 생성은 클라이언트 subkey 계산을 제거하고 서버 카운터 할당(D11)로 통일.
+- **에이전트 전달 = 저널(a) 채택, 위치 변경**: 원안(클론 내 .gojira/pending-changes.yaml)은
+  프로젝트 레포에 .gitignore 가 없어 PR 오염 → **~/.gojira/journal/<code>.yaml (런처 영역)**
+  로 확정. 런처 POST /issue-journal(append, code별 mutex), spawn env GOJIRA_ISSUE_JOURNAL 주입,
+  에이전트 계약은 스킬 배포 라인으로: `.claude/skills/_shared/issue-journal.md`(처리 지침) +
+  clone 배포 `.claude/CLAUDE.md`(assets-extra — build-launcher.sh 와 launcher-dist Dockerfile
+  양쪽 sync 필요, 후자 누락을 배포 검증에서 발견·수정). (b) 능동통지 버튼은 후속.
+- **검증 중 발견·수정**: IssueList select 가 status/priority 를 항상 `{name}` 객체로 강제
+  (구 Mongo/JIRA 캐시 shape) → 로컬 YAML 스칼라 관례 파괴. shape 보존형으로 수정
+  (IssueDetailDialog 는 이미 보존형). E2E 실측: 수정(스칼라 유지)/생성(파일+카운터키)/삭제
+  (파일 제거)/저널 3건/Mongo 무접촉/공식뷰 게이트 전부 확인.
+- **분업**: 조사(Explore·Sonnet) → 사양(Fable) → 코딩 Sonnet 2병렬(런처/웹) → 검증·수정 Fable.
