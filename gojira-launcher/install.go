@@ -55,7 +55,9 @@ func printUsage() {
 
 사용법:
   gojira-launcher                        데몬 실행 (기본)
-  gojira-launcher install                설치(자기복사 + 스킬배포 + 설정파일 + 자동시작 등록) 후 기동
+  gojira-launcher install                설치(자기복사 + 스킬배포 + 설정파일 + 자동시작 등록) 후 기동.
+                                         터미널에서 직접 실행 시 게이트웨이/git 사용자/토큰을 대화형으로
+                                         입력받는다(이미 값이 있으면 재입력 없이 Enter 로 유지).
   gojira-launcher install --gateway URL  설치 + launcher.json 의 gateway 자동 기록
                                          (backend URL/webOrigins 자동 파생). 예: --gateway https://gojira-host:44300
   gojira-launcher uninstall              자동시작 해제 + 설치 정리
@@ -97,13 +99,27 @@ func doInstall(gateway string) error {
 	}
 	target := filepath.Join(dir, exeName())
 
+	// 대화형 입력 — TTY 일 때만 프롬프트(install_prompt.go). --gateway 플래그가 이미
+	// 있으면 그 값을 우선하고(재프롬프트 안 함), 없으면 기존 launcher.json 값을 기본으로
+	// 보여준다. git.user/git.token 도 여기서 함께 받아 손으로 JSON 열 필요를 없앤다.
+	gdir, gderr := gojiraDir()
+	var existingGateway, existingGitUser, existingGitToken string
+	if gderr == nil {
+		existingGateway, existingGitUser, existingGitToken = peekExistingConfigValues(gdir)
+	}
+	if gateway == "" {
+		gateway = existingGateway
+	}
+	gitUser, gitToken := "", ""
+	gateway, gitUser, gitToken = promptInstallAnswers(gateway, existingGitUser, existingGitToken)
+
 	// 기존 데몬 종료 — copyFile 보다 먼저 해야 한다. target 이 이미 실행 중이면(재설치/
 	// --gateway 재실행) 그 exe 파일이 잠겨 있어 copyFile 이 "text file busy" 로 실패한다
 	// (update.go 의 자동 업데이트가 .old/.new staged swap 을 쓰는 것과 같은 이유).
 	// 아직 LoadConfig 를 부르지 않은 시점이라, 기존 설정 파일(있으면)에서 port/token 만
 	// 가볍게 읽어 종료 요청한다. 파일이 없거나(최초 설치) 읽기 실패해도 무해 — 그 경우
 	// 애초에 떠 있는 데몬이 없으므로 shutdown 요청은 그냥 도달 실패로 끝난다.
-	if gdir, derr := gojiraDir(); derr == nil {
+	if gderr == nil {
 		port, token := peekExistingPortToken(gdir)
 		stopRunningDaemon(port, token)
 	}
@@ -117,15 +133,13 @@ func doInstall(gateway string) error {
 		fmt.Printf("✓ exe 이미 설치 위치에서 실행 중: %s\n", target)
 	}
 
-	// gateway 가 넘어오면 launcher.json 에 자동 기록 — backend URL/webOrigins 는
-	// 런처가 파생하므로 이후 손편집 불요(자동화). LoadConfig 이전에 기록해야 파생에 반영됨.
-	if gateway != "" {
-		if dir, derr := gojiraDir(); derr == nil {
-			if perr := persistGateway(dir, gateway); perr != nil {
-				log.Printf("gateway 기록 실패(비치명적): %v", perr)
-			} else {
-				fmt.Printf("✓ gateway 기록: %s (backend URL/webOrigins 자동 파생)\n", gateway)
-			}
+	// gateway/git 자격증명을 launcher.json 에 기록 — backend URL/webOrigins 는 런처가
+	// gateway 로부터 파생하므로 이후 손편집 불요. LoadConfig 이전에 기록해야 파생에 반영됨.
+	if gateway != "" || gitUser != "" || gitToken != "" {
+		if perr := persistInstallAnswers(gdir, gateway, gitUser, gitToken); perr != nil {
+			log.Printf("설정 기록 실패(비치명적): %v", perr)
+		} else {
+			fmt.Println("✓ 설정 기록 완료 (gateway/git 자격증명 — backend URL/webOrigins 자동 파생)")
 		}
 	}
 
@@ -170,7 +184,11 @@ func doInstall(gateway string) error {
 		fmt.Printf("✓ 데몬 기동: http://127.0.0.1:%d\n", cfg.Port)
 	}
 
-	fmt.Printf("\n설치 완료. 폐쇄망에서는 ~/.gojira/%s 의 git.user/git.token 을 채우고\ninstall 을 다시 실행하세요(기존 데몬을 자동으로 내리고 새 설정으로 재기동합니다).\n", configFileName)
+	if cfg.Git.User == "" || cfg.Git.Token == "" {
+		fmt.Printf("\n설치 완료. git.user/git.token 이 비어있습니다 — 폐쇄망 Gitea 인증에 필요하면\n~/.gojira/%s 를 채우고 install 을 다시 실행하세요(기존 데몬을 자동으로 내리고\n새 설정으로 재기동합니다).\n", configFileName)
+	} else {
+		fmt.Println("\n설치 완료.")
+	}
 	return nil
 }
 
@@ -192,9 +210,11 @@ func doUninstall() error {
 	return nil
 }
 
-// persistGateway — launcher.json 의 `gateway` 필드만 갱신해 저장한다. 다른 필드
-// (git 크리덴셜 등)는 map round-trip 으로 보존. 파일이 없으면 placeholder 를 먼저 만든다.
-func persistGateway(dir, gateway string) error {
+// persistInstallAnswers — launcher.json 의 `gateway`/`git.user`/`git.token` 만 갱신해
+// 저장한다(빈 문자열은 "변경 없음"). 다른 필드는 map round-trip 으로 보존. 파일이 없으면
+// placeholder 를 먼저 만든다. 대화형 install(install_prompt.go)과 `install --gateway`
+// 양쪽이 이 함수 하나로 수렴한다.
+func persistInstallAnswers(dir, gateway, gitUser, gitToken string) error {
 	path := filepath.Join(dir, configFileName)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if werr := writePlaceholderConfig(dir, path); werr != nil {
@@ -209,15 +229,62 @@ func persistGateway(dir, gateway string) error {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("%s 파싱 실패: %w", path, err)
 	}
-	if strings.TrimSpace(gateway) == m["gateway"] {
-		return nil // 변경 없음
+
+	changed := false
+	if gateway != "" && gateway != m["gateway"] {
+		m["gateway"] = gateway
+		changed = true
 	}
-	m["gateway"] = strings.TrimSpace(gateway)
+	if gitUser != "" || gitToken != "" {
+		git, _ := m["git"].(map[string]any)
+		if git == nil {
+			git = map[string]any{}
+		}
+		if gitUser != "" && gitUser != git["user"] {
+			git["user"] = gitUser
+			changed = true
+		}
+		if gitToken != "" && gitToken != git["token"] {
+			git["token"] = gitToken
+			changed = true
+		}
+		m["git"] = git
+	}
+	if !changed {
+		return nil
+	}
+
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, append(out, '\n'), 0o600)
+}
+
+// peekExistingConfigValues — LoadConfig 를 부르기 전, 기존 launcher.json(있으면)에서
+// gateway/git.user/git.token 을 가볍게 읽는다(대화형 install 이 "현재 값"을 보여주고
+// 재입력 안 해도 되게 하기 위함). 파일 없거나 파싱 실패 시 전부 빈 문자열.
+func peekExistingConfigValues(dir string) (gateway, gitUser, gitToken string) {
+	path := filepath.Join(dir, configFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", ""
+	}
+	var m struct {
+		Gateway string `json:"gateway"`
+		Git     struct {
+			User  string `json:"user"`
+			Token string `json:"token"`
+		} `json:"git"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return "", "", ""
+	}
+	// placeholder 파일의 "<gojira-host>..." 같은 미입력 값은 실제 값이 아니므로 무시.
+	if strings.Contains(m.Gateway, "<") {
+		m.Gateway = ""
+	}
+	return m.Gateway, m.Git.User, m.Git.Token
 }
 
 // peekExistingPortToken — LoadConfig 를 부르기 전, 기존 launcher.json(있으면)에서
