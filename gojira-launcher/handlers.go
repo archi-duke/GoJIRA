@@ -18,9 +18,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
-const version = "0.1.22"
+const version = "0.1.24"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -83,6 +84,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		resp["token"] = s.cfg.Token
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// POST /shutdown — 실행 중인 데몬을 정상 종료시킨다. `install`(doInstall) 이 launcher.json
+// 을 새로 쓴 뒤, 이미 떠 있는 구 데몬을 내리고 새 프로세스가 그 포트를 이어받게 하는 용도
+// (설정은 기동 시 1회만 읽으므로, 재시작 없이는 손편집/재설치 값이 절대 반영되지 않았던
+// 문제의 근본 수정). 토큰 필요 — 외부에서 임의로 데몬을 죽이지 못하게.
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "shutting down"})
+	go func() {
+		time.Sleep(200 * time.Millisecond) // 응답 flush 시간 확보
+		os.Exit(0)
+	}()
 }
 
 type openReq struct {

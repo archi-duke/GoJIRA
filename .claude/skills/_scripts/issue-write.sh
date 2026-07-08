@@ -21,7 +21,7 @@ source "${DIR}/_local-write.sh"
 
 METHOD="${1:?METHOD required (POST|PUT|DELETE)}"
 APIPATH="${2:?path required (/Issue|/Issue/link)}"
-GOJIRA_API="${GOJIRA_API:-${GOJIRA_API_URL:-http://localhost:9001/api/v2}}"
+GOJIRA_API="${GOJIRA_API:-${GOJIRA_API_URL:?GOJIRA_API or GOJIRA_API_URL env var required (launcher must inject)}}"
 
 BODY=$(cat)
 USER="${GOJIRA_USER:-}"
