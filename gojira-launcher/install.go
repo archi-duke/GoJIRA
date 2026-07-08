@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // runSubcommand — 단일 exe 가 데몬 외에 install/uninstall/version/update-finalize 를 처리한다.
@@ -95,6 +97,17 @@ func doInstall(gateway string) error {
 	}
 	target := filepath.Join(dir, exeName())
 
+	// 기존 데몬 종료 — copyFile 보다 먼저 해야 한다. target 이 이미 실행 중이면(재설치/
+	// --gateway 재실행) 그 exe 파일이 잠겨 있어 copyFile 이 "text file busy" 로 실패한다
+	// (update.go 의 자동 업데이트가 .old/.new staged swap 을 쓰는 것과 같은 이유).
+	// 아직 LoadConfig 를 부르지 않은 시점이라, 기존 설정 파일(있으면)에서 port/token 만
+	// 가볍게 읽어 종료 요청한다. 파일이 없거나(최초 설치) 읽기 실패해도 무해 — 그 경우
+	// 애초에 떠 있는 데몬이 없으므로 shutdown 요청은 그냥 도달 실패로 끝난다.
+	if gdir, derr := gojiraDir(); derr == nil {
+		port, token := peekExistingPortToken(gdir)
+		stopRunningDaemon(port, token)
+	}
+
 	if !sameFile(self, target) {
 		if err := copyFile(self, target, 0o755); err != nil {
 			return fmt.Errorf("exe 복사 실패(%s → %s): %w", self, target, err)
@@ -148,14 +161,16 @@ func doInstall(gateway string) error {
 		fmt.Printf("✓ 자동시작 등록 완료\n")
 	}
 
-	// 데몬 기동(detached).
+	// 데몬 기동(detached). (기존 데몬은 위에서 이미 종료 요청했다 — 설정은 기동 시
+	// 1회만 읽으므로, 내리지 않으면 방금 기록한 gateway/backend 값이 절대 반영되지
+	// 않는다. 사람이 "재시작하라" 안내를 놓치는 게 실제로 반복 발생한 실패 원인이었다.)
 	if err := startDetached(target); err != nil {
 		log.Printf("데몬 자동 기동 실패(비치명적 — 수동 실행 가능): %v", err)
 	} else {
 		fmt.Printf("✓ 데몬 기동: http://127.0.0.1:%d\n", cfg.Port)
 	}
 
-	fmt.Printf("\n설치 완료. 폐쇄망에서는 ~/.gojira/%s 의 git.user/git.token 을 채우고\n런처를 재시작(또는 재로그인)하세요.\n", configFileName)
+	fmt.Printf("\n설치 완료. 폐쇄망에서는 ~/.gojira/%s 의 git.user/git.token 을 채우고\ninstall 을 다시 실행하세요(기존 데몬을 자동으로 내리고 새 설정으로 재기동합니다).\n", configFileName)
 	return nil
 }
 
@@ -203,6 +218,51 @@ func persistGateway(dir, gateway string) error {
 		return err
 	}
 	return os.WriteFile(path, append(out, '\n'), 0o600)
+}
+
+// peekExistingPortToken — LoadConfig 를 부르기 전, 기존 launcher.json(있으면)에서
+// port/token 만 가볍게 읽는다. 파일 파싱에 실패하거나 없으면 기본 port + 빈 token 반환
+// (그 경우 stopRunningDaemon 은 그냥 조용히 실패한다 — 최초 설치라 떠 있는 데몬이 없음).
+func peekExistingPortToken(dir string) (int, string) {
+	path := filepath.Join(dir, configFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return defaultPort, ""
+	}
+	var m struct {
+		Port  int    `json:"port"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return defaultPort, ""
+	}
+	if m.Port == 0 {
+		m.Port = defaultPort
+	}
+	return m.Port, m.Token
+}
+
+// stopRunningDaemon — 같은 포트에 이미 떠 있는 구 데몬을 POST /shutdown 으로 정상
+// 종료시킨다. 도달 불가(실행 중 아님)면 조용히 무시 — install 첫 실행 시엔 항상 이 경로.
+// 토큰이 안 맞으면(설정 파일이 아예 새로 생성된 경우 등) 서버가 401 을 주는데, 그 경우도
+// 그냥 무시하고 계속 진행한다(포트 충돌은 startDetached 쪽에서 자연히 드러남).
+func stopRunningDaemon(port int, token string) {
+	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown", port)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return
+	}
+	if token != "" {
+		req.Header.Set(tokenHeader, token)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return // 실행 중인 인스턴스 없음(또는 도달 불가) — 정상 케이스
+	}
+	resp.Body.Close()
+	fmt.Println("✓ 기존 데몬 종료 요청")
+	time.Sleep(500 * time.Millisecond) // 포트 해제 대기
 }
 
 // copyFile — src → dst 복사(권한 mode). dst 가 실행 중이면 실패할 수 있음(호출부에서 처리).

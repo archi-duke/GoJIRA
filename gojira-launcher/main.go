@@ -72,6 +72,7 @@ func main() {
 	mux.HandleFunc("OPTIONS /issues", srv.secure(true, srv.handleIssues))
 	mux.HandleFunc("POST /issue-journal", srv.secure(true, srv.handleIssueJournal))
 	mux.HandleFunc("OPTIONS /issue-journal", srv.secure(true, srv.handleIssueJournal))
+	mux.HandleFunc("POST /shutdown", srv.secure(true, srv.handleShutdown))
 
 	// 127.0.0.1 전용 bind — 외부 인터페이스 노출 금지 (§2.3).
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
