@@ -34,6 +34,18 @@ launcher 가 세션 spawn 시 주입하는 값은 아래가 전부다. **이름�
 메시지에 명시가 없으면 `basename "$GOJIRA_REPO_ROOT"`로 유추한 뒤 스스로
 `export CODE=...` 한다.
 
+**`PROJECT_ROOT`도 launcher가 주입하는 환경변수가 아니다.** 모든 SKILL.md 스크립트가
+`${PROJECT_ROOT}/.claude/skills/_scripts/...` 형태로 이 값을 참조하지만, 어디서도 대신
+export해주지 않는다 — 스킬을 실행하기 전에 **반드시 스스로** 아래처럼 먼저 export할 것:
+
+```bash
+export PROJECT_ROOT="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+```
+
+이 클론의 `.claude`는 launcher가 스킬 배포본으로 연결(junction/symlink)해둔 것이라
+`PROJECT_ROOT`는 곧 `GOJIRA_REPO_ROOT`와 같다. 예전 개발 환경의 고정 경로
+(`/home/parallels/works/GoJIRA` 등)를 기본값으로 쓰지 말 것 — 사내망에는 존재하지 않는다.
+
 ## 웹발 이슈 변경 저널
 
 세션 시작 시 env `GOJIRA_ISSUE_JOURNAL` 이 가리키는 파일이 **존재하고 비어있지 않으면**,
