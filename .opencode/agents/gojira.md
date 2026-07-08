@@ -24,9 +24,11 @@ permission:
 
 ## 입력 파싱
 
-- 사용자 메시지에서 `projectCode` (예: `GOJIRA3`)와 `user` (예: `batman`) 를 추출해 스킬 실행 환경변수로 export 한다.
-- 없으면 되물어 확정한 뒤 스킬을 호출한다.
-- **기본 사용자**: `USER="batman"` (별도 지정 없으면 이 값 사용)
+- `CODE`(projectCode, 예: `GOJIRA3`)는 사용자 메시지에서 추출해 export 한다. 메시지에
+  없으면 `basename "$GOJIRA_REPO_ROOT"`로 유추(클론 디렉토리명 = 프로젝트 코드). 그래도
+  불확실하면 되물어 확정한다.
+- **`USER`는 채팅에서 추측하거나 기본값(예: `batman`)을 쓰지 않는다** — launcher 가 주입하는
+  `GOJIRA_USER`(실제 로그인 사용자의 knox ID)를 그대로 쓴다. 아래 "환경변수" 절 참조.
 
 ## 🚀 워크플로우 시작 시 — 상태 확인은 1회로
 
@@ -47,33 +49,37 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/project-status.sh" "${CODE}" "${US
 
 ## 환경변수 (절대 추측 금지)
 
-bash 실행 시 항상 맨 앞에 export 한다. 환경에 이미 설정돼 있으면 보존되고, 없으면 default 사용:
+launcher 가 세션 spawn 시 주입하는 값이 전부다(하드코딩 기본값 쓰지 말 것 — 특히 예전
+`/home/parallels/works/GoJIRA`, `batman` 같은 개발용 예시값을 실제 세션에 흘리지 않는다).
+bash 실행 시 항상 맨 앞에 export 한다:
 ```bash
-export PROJECT_ROOT="${PROJECT_ROOT:-/home/parallels/works/GoJIRA}"
+export PROJECT_ROOT="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+export USER="${GOJIRA_USER:?GOJIRA_USER env var required (launcher must inject) — batman 등으로 대체 금지}"
 # 사내 컨벤션: platform-api=44350, gojira-api=44360 (호스트 매핑 포트, 고정).
 # PLATFORM_API/GOJIRA_API 는 launcher 가 launcher.json 의 backend 설정으로 주입한다.
 # 미설정 시 fail-fast — dev IP 가 prod 에 새는 것을 방지.
 export PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
-# 스킬이 fs 직접 read/write 시 사용 — Platform-API 와 같은 디렉토리 공유.
-# worktree 경로 컨벤션은 아래 참조.
-export GOJIRA_REPOS_DIR="${GOJIRA_REPOS_DIR:-${PROJECT_ROOT}/repos}"
+```
+
+다른 걸 하기 전에 위 값들을 한 번에 확인하려면:
+```bash
+env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SESSION_TOKEN|GOJIRA_ISSUE_JOURNAL)='
 ```
 
 ### ⛔ API URL 호출 규칙 — 엄격 준수 (위반 금지)
 
 - 모든 API 호출은 위에서 export 한 **`${PLATFORM_API}`** 또는 **`${GOJIRA_API}`** 만 사용. URL literal 박지 마라 — launcher 가 주입한 값을 그대로 쓴다.
 - 절대 curl 명령에 `http://localhost:...` / `http://127.0.0.1:...` / `http://0.0.0.0:...` 박지 마라. 항상 `${PLATFORM_API}/...` 또는 `${GOJIRA_API}/...` 형식.
-- 만약 curl 응답에 `Connection refused` 가 나오면, 먼저 `echo "PLATFORM_API=$PLATFORM_API"` 로 환경변수 값을 확인하고, 누락이면 위 export 블록을 다시 실행하라. **사용자에게 "서버를 시작하라" 고 안내하지 마라** — 서버는 이미 떠 있고 URL 만 틀린 것이다.
+- 만약 curl 응답에 `Connection refused` 가 나오면, 먼저 `echo "PLATFORM_API=$PLATFORM_API"` 로 환경변수 값을 확인하고, 비어있으면 launcher.json 의 `gateway`/`backend` 설정 문제다. **사용자에게 "서버를 시작하라" 고 안내하지 마라** — 서버는 이미 떠 있고 launcher 설정이 안 된 것이다.
 - 위 규칙 위반은 오답이다.
-- 모든 쓰기 호출에 `X-User-Id: ${USER}` 헤더 필수
-- 스크립트 경로는 `${PROJECT_ROOT}/.claude/skills/_scripts/` 를 사용
-- worktree 경로 컨벤션 (스킬 fs 직접 접근):
-  - `${GOJIRA_REPOS_DIR}/<gitea-org>/<repo-name>.git/` — bare clone (Platform-API 관리, 스킬은 read 만)
-  - `${GOJIRA_REPOS_DIR}/<gitea-org>/<repo-name>.worktrees/${USER}/` — 사용자별 worktree (스킬 fs read/write 대상)
-  - 자세한 설계: `docs/refactor-skill-fs-direct.md` § 3.2
-- **세션 lock**: write 계열 스킬 (`doc-save.sh`) 은 holderKind="skill" 로 EditSession lock 을 잡는다. 같은 사용자가 UI 로 동시 편집 중이면 도구가 충돌 메시지를 반환하므로 그대로 사용자에게 보고하고 멈춰라. 작업 종료 시 반드시 `bash _scripts/_edit-release.sh ${CODE} ${USER}` 를 호출해 UI 사용을 풀어 주어야 한다 (호출 안 하면 30분 TTL 후 자동 해제).
-- **파일 락**: 같은 user 의 동시 write race 는 `${WT}/.gojira-locks/<path>.lock` 위의 flock 으로 OS 레벨 직렬화된다 (doc-save.sh + Platform-API 동일 lock 경로). 스킬이 의식할 필요는 없음 — 자동.
+- 모든 쓰기 호출에 `X-User-Id: ${USER}` 헤더 필수 (위에서 export 한 `GOJIRA_USER` 값)
+- 스크립트 경로는 `${PROJECT_ROOT}/.claude/skills/_scripts/` 를 사용 — 각 프로젝트 clone 의
+  `.claude` 는 launcher 가 스킬 배포본으로 연결(junction/symlink)해둔 것이라 clone 루트 =
+  `PROJECT_ROOT` = `GOJIRA_REPO_ROOT` 다.
+- 이슈/문서 쓰기는 이 로컬 clone(`PROJECT_ROOT`)에 바로 반영된다(D10~D12) — 서버 worktree /
+  EditSession lock / 사용자별 worktree 컨벤션은 더 이상 쓰지 않는다. 로컬에 반영된 내용은
+  사용자가 PR 로 등록하기 전까지 이 clone 에만 존재한다.
 
 ## 🚨 스킬 우선 원칙
 
