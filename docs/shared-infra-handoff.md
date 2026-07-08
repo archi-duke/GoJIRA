@@ -98,8 +98,10 @@ cd D:\Works\GoJIRA\deploy && docker compose up -d
 4. **포트 충돌 결론** (`docs/ports.md` 반영):
    - **3030 은 충돌 아님** — GoJIRA pumlex 는 gateway 도입 후 호스트 비노출(`expose` 전용).
      RAGaaS Fuseki 가 3030 을 그대로 써도 됨 (본 문서 상단 표는 gateway 도입 전 기준).
-   - **8000 만 충돌** — 공존 호스트에서는 GoJIRA `.env` 에 `JIRA_API_HOST_PORT=44380`
-     (44xxx 관례) 리매핑 권장.
+   - **8000 만 충돌** — 공존 호스트에서는 GoJIRA `.env` 에 `JIRA_API_HOST_PORT=44340`
+     (44xxx 관례) 리매핑 권장. (2026-07-08 정정: 최초 권장값 44380 은 이후
+     shared-infra 가 44370-44399 를 점유하며 shared-milvus 와 충돌하게 되어 44340 으로
+     재조정 — `docs/ports.md` 참조.)
 5. RAG 연계(`http://ragaas-backend:8000` 호출 기능)는 백엔드가 shared-net 에 조인되어
    네트워크 경로는 열림 — 실제 연계 기능(KB 매핑/인제스트/retrieval)은 별도 과제.
 

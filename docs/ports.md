@@ -79,22 +79,23 @@ MongoDB 는 `shared-infra` 스택의 `shared-mongo` 로 일원화 (호스트 270
 
 | 호스트 포트 | RAGaaS | GoJIRA | 조정 |
 |---|---|---|---|
-| 8000 | Backend API | JIRA Mock (`JIRA_API_HOST_PORT`) | 공존 시 GoJIRA 쪽 `.env` 에 `JIRA_API_HOST_PORT=44380` 권장 (44xxx 관례) |
+| 8000 | Backend API | JIRA Mock (`JIRA_API_HOST_PORT`) | 공존 시 GoJIRA 쪽 `.env` 에 `JIRA_API_HOST_PORT=44340` 권장 (2026-07-08: shared-infra 가 44370-44399 를 점유하게 되어 기존 권장값 44380 은 shared-milvus 와 충돌 — 44340 으로 재조정) |
 | 3030 | Fuseki | ~~Pumlex~~ | 충돌 없음 — gateway 도입 후 pumlex 는 호스트 비노출(`expose` 전용), RAGaaS 가 3030 사용 가능 |
 | 27017 | shared-mongo | shared-mongo | shared-infra 로 일원화되어 해소 |
 
-**shared-infra 호스트 점유 포트 (2차 통합, 2026-07-05)** — GoJIRA 가 새 포트를 쓸 때
+**shared-infra 호스트 점유 포트 (3차 갱신, 2026-07-08 — 사내 폐쇄망 방화벽 정책에 맞춰
+44370 대로 재배정됨, PR: archi-duke/shared-infra)** — GoJIRA 가 새 포트를 쓸 때
 아래와 겹치지 않게 shared-infra README 포트표를 먼저 확인:
 
-| 호스트 포트 | shared-infra 서비스 | 비고 |
-|---|---|---|
-| 27017 | shared-mongo | 공용 (gojira/ragaas DB 분리) |
-| 3030 | shared-fuseki | RAGaaS |
-| 19530, 9091 | shared-milvus | RAGaaS |
-| **9000, 9001** | shared-minio | ⚠️ Windows dev 에서 platform-api(9000)/gojira/api(9001) exe 와 **localhost 포트가 겹침** — WSL2 포트포워딩 때문에 dev exe 미기동 시 localhost:9000/9001 이 MinIO 로 연결돼 혼동 가능(프론트는 S3 XML 403 을 받음). **방침(2026-07-06 확정): GoJIRA 는 9000/9001 을 유지하고, 포트 조정은 RAGaaS(shared-infra MinIO) 쪽에서 수행한다.** 그때까지의 임시 우회: dev exe 를 `PLATFORM_SERVER_PORT=:9100` / `GOJIRA_SERVER_PORT=:9101`(+`GOJIRA_PLATFORM_API=http://localhost:9100/api/v2`) 로 띄우고 두 앱 `public/env.js`(git-ignored) 에 `REACT_APP_PLATFORM_API/GOJIRA_API` 를 9100/9101 로 주입 — 커밋 코드/기본값은 9000/9001 불변 |
-| 7474, 7687 | shared-neo4j | RAGaaS |
-| 6379 | shared-redis | RAGaaS (GoJIRA 도 사용 가능) |
-| (예정) 3300 | shared-gitea | GoJIRA — Mac Gitea 데이터 이관과 동시 활성화 (아래 참조) |
+| 호스트 포트 | shared-infra 서비스 | 컨테이너 내부 포트 | 비고 |
+|---|---|---|---|
+| 44370 | shared-mongo | 27017 | 공용 (gojira/ragaas DB 분리). ⚠️ 위 "환경변수와 매핑" 표의 `AGENT_API_PORT`(Agent-Service, 9002) 예정 호스트 포트도 44370 이었음 — Agent-Service 를 컨테이너화할 때 **다른 포트로 재조정 필요** (미해결) |
+| 44390 | shared-fuseki | 3030 | RAGaaS |
+| 44380, 44381 | shared-milvus | 19530, 9091 | RAGaaS |
+| 44385, 44386 | shared-minio | 9000, 9001 | RAGaaS(Milvus 내부). 기존 "Windows dev exe 와 9000/9001 겹침" 이슈는 이 재배정으로 해소됨 |
+| 44395, 44396 | shared-neo4j | 7474, 7687 | RAGaaS |
+| 44375 | shared-redis | 6379 | RAGaaS (GoJIRA 도 사용 가능) |
+| (예정) 3300 | shared-gitea | 3000 | GoJIRA — Mac Gitea 데이터 이관과 동시 활성화 (아래 참조) |
 
 GoJIRA 에 Redis/그래프DB 등 서드파티 인프라가 필요해지면 **앱 compose 에 추가하지 말고**
 shared-infra 의 기존 서비스(shared-redis 등)를 공용하거나 shared-infra 에 추가한다
