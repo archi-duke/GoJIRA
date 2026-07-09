@@ -46,6 +46,25 @@ export PROJECT_ROOT="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/
 `PROJECT_ROOT`는 곧 `GOJIRA_REPO_ROOT`와 같다. 예전 개발 환경의 고정 경로
 (`/home/parallels/works/GoJIRA` 등)를 기본값으로 쓰지 말 것 — 사내망에는 존재하지 않는다.
 
+## 🚨 이슈 조회 — `issue-query.sh` 사용, curl 직접 호출 금지
+
+이슈(VOS/Feature/Requirement/ADSN 등) 조회가 필요하면 **반드시 아래 스크립트를 실행하라.
+`${GOJIRA_API}` 로 curl 을 직접 만들거나 REST 경로를 추측하지 말 것**
+(`/projects/{code}/issues`, `/Issue?...` 등 — 전부 존재하지 않는 경로다):
+
+```bash
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh"
+```
+
+이유 두 가지:
+1. 이슈 쓰기(POST/PUT /Issue)는 Mongo 를 건드리지 않고 로컬 clone 에만 기록되고, Mongo 는
+   PR 머지 시점에만 갱신된다 — 세션 중 GoJIRA-API 를 직접 조회하면 방금 만든 이슈가 안 보인다.
+2. GoJIRA-API 의 실제 이슈 조회 엔드포인트는 `GET /Issue` + `XBody` 헤더(JSON 필터) 방식이라
+   일반적인 REST 관례(`/projects/{code}/issues` 등)와 다르다 — 추측하면 100% 404 다.
+
+문서/프로젝트 조회도 마찬가지로 각 스킬의 `_scripts/*.sh` 헬퍼(`doc-list.sh`, `doc-read.sh`,
+`project-status.sh` 등)를 통해서만 하고, URL 을 직접 조립하지 말 것.
+
 ## 웹발 이슈 변경 저널
 
 세션 시작 시 env `GOJIRA_ISSUE_JOURNAL` 이 가리키는 파일이 **존재하고 비어있지 않으면**,
