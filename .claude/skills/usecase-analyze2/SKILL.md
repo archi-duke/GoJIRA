@@ -160,17 +160,20 @@ DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${U
 echo "=== project-description.md ==="
 echo "$DESC"
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # VOS 목록 (issueLinks 포함 — relink 차집합 계산 / Feature 미연결 VOS 검출용)
 echo
 echo "=== VOS 목록 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client,issueLinks}]'
+jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client,issueLinks}]' /tmp/gojira_issues.json
 
 # 기존 Feature (issueLinks + 전체 본문 — relink/강제 재생성 에서 원문 그대로 보존)
 echo
 echo "=== 기존 Feature ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]'
+jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]' \
+  /tmp/gojira_issues.json
 ```
 
 - VOS 가 0건 → **중단** 하고 "vos-collect2 를 먼저 실행하세요" 보고

@@ -104,19 +104,23 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # ADSN/DDSN 이슈
 echo "=== ADSN/DDSN 설계 이슈 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design")
-         | {key,subkey,issueType,summary,description,designLevel,designPoint,decision,decisionRationale,tradeoffs,risk,sensitivity}]'
+jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design")
+     | {key,subkey,issueType,summary,description,designLevel,designPoint,decision,decisionRationale,tradeoffs,risk,sensitivity}]' \
+  /tmp/gojira_issues.json
 
 # Requirement 요약
 echo
 echo "=== Requirement 요약 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,reqtype,summary}]'
+jq '[.[] | select(.issueType=="Requirement") | {key,subkey,reqtype,summary}]' /tmp/gojira_issues.json
 
-# archSettings (chosenStyles, normalizedAttributes)
+# archSettings (chosenStyles, normalizedAttributes) — X-Local-Write 없이 직접 Mongo 에
+# 쓰이므로 API 조회 유지.
 echo
 echo "=== archSettings ==="
 curl -s "${GOJIRA_API}/Project/${CODE}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \

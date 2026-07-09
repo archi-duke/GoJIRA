@@ -25,6 +25,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+import issue_local
+
 
 GRAPH_PATH = Path(__file__).resolve().parent / "workflow-graph.json"
 GOJIRA_API = os.environ["GOJIRA_API"]
@@ -50,14 +52,10 @@ def http(method: str, url: str, headers=None, body=None):
 
 
 def fetch_issues(code: str, user: str):
-    return http(
-        "GET",
-        f"{GOJIRA_API}/Issue",
-        headers={
-            "XBody": json.dumps({"prjID": code, "infoType": ""}),
-            "X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""),
-        },
-    ) or []
+    """이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — 이슈 쓰기는 Mongo 를 건드리지
+    않고 로컬에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 GET /Issue 로는
+    방금 만든/수정한 이슈가 보이지 않아 drift 판정(baseline 해시)이 어긋난다."""
+    return issue_local.load_local_issues()
 
 
 def fetch_arch_settings(code: str, user: str):

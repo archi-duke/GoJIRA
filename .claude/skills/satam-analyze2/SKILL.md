@@ -155,26 +155,25 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # 채택된 ADSN 목록 (decision 필드 있음) — 논리 판정에 필요한 전체 맥락 포함
 echo "=== 채택 ADSN 목록 ==="
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
-         | {key, subkey, summary, designPoint, designLevel,
-            objectives, decision, decisionRationale, approaches,
-            pros, cons, eval, tradeoffs, adiagram, bdiagram}]'
+jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
+     | {key, subkey, summary, designPoint, designLevel,
+        objectives, decision, decisionRationale, approaches,
+        pros, cons, eval, tradeoffs, adiagram, bdiagram}]' /tmp/gojira_issues.json
 
 # Requirement 전체 — FR/NFR/CNST, ASR 플래그 포함
 echo
 echo "=== Requirement 전체 (FR/NFR/CNST + driverSelected) ==="
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement")
-         | {key, subkey, summary, description, reqtype,
-            driverSelected: (.driverSelected // false),
-            qa, source, stimulus, environment, artifact, response, measure, responseScenario}]'
+jq '[.[] | select(.issueType=="Requirement")
+     | {key, subkey, summary, description, reqtype,
+        driverSelected: (.driverSelected // false),
+        qa, source, stimulus, environment, artifact, response, measure, responseScenario}]' \
+  /tmp/gojira_issues.json
 ```
 
 ADSN(decision 필드 있는) 이 0건이면 **중단** — "design_decide2 를 먼저 실행하세요".
@@ -191,21 +190,19 @@ v3 SATAM 대상 Requirement:
 수집한 ADSN 목록과 QA 참조 키를 context 파일로 저장. Step 1 이후 모든 generation 이 이 파일을 load 해서 참조.
 
 ```bash
-ADSN_JSON=$(curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — /tmp/gojira_issues.json 은
+# Step 0.3 에서 이미 issue-query.sh 로 받아둔 것을 재사용한다.
+ADSN_JSON=$(jq '[.[] | select(.issueType=="Architectural Design" and .decision != null and .decision != "")
          | {key, summary, designPoint, objectives, decision, decisionRationale,
             approaches, pros, cons, eval, tradeoffs, adiagram, bdiagram}]
-        | reduce .[] as $i ({}; . + {($i.key): $i})')
+        | reduce .[] as $i ({}; . + {($i.key): $i})' /tmp/gojira_issues.json)
 
-REQ_JSON=$(curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement")
+REQ_JSON=$(jq '[.[] | select(.issueType=="Requirement")
          | select(.reqtype=="NFR" or .reqtype=="CNST" or (.reqtype=="FR" and (.driverSelected // false) == true))
          | {key, summary, description, reqtype,
             driverSelected: (.driverSelected // false),
             qa, measure, responseScenario}]
-        | reduce .[] as $i ({}; . + {($i.key): $i})')
+        | reduce .[] as $i ({}; . + {($i.key): $i})' /tmp/gojira_issues.json)
 
 jq -n --argjson a "$ADSN_JSON" --argjson r "$REQ_JSON" '{adsns:$a, requirements:$r}' \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "satam" "context"

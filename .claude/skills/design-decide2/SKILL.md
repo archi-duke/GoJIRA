@@ -103,25 +103,29 @@ drift 모두 CLEAN 인 경우 **반드시 사용자에게 다음 3 옵션을 명
 PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
-# 프로젝트 archSettings (chosenStyles, normalizedAttributes, qaWeights)
+# 프로젝트 archSettings (chosenStyles, normalizedAttributes, qaWeights) — X-Local-Write
+# 없이 직접 Mongo 에 쓰이므로 API 조회 유지.
 echo "=== archSettings ==="
 curl -s "${GOJIRA_API}/Project" -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '.[0].archSettings // {}'
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # Architecture Drivers
 echo; echo "=== Drivers ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement" and .driverSelected==true) | {key,subkey,summary,reqtype,qa,qad,qai,priority}]'
+jq '[.[] | select(.issueType=="Requirement" and .driverSelected==true) | {key,subkey,summary,reqtype,qa,qad,qai,priority}]' \
+  /tmp/gojira_issues.json
 
 # 전체 Requirement (hallucination 방지용 실존 key 풀)
 echo; echo "=== Requirement 전체 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,reqtype,qa}]'
+jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,reqtype,qa}]' /tmp/gojira_issues.json
 
 # 기존 ADSN/DDSN (스타일 ADSN 포함)
 echo; echo "=== 기존 설계 이슈 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design") | {key,subkey,issueType,summary,designPoint,designLevel}]'
+jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design") | {key,subkey,issueType,summary,designPoint,designLevel}]' \
+  /tmp/gojira_issues.json
 ```
 
 선행 부족 (drivers 0건 / chosenStyles 비어있음 / normalizedAttributes 없음) → **중단** 하고 `style_define2` 먼저 실행 권고.

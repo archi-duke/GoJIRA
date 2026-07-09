@@ -11,7 +11,8 @@ allowed-tools: Bash, Read
 3. Step 5 는 **절대 개별 `curl -X POST /Issue` 를 반복 호출하지 말 것** — Gitea git push race + subkey 충돌로 대량 실패한다. 반드시 `bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh"` 를 **한 번만** 호출해 배치 처리한다.
 4. 실행 순서: Step 0 (bash) → Step 1~4 (내부 추론) → **Step 5 (batch 스크립트 1회)** → Step 6 (최종 보고).
 5. Step 5 실행 없이 "점수 0.X 성공" 서술만 출력하면 **거짓 응답** — 절대 금지.
-6. 생성 후 GET /Issue 로 실제 count 를 재조회해 보고에 포함하라.
+6. 생성 후 `issue-query.sh` (로컬 clone 조회 — GET /Issue 아님, Mongo 는 PR 머지 시점에만
+   갱신되므로 방금 만든 이슈가 안 보임) 로 실제 count 를 재조회해 보고에 포함하라.
 
 ## 한 generation 당 제약 (GLM 계열 스톨 방지 — 필독)
 
@@ -84,10 +85,12 @@ echo "$DESC" | head -100
 
 ### 기존 VOS 조회
 
+🚨 `curl ${GOJIRA_API}/Issue` 로 직접 조회하지 말 것 — 이슈 쓰기는 Mongo 를 건드리지 않고
+로컬 clone 에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 방금 만든 VOS 가
+API 응답에 안 보여 **중복 생성**으로 이어질 수 있다. 반드시 로컬 clone(`issue-query.sh`)에서 조회:
+
 ```bash
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" \
   | jq '[.[] | select(.issueType == "VOS") | {key, summary, description, client}]'
 ```
 

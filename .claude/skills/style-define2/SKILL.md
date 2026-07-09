@@ -178,7 +178,9 @@ cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}]
 동일 프로젝트에 기존 스타일 ADSN 이 있으면 참고용으로 파악. 현재 `create` 중심 모드만 지원 — 기존 ADSN 재사용·수정 로직은 design-decide2 와 같은 패턴으로 후속 확장 가능.
 
 ```bash
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" \
   | jq '[.[] | select(.issueType=="Architectural Design" and (.designPoint // "") == "시스템 스타일 결정") | {key,subkey,summary,decision}]'
 ```
 

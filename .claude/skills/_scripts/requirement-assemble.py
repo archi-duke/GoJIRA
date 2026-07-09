@@ -19,14 +19,14 @@ import sys
 import urllib.error
 import urllib.request
 
+import issue_local
 
-def http_get_issues(api: str, code: str, user: str) -> list:
-    xbody = json.dumps({"prjID": code, "infoType": ""})
-    req = urllib.request.Request(
-        f"{api}/Issue", headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody}
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+
+def load_issues() -> list:
+    """이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — 이슈 쓰기는 Mongo 를
+    건드리지 않고 로컬에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중
+    GET /Issue 로는 방금 만든 이슈가 보이지 않는다."""
+    return issue_local.load_local_issues()
 
 
 def http_get_project(api: str, code: str, user: str) -> dict:
@@ -189,7 +189,7 @@ def main() -> int:
     args = p.parse_args()
 
     try:
-        issues = http_get_issues(args.api, args.code, args.user)
+        issues = load_issues()
         prj = http_get_project(args.api, args.code, args.user)
     except urllib.error.HTTPError as e:
         print(f"ERROR: HTTP {e.code} — {e.reason}", file=sys.stderr)
