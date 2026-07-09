@@ -1,5 +1,5 @@
 ---
-name: driver-select2
+name: driver-select
 description: Requirement(FR/NFR/CNST) 중 아키텍처 결정에 영향이 큰 항목을 Architecture Driver 로 선정하고 QAD/QAI/Priority/risk/sensitivity 를 평가합니다. 해당 Requirement 를 업데이트(ASR 라벨 부여)하고 architecture/drivers.md + 정규화 시스템 속성(style_define 입력)을 산출합니다. Self-loop 자가검증(최대 3회). Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -257,7 +257,7 @@ jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson l "$NEW_LABELS" \
 
 `PATCH /Project/{CODE}/archSettings` 한 번 호출로 두 필드 동시 merge. 다른 archSettings 필드(chosenStyles/satamDone 등)는 건드리지 않음.
 
-**HTTP status 검증 필수** — 실패 시 silent 통과하면 하류 스킬(style-define2/design-decide2)이 drivers.md fallback 파싱 (~70초 비효율) 으로 빠진다. 본 단계가 실패하면 Step 5.4/6.2 진행 전에 사용자에게 알리고 수동 점검 유도.
+**HTTP status 검증 필수** — 실패 시 silent 통과하면 하류 스킬(style-define/design-decide)이 drivers.md fallback 파싱 (~70초 비효율) 으로 빠진다. 본 단계가 실패하면 Step 5.4/6.2 진행 전에 사용자에게 알리고 수동 점검 유도.
 
 ```bash
 # NORM_JSON: Step 1.7 에서 만든 normalizedAttributes JSON 객체
@@ -283,12 +283,12 @@ if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
 else
   echo "⚠ archSettings PATCH 실패 (status=$STATUS)"
   echo "$BODY"
-  echo "→ 하류 스킬(style-define2/design-decide2) 에서 ~70초 fallback 파싱 비효율 발생 예상."
+  echo "→ 하류 스킬(style-define/design-decide) 에서 ~70초 fallback 파싱 비효율 발생 예상."
   echo "→ 수동 재시도하거나 사용자에게 알려 archSettings 직접 점검 권고. Step 5.4/6.2 진행 전 사용자 결정 필요."
 fi
 ```
 
-실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define2) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
+실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
 
 ### 5.4 architecture/drivers.md 저장 — 결정적 조립 (LLM 0회)
 

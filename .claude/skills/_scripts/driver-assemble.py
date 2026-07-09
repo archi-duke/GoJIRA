@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""driver-assemble.py — driver-select2 결정적 문서 조립 (LLM 0회).
+"""driver-assemble.py — driver-select 결정적 문서 조립 (LLM 0회).
 
 driverSelected=true Requirement 이슈 + archSettings.normalizedAttributes 만으로
 architecture/drivers.md 생성.
@@ -69,7 +69,7 @@ def build_doc(drivers: list, arch: dict) -> str:
             summary = (d.get("summary") or "").replace("|", "\\|")
             L.append(f"| {i} | {sub} | {rt} | {qa} | {summary} | {d.get('qad') or '-'} | {d.get('qai') or '-'} | {d.get('qas') or '-'} | {d.get('priority') or '-'} |")
     else:
-        L.append("_(Driver 0건 — driver-select2 full mode 1회 실행 필요)_")
+        L.append("_(Driver 0건 — driver-select full mode 1회 실행 필요)_")
     L.append("")
 
     # Section 2 Driver 별 상세 근거
@@ -167,7 +167,7 @@ def main() -> int:
         if i.get("issueType") == "Requirement" and is_driver(i)
     ]
     if not drivers:
-        print("ERROR: Driver (driverSelected=true) Requirement 0건 — driver-select2 full mode 1회 실행 필요", file=sys.stderr)
+        print("ERROR: Driver (driverSelected=true) Requirement 0건 — driver-select full mode 1회 실행 필요", file=sys.stderr)
         return 3
 
     md = build_doc(drivers, arch)

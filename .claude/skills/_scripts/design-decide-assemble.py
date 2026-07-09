@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""design-decide-assemble.py — design-decide2 결정적 문서 조립 (LLM 0회).
+"""design-decide-assemble.py — design-decide 결정적 문서 조립 (LLM 0회).
 
 ADSN/DDSN 이슈(designPoint != "시스템 스타일 결정") + archSettings.designDecideQAWeights
 만으로 design-decisions.md (index) + design-decisions/DP-NN-{slug}.md (DP별) 생성.

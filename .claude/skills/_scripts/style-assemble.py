@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""style-assemble.py — style-define2 결정적 문서 조립 (LLM 0회).
+"""style-assemble.py — style-define 결정적 문서 조립 (LLM 0회).
 
 ADSN 이슈(designPoint="시스템 스타일 결정") + archSettings 만으로 architecture-style.md (index)
 + architecture-style/{subkey}-{slug}.md (후보별 상세) 를 생성한다.

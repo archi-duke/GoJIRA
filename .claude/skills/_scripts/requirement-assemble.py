@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""requirement-assemble.py — requirement-refine2 결정적 문서 조립 (LLM 0회).
+"""requirement-assemble.py — requirement-refine 결정적 문서 조립 (LLM 0회).
 
 Requirement 이슈 (FR/NFR/CNST) + issueLinks (관련 Feature) 만으로 business/requirements.md 생성.
 archSettings 보조 데이터 없음.

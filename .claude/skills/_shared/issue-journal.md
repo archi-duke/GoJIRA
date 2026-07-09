@@ -28,10 +28,9 @@
    (delete 면 파일이 이미 없을 수 있다 — 그 자체가 검토 대상.)
 2. **SATAM 매트릭스 정합** — 변경된 이슈가 NFR/ADSN 이거나 ADSN 과 링크돼 있으면,
    risk/sensitivity/mitigation 관계가 여전히 성립하는지 검토한다. 링크 삭제·이슈 삭제로
-   mitigation 참조가 끊기지 않았는지 특히 확인 (`satam-analyze` 로 점검, 재판정 필요 시
-   `satam-analyze2`).
+   mitigation 참조가 끊기지 않았는지 특히 확인 (재판정 필요 시 `satam-analyze`).
 3. **유스케이스 산출물** — VOS/Feature/UC 계열 변경이면 `business/use-cases.md` 와
-   VOS↔Feature 커버리지가 깨지지 않았는지 확인 (재정립 필요 시 `usecase-analyze2` MODE=relink).
+   VOS↔Feature 커버리지가 깨지지 않았는지 확인 (재정립 필요 시 `usecase-analyze` MODE=relink).
 4. **설계 문서** — `architecture/` 문서(drivers/style/design-decisions/integrated)가 변경된
    이슈를 인용하고 있으면 본문·인용 key 가 실제 이슈 상태와 어긋나지 않는지 확인한다.
 5. **링크 정합** — link/unlink/delete 항목은 양쪽 이슈의 links 필드가 대칭인지, 고아

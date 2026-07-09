@@ -1,5 +1,5 @@
 ---
-name: design-integrate2
+name: design-integrate
 description: ADSN/DDSN 설계 결정과 선정 시스템 스타일을 Logical/Process/Deployment/Development 4개 view 별로 분리 작성한 뒤, **결정적 통합(LLM 0회)** 으로 architecture/architecture-integrated.md (짧은 index) + architecture/architecture-integrated/{logical,process,deployment,development}.md (4 본문) 을 산출합니다. cross-view entity dictionary 일관성 자가검증 + self-loop(최대 3회). 이슈 생성/수정 없이 문서만 산출. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -71,7 +71,7 @@ architecture/
     └── development.md   — 코드 구조/패키지 의존 (package/component)
 ```
 
-이 구조는 design-decide2 의 (`design-decisions.md` index + `design-decisions/DP-NN-*.md` 본문) 패턴과 동일하다.
+이 구조는 design-decide 의 (`design-decisions.md` index + `design-decisions/DP-NN-*.md` 본문) 패턴과 동일하다.
 
 ---
 
@@ -148,7 +148,7 @@ echo '[]' > /tmp/${CODE}-arch-int-dict.json
 작성 규칙:
 - 본 view 는 `templates/view.md` 의 6 섹션 구조를 따른다 (`templates/view.md` 참조).
   ```bash
-  cat "${PROJECT_ROOT}/.claude/skills/design-integrate2/templates/view.md"
+  cat "${PROJECT_ROOT}/.claude/skills/design-integrate/templates/view.md"
   ```
 - §1 개요 첫 단락은 단독으로도 읽혀야 한다 (Step 1.5 가 그대로 index §3 에 인용).
 - §2 entity 표에 이 view 등장 entity 의 `id / name / type / 설명` 기재. **id 는 이후 view 들과 공유될 식별자** — 짧고 유일한 약자 권장 (예: `WSS`, `GSM`, `CACHE`).

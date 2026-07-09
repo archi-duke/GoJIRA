@@ -103,14 +103,14 @@ def matches_filter_not(issue: dict, filt: dict | None) -> bool:
 # 이 값들이 link 에 박혀있으면 hash 에서 제외 (false positive 차단).
 # 사용자 수작업 link 는 _addedBy 없음 → 그대로 hash 에 포함되어 drift 감지.
 _KNOWN_WORKFLOW_SOURCES = {
-    "vos-collect2",
-    "usecase-analyze2",
-    "requirement-refine2",
-    "driver-select2",
-    "style-define2",
-    "design-decide2",
-    "design-integrate2",
-    "satam-analyze2",
+    "vos-collect",
+    "usecase-analyze",
+    "requirement-refine",
+    "driver-select",
+    "style-define",
+    "design-decide",
+    "design-integrate",
+    "satam-analyze",
 }
 
 

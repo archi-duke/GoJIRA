@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""validate-satam.py — satam-analyze2 v3 검증 로직.
+"""validate-satam.py — satam-analyze v3 검증 로직.
 
 v3 (2026-04-24) 구조 변경:
 - 원문 분해가 아닌 design × requirement 논리 판정 방식

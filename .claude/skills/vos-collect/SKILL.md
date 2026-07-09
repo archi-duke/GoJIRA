@@ -1,5 +1,5 @@
 ---
-name: vos-collect2
+name: vos-collect
 description: 프로젝트의 project-description.md를 분석해 이해관계자 요구사항(VOS)을 추출하고 VOS 이슈를 자동 생성합니다. Self-loop 자가검증(최대 3회) + best-so-far 채택. Claude Code 네이티브 실행 (curl/jq 기반).
 allowed-tools: Bash, Read
 ---

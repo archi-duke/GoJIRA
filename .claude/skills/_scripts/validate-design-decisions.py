@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""validate-design-decisions.py — design-decide2 Type A 검증 (v2 스키마).
+"""validate-design-decisions.py — design-decide Type A 검증 (v2 스키마).
 
 v2 변경점: 1 Design Point = N+1 ADSN (후보 N + 선정 ADSN 가능). 후보별 QA 점수 /
 구조·동적 diagram / 가중치 기반 선정 근거. document 는 {index, dpFiles} 로 분리.

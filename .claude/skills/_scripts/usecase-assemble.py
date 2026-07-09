@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""usecase-assemble.py — usecase-analyze2 Step 1.5 결정적 조립 (LLM 0회).
+"""usecase-assemble.py — usecase-analyze Step 1.5 결정적 조립 (LLM 0회).
 
 입력 모드 (택1):
   (a) stdin: 누적 draft JSON (Step 1.1 entities + 1.2 features + 1.3 scenarios + 1.4 diagrams)

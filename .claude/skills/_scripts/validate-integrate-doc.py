@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""validate-integrate-doc.py — design-integrate2 자가검증 (Type A).
+"""validate-integrate-doc.py — design-integrate 자가검증 (Type A).
 
 view 분할 + 결정적 통합 패턴(2026-04-25 개편) 을 검증한다. 4 view 본문이 각각
 별도 문서로 들어오고, 상위 index 와 cross-view entity dictionary 도 입력에 포함된다.

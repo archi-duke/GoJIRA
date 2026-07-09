@@ -1,6 +1,6 @@
 # `todowrite` 진행 상태 가시화 가이드 (선택)
 
-OpenCode 환경에서 실행될 때, 내장 `todowrite` tool 을 각 Step 진입/완료에 맞춰 호출하면 사용자가 "지금 어디까지 왔고 남은 게 뭔지" 를 한눈에 볼 수 있다. TPRJ 실증 중 `design-integrate2` 세션 (`ses_24b74df38ffegNWOWXuMm1uqWX`) 에서 GLM-5 가 자발적으로 호출한 사례가 관찰되어 리팩터링 5 스킬에 공식 가이드로 편입.
+OpenCode 환경에서 실행될 때, 내장 `todowrite` tool 을 각 Step 진입/완료에 맞춰 호출하면 사용자가 "지금 어디까지 왔고 남은 게 뭔지" 를 한눈에 볼 수 있다. TPRJ 실증 중 `design-integrate` 세션 (`ses_24b74df38ffegNWOWXuMm1uqWX`) 에서 GLM-5 가 자발적으로 호출한 사례가 관찰되어 리팩터링 5 스킬에 공식 가이드로 편입.
 
 ## 원칙
 

@@ -1,5 +1,5 @@
 ---
-name: design-decide2
+name: design-decide
 description: Architecture Driver + 선정 스타일에서 Design Point 를 식별하고, 각 DP 마다 2개 이상의 후보안을 Structural/Dynamic 다이어그램 + QA 가중 점수로 비교해 최종안을 선정합니다. 각 후보를 ADSN 이슈로 생성(선정 후보만 decision 필드 기록), architecture/design-decisions.md (상위 index) + architecture/design-decisions/DP-NN-*.md (DP별 상세) 를 저장합니다. Self-loop 최대 3회. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -234,8 +234,8 @@ Step 1 에서 index + 각 DP 파일 **뼈대**를 작성한다. 후보별 plantu
 
 템플릿 참조:
 ```bash
-cat "${PROJECT_ROOT}/.claude/skills/design-decide2/templates/design-decisions.md"  # index
-cat "${PROJECT_ROOT}/.claude/skills/design-decide2/templates/dp.md"                # DP 파일
+cat "${PROJECT_ROOT}/.claude/skills/design-decide/templates/design-decisions.md"  # index
+cat "${PROJECT_ROOT}/.claude/skills/design-decide/templates/dp.md"                # DP 파일
 ```
 
 ### Step 1 종료 — draft flush (필수)
@@ -528,7 +528,7 @@ open("/tmp/dd_links.json","w").write(json.dumps(links, ensure_ascii=False))
 print(f"{len(links)}건 링크 예정")
 PY
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "design-decide2" < /tmp/dd_links.json \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "design-decide" < /tmp/dd_links.json \
   > /tmp/dd_link_result.json
 cat /tmp/dd_link_result.json
 ```
