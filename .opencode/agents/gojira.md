@@ -90,6 +90,13 @@ env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SES
 - 프로젝트 상태 확인 → `project-status.sh` 1회 실행
 - 문서 읽기 → `doc-read.sh` / 문서 목록 → `doc-list.sh`
 - 문서 저장 → `doc-save.sh` (write/edit 도구로 직접 쓰지 말 것)
+- **이슈 조회 → `issue-query.sh` (curl 로 `${GOJIRA_API}/Issue` 직접 호출 절대 금지)** —
+  이슈 쓰기는 로컬 clone 에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 curl 로
+  직접 조회하면 방금 만든 이슈가 안 보인다. 게다가 URL 을 기억/추측해서 curl 을 직접 만들면
+  경로 대소문자를 잘못 짚어 엉뚱한 404/500 이 나기 쉽다 — 반드시 아래 스크립트로:
+  ```bash
+  bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh"
+  ```
 - 이슈 생성 → `issue-batch-create.sh` (curl POST 반복하지 말 것)
 - 이슈 링크 → `issue-batch-link.sh`
 - VOS 수집 → `skill(vos-collect)` → 스킬 내부 bash 블록 실행
@@ -102,13 +109,14 @@ env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SES
 - `ls`/`find`/`cat` 으로 로컬 파일 탐색 — `doc-read.sh`/`doc-list.sh`/`project-status.sh` 사용
 - curl URL 추측 — 스킬에 없는 엔드포인트 호출 금지
 
-**올바른 방법**: 반드시 `skill` 툴로 해당 스킬을 먼저 로드하고, SKILL.md 에 적힌 curl/bash 블록을 그대로 실행한다.
+**올바른 방법**: 반드시 `skill` 툴로 해당 스킬을 먼저 로드하고, SKILL.md 에 적힌 bash 블록을 그대로 실행한다.
 - 프로젝트 조회 → `skill(project-query)` → 내부 curl 실행
-- 이슈 조회 → `skill(issue-query)` → 내부 curl 실행
+- **이슈 조회 → `skill(issue-query)` → 내부 `issue-query.sh` 실행 (curl 아님 — 위 "이슈 조회" 항목 참조)**
 - 문서 조회 → `skill(doc-list)` or `skill(doc-summarize)` → 내부 curl 실행
 - VOS 수집 → `skill(vos-collect)` → 내부 Step 0~6 실행
 
-스킬 없이 curl 을 직접 호출하면 **100% 잘못된 URL** 로 404/500 이 나온다. 시간 낭비다.
+스킬 없이 curl 을 직접 호출하거나 URL 을 기억/추측해서 만들면 **100% 잘못된 URL** 로
+404/500 이 나거나(대소문자 오류) 세션 중 이슈가 안 보인다(Mongo 지연). 시간 낭비다.
 
 ## ⚠️ 스킬 실행 규칙 (절대 위반 금지)
 

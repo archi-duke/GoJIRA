@@ -35,9 +35,22 @@ func purgeOldTrashWorker() {
 	}
 }
 
+// issueSubSegments — /Issue 바로 다음에 오는 하위 세그먼트(동적 파라미터 없이 고정 위치).
+// Project 류는 다음 세그먼트가 {jiraCode} 실값이라 정규화 대상에서 제외한다 — 잘못 건드리면
+// 프로젝트 코드 자체가 손상된다.
+var issueSubSegments = map[string]string{
+	"ingest":    "ingest",
+	"label":     "label",
+	"link":      "link",
+	"comment":   "comment",
+	"fetch":     "fetch",
+	"field":     "field",
+	"relations": "relations",
+}
+
 func caseInsensitiveRouting(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		parts := strings.SplitN(r.URL.Path, "/", 5)
+		parts := strings.Split(r.URL.Path, "/")
 		canonical := map[string]string{
 			"check":   "Check",
 			"issue":   "Issue",
@@ -50,10 +63,25 @@ func caseInsensitiveRouting(next http.Handler) http.Handler {
 			if mapped, ok := canonical[strings.ToLower(parts[3])]; ok {
 				parts[3] = mapped
 			}
+			if parts[3] == "Issue" && len(parts) >= 5 {
+				if mapped, ok := issueSubSegments[strings.ToLower(parts[4])]; ok {
+					parts[4] = mapped
+				}
+			}
 			r.URL.Path = strings.Join(parts, "/")
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// notFoundHint — 에이전트(특히 URL 을 기억/추측해 curl 을 직접 만드는 모델)가 잘못된 경로를
+// 호출했을 때 맨 "404 page not found" 대신 올바른 사용법을 안내한다. 이슈 조회는 애초에
+// 이 API 를 직접 두드리는 대신 issue-query.sh(로컬 clone 읽기)를 써야 한다 — Mongo 는
+// PR 머지 시점에만 갱신되므로 세션 중 조회 결과가 비어있을 수 있다.
+func notFoundHint(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprintf(w, `{"error":"unknown route","path":%q,"hint":"issue 조회는 GoJIRA-API 를 직접 두드리지 말고 issue-query.sh(로컬 clone 읽기)를 사용하세요. API 직접 호출이 꼭 필요하면 경로 대소문자를 확인: GET/POST/PUT/DELETE /api/v2/Issue, /api/v2/Issue/{ingest|label|link|comment|fetch|field|relations}, /api/v2/Project"}`, r.URL.Path)
 }
 
 func main() {
@@ -63,6 +91,7 @@ func main() {
 	go purgeOldTrashWorker()
 
 	r := chi.NewRouter()
+	r.NotFound(notFoundHint)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
