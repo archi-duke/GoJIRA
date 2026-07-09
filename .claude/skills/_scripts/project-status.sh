@@ -6,8 +6,12 @@
 #
 # 출력 JSON: {code, user, nextStage, issues, docs, projectDescription, flags}
 #
-# 이슈 통계는 GoJIRA-API (HTTP) 로, 문서는 worktree fs 직접 read.
+# 이슈 통계는 로컬 clone data/issues/*.yaml 에서, 문서도 worktree fs 직접 read.
+# (이슈 쓰기는 Mongo 를 건드리지 않고 로컬에만 기록되고 Mongo 는 PR 머지 시점에만
+#  갱신되므로, 세션 중 GET /Issue 로는 방금 만든 이슈가 보이지 않는다.)
 set -euo pipefail
+
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 CODE="${1:?projectCode required}"
 USER="${2:?user required}"
@@ -21,10 +25,8 @@ if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
   exit 1
 fi
 
-# 1) 이슈 통계 (HTTP 유지 — DB)
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" > /tmp/gojira_issues.json
+# 1) 이슈 통계 (로컬 clone data/issues/*.yaml)
+bash "${DIR}/issue-query.sh" > /tmp/gojira_issues.json
 
 ISSUE_STATS=$(jq '{
   total: length,

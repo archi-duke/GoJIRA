@@ -1,5 +1,5 @@
 ---
-name: requirement-refine2
+name: requirement-refine
 description: Requirement(FR/NFR/CNST) 를 도출·정제하고 Feature↔Requirement Contains 링크 + business/requirements.md 를 작성/재정립합니다. 사용자가 "요구사항 도출/생성" 을 요청하면 MODE=full, "연결 정리·재정립·재링크·relink·링크만 다시" 류 요청이면 MODE=relink 로 호출 (기존 이슈 보존, 링크·문서만 재작성, 차집합만 POST). Self-loop 자가검증(최대 3회) + Feature 커버리지 매트릭스. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -125,24 +125,27 @@ UC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${USE
 echo "=== project-description.md ==="; echo "$DESC"
 echo; echo "=== use-cases.md ==="; echo "$UC"
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # Feature (issueLinks 포함 — relink 차집합 계산에 필요)
 echo; echo "=== Feature ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]'
+jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]' \
+  /tmp/gojira_issues.json
 
 # VOS (참조용)
 echo; echo "=== VOS ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="VOS") | {key,summary}]'
+jq '[.[] | select(.issueType=="VOS") | {key,summary}]' /tmp/gojira_issues.json
 
 # 기존 Requirement (description/QAS 전체 + issueLinks — relink 모드에서 원문 그대로 보존)
 echo; echo "=== 기존 Requirement ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,description,reqtype,qa,source,stimulus,environment,artifact,response,measure,responseScenario,measureAuto,issueLinks}]'
+jq '[.[] | select(.issueType=="Requirement") | {key,subkey,summary,description,reqtype,qa,source,stimulus,environment,artifact,response,measure,responseScenario,measureAuto,issueLinks}]' \
+  /tmp/gojira_issues.json
 ```
 
 - project-description.md 가 템플릿 수준(실질 < 30자) → **중단** 하고 `projdesc_interview` 먼저 권고
-- Feature 0 건 → **중단** 하고 `usecase-analyze2` 먼저 권고
+- Feature 0 건 → **중단** 하고 `usecase-analyze` 먼저 권고
 - `MODE=relink` 인데 기존 Requirement 0 건 → **중단** 하고 `MODE=full` 로 전환 권고 (재링크 대상이 없음)
 
 ---
@@ -245,7 +248,7 @@ cross-cutting NFR/CNST 예 (여러 Feature 열거): `"relatedFeatures": ["GOJIRA
 **반드시** 아래 템플릿 파일의 구조를 따른다. 섹션 번호/이름을 그대로 유지:
 
 ```bash
-cat "${PROJECT_ROOT}/.claude/skills/requirement-refine2/templates/requirements.md"
+cat "${PROJECT_ROOT}/.claude/skills/requirement-refine/templates/requirements.md"
 ```
 
 - 섹션 1 개요 / 2 FR / 3 NFR / 4 CNST / 5 상세 / 6 Feature 커버리지 매트릭스 전부 포함
@@ -412,7 +415,7 @@ cat > /tmp/req_links.json <<'JSON'
 ]
 JSON
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "requirement-refine2" < /tmp/req_links.json \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "requirement-refine" < /tmp/req_links.json \
   > /tmp/req_link_result.json
 cat /tmp/req_link_result.json
 ```

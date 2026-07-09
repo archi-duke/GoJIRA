@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""validate-requirements.py — requirement-refine2 의 Type A 검증 로직.
+"""validate-requirements.py — requirement-refine 의 Type A 검증 로직.
 
 stdin JSON:
 {

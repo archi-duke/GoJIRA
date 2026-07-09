@@ -25,6 +25,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+import issue_local
+
 
 GRAPH_PATH = Path(__file__).resolve().parent / "workflow-graph.json"
 GOJIRA_API = os.environ["GOJIRA_API"]
@@ -50,14 +52,10 @@ def http(method: str, url: str, headers=None, body=None):
 
 
 def fetch_issues(code: str, user: str):
-    return http(
-        "GET",
-        f"{GOJIRA_API}/Issue",
-        headers={
-            "XBody": json.dumps({"prjID": code, "infoType": ""}),
-            "X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""),
-        },
-    ) or []
+    """이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — 이슈 쓰기는 Mongo 를 건드리지
+    않고 로컬에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 GET /Issue 로는
+    방금 만든/수정한 이슈가 보이지 않아 drift 판정(baseline 해시)이 어긋난다."""
+    return issue_local.load_local_issues()
 
 
 def fetch_arch_settings(code: str, user: str):
@@ -105,14 +103,14 @@ def matches_filter_not(issue: dict, filt: dict | None) -> bool:
 # 이 값들이 link 에 박혀있으면 hash 에서 제외 (false positive 차단).
 # 사용자 수작업 link 는 _addedBy 없음 → 그대로 hash 에 포함되어 drift 감지.
 _KNOWN_WORKFLOW_SOURCES = {
-    "vos-collect2",
-    "usecase-analyze2",
-    "requirement-refine2",
-    "driver-select2",
-    "style-define2",
-    "design-decide2",
-    "design-integrate2",
-    "satam-analyze2",
+    "vos-collect",
+    "usecase-analyze",
+    "requirement-refine",
+    "driver-select",
+    "style-define",
+    "design-decide",
+    "design-integrate",
+    "satam-analyze",
 }
 
 

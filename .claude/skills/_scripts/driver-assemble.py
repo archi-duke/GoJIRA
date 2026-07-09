@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""driver-assemble.py — driver-select2 결정적 문서 조립 (LLM 0회).
+"""driver-assemble.py — driver-select 결정적 문서 조립 (LLM 0회).
 
 driverSelected=true Requirement 이슈 + archSettings.normalizedAttributes 만으로
 architecture/drivers.md 생성.
@@ -18,13 +18,14 @@ import sys
 import urllib.error
 import urllib.request
 
+import issue_local
+
 
 def http_get(api: str, code: str, user: str) -> tuple[list, dict]:
-    xbody = json.dumps({"prjID": code, "infoType": ""})
-    req = urllib.request.Request(
-        f"{api}/Issue", headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody}
-    )
-    issues = json.loads(urllib.request.urlopen(req, timeout=15).read().decode("utf-8"))
+    # 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — 이슈 쓰기는 Mongo 를 건드리지
+    # 않고 로컬에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 GET /Issue 로는
+    # 방금 만든 이슈가 보이지 않는다.
+    issues = issue_local.load_local_issues()
 
     pxbody = json.dumps({"jiraCode": code})
     preq = urllib.request.Request(
@@ -68,7 +69,7 @@ def build_doc(drivers: list, arch: dict) -> str:
             summary = (d.get("summary") or "").replace("|", "\\|")
             L.append(f"| {i} | {sub} | {rt} | {qa} | {summary} | {d.get('qad') or '-'} | {d.get('qai') or '-'} | {d.get('qas') or '-'} | {d.get('priority') or '-'} |")
     else:
-        L.append("_(Driver 0건 — driver-select2 full mode 1회 실행 필요)_")
+        L.append("_(Driver 0건 — driver-select full mode 1회 실행 필요)_")
     L.append("")
 
     # Section 2 Driver 별 상세 근거
@@ -166,7 +167,7 @@ def main() -> int:
         if i.get("issueType") == "Requirement" and is_driver(i)
     ]
     if not drivers:
-        print("ERROR: Driver (driverSelected=true) Requirement 0건 — driver-select2 full mode 1회 실행 필요", file=sys.stderr)
+        print("ERROR: Driver (driverSelected=true) Requirement 0건 — driver-select full mode 1회 실행 필요", file=sys.stderr)
         return 3
 
     md = build_doc(drivers, arch)

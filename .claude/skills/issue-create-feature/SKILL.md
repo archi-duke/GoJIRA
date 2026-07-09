@@ -39,12 +39,12 @@ export ACTOR="End User"
 ```
 
 ## Pre-check — 유사 Feature 조회 (필수)
-`issue-query` 또는 아래 curl 로 기존 Feature 조회:
+🚨 `curl ${GOJIRA_API}/Issue` 로 직접 조회하지 말 것 — 이슈 쓰기는 Mongo 를 건드리지 않고
+로컬 clone 에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 방금 만든 Feature 가
+API 응답에 안 보여 **중복 생성**으로 이어질 수 있다. 반드시 로컬 clone(`issue-query.sh`)에서 조회:
 
 ```bash
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" \
   | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,actor}]'
 ```
 

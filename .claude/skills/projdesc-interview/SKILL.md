@@ -117,7 +117,7 @@ cat /tmp/projdesc.md | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh
 - 경로: business/project-description.md
 - 브랜치: docs/{user}
 - 수집 항목: background / purpose / stakeholders / requirements / constraints
-- 다음 단계: vos-collect2 로 VOS 추출 진행 가능
+- 다음 단계: vos-collect 로 VOS 추출 진행 가능
 ```
 
 ---

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""usecase-assemble.py — usecase-analyze2 Step 1.5 결정적 조립 (LLM 0회).
+"""usecase-assemble.py — usecase-analyze Step 1.5 결정적 조립 (LLM 0회).
 
 입력 모드 (택1):
   (a) stdin: 누적 draft JSON (Step 1.1 entities + 1.2 features + 1.3 scenarios + 1.4 diagrams)
@@ -51,6 +51,8 @@ import re
 import sys
 import urllib.error
 import urllib.request
+
+import issue_local
 
 
 # ─── 섹션 빌더 ----------------------------------------------------------------
@@ -333,19 +335,13 @@ def _http_get_json(url: str, user: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _http_get_issues(api: str, code: str, user: str) -> list:
-    """/Issue 는 XBody 헤더로 JSON 본문을 받는다."""
-    xbody = json.dumps({"prjID": code, "infoType": ""})
-    req = urllib.request.Request(
-        f"{api}/Issue",
-        headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody},
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
 def build_payload_from_mongo(code: str, user: str, api: str) -> dict:
-    """artifact + Feature/VOS 이슈 → assemble payload."""
+    """artifact + Feature/VOS 이슈 → assemble payload.
+
+    이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — 이슈 쓰기는 Mongo 를 건드리지
+    않고 로컬에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 GET /Issue 로는
+    방금 만든 이슈가 보이지 않는다. usecase-artifacts 는 X-Local-Write 없이 직접 Mongo 에
+    쓰이므로 API 조회 그대로 유지."""
     art = _http_get_json(f"{api}/Project/{code}/usecase-artifacts", user)
     if not art.get("exists"):
         print(
@@ -355,7 +351,7 @@ def build_payload_from_mongo(code: str, user: str, api: str) -> dict:
         )
         sys.exit(3)
 
-    issues = _http_get_issues(api, code, user)
+    issues = issue_local.load_local_issues()
     vos = [i for i in issues if i.get("issueType") == "VOS"]
     feats = [i for i in issues if i.get("issueType") == "Feature"]
 

@@ -1,5 +1,5 @@
 ---
-name: style-define2
+name: style-define
 description: Architecture Driver 로부터 정규화된 시스템 속성을 입력 받아, 카탈로그 스타일 엔진 점수를 참조해 **통합 스타일 조합 후보 2~3개** 를 구성하고 QA 가중 점수로 비교해 최종 선정합니다. 각 조합 후보를 ADSN 이슈로 생성(선정 조합만 decision 필드 기록, 혼합 허용), architecture/architecture-style.md (상위 index) + architecture/architecture-style/ADSN_NNN-*.md (후보별 상세, 파일명은 실제 subkey) 를 저장합니다. 개별 스타일은 ADSN 으로 만들지 않음. Self-loop 최대 3회. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -109,7 +109,7 @@ NORM=$(curl -s "${GOJIRA_API}/Project" \
   -H "XBody: {\"jiraCode\":\"${CODE}\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
   | jq '.[0].archSettings.normalizedAttributes // {}')
 
-# Fallback 1: driver-select2 가 같은 세션에서 flush 해둔 /tmp 파일
+# Fallback 1: driver-select 가 같은 세션에서 flush 해둔 /tmp 파일
 if [[ "$NORM" == "{}" ]] && [[ -f "/tmp/${CODE}-drivers-normalized.json" ]]; then
   NORM=$(cat "/tmp/${CODE}-drivers-normalized.json")
 fi
@@ -142,7 +142,7 @@ echo "$NORM" > "/tmp/${CODE}-styledef-norm.json"
 echo "$NORM"
 ```
 
-`NORM` 이 `{}` 이면 **중단** → "먼저 driver-select2 를 실행하거나 normalizedAttributes JSON 을 제공하세요" 보고.
+`NORM` 이 `{}` 이면 **중단** → "먼저 driver-select 를 실행하거나 normalizedAttributes JSON 을 제공하세요" 보고.
 
 #### 0.3.2 카탈로그 읽기
 
@@ -175,10 +175,12 @@ cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}]
 
 #### 0.3.4 기존 ADSN 스캔 (선택)
 
-동일 프로젝트에 기존 스타일 ADSN 이 있으면 참고용으로 파악. 현재 `create` 중심 모드만 지원 — 기존 ADSN 재사용·수정 로직은 design-decide2 와 같은 패턴으로 후속 확장 가능.
+동일 프로젝트에 기존 스타일 ADSN 이 있으면 참고용으로 파악. 현재 `create` 중심 모드만 지원 — 기존 ADSN 재사용·수정 로직은 design-decide 와 같은 패턴으로 후속 확장 가능.
 
 ```bash
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" \
   | jq '[.[] | select(.issueType=="Architectural Design" and (.designPoint // "") == "시스템 스타일 결정") | {key,subkey,summary,decision}]'
 ```
 
@@ -266,8 +268,8 @@ Step 1 에서 index + 각 후보 파일 **뼈대** 작성. plantuml 자리는 pl
 
 템플릿 참조:
 ```bash
-cat "${PROJECT_ROOT}/.claude/skills/style-define2/templates/architecture-style.md"  # index
-cat "${PROJECT_ROOT}/.claude/skills/style-define2/templates/style-candidate.md"      # 후보 파일
+cat "${PROJECT_ROOT}/.claude/skills/style-define/templates/architecture-style.md"  # index
+cat "${PROJECT_ROOT}/.claude/skills/style-define/templates/style-candidate.md"      # 후보 파일
 ```
 
 index (`architecture-style.md`) 필수 섹션: 1 후보 조합 스타일 / 2 QA 가중치 / 3 최종 선정 / (4 Driver 추적성 / 5 트레이드오프)
@@ -560,7 +562,7 @@ open("/tmp/style_links.json","w").write(json.dumps(links, ensure_ascii=False))
 print(f"{len(links)}건 링크 예정")
 PY
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "style-define2" < /tmp/style_links.json \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "style-define" < /tmp/style_links.json \
   > /tmp/style_link_result.json
 cat /tmp/style_link_result.json
 ```
@@ -593,7 +595,7 @@ echo "architecture-style.md + 후보 파일 저장 완료 (결정적 조립)"
 
 ### 5.4 archSettings.chosenStyles 업데이트 (선정 조합 평탄화)
 
-**호환성 중요** — 다음 스킬(design-integrate2) 이 `chosenStyles.primary / secondary / supporting` 구조로 읽는다. 선정된 조합(들) 의 composition 을 역할별로 평탄화 병합.
+**호환성 중요** — 다음 스킬(design-integrate) 이 `chosenStyles.primary / secondary / supporting` 구조로 읽는다. 선정된 조합(들) 의 composition 을 역할별로 평탄화 병합.
 
 ```bash
 python3 <<'PY'
@@ -692,6 +694,6 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 - `qaWeights` 합 = 1.0 ±0.02 / `qaScores` 는 1~5 정수 / `weightedScore` 는 Σ(score×weight)
 - **Step 1 에서 plantuml 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 plantuml 생성하면 스톨 리스크
 - Step 0 / 1 / 1.5 / 2 / 3 / 5 만 실제 Bash 호출, Step 4 는 내부 판단
-- `archSettings.chosenStyles` 는 **평탄화된 Primary/Secondary/Supporting 리스트** — design-integrate2 가 이 형식을 기대
+- `archSettings.chosenStyles` 는 **평탄화된 Primary/Secondary/Supporting 리스트** — design-integrate 가 이 형식을 기대
 - 진입 정책: Step 0.1 의 drift-check 가 작업 진행 여부를 정한다. 모두 CLEAN 인데 사용자가 강제 재생성을 거부하면 즉시 종료 (LLM 호출 0회). 강제 재생성 yes 인 경우 이슈 생성/수정 step 들은 자동 스킵하고 문서/링크만 재생성
 - baseline 갱신: 본 작업 진행 시 Step 6.2 의 `set-baseline --stage style` 호출이 필수. 안 하면 다음 호출에서 또 DRIFT 로 잡혀 재실행 압력이 생긴다

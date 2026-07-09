@@ -5,26 +5,21 @@ allowed-tools: Bash
 ---
 
 전체 이슈의 status/dueDate 를 에이전트가 직접 집계해 일정 분석을 수행합니다.
+(이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — Mongo 는 PR 머지 시점에만 갱신되므로
+세션 중 GoJIRA-API `/Issue` 로는 방금 만든 이슈가 보이지 않는다.)
 
 ## 환경 & 인자
-- `GOJIRA_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
-- `CODE` — projectCode
-- `USER` — X-User-Id
+- `CODE` — projectCode (참고용)
 
 ```bash
 export CODE="GOJIRA3"
-export USER="batman"
-export GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 ```
 
 ## 조회
-🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
+🚨 `RESP=$(curl ...)` 같은 command substitution 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
 
 ```bash
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  > /tmp/gojira_issues.json
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
 
 jq '[.[] | {key, subkey, issueType, summary, status, dueDate, startDate}]' /tmp/gojira_issues.json
 ```

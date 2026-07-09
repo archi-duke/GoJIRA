@@ -112,7 +112,7 @@ cat /tmp/projdesc.md | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh
 - 경로: business/project-description.md
 - 브랜치: docs/{user}
 - 저장 결과: 성공/실패 + commit 정보
-- 다음 단계: vos-collect2
+- 다음 단계: vos-collect
 ```
 
 ---

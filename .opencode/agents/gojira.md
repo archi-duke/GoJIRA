@@ -92,9 +92,9 @@ env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SES
 - 문서 저장 → `doc-save.sh` (write/edit 도구로 직접 쓰지 말 것)
 - 이슈 생성 → `issue-batch-create.sh` (curl POST 반복하지 말 것)
 - 이슈 링크 → `issue-batch-link.sh`
-- VOS 수집 → `skill(vos-collect2)` → 스킬 내부 bash 블록 실행
-- Use Case 분석 → `skill(usecase-analyze2)` → 템플릿(`cat templates/use-cases.md`) 참조 필수
-- Requirement 정제 → `skill(requirement-refine2)`
+- VOS 수집 → `skill(vos-collect)` → 스킬 내부 bash 블록 실행
+- Use Case 분석 → `skill(usecase-analyze)` → 템플릿(`cat templates/use-cases.md`) 참조 필수
+- Requirement 정제 → `skill(requirement-refine)`
 - 각 스킬의 SKILL.md 에 있는 bash 코드블록을 **그대로 실행**. 자기 방식으로 재작성하지 말 것.
 
 **하지 말 것:**
@@ -106,7 +106,7 @@ env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SES
 - 프로젝트 조회 → `skill(project-query)` → 내부 curl 실행
 - 이슈 조회 → `skill(issue-query)` → 내부 curl 실행
 - 문서 조회 → `skill(doc-list)` or `skill(doc-summarize)` → 내부 curl 실행
-- VOS 수집 → `skill(vos-collect2)` → 내부 Step 0~6 실행
+- VOS 수집 → `skill(vos-collect)` → 내부 Step 0~6 실행
 
 스킬 없이 curl 을 직접 호출하면 **100% 잘못된 URL** 로 404/500 이 나온다. 시간 낭비다.
 
@@ -128,14 +128,14 @@ env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SES
 아래 순서로 진행한다. 각 단계가 완료돼야 다음으로 넘어간다.
 
 1. **projdesc** — `project-description.md` 가 없거나 템플릿 수준이면 `projdesc-interview` (대화형) 또는 `projdesc-generate`
-2. **vos** — 이해관계자 요구 수집: `vos-collect2`
-3. **usecase** — Use Case/Feature 분석 + VOS 커버리지: `usecase-analyze2`
-4. **requirement** — FR/NFR/CNST 정제: `requirement-refine2`
-5. **driver** — Requirement 중 ASR 마킹: `driver-select2`
-6. **style** — 아키텍처 스타일 결정: `style-define2`
-7. **design_decide** — ADR 기반 설계 결정: `design-decide2`
-8. **design_integrate** — 통합 설계 문서: `design-integrate2`
-9. **satam** — ADSN risk/sensitivity/mitigation: `satam-analyze2`
+2. **vos** — 이해관계자 요구 수집: `vos-collect`
+3. **usecase** — Use Case/Feature 분석 + VOS 커버리지: `usecase-analyze`
+4. **requirement** — FR/NFR/CNST 정제: `requirement-refine`
+5. **driver** — Requirement 중 ASR 마킹: `driver-select`
+6. **style** — 아키텍처 스타일 결정: `style-define`
+7. **design_decide** — ADR 기반 설계 결정: `design-decide`
+8. **design_integrate** — 통합 설계 문서: `design-integrate`
+9. **satam** — ADSN risk/sensitivity/mitigation: `satam-analyze`
 
 ### 단계 판정
 각 turn 시작 시 `project-query` 또는 `issue-query` 로 현재 상태(문서 존재, VOS/Feature/Requirement 카운트, archSettings)를 확인하고 다음 단계를 스스로 판정한다. 사용자가 "계속/진행해줘" 하면 위 순서의 다음 단계를 호출한다.

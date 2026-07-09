@@ -1,5 +1,5 @@
 ---
-name: usecase-analyze2
+name: usecase-analyze
 description: VOS 를 User Story / Use Case / Feature 로 분석·도출하고 VOS↔Feature Contains 링크 + business/use-cases.md 를 작성/재정립합니다. 사용자가 "Feature 도출/Use Case 분석" 을 요청하면 MODE=full, "Feature-VOS 연결 재정리·재링크·링크만 다시" 류 요청이면 MODE=relink 로 호출 (기존 Feature/UC 이슈 보존, 링크·문서만 재작성, 차집합만 POST). VOS 커버리지 자가검증(모든 VOS 최소 1 Feature) + self-loop(최대 3회). Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -160,20 +160,23 @@ DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${U
 echo "=== project-description.md ==="
 echo "$DESC"
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # VOS 목록 (issueLinks 포함 — relink 차집합 계산 / Feature 미연결 VOS 검출용)
 echo
 echo "=== VOS 목록 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client,issueLinks}]'
+jq '[.[] | select(.issueType=="VOS") | {key,summary,description,client,issueLinks}]' /tmp/gojira_issues.json
 
 # 기존 Feature (issueLinks + 전체 본문 — relink/강제 재생성 에서 원문 그대로 보존)
 echo
 echo "=== 기존 Feature ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]'
+jq '[.[] | select(.issueType=="Feature") | {key,subkey,summary,description,actor,precondition,basicflow,alternativeflow,exceptionflow,postcondition,issueLinks}]' \
+  /tmp/gojira_issues.json
 ```
 
-- VOS 가 0건 → **중단** 하고 "vos-collect2 를 먼저 실행하세요" 보고
+- VOS 가 0건 → **중단** 하고 "vos-collect 를 먼저 실행하세요" 보고
 - `MODE=relink` 인데 기존 Feature 0 건 → **중단** 하고 `MODE=full` 로 전환 권고 (재링크 대상 없음)
 - **강제 재생성 모드**인데 기존 Feature 0 건 → **중단** (재생성할 대상 없음)
 
@@ -421,7 +424,7 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "
 누적된 draft (`/tmp/${CODE}-uc-draft.json`) 또는 `usecase_artifacts` mongo 컬렉션에서 entities + features + diagrams 를 가져와 `usecase-assemble.py` 가 템플릿에 채워 use-cases.md 본문을 생성한다. **이 step 에서 LLM 호출 절대 금지**.
 
 ```bash
-TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
+TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze/templates/use-cases.md"
 
 if [ "${FAST_PATH:-false}" = "true" ]; then
   # fast path: artifact + Feature/VOS 이슈 mongo 직접 fetch (Step 1.1~1.4 스킵 케이스)
@@ -539,7 +542,7 @@ jq -n '{diagrams:{sequences:{"UC-3":"@startuml\n...\n@enduml"}}}' \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" merge "${CODE}" "uc" "draft" "fix"
 
 # 수정 반영 후 Step 1.5 결정적 조립을 다시 실행해 document 갱신 (필수)
-TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
+TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze/templates/use-cases.md"
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "uc" "draft" \
   | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" --template "$TEMPLATE" \
   > /tmp/${CODE}-uc-final.md
@@ -610,7 +613,7 @@ cat > /tmp/uc_links.json <<'JSON'
 ]
 JSON
 
-bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "usecase-analyze2" < /tmp/uc_links.json \
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-link.sh" "${CODE}" "${USER}" "usecase-analyze" < /tmp/uc_links.json \
   > /tmp/uc_link_result.json
 cat /tmp/uc_link_result.json
 ```
@@ -626,7 +629,7 @@ cat /tmp/uc_link_result.json
 **MODE=full / fast path 동일 흐름**: Step 5.1 직후 mongo Feature 이슈 + Step 1.1·1.4 에서 PUT 한 `usecase_artifacts` 가 갖춰져 있으므로 `usecase-assemble.py --from-mongo` 가 결정적 조립. doc-save.sh 가 plantuml-fix 결정적 자동 수정 적용.
 
 ```bash
-TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze2/templates/use-cases.md"
+TEMPLATE="${PROJECT_ROOT}/.claude/skills/usecase-analyze/templates/use-cases.md"
 python3 "${PROJECT_ROOT}/.claude/skills/_scripts/usecase-assemble.py" \
   --from-mongo "${CODE}" --user "${USER}" --template "$TEMPLATE" \
   | bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-save.sh" "${CODE}" "${USER}" "business/use-cases.md"

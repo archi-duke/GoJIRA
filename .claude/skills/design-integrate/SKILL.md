@@ -1,5 +1,5 @@
 ---
-name: design-integrate2
+name: design-integrate
 description: ADSN/DDSN 설계 결정과 선정 시스템 스타일을 Logical/Process/Deployment/Development 4개 view 별로 분리 작성한 뒤, **결정적 통합(LLM 0회)** 으로 architecture/architecture-integrated.md (짧은 index) + architecture/architecture-integrated/{logical,process,deployment,development}.md (4 본문) 을 산출합니다. cross-view entity dictionary 일관성 자가검증 + self-loop(최대 3회). 이슈 생성/수정 없이 문서만 산출. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -71,7 +71,7 @@ architecture/
     └── development.md   — 코드 구조/패키지 의존 (package/component)
 ```
 
-이 구조는 design-decide2 의 (`design-decisions.md` index + `design-decisions/DP-NN-*.md` 본문) 패턴과 동일하다.
+이 구조는 design-decide 의 (`design-decisions.md` index + `design-decisions/DP-NN-*.md` 본문) 패턴과 동일하다.
 
 ---
 
@@ -104,19 +104,23 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
 GOJIRA_API="${GOJIRA_API:?GOJIRA_API env var required (launcher must inject)}"
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # ADSN/DDSN 이슈
 echo "=== ADSN/DDSN 설계 이슈 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design")
-         | {key,subkey,issueType,summary,description,designLevel,designPoint,decision,decisionRationale,tradeoffs,risk,sensitivity}]'
+jq '[.[] | select(.issueType=="Architectural Design" or .issueType=="Detailed Design")
+     | {key,subkey,issueType,summary,description,designLevel,designPoint,decision,decisionRationale,tradeoffs,risk,sensitivity}]' \
+  /tmp/gojira_issues.json
 
 # Requirement 요약
 echo
 echo "=== Requirement 요약 ==="
-curl -s "${GOJIRA_API}/Issue" -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement") | {key,subkey,reqtype,summary}]'
+jq '[.[] | select(.issueType=="Requirement") | {key,subkey,reqtype,summary}]' /tmp/gojira_issues.json
 
-# archSettings (chosenStyles, normalizedAttributes)
+# archSettings (chosenStyles, normalizedAttributes) — X-Local-Write 없이 직접 Mongo 에
+# 쓰이므로 API 조회 유지.
 echo
 echo "=== archSettings ==="
 curl -s "${GOJIRA_API}/Project/${CODE}" -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
@@ -144,7 +148,7 @@ echo '[]' > /tmp/${CODE}-arch-int-dict.json
 작성 규칙:
 - 본 view 는 `templates/view.md` 의 6 섹션 구조를 따른다 (`templates/view.md` 참조).
   ```bash
-  cat "${PROJECT_ROOT}/.claude/skills/design-integrate2/templates/view.md"
+  cat "${PROJECT_ROOT}/.claude/skills/design-integrate/templates/view.md"
   ```
 - §1 개요 첫 단락은 단독으로도 읽혀야 한다 (Step 1.5 가 그대로 index §3 에 인용).
 - §2 entity 표에 이 view 등장 entity 의 `id / name / type / 설명` 기재. **id 는 이후 view 들과 공유될 식별자** — 짧고 유일한 약자 권장 (예: `WSS`, `GSM`, `CACHE`).

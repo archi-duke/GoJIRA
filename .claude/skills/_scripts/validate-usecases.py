@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""validate-usecases.py — usecase-analyze2 의 Type A 검증.
+"""validate-usecases.py — usecase-analyze 의 Type A 검증.
 
 stdin JSON:
 {

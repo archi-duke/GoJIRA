@@ -1,5 +1,5 @@
 ---
-name: driver-select2
+name: driver-select
 description: Requirement(FR/NFR/CNST) 중 아키텍처 결정에 영향이 큰 항목을 Architecture Driver 로 선정하고 QAD/QAI/Priority/risk/sensitivity 를 평가합니다. 해당 Requirement 를 업데이트(ASR 라벨 부여)하고 architecture/drivers.md + 정규화 시스템 속성(style_define 입력)을 산출합니다. Self-loop 자가검증(최대 3회). Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
@@ -98,21 +98,20 @@ DESC=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/doc-read.sh" "${CODE}" "${U
 echo "=== project-description.md ==="
 echo "$DESC"
 
+# 이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 (issue-query.sh) — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든 이슈가 안 보인다.
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" > /tmp/gojira_issues.json
+
 # Requirement 목록
 echo
 echo "=== Requirement 목록 ==="
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Requirement") | {key, subkey, summary, description, reqtype, qa, measure}]'
+jq '[.[] | select(.issueType=="Requirement") | {key, subkey, summary, description, reqtype, qa, measure}]' \
+  /tmp/gojira_issues.json
 
 # Feature (참고)
 echo
 echo "=== Feature (참고) ==="
-curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"infoType\":\"\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq '[.[] | select(.issueType=="Feature") | {key, summary}]'
+jq '[.[] | select(.issueType=="Feature") | {key, summary}]' /tmp/gojira_issues.json
 
 # priorityWeight (projects.archSettings 에서 조회 — 없으면 0.5/0.5)
 # W_QAD/W_QAI 가 미리 export 되어 있으면 사용, 아니면 기본 0.5/0.5
@@ -241,11 +240,10 @@ jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" \
 **강제 재생성 모드(Step 0.2 의 drift CLEAN + 사용자 yes) 이면 이 섹션 전체 스킵** — labels 갱신 PUT 하지 않는다.
 
 ```bash
-# 현재 labels 조회 (XBody 헤더 방식) → ASR 누락 시 append
-LABELS=$(curl -s "${GOJIRA_API}/Issue" \
-  -H "XBody: {\"prjID\":\"${CODE}\",\"key\":\"${KEY}\"}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  | jq -c '.[0].labels // []')
+# 현재 labels 조회 → ASR 누락 시 append. 로컬 clone 에서 읽는다 — Mongo 는 PR 머지
+# 시점에만 갱신되므로 curl ${GOJIRA_API}/Issue 로는 세션 중 방금 만든/수정한 값이 안 보인다.
+LABELS=$(bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh" \
+  | jq -c --arg k "$KEY" '[.[] | select(.key==$k)][0].labels // []')
 NEW_LABELS=$(echo "$LABELS" | jq -c 'if index("ASR") then . else . + ["ASR"] end')
 SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson l "$NEW_LABELS" \
@@ -259,7 +257,7 @@ jq -n --arg p "$CODE" --arg k "$KEY" --arg u "$USER" --argjson l "$NEW_LABELS" \
 
 `PATCH /Project/{CODE}/archSettings` 한 번 호출로 두 필드 동시 merge. 다른 archSettings 필드(chosenStyles/satamDone 등)는 건드리지 않음.
 
-**HTTP status 검증 필수** — 실패 시 silent 통과하면 하류 스킬(style-define2/design-decide2)이 drivers.md fallback 파싱 (~70초 비효율) 으로 빠진다. 본 단계가 실패하면 Step 5.4/6.2 진행 전에 사용자에게 알리고 수동 점검 유도.
+**HTTP status 검증 필수** — 실패 시 silent 통과하면 하류 스킬(style-define/design-decide)이 drivers.md fallback 파싱 (~70초 비효율) 으로 빠진다. 본 단계가 실패하면 Step 5.4/6.2 진행 전에 사용자에게 알리고 수동 점검 유도.
 
 ```bash
 # NORM_JSON: Step 1.7 에서 만든 normalizedAttributes JSON 객체
@@ -285,12 +283,12 @@ if [[ "$STATUS" =~ ^2[0-9][0-9]$ ]]; then
 else
   echo "⚠ archSettings PATCH 실패 (status=$STATUS)"
   echo "$BODY"
-  echo "→ 하류 스킬(style-define2/design-decide2) 에서 ~70초 fallback 파싱 비효율 발생 예상."
+  echo "→ 하류 스킬(style-define/design-decide) 에서 ~70초 fallback 파싱 비효율 발생 예상."
   echo "→ 수동 재시도하거나 사용자에게 알려 archSettings 직접 점검 권고. Step 5.4/6.2 진행 전 사용자 결정 필요."
 fi
 ```
 
-실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define2) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
+실패(4xx/5xx) 시 최종 보고에 ⚠ 로 노출. 다음 스킬(style-define) 은 fallback 체인으로 우회 가능하지만, 세션 경계를 넘으면 복구 불가이므로 사용자에게 경고.
 
 ### 5.4 architecture/drivers.md 저장 — 결정적 조립 (LLM 0회)
 

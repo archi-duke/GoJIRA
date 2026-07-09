@@ -114,9 +114,9 @@ curl -s -X POST "${GOJIRA_API}/Project/${CODE}/reset" \
 - `architecture/architecture-integrated.md`
 
 추가로 **하위 디렉토리의 후보별/뷰별 파일도 정리** (Step 4-3 에서 처리):
-- `architecture/architecture-style/<subkey>-*.md` — style-define2 후보별 ADSN 파일
-- `architecture/design-decisions/DP-NN-*.md` — design-decide2 DP별 파일
-- `architecture/architecture-integrated/{logical,process,deployment,development}.md` — design-integrate2 view별
+- `architecture/architecture-style/<subkey>-*.md` — style-define 후보별 ADSN 파일
+- `architecture/design-decisions/DP-NN-*.md` — design-decide DP별 파일
+- `architecture/architecture-integrated/{logical,process,deployment,development}.md` — design-integrate view별
 - `data/issues/*.yaml` — 이슈 yaml (서버 reset 이 자기 과제 이슈의 삭제 대상을 localWrites 로
   돌려주고, 4-1 에서 로컬 clone 에 적용해 삭제됨)
 
@@ -178,7 +178,7 @@ fi
 
 ### 4-3. 하위 디렉토리 후보별/뷰별 파일 정리 (PR #11 보강)
 
-style-define2 / design-decide2 / design-integrate2 가 만드는 sub-directory 의 동적 파일들 정리. 로컬 clone(`${ROOT}`)의 해당 디렉토리를 직접 비운다(서버 tree/DELETE 미사용).
+style-define / design-decide / design-integrate 가 만드는 sub-directory 의 동적 파일들 정리. 로컬 clone(`${ROOT}`)의 해당 디렉토리를 직접 비운다(서버 tree/DELETE 미사용).
 
 ```bash
 if [ "$CONFIRM" = "true" ] && [ "$RESET_DOCS" = "true" ]; then

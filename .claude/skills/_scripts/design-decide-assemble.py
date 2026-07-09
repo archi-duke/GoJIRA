@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""design-decide-assemble.py — design-decide2 결정적 문서 조립 (LLM 0회).
+"""design-decide-assemble.py — design-decide 결정적 문서 조립 (LLM 0회).
 
 ADSN/DDSN 이슈(designPoint != "시스템 스타일 결정") + archSettings.designDecideQAWeights
 만으로 design-decisions.md (index) + design-decisions/DP-NN-{slug}.md (DP별) 생성.
@@ -22,6 +22,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import issue_local
+
 
 def slugify(name: str) -> str:
     s = re.sub(r"[^0-9A-Za-z가-힣+\-]+", "-", name).strip("-").lower()
@@ -34,18 +36,13 @@ def http_get_json(url: str, user: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def http_get_issues(api: str, code: str, user: str) -> list:
-    xbody = json.dumps({"prjID": code, "infoType": ""})
-    req = urllib.request.Request(
-        f"{api}/Issue", headers={"X-User-Id": user, "Authorization": "Bearer " + os.environ.get("GOJIRA_SESSION_TOKEN", ""), "XBody": xbody}
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
 def fetch_inputs(code: str, user: str, api: str) -> tuple[list, dict]:
-    """ADSN/DDSN 이슈 (스타일 제외) + archSettings 반환."""
-    issues = http_get_issues(api, code, user)
+    """ADSN/DDSN 이슈 (스타일 제외) + archSettings 반환.
+
+    이슈는 로컬 clone data/issues/*.yaml 에서 읽는다 — 이슈 쓰기는 Mongo 를 건드리지
+    않고 로컬에만 기록되고 Mongo 는 PR 머지 시점에만 갱신되므로, 세션 중 GET /Issue 로는
+    방금 만든 이슈가 보이지 않는다."""
+    issues = issue_local.load_local_issues()
     design_issues = [
         i for i in issues
         if i.get("issueType") in ("Architectural Design", "Detailed Design")

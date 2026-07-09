@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""validate-style-doc.py — style-define2 v2 (통합 스타일 조합 후보).
+"""validate-style-doc.py — style-define v2 (통합 스타일 조합 후보).
 
 v2 변경점: "Primary/Secondary/Supporting 각각 ADSN" → "통합 스타일 조합 후보 N개 비교".
 각 후보는 (Primary + Secondary + Supporting) 세트이며, QA 가중 점수로 비교.

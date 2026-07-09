@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestPersistGateway(t *testing.T) {
+func TestPersistInstallAnswers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, configFileName)
 	// git 크리덴셜이 이미 채워진 기존 launcher.json
@@ -20,7 +20,7 @@ func TestPersistGateway(t *testing.T) {
 	if err := os.WriteFile(path, []byte(orig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := persistGateway(dir, "https://gojira-host:44300"); err != nil {
+	if err := persistInstallAnswers(dir, "https://gojira-host:44300", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	m := map[string]any{}
@@ -42,7 +42,7 @@ func TestPersistGateway(t *testing.T) {
 
 	// 파일이 없으면 placeholder 생성 후 기록
 	dir2 := t.TempDir()
-	if err := persistGateway(dir2, "http://h:3000"); err != nil {
+	if err := persistInstallAnswers(dir2, "http://h:3000", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	data2, _ := os.ReadFile(filepath.Join(dir2, configFileName))
