@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const version = "0.1.28"
+const version = "0.1.29"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -616,6 +616,21 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// treeHashCache — repoPath 별 파일 blob SHA 캐시. mtime+size 가 그대로면 재해시(디스크
+// 재읽기 + git hash-object 프로세스)를 스킵한다. 파일이 많은 프로젝트에서 /files 호출마다
+// 전체 내용을 다시 읽어 해시하던 게 체감 지연의 주 원인이었다 — 외부에서 파일을 직접
+// 고쳐도 mtime 이 바뀌므로 정확하게 재계산된다(수동 무효화 로직 불필요).
+type cachedFileEntry struct {
+	mtime int64
+	size  int64
+	sha   string
+}
+
+var (
+	treeHashCacheMu sync.Mutex
+	treeHashCache   = map[string]map[string]cachedFileEntry{} // repoPath -> rel path -> entry
+)
+
 // listLocalTree — repoPath 하위 모든 파일을 git blob 해시와 함께 평면 리스트로 반환.
 // .git / .claude(skills symlink) / 디렉터리 본체는 제외 (blob 만). 정렬은 path 사전순.
 //
@@ -625,8 +640,9 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 // false positive 가 사라진다.
 func listLocalTree(repoPath string) ([]map[string]any, error) {
 	type fileInfo struct {
-		rel  string
-		size int64
+		rel   string
+		size  int64
+		mtime int64
 	}
 	var files []fileInfo
 	err := filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
@@ -652,30 +668,57 @@ func listLocalTree(repoPath string) ([]map[string]any, error) {
 		if err != nil {
 			return nil // 한 파일 stat 실패는 무시 — 트리는 계속.
 		}
-		files = append(files, fileInfo{rel: filepath.ToSlash(rel), size: info.Size()})
+		files = append(files, fileInfo{rel: filepath.ToSlash(rel), size: info.Size(), mtime: info.ModTime().UnixNano()})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	paths := make([]string, len(files))
-	for i, f := range files {
-		paths[i] = f.rel
+	treeHashCacheMu.Lock()
+	cache := treeHashCache[repoPath]
+	if cache == nil {
+		cache = map[string]cachedFileEntry{}
+		treeHashCache[repoPath] = cache
 	}
-	shas, _ := hashObjectsBatch(repoPath, paths) // 실패 시 빈 map — 아래에서 fallback.
+	// 캐시 스냅샷(락 밖에서 읽기 전용으로 사용) — git hash-object 는 시간이 걸리므로 락을 오래
+	// 쥐지 않는다.
+	snapshot := make(map[string]cachedFileEntry, len(cache))
+	for k, v := range cache {
+		snapshot[k] = v
+	}
+	treeHashCacheMu.Unlock()
+
+	shaOf := make(map[string]string, len(files))
+	var missPaths []string
+	for _, f := range files {
+		if c, ok := snapshot[f.rel]; ok && c.mtime == f.mtime && c.size == f.size {
+			shaOf[f.rel] = c.sha
+			continue
+		}
+		missPaths = append(missPaths, f.rel)
+	}
+	if len(missPaths) > 0 {
+		shas, _ := hashObjectsBatch(repoPath, missPaths) // 실패 시 빈 map — 아래에서 fallback.
+		for _, rel := range missPaths {
+			shaOf[rel] = shas[rel]
+		}
+	}
 
 	entries := make([]map[string]any, 0, len(files))
+	newCache := make(map[string]cachedFileEntry, len(files))
 	for _, f := range files {
-		sha := shas[f.rel]
+		sha := shaOf[f.rel]
 		if sha == "" {
 			// fallback: batch 실패 시 디스크 raw 해시(이전 동작). UI 가 가짜 dirty 로 보일 수
-			// 있지만 응답 자체는 유지.
+			// 있지만 응답 자체는 유지. 캐시에는 저장하지 않아 다음 호출에서 재시도.
 			if s, err := blobShaRaw(filepath.Join(repoPath, filepath.FromSlash(f.rel)), f.size); err == nil {
 				sha = s
 			} else {
 				continue
 			}
+		} else {
+			newCache[f.rel] = cachedFileEntry{mtime: f.mtime, size: f.size, sha: sha}
 		}
 		entries = append(entries, map[string]any{
 			"path": f.rel,
@@ -687,6 +730,11 @@ func listLocalTree(repoPath string) ([]map[string]any, error) {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i]["path"].(string) < entries[j]["path"].(string)
 	})
+
+	treeHashCacheMu.Lock()
+	treeHashCache[repoPath] = newCache // 삭제/rename 된 파일은 자연스럽게 빠짐(누적 방지).
+	treeHashCacheMu.Unlock()
+
 	return entries, nil
 }
 
