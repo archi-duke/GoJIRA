@@ -62,8 +62,9 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-query.sh"
 2. GoJIRA-API 의 실제 이슈 조회 엔드포인트는 `GET /Issue` + `XBody` 헤더(JSON 필터) 방식이라
    일반적인 REST 관례(`/projects/{code}/issues` 등)와 다르다 — 추측하면 100% 404 다.
 
-문서/프로젝트 조회도 마찬가지로 각 스킬의 `_scripts/*.sh` 헬퍼(`doc-list.sh`, `doc-read.sh`,
-`project-status.sh` 등)를 통해서만 하고, URL 을 직접 조립하지 말 것.
+문서/프로젝트/PR/커밋이력 조회도 마찬가지로 각 스킬의 `_scripts/*.sh` 헬퍼(`doc-list.sh`,
+`doc-read.sh`, `project-status.sh`, `project-query.sh`, `pr-list.sh`, `doc-history.sh` 등)를
+통해서만 하고, URL 을 직접 조립하지 말 것.
 
 ## 웹발 이슈 변경 저널
 

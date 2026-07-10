@@ -99,6 +99,8 @@ env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SES
   ```
 - 이슈 생성 → `issue-batch-create.sh` (curl POST 반복하지 말 것)
 - 이슈 링크 → `issue-batch-link.sh`
+- 프로젝트 조회 → `project-query.sh "$USER" [CODE]` / PR 목록 → `pr-list.sh "$CODE" "$USER" [STATE]` /
+  커밋 이력 → `doc-history.sh "$CODE" [BRANCH] [LIMIT]` — 셋 다 curl 직접 조립 금지
 - VOS 수집 → `skill(vos-collect)` → 스킬 내부 bash 블록 실행
 - Use Case 분석 → `skill(usecase-analyze)` → 템플릿(`cat templates/use-cases.md`) 참조 필수
 - Requirement 정제 → `skill(requirement-refine)`
@@ -110,9 +112,10 @@ env | grep -E '^(GOJIRA_REPO_ROOT|GOJIRA_USER|GOJIRA_API|PLATFORM_API|GOJIRA_SES
 - curl URL 추측 — 스킬에 없는 엔드포인트 호출 금지
 
 **올바른 방법**: 반드시 `skill` 툴로 해당 스킬을 먼저 로드하고, SKILL.md 에 적힌 bash 블록을 그대로 실행한다.
-- 프로젝트 조회 → `skill(project-query)` → 내부 curl 실행
+- 프로젝트 조회 → `skill(project-query)` → 내부 `project-query.sh` 실행
 - **이슈 조회 → `skill(issue-query)` → 내부 `issue-query.sh` 실행 (curl 아님 — 위 "이슈 조회" 항목 참조)**
-- 문서 조회 → `skill(doc-list)` or `skill(doc-summarize)` → 내부 curl 실행
+- PR 목록 → `skill(pr-list)` → 내부 `pr-list.sh` 실행 / 커밋 이력 → `skill(doc-history)` → 내부 `doc-history.sh` 실행
+- 문서 조회 → `skill(doc-list)` or `skill(doc-summarize)` → 내부 `doc-list.sh`/`doc-read.sh` 실행
 - VOS 수집 → `skill(vos-collect)` → 내부 Step 0~6 실행
 
 스킬 없이 curl 을 직접 호출하거나 URL 을 기억/추측해서 만들면 **100% 잘못된 URL** 로
