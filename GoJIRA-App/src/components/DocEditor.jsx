@@ -288,7 +288,21 @@ export default function DocEditor({ project, user, onBack, currentPage, onNaviga
   // 마운트 시 + 창 포커스 복귀 시 재감지(런처를 나중에 켰을 수 있으므로).
   useEffect(() => {
     let alive = true;
-    const probe = () => detectLauncher().then((r) => { if (alive) setLauncher(r); });
+    // detectLauncher 는 성공 시 매번 새 객체를, health 미응답(2s 타임아웃/실패) 시 null 을 반환한다.
+    // focus 마다 그대로 setLauncher 하면 launcher?.ready 가 true↔undefined 로 토글돼
+    // refreshDocState useEffect(의존성: launcher?.ready)가 재실행되고 /files 가 다시 불려
+    // 프로비저닝 인디케이터가 깜빡인다(느린 사내망 Gitea 에서만 육안 노출). 참조도 매번 흔들린다.
+    // → 일시 미응답(null)은 기존 상태를 보존하고, 실질 동일하면 참조를 유지해 재평가를 막는다.
+    const sameLauncher = (a, b) =>
+      !!a && !!b && a.ready === b.ready && a.token === b.token && a.version === b.version;
+    const probe = () => detectLauncher().then((r) => {
+      if (!alive) return;
+      setLauncher((prev) => {
+        if (!r) return prev;                 // 일시 미응답 → 마지막 성공 상태 유지 (토글 차단)
+        if (sameLauncher(prev, r)) return prev; // 실질 동일 → 참조 유지 (불필요 재렌더/effect 방지)
+        return r;
+      });
+    });
     probe();
     window.addEventListener('focus', probe);
     return () => { alive = false; window.removeEventListener('focus', probe); };
