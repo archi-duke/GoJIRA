@@ -704,6 +704,7 @@ func hashObjectsBatch(repoPath string, paths []string) (map[string]string, error
 	cmd := exec.Command("git", "hash-object", "--stdin-paths")
 	cmd.Dir = repoPath
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	hideConsole(cmd) // Windows 콘솔 창 번쩍임 방지 (비 Windows no-op)
 	var stdinBuf bytes.Buffer
 	for _, p := range paths {
 		// stdin-paths 는 줄 단위 — 경로에 newline 이 들어가는 케이스는 거부.
