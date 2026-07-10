@@ -4,32 +4,26 @@ description: GoJIRA 프로젝트의 Pull Request 목록을 조회합니다.
 allowed-tools: Bash
 ---
 
-Platform-API `GET /DocRepo/{code}/prs?state=...` 로 PR 목록을 조회합니다.
-
-## 환경
-- `PLATFORM_API` 필수 (launcher 가 주입). 미설정 시 fail-fast
+PR 목록을 `pr-list.sh` 로 조회합니다. **curl 로 `${PLATFORM_API}/DocRepo/.../prs` 를 직접 호출하지 말 것** — URL/헤더 조립은 스크립트가 전담한다.
 
 ## 인자
-- `CODE` — projectCode
-- `USER` — X-User-Id
-- `STATE` — `open` | `closed` | `all` (기본 `open`)
+- `CODE` — projectCode (필수)
+- `USER` — X-User-Id (필수, 시스템 컨텍스트의 knoxID)
+- `STATE` — `open` | `closed` | `all` (선택, 기본 `open`)
+
+## 실행 — 이 bash 블록을 그대로 사용
+
+🚨 `RESP=$(bash ...)` 캡처 금지 — 반드시 **파일로 저장** 후 jq 사용.
 
 ```bash
-export CODE="GOJIRA3"
-export USER="batman"
-export STATE="${STATE:-open}"
-export PLATFORM_API="${PLATFORM_API:?PLATFORM_API env var required (launcher must inject)}"
+export CODE="GOJIRA3"            # 실제 프로젝트 코드로 교체
+export USER="batman"             # 시스템 컨텍스트의 knoxID 로 교체
+export STATE="open"              # open | closed | all
+
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/pr-list.sh" "$CODE" "$USER" "$STATE" > /tmp/gojira_prs.json
+
+jq . /tmp/gojira_prs.json
 ```
 
-## 조회
-🚨 `RESP=$(curl ...)` 캡처 금지 — bash 가 응답 바이트를 손상시킴. **파일 저장** 후 jq 사용.
-
-```bash
-curl -s "${PLATFORM_API}/DocRepo/${CODE}/prs?state=${STATE}" \
-  -H "X-User-Id: ${USER}" -H "Authorization: Bearer ${GOJIRA_SESSION_TOKEN}" \
-  > /tmp/gojira_prs.json
-
-jq '[.[] | {number, title, state, author: (.user.login // .author // null), head: (.head.ref // null)}]' /tmp/gojira_prs.json
-```
-
-결과를 한국어로 정리: PR 수 → 번호/제목/상태/작성자 마크다운 표.
+## 결과 보고 (한국어)
+PR 수 → 번호 / 제목 / 상태 / 작성자 마크다운 표.
