@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const version = "0.1.30"
+const version = "0.1.31"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
