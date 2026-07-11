@@ -125,10 +125,13 @@ project-description 내용과 기존 VOS 를 놓고 **새로 추가할 VOS** 항
 - `delete_mark`: 기존 폐기 (existingKey + deleteReason)
 
 ### 항목 형식 (내부 구조)
+
+⚠️ 본문 필드명은 **`desc`** — `description` 아님. 이 초안 항목이 Step 5 배치 입력으로 **필드명 변경 없이 그대로** 들어간다 (조회 응답의 `description` 은 저장 필드명일 뿐, 생성 입력 규약은 `desc`).
+
 ```
 {
   "summary": "...",
-  "description": "...",
+  "desc": "...",
   "client": "...",
   "mode": "create",
   "existingKey": "", "modifyReason": "", "deleteReason": ""
@@ -142,7 +145,7 @@ project-description 내용과 기존 VOS 를 놓고 **새로 추가할 VOS** 항
 ## Step 2 — 자가검증
 
 ### 점검 항목 (critical 기준)
-- 필수 필드(summary, description, client, mode) 누락
+- 필수 필드(summary, desc, client, mode) 누락 — 본문 필드가 `description` 으로 되어 있으면 그 자체가 critical (규약은 `desc`)
 - `mode=reuse/modify/delete_mark` 인데 `existingKey` 가 기존 VOS 에 없음
 - 동일 의미 VOS 중복 (summary 유사도 과도)
 - 이해관계자 관점 편향 (사용자만 있고 운영/보안 등 누락)
@@ -185,6 +188,8 @@ critical + suggestions 항목만 **국소 수정**. 나머지는 원문 유지. 
 개별 `curl -X POST` 를 **절대 반복 호출하지 말 것** — Gitea git push race + subkey 충돌 발생.
 대신 `finalItem` 중 `mode == "create"` 만 모아 JSON 배열로 한 파일에 쓰고, 아래 스크립트를 **한 번** 실행한다. 스크립트가 순차 POST + 재시도 + PUT(client/priority/assignee) 까지 처리한다.
 
+⚠️ 배치 파일의 필드명은 초안 그대로 — 특히 본문은 **`desc`** (`description` 으로 바꿔 쓰면 검증 경고/실패). `mode`/`existingKey` 등 여분 필드는 스크립트가 무시하므로 지우지 않아도 된다.
+
 ```bash
 # 1) 생성할 items 를 JSON 배열로 작성
 cat > /tmp/vos_items.json <<'JSON'
@@ -203,6 +208,9 @@ cat /tmp/vos_result.json
 결과 JSON 에서 `keys` 배열 · `created` · `failed` · `errors` 를 최종 보고에 반영.
 
 ### modify (기존 이슈 업데이트)
+
+⚠️ 비대칭 주의: **생성 입력은 `desc`, 수정(PUT data)은 저장 필드명 `description`** — API wire 규약이 다르다. 아래 블록 그대로 사용.
+
 ```bash
 SCRIPTS="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel)}/.claude/skills/_scripts"
 jq -n --arg p "$CODE" --arg k "EXISTING_KEY" --arg u "$USER" \

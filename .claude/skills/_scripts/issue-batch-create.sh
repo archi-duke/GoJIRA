@@ -6,7 +6,8 @@
 #
 # 입력(stdin): JSON array
 #   [{"issueType":"VOS","summary":"...","desc":"...","client":"alice"}, ...]
-#   필수: issueType, summary, desc
+#   필수: issueType, summary, desc — 하나라도 비면 전체 중단(아무것도 생성 안 함)
+#   "description" 은 규약 위반이지만 desc 부재 시 자동 정규화된다(+stderr 경고)
 #   POST 본문 포함: issueType / summary / desc / reqType / labels
 #   PUT 업데이트 필드 (생성 후 자동 반영):
 #     공통:      client / priority / assignee
@@ -33,6 +34,31 @@ USER="${2:?user knoxID required}"
 GOJIRA_API="${GOJIRA_API:-${GOJIRA_API_URL:?GOJIRA_API or GOJIRA_API_URL env var required (launcher must inject)}}"
 
 INPUT=$(cat)
+
+# ── 입력 사전 검증 + 별칭 정규화 (생성 시작 전, 원자적) ──────────────────────
+# 에이전트가 초안 스키마의 "description" 을 배치 입력에 그대로 가져오는 사고가 반복됨.
+# 배치 규약은 "desc" (POST /Issue wire 필드) — 미지 필드는 무시되므로 그대로 두면
+# 본문이 빈 이슈가 조용히 생긴다. → description 만 있으면 desc 로 자동 정규화(+경고),
+# 필수 필드(issueType/summary/desc) 가 하나라도 비면 아무것도 생성하지 않고 중단.
+if [ "$(jq -r 'type' <<< "$INPUT" 2>/dev/null)" != "array" ]; then
+  echo "ERROR: 입력은 JSON 배열이어야 함 — 받은 것: $(head -c 200 <<< "$INPUT")" >&2
+  exit 1
+fi
+ALIASED=$(jq '[.[] | select((.desc // "")=="" and (.description // "")!="")] | length' <<< "$INPUT")
+if [ "$ALIASED" -gt 0 ]; then
+  echo "WARN: ${ALIASED}개 항목의 'description' 을 'desc' 로 정규화함 — 배치 입력 규약은 desc (초안 필드명을 바꾸지 말고 그대로 desc 로 작성할 것)" >&2
+  INPUT=$(jq 'map(if (.desc // "")=="" and (.description // "")!="" then .desc = .description else . end)' <<< "$INPUT")
+fi
+INVALID=$(jq -r 'to_entries
+  | map(select((.value.issueType // "")=="" or (.value.summary // "")=="" or (.value.desc // "")==""))
+  | map("  항목[\(.key)] summary=\(.value.summary // "(없음)") — issueType/summary/desc 는 필수(비어있으면 안 됨)")
+  | .[]' <<< "$INPUT")
+if [ -n "$INVALID" ]; then
+  echo "ERROR: 입력 검증 실패 — 아무 이슈도 생성하지 않음. 항목을 고쳐 전체 배열로 다시 호출할 것." >&2
+  echo "$INVALID" >&2
+  exit 1
+fi
+
 COUNT=$(jq 'length' <<< "$INPUT")
 
 CREATED=0
