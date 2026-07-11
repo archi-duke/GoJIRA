@@ -367,15 +367,19 @@ FR / NFR / CNST 모든 create 모드 항목을 JSON 배열로 모아 batch 스�
 
 `relatedFeatures` 는 Step 5.2 링크 생성에만 쓰이며 Issue 본문에는 저장되지 않음 — batch JSON 에 포함시켜도 무해하나, 순수 생성용 페이로드만 전달해도 됨.
 
+⚠️ 배치 JSON 을 **손으로 다시 타이핑하지 말 것** — 초안 스키마는 `description`(validator 규약), 배치 입력은 `desc`(POST wire 규약) 로 필드명이 다르다. 아래처럼 저장된 draft 에서 **jq 로 결정적 변환**해 필드명 실수 여지를 없앤다.
+
 ```bash
-# reqType / qa / source 등 추가 필드를 포함시키면 PUT 으로 자동 업데이트됨
-cat > /tmp/req_items.json <<'JSON'
-[
-  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"FR"},
-  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"NFR","qa":"Performance","source":"...","stimulus":"...","environment":"...","artifact":"...","response":"...","measure":"...","responseScenario":"...","measureAuto":false},
-  {"issueType":"Requirement","summary":"...","desc":"...","reqType":"CNST"}
-]
-JSON
+# 최종 채택 draft → 배치 입력 결정적 변환 (description→desc 매핑 + NFR 추가필드 유지)
+bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" load "${CODE}" "reqref" "draft" \
+  | jq '[.requirements[] | select(.mode=="create")
+      | {issueType:"Requirement", summary, desc:(.description // ""), reqType}
+        + (to_entries
+           | map(select(.key | IN("qa","source","stimulus","environment","artifact","response","measure","responseScenario","measureAuto")))
+           | from_entries)]' \
+  > /tmp/req_items.json
+
+jq -c '.[] | {summary, reqType}' /tmp/req_items.json   # 생성 대상 육안 확인
 
 bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "${USER}" < /tmp/req_items.json \
   > /tmp/req_result.json
