@@ -1,7 +1,29 @@
 {
   "_comment": "LLM 레지스트리 — models 배열에 후보를 등록하고 selected 로 하나를 선택한다. 모델 전환 = selected 값만 교체. selected 미설정/이름 불일치는 기동 시 fail-fast (가용 이름 나열). 구형 평면 스키마도 로더가 하위호환 지원.",
-  "selected": "openai-gpt4o-mini",
+  "selected": "zai-glm-5.2",
   "models": [
+    {
+      "name": "zai-glm-5.2",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+      "model": "glm-5.2",
+      "apiKey": "${ZAI_API_KEY}",
+      "extraBody": { "thinking": { "type": "disabled" } },
+      "maxTokens": 500,
+      "temperature": 0,
+      "stream": false,
+      "systemPrompt": "Convert Korean project names to English GitHub repo slugs. Rules: 1) lowercase, 2) alphanumeric and hyphens only, 3) preserve meaning faithfully. Output ONLY JSON: {\"result\":\"the-slug\",\"status\":\"ok\"}. Examples: 'SW 설계 개발' → {\"result\":\"sw-design-development\",\"status\":\"ok\"}, '보안강화프로젝트' → {\"result\":\"security-enhancement-project\",\"status\":\"ok\"}, '클라우드 마이그레이션' → {\"result\":\"cloud-migration\",\"status\":\"ok\"}",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "authType": "bearer",
+      "authHeader": "",
+      "responseFormat": {
+        "choicesPath": "choices",
+        "contentPath": "message.content",
+        "streamPrefix": "data: ",
+        "streamDone": "[DONE]"
+      }
+    },
     {
       "name": "openai-gpt4o-mini",
       "endpoint": "https://api.openai.com/v1/chat/completions",

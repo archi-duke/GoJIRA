@@ -23,7 +23,11 @@ type Config struct {
 	Headers        map[string]string `json:"headers"`
 	AuthType       string            `json:"authType"`   // "bearer" | "header" | "none"
 	AuthHeader     string            `json:"authHeader"` // authType 이 "header" 일 때
-	ResponseFormat ResponseFormat    `json:"responseFormat"`
+	// ExtraBody 는 요청 body 에 그대로 병합되는 프로바이더 전용 파라미터.
+	// 예: z.ai GLM 하이브리드 추론 끄기 — {"thinking": {"type": "disabled"}}
+	// (reasoning 이 max_tokens 를 소진해 content 가 비는 것 방지)
+	ExtraBody      map[string]interface{} `json:"extraBody"`
+	ResponseFormat ResponseFormat         `json:"responseFormat"`
 }
 
 type ResponseFormat struct {

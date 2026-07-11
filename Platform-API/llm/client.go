@@ -76,6 +76,11 @@ func Call(cfg *Config, messages []Message, opts *Options) (string, error) {
 		"max_tokens":  maxTokens,
 		"temperature": temperature,
 	}
+	// 프로바이더 전용 파라미터 병합 (llm.json extraBody) — 표준 키도 덮어쓸 수 있다.
+	// 예: z.ai GLM thinking 끄기 {"thinking":{"type":"disabled"}}.
+	for k, v := range cfg.ExtraBody {
+		payload[k] = v
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("payload marshal 실패: %w", err)
