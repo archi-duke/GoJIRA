@@ -130,8 +130,9 @@ services:
       SMTP_USER: "${SMTP_USER:-}"
       SMTP_PASS: "${SMTP_PASS:-}"
       SMTP_FROM: "${SMTP_FROM:-}"
-      # LLM (선택 — llm.json 의 active provider 에 따라 사용됨)
+      # LLM (선택 — llm.json 의 selected 모델에 따라 사용됨)
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ZAI_API_KEY: "${ZAI_API_KEY:-}"
       PLATFORM_LLM_TICKET: "${PLATFORM_LLM_TICKET:-}"
       PLATFORM_LLM_USER_ID: "${PLATFORM_LLM_USER_ID:-}"
     volumes:
