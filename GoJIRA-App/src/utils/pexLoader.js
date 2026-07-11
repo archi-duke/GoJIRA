@@ -22,15 +22,20 @@ function alreadyExposed() {
 
 /**
  * GoJIRA-App 자기 자산 base URL 결정.
- * - webpack public path (CRA 빌드 / MFE remote) 우선
+ * - Vite 빌드 base (vite.config base='/gojira/' — 게이트웨이 프리픽스) 우선.
+ *   MF remote 로 셸에 로드돼도 빌드 시점 값이 번들에 박혀 있어 그대로 유효.
+ *   (구 __webpack_public_path__ 는 CRA 잔재 — Vite 6 이전 후 항상 미정의라
+ *   same-origin 폴백으로 빠져 게이트웨이에서 /pex-core 404 가 났다)
  * - dev 컨테이너 (3000) → standalone GoJIRA-App (3001) 로 fallback
  * - 그 외엔 same-origin (relative)
  */
 function pexAssetBase() {
-  // eslint-disable-next-line no-undef, camelcase
-  const wpPath = typeof __webpack_public_path__ === 'string' ? __webpack_public_path__ : '';
-  if (wpPath && wpPath !== '/' && /^https?:\/\//.test(wpPath)) {
-    return wpPath.replace(/\/$/, '');
+  const viteBase =
+    typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL
+      ? import.meta.env.BASE_URL
+      : '';
+  if (viteBase && viteBase !== '/') {
+    return viteBase.replace(/\/$/, '');
   }
   if (typeof window !== 'undefined') {
     const { protocol, hostname, port } = window.location;
