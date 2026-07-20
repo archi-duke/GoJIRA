@@ -89,6 +89,16 @@ func OpenInEditor(repoPath, fullFile string) error {
 //     (D10 Phase 3 §옵션(a)). code 가 빈 문자열(프로젝트 없는 일반 채팅)이면 미주입.
 func (s *Server) agentEnv(repoPath, user, code string) []string {
 	env := []string{"GOJIRA_REPO_ROOT=" + repoPath}
+	// 프로젝트 코드 주입 + bare 이름 자동 매핑(BASH_ENV).
+	// 스킬은 ${CODE}/${USER}/${PROJECT_ROOT} 로 참조하는데 launcher 는 GOJIRA_* 로 주입한다.
+	// 그 다리를 LLM(gojira.md export)에 맡기면 누락/오판 여지가 있으므로, 모든 bash 호출이
+	// 시작 시 자동 source 하는 _bootstrap.sh 를 BASH_ENV 로 지정해 결정적으로 매핑한다
+	// (GOJIRA_* 를 단일 진실로 유지 — bare 이름은 파생만, OS $USER 전역 오염 없음).
+	// 실측: bash -c 는 BASH_ENV 를 honor. 폐쇄망 주 타깃 Windows=Git Bash.
+	if code != "" {
+		env = append(env, "GOJIRA_CODE="+code)
+		env = append(env, "BASH_ENV="+filepath.Join(repoPath, ".claude", "skills", "_scripts", "_bootstrap.sh"))
+	}
 	// UTF-8 강제 — Windows 콘솔 기본 코드페이지(한국어 환경 CP949 등)에서 한글이
 	// U+FFFD 로 깨져 저장되는 문제 방지. 에이전트가 띄우는 bash/jq/python(스킬 스크립트)
 	// 가 UTF-8 I/O 를 쓰도록 locale 을 명시한다(콘솔 코드페이지는 terminalCommand 의

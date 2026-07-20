@@ -24,11 +24,15 @@ permission:
 
 ## 입력 파싱
 
-- `CODE`(projectCode, 예: `GOJIRA3`)는 사용자 메시지에서 추출해 export 한다. 메시지에
-  없으면 `basename "$GOJIRA_REPO_ROOT"`로 유추(클론 디렉토리명 = 프로젝트 코드). 그래도
-  불확실하면 되물어 확정한다.
-- **`USER`는 채팅에서 추측하거나 기본값(예: `batman`)을 쓰지 않는다** — launcher 가 주입하는
-  `GOJIRA_USER`(실제 로그인 사용자의 knox ID)를 그대로 쓴다. 아래 "환경변수" 절 참조.
+**`CODE` / `USER` / `PROJECT_ROOT` 는 이미 세팅돼 있다 — 직접 export 하거나 추측하지 마라.**
+launcher 가 `GOJIRA_CODE` / `GOJIRA_USER` / `GOJIRA_REPO_ROOT` 를 주입하고, 모든 bash 호출
+시작 시 `_bootstrap.sh`(BASH_ENV)가 이를 `CODE` / `USER` / `PROJECT_ROOT` 로 자동 매핑한다.
+그냥 `${CODE}` / `${USER}` / `${PROJECT_ROOT}` 를 쓰면 된다.
+
+- `CODE`: `GOJIRA_CODE` 주입값. 없으면 clone 디렉토리명(`basename $GOJIRA_REPO_ROOT`)으로 자동
+  채워진다 — **채팅 메시지에서 추측하지 마라**(오판 위험). 값이 정말 비어 있을 때만 되물어 확정.
+- `USER`: `GOJIRA_USER`(실제 로그인 knox ID) 자동. **채팅 추측·기본값(`batman`) 금지.**
+- `PROJECT_ROOT`: clone 루트(`GOJIRA_REPO_ROOT`) 자동.
 
 ## 🚀 워크플로우 시작 시 — 상태 확인은 1회로
 
@@ -51,8 +55,12 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/project-status.sh" "${CODE}" "${US
 
 launcher 가 세션 spawn 시 주입하는 값이 전부다(하드코딩 기본값 쓰지 말 것 — 특히 예전
 `/home/parallels/works/GoJIRA`, `batman` 같은 개발용 예시값을 실제 세션에 흘리지 않는다).
-bash 실행 시 항상 맨 앞에 export 한다:
+
+`CODE`/`USER`/`PROJECT_ROOT` 는 `_bootstrap.sh`(BASH_ENV)가 매 bash 호출마다 `GOJIRA_*` 에서
+자동 파생하므로 **직접 export 불필요**(아래는 안전망 — 그대로 둬도 무해). `PLATFORM_API`/
+`GOJIRA_API` 는 이미 그 이름으로 주입되므로 검증만:
 ```bash
+# (자동 매핑되지만, 값 확인/안전망용)
 export PROJECT_ROOT="${GOJIRA_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 export USER="${GOJIRA_USER:?GOJIRA_USER env var required (launcher must inject) — batman 등으로 대체 금지}"
 # 사내 컨벤션: platform-api=44350, gojira-api=44360 (호스트 매핑 포트, 고정).
