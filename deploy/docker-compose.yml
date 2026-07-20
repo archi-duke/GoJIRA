@@ -135,10 +135,16 @@ services:
       ZAI_API_KEY: "${ZAI_API_KEY:-}"
       PLATFORM_LLM_TICKET: "${PLATFORM_LLM_TICKET:-}"
       PLATFORM_LLM_USER_ID: "${PLATFORM_LLM_USER_ID:-}"
+      # 프로젝트 아카이브 백업(zip) 저장 위치. user:"${UID}:${GID}" override 시
+      # /etc/passwd 에 uid 가 없어 HOME=/ → 기본 fallback 이 /tmp(휘발)가 되므로 명시.
+      # 아래 볼륨으로 서버 호스트에 영속됨.
+      GOJIRA_BACKUP_DIR: "/data/backups"
     volumes:
       # 호스트 bind mount — Platform-API 와 (향후) OpenCode 가 같은 fs 공유.
       # ${GOJIRA_REPOS_DIR} 는 호스트 측 절대/상대 경로 (compose 가 .env 에서 해석).
       - ${GOJIRA_REPOS_DIR:-../repos}:/data/repos
+      # 아카이브 백업 zip 영속 저장 (서버 호스트). 미설정 시 ../backups.
+      - ${GOJIRA_BACKUP_DIR_HOST:-../backups}:/data/backups
       # 사내 LLM swap 위해 llm.json 외부 주입 (없으면 이미지에 내장된 default 사용)
       - ./config/llm.json:/app/config/llm.json:ro
       # 런처 바이너리(OS별) — launcher-dist init job 이 채운 공유 볼륨을 read-only 서빙.
