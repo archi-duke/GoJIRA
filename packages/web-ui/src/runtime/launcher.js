@@ -133,6 +133,15 @@ export async function requestDelete({ code, user, path, token }) {
 }
 
 /**
+ * 프로젝트 아카이브 후처리 — 로컬 clone(RepoRoot/{code}) 전체 삭제.
+ * 서버측 archive(Gitea/Mongo) 성공 후 웹이 호출. 이미 없으면 성공(removed:false).
+ * @returns {Promise<{ok:boolean, data?:{removed:boolean}, error?:string}>}
+ */
+export async function requestRemoveClone({ code, user, token }) {
+  return post('/remove-clone', { code, user }, token);
+}
+
+/**
  * 파일 이동/이름변경 — 로컬 working tree 의 from→to. commit/push 안 함(/sync 가 포착).
  */
 export async function requestRename({ code, user, from, to, token }) {

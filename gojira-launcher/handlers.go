@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const version = "0.1.31"
+const version = "0.1.32"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -467,6 +467,45 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "path": req.Path, "deleted": true})
+}
+
+type removeCloneReq struct {
+	Code string `json:"code"`
+	User string `json:"user"`
+}
+
+// POST /remove-clone — 프로젝트 아카이브 후처리: 로컬 clone(RepoRoot/{code}) 전체 삭제.
+// 서버측 archive(Gitea repo + Mongo)는 Platform-API 가 처리하고, 사용자 PC 의 clone 은
+// 서버가 닿을 수 없어 이 핸들러가 담당한다(웹 삭제 흐름이 archive 성공 후 호출).
+// 멱등: 이미 없으면 성공(removed:false) — 수동 삭제된 경우도 정상 처리(끝까지 정리 원칙).
+func (s *Server) handleRemoveClone(w http.ResponseWriter, r *http.Request) {
+	var req removeCloneReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "잘못된 JSON 본문")
+		return
+	}
+	// code 검증 — 경로 이탈(../, 절대경로, 구분자) 차단. RepoRoot 하위 단일 세그먼트만 허용.
+	if req.Code == "" || strings.ContainsAny(req.Code, `/\`) || strings.Contains(req.Code, "..") {
+		writeErr(w, http.StatusBadRequest, "잘못된 code")
+		return
+	}
+	path := s.repoPath(req.Code) // filepath.Join(RepoRoot, code)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			// 이미 없음 — 멱등 성공.
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "removed": false, "reason": "not found"})
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.RemoveAll(path); err != nil {
+		writeErr(w, http.StatusInternalServerError, "clone 삭제 실패: "+err.Error())
+		return
+	}
+	s.alignedRepos.Delete(req.Code) // 정렬 캐시에서도 제거
+	log.Printf("/remove-clone code=%s → %s 삭제", req.Code, path)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "removed": true, "repoPath": path})
 }
 
 type renameReq struct {

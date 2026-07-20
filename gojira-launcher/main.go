@@ -58,6 +58,8 @@ func main() {
 	mux.HandleFunc("OPTIONS /write", srv.secure(true, srv.handleWrite))
 	mux.HandleFunc("POST /delete", srv.secure(true, srv.handleDelete))
 	mux.HandleFunc("OPTIONS /delete", srv.secure(true, srv.handleDelete))
+	mux.HandleFunc("POST /remove-clone", srv.secure(true, srv.handleRemoveClone))
+	mux.HandleFunc("OPTIONS /remove-clone", srv.secure(true, srv.handleRemoveClone))
 	mux.HandleFunc("POST /rename", srv.secure(true, srv.handleRename))
 	mux.HandleFunc("OPTIONS /rename", srv.secure(true, srv.handleRename))
 	mux.HandleFunc("GET /status", srv.secure(true, srv.handleStatus))
