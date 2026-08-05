@@ -4,7 +4,7 @@ import ContextMenu from './ContextMenu';
 import ProjectDialog from './ProjectDialog';
 import { modalAlert, modalPrompt } from '@platform/web-ui/components/AlertModal';
 import config from '../config';
-import { detectLauncher, requestPrewarm } from '@platform/web-ui/runtime/launcher';
+import { detectLauncher, requestPrewarm, requestRemoveClone } from '@platform/web-ui/runtime/launcher';
 import LauncherInstallModal from './LauncherInstallModal';
 import { authFetch } from '../platform/auth';
 
@@ -165,7 +165,7 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       case 'delete': {
         const code = getJiraCode(project);
         const input = await modalPrompt(
-          `"${project.name}" 과제를 영구 삭제합니다.\n백업 zip 이 ~/.gojira-backups/ 에 만들어진 후 이슈/문서/repo 가 모두 정리됩니다.\n계속하려면 과제명을 정확히 입력해주세요.`,
+          `"${project.name}" 과제를 영구 삭제합니다.\n서버에 백업 zip 이 만들어진 후 이슈/문서/repo 와 내 PC 로컬 클론이 모두 정리됩니다.\n계속하려면 과제명을 정확히 입력해주세요.`,
           '',
           {
             dangerous: true,
@@ -186,7 +186,23 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
             return;
           }
           setProjects((prev) => prev.filter((p) => getJiraCode(p) !== code));
-          await modalAlert(`삭제 완료\n백업: ${data.backupPath || '(없음)'}\nGitHub repo: ${data.githubDeleted ? '삭제' : '미삭제'}`);
+
+          // 후처리: 내 PC 로컬 clone 삭제 — launcher 담당(서버는 못 닿음).
+          // best-effort: launcher 오프라인/실패해도 전체 삭제는 중단하지 않고 상태만 보고.
+          let cloneMsg = '\n로컬 클론: 런처 미감지 — 수동 삭제 필요';
+          try {
+            const launcher = await detectLauncher();
+            if (launcher?.ready) {
+              const rc = await requestRemoveClone({ code, user, token: launcher.token });
+              cloneMsg = rc.ok
+                ? (rc.data?.removed ? '\n로컬 클론: 삭제' : '\n로컬 클론: 없음(이미 정리됨)')
+                : `\n로컬 클론: 삭제 실패(${rc.error || '알 수 없음'})`;
+            }
+          } catch (e) {
+            cloneMsg = `\n로컬 클론: 삭제 시도 오류(${e.message})`;
+          }
+
+          await modalAlert(`삭제 완료\n백업: ${data.backupPath || '(없음)'}\nGitHub repo: ${data.githubDeleted ? '삭제' : '미삭제'}${cloneMsg}`);
         } catch (e) {
           await modalAlert('삭제 중 오류: ' + e.message);
         }
