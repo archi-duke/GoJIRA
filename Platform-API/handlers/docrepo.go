@@ -908,6 +908,23 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 		req.Body = "LGTM"
 	}
 
+	knoxID := authmw.UserID(r.Context())
+
+	// 자가승인 선차단. Gitea 도 거부하지만("approve your own pull is not allowed")
+	// 그 422 가 사용자에게 영문 원문 그대로 노출돼 원인을 알기 어려웠다.
+	// 조회 실패 시에는 막지 않고 진행한다 — 판단 근거가 없는데 차단하면 안 된다.
+	if knoxID != "" {
+		if pr, _ := github.GetPR(owner, name, num); pr != nil {
+			if author, ok := pr["user"].(map[string]interface{}); ok {
+				if login, _ := author["login"].(string); login != "" && login == knoxID {
+					respondError(w, http.StatusConflict,
+						"본인이 작성한 발행 신청은 본인이 승인할 수 없습니다. 지정된 승인자에게 요청하세요.")
+					return
+				}
+			}
+		}
+	}
+
 	userToken := getUserToken(r)
 	if err := github.CreateReview(owner, name, num, req.Event, req.Body, userToken); err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
@@ -915,7 +932,6 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 승인/반려 후 requested_reviewers에서 해당 사용자 제거
-	knoxID := authmw.UserID(r.Context())
 	if knoxID != "" {
 		github.RemoveRequestedReviewer(owner, name, num, knoxID, userToken)
 	}
