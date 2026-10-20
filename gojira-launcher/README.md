@@ -38,7 +38,7 @@
 ```jsonc
 {
   "defaultAgent": "opencode",          // opencode | claude
-  "repoRoot": "~/GoJIRA-projects",     // 로컬 clone 루트 (기본값)
+  "repoRoot": "~/GoJIRA-projects",     // 로컬 clone 루트 (기본값). 실제 clone 은 <repoRoot>/<user>/<code>
   "backend": {
     "platformApi": "http://<host>:9000/api/v2",
     "gojiraApi": "http://<host>:9001/api/v2"
@@ -134,7 +134,8 @@ docker run --rm -v "$PWD":/src -w /src -e CGO_ENABLED=0 -e GOWORK=off golang:1.2
 ```
 [웹] "수정" → fetch http://127.0.0.1:5599/edit (POST {code,user,file,agent} + 토큰)
 [런처] Origin·토큰 검증
-      → 로컬 clone 보장 (없으면 git clone <git.base>/<org>/<code> → docs/{user} 체크아웃)
+      → 사용자별 로컬 clone 보장 (<repoRoot>/<user>/<code>, 없으면 git clone → docs/{user} 체크아웃.
+        분리 이전 공유 clone <repoRoot>/<code> 가 docs/{user} 상태면 그대로 이관)
       → code <repoPath> + code -r -g <repoPath>/<file>
       → 새 터미널에서 opencode|claude (repoPath)
       → {status, sessionId} 회신

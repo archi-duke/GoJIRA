@@ -61,9 +61,45 @@ func gitCmd(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// repoPath — 로컬 clone 경로 (repoRoot/<code>).
-func (s *Server) repoPath(code string) string {
+// repoPath — 로컬 clone 경로 (repoRoot/<user>/<code>).
+// 사용자별로 작업본을 분리한다 — 한 폴더를 사용자 간 공유하면 전환 시 checkout 이
+// 미커밋 변경을 다른 사용자 브랜치로 옮기고, 살아있는 에이전트가 남의 브랜치에 쓰게 된다.
+func (s *Server) repoPath(code, user string) string {
+	return filepath.Join(s.cfg.RepoRoot, user, code)
+}
+
+// legacyRepoPath — 사용자별 분리 이전의 공유 clone 경로 (repoRoot/<code>). 이관/정리 전용.
+func (s *Server) legacyRepoPath(code string) string {
 	return filepath.Join(s.cfg.RepoRoot, code)
+}
+
+// repoKey — 레포 락·정렬 캐시 키. 경로와 같은 단위((user,code))로 직렬화한다.
+func repoKey(code, user string) string {
+	return user + "/" + code
+}
+
+// migrateLegacyClone — 공유 clone(repoRoot/<code>)이 이 사용자의 docs/<user> 를 체크아웃한
+// 상태라면 사용자별 경로로 옮긴다(재clone 없이 미커밋·미push 작업 보존). 다른 사용자 브랜치면
+// 건드리지 않는다 — 그 사용자가 접근할 때 이관되도록 남겨두고, 이 사용자는 새로 clone 한다.
+// 이관 실패(Windows 에서 다른 프로세스가 cwd 로 점유 등)는 로그만 남기고 새 clone 으로 진행.
+func (s *Server) migrateLegacyClone(code, user, path string) {
+	legacy := s.legacyRepoPath(code)
+	if _, err := os.Stat(filepath.Join(legacy, ".git")); err != nil {
+		return
+	}
+	cur, err := gitCmd(legacy, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || cur != "docs/"+user {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		log.Printf("migrateLegacyClone mkdir 실패 (%s): %v", path, err)
+		return
+	}
+	if err := os.Rename(legacy, path); err != nil {
+		log.Printf("migrateLegacyClone 이관 실패 (%s → %s): %v — 새로 clone", legacy, path, err)
+		return
+	}
+	log.Printf("migrateLegacyClone 공유 clone 이관 (%s → %s)", legacy, path)
 }
 
 // cloneURL — 자격이 있으면 http://<user>:<token>@<host>/... 형태로 임베드한다.
@@ -194,7 +230,7 @@ func (s *Server) resolveRepoLocal(code, user string) (string, error) {
 	if err := validateName("user", user); err != nil {
 		return "", err
 	}
-	path := s.repoPath(code)
+	path := s.repoPath(code, user)
 	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 		return path, nil // 이미 프로비저닝된 clone — 즉시 반환 (락/git 호출 없음).
 	}
@@ -213,32 +249,37 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 		return "", fmt.Errorf("git.base 미설정 — launcher.json 에 clone 대상 Gitea 주소를 지정하세요")
 	}
 
-	path := s.repoPath(code)
+	path := s.repoPath(code, user)
+	key := repoKey(code, user)
 
 	// 정렬 게이트 — no-fetch 조회 경로는 프로세스 생애 동안 (code,user) 당 1회만 정렬한다.
 	// clone 존재 확인(stat)은 값싸므로 유지 — 사용자가 clone 을 지웠으면 게이트 무효화 후 재프로비저닝.
 	if !withFetch {
-		if u, ok := s.alignedRepos.Load(code); ok && u.(string) == user {
+		if _, ok := s.alignedRepos.Load(key); ok {
 			if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 				return path, nil // 락/git 서브프로세스 0 으로 즉시 반환.
 			}
-			s.alignedRepos.Delete(code)
+			s.alignedRepos.Delete(key)
 		}
 	}
 
-	mu := getRepoLock(code)
+	mu := getRepoLock(key)
 	mu.Lock()
 	defer mu.Unlock()
 
 	branch := "docs/" + user
 
 	if _, err := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(err) {
-		if err := os.MkdirAll(s.cfg.RepoRoot, 0o755); err != nil {
+		s.migrateLegacyClone(code, user, path)
+	}
+	if _, err := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(err) {
+		userRoot := filepath.Dir(path)
+		if err := os.MkdirAll(userRoot, 0o755); err != nil {
 			return "", fmt.Errorf("repoRoot 생성 실패: %w", err)
 		}
 		// code ≠ Gitea repo 이름일 수 있으므로 repoName 으로 clone (로컬 디렉터리명은 code).
 		repoName := s.resolveRepoName(code, user)
-		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(repoName, user), code); err != nil {
+		if _, err := gitCmd(userRoot, "clone", s.cloneURL(repoName, user), code); err != nil {
 			return "", err
 		}
 	} else {
@@ -259,7 +300,7 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 		s.ensureExcluded(path, entry)
 	}
 	s.ensureGitIdentity(path, user)
-	s.alignedRepos.Store(code, user) // 정렬 완료 — 이후 no-fetch 조회는 fast-path.
+	s.alignedRepos.Store(key, true) // 정렬 완료 — 이후 no-fetch 조회는 fast-path.
 	return path, nil
 }
 
@@ -573,7 +614,7 @@ func (s *Server) Push(code, user string) (*PushResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	mu := getRepoLock(code)
+	mu := getRepoLock(repoKey(code, user))
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -647,7 +688,7 @@ func (s *Server) Pull(code, user string) (*PullResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	mu := getRepoLock(code)
+	mu := getRepoLock(repoKey(code, user))
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -713,11 +754,14 @@ type RepoStatus struct {
 	LastCommit string `json:"lastCommit,omitempty"`
 }
 
-func (s *Server) Status(code string) (*RepoStatus, error) {
+func (s *Server) Status(code, user string) (*RepoStatus, error) {
 	if err := validateName("code", code); err != nil {
 		return nil, err
 	}
-	path := s.repoPath(code)
+	if err := validateName("user", user); err != nil {
+		return nil, err
+	}
+	path := s.repoPath(code, user)
 	if _, err := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(err) {
 		return &RepoStatus{State: "missing"}, nil
 	}

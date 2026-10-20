@@ -14,7 +14,7 @@ import (
 func TestHandleIssuesLocal(t *testing.T) {
 	tmp := t.TempDir()
 	code := "TESTPRJ"
-	repoPath := filepath.Join(tmp, code)
+	repoPath := filepath.Join(tmp, "duke.kimm", code)
 	issuesDir := filepath.Join(repoPath, "data", "issues")
 	if err := os.MkdirAll(issuesDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestHandleIssuesNoClone(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status=%d want 404 body=%s", w.Code, w.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(tmp, "NOPE")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "duke.kimm", "NOPE")); !os.IsNotExist(err) {
 		t.Fatal("clone 이 자동 생성되면 안 됨(EnsureRepo 호출 금지)")
 	}
 }
@@ -92,7 +92,7 @@ func TestHandleIssuesNoClone(t *testing.T) {
 func TestHandleIssuesNoIssuesDir(t *testing.T) {
 	tmp := t.TempDir()
 	code := "EMPTYPRJ"
-	repoPath := filepath.Join(tmp, code)
+	repoPath := filepath.Join(tmp, "duke.kimm", code)
 	if err := os.MkdirAll(filepath.Join(repoPath, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
