@@ -909,17 +909,9 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userToken := getUserToken(r)
-	reviewID, err := github.CreateReview(owner, name, num, req.Event, req.Body, userToken)
-	if err != nil {
+	if err := github.CreateReview(owner, name, num, req.Event, req.Body, userToken); err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
-	}
-
-	// Gitea 1.25 API 버그: APPROVE/REQUEST_CHANGES가 PENDING으로 저장됨 → DB 직접 수정
-	if reviewID > 0 {
-		if err := github.FixReviewState(reviewID, req.Event); err != nil {
-			log.Printf("review state fix 실패 (id=%d): %v", reviewID, err)
-		}
 	}
 
 	// 승인/반려 후 requested_reviewers에서 해당 사용자 제거
@@ -1017,8 +1009,10 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("merge: PR #%d 자동 동기화 성공", num)
 	}
 
-	// force_merge로 branch protection 우회하여 머지
-	if err := github.MergePR(owner, name, num, "merge"); err != nil {
+	// 머지는 요청 사용자 토큰으로 — Gitea 이력의 머지 주체가 실제 작업자가 된다.
+	// (승인 집계가 어긋나면 github.MergePR 내부에서 관리자 force_merge 로 폴백)
+	userToken := getUserToken(r)
+	if err := github.MergePR(owner, name, num, "merge", userToken); err != nil {
 		if strings.Contains(err.Error(), "405") {
 			respondError(w, http.StatusConflict, "머지할 수 없습니다. 변경사항이 없거나 충돌이 있습니다. PR을 확인해주세요.")
 			return
