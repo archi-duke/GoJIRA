@@ -70,6 +70,8 @@ func main() {
 		// Account 관리
 		r.Route("/Account", func(r chi.Router) {
 			r.Get("/me", handlers.UserMeHandler)
+			// 본인 Gitea 자격(username+PAT) — 런처가 clone/push URL 용으로 조회.
+			r.Get("/me/gitCredentials", handlers.UserGitCredentialsHandler)
 
 			r.Get("/users", handlers.UserListHandler)
 			r.Get("/users/{id}", handlers.UserGetHandler)

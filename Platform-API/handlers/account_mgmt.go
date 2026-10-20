@@ -20,6 +20,33 @@ func reqApp(r *http.Request) string {
 	return db.NormalizeApp(r.URL.Query().Get("app"))
 }
 
+// stripSecrets — 응답으로 내보낼 user 문서에서 비밀 필드를 제거한다.
+// giteaToken(사용자 Gitea PAT)은 신원 증명이므로 일반 user 응답에 실려선 안 된다.
+// 런처 등 신뢰 컴포넌트는 전용 엔드포인트(/Account/me/gitCredentials)로만 받는다.
+// 입력 문서를 변형하지 않도록 얕은 복사 후 삭제한다.
+func stripSecrets(user bson.M) bson.M {
+	if user == nil {
+		return nil
+	}
+	out := make(bson.M, len(user))
+	for k, v := range user {
+		if k == "giteaToken" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// stripSecretsAll — user 문서 슬라이스에 stripSecrets 를 적용.
+func stripSecretsAll(users []bson.M) []bson.M {
+	out := make([]bson.M, 0, len(users))
+	for _, u := range users {
+		out = append(out, stripSecrets(u))
+	}
+	return out
+}
+
 // === Users ===
 
 func UserListHandler(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +57,7 @@ func UserListHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, users)
+	respondJSON(w, http.StatusOK, stripSecretsAll(users))
 }
 
 func UserGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +69,7 @@ func UserGetHandler(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "user not found")
 		return
 	}
-	respondJSON(w, http.StatusOK, user)
+	respondJSON(w, http.StatusOK, stripSecrets(user))
 }
 
 func UserCreateHandler(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +215,37 @@ func UserMeHandler(w http.ResponseWriter, r *http.Request) {
 		userID = fmt.Sprintf("%v", id)
 	}
 	auth, _ := db.CalcUserAuthority(ctx, userID, reqApp(r))
-	respondJSON(w, http.StatusOK, bson.M{"user": user, "authority": auth})
+	respondJSON(w, http.StatusOK, bson.M{"user": stripSecrets(user), "authority": auth})
+}
+
+// UserGitCredentialsHandler — GET /Account/me/gitCredentials
+//
+// 요청자 **본인** 의 Gitea 자격(username + PAT)만 반환한다. 경로에 사용자 파라미터가
+// 없으므로 타인 자격을 조회할 방법이 없다. 신원은 auth 미들웨어가 검증한 것(SSO
+// Bearer 또는 X-Service-Token act-as)만 사용한다.
+//
+// 용도: 런처가 clone/fetch/push URL 에 임베드할 자격을 런타임에 받아간다.
+// 이전에는 launcher.json 의 git.user/git.token 에 사람이 PAT 를 손으로 적어두어
+// 전원이 공용 관리자 계정(gojira-admin)으로 push 되는 문제가 있었다.
+//
+// PAT 는 사용자 등록 시 Gitea 계정과 함께 자동 발급되어 users.giteaToken 에 저장된다
+// (UserCreateHandler). 아직 없는 사용자는 404 — 호출 측은 기존 설정으로 폴백한다.
+func UserGitCredentialsHandler(w http.ResponseWriter, r *http.Request) {
+	knoxID := authmw.UserID(r.Context())
+	if knoxID == "" {
+		respondError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	token := db.GetUserGiteaToken(ctx, knoxID)
+	if token == "" {
+		respondError(w, http.StatusNotFound, fmt.Sprintf("'%s' 의 Gitea 토큰이 없습니다", knoxID))
+		return
+	}
+	// 캐시 금지 — 자격증명이 중간 프록시/브라우저에 남지 않도록.
+	w.Header().Set("Cache-Control", "no-store")
+	respondJSON(w, http.StatusOK, bson.M{"login": knoxID, "token": token})
 }
 
 // === AuthGroups ===

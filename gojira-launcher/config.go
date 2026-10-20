@@ -108,7 +108,7 @@ func LoadConfig() (*Config, error) {
 		if werr := writePlaceholderConfig(dir, path); werr != nil {
 			fmt.Fprintf(os.Stderr, "launcher.json placeholder 생성 실패 (%s): %v\n", path, werr)
 		} else {
-			fmt.Fprintf(os.Stderr, "launcher.json placeholder 생성: %s — git.user/git.token 채우고 launcher 재시작 필요\n", path)
+			fmt.Fprintf(os.Stderr, "launcher.json placeholder 생성: %s — gateway 를 채우고 launcher 재시작 필요 (git.user/git.token 은 선택: 사용자 PAT 는 Platform-API 에서 자동 조회)\n", path)
 		}
 	} else {
 		return nil, fmt.Errorf("%s 읽기 실패: %w", path, err)
@@ -161,18 +161,22 @@ func writePlaceholderConfig(dir, path string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
 
-// gitAuthSummary — 시작 로그용. user/token 미설정 시 명시 경고.
+// gitAuthSummary — 시작 로그용.
+//
+// git.user/git.token 은 이제 폴백이다 — 평시에는 요청 사용자 본인의 Gitea PAT 를
+// Platform-API 에서 받아 쓴다(gitcreds.go). 따라서 미설정 자체는 경고가 아니고,
+// "백엔드 조회 실패 시 익명으로 떨어진다"는 사실만 알린다.
 func (c *Config) gitAuthSummary() string {
 	hasAuth := c.Git.User != "" && c.Git.Token != ""
 	if !hasAuth {
-		return "git auth=anonymous (WARN: git.user/git.token 미설정 — 폐쇄망 Gitea 에서 매 호출마다 인증 prompt 가 뜰 수 있습니다. " +
-			"launcher.json 의 git.user/git.token 을 채우고 재시작하세요.)"
+		return "git auth=per-user (launcher.json git.user/git.token 미설정 — 폴백 없음. " +
+			"Platform-API 에서 사용자 PAT 조회 실패 시 익명으로 떨어져 폐쇄망 Gitea 에서 인증 prompt 가 뜰 수 있습니다.)"
 	}
 	masked := c.Git.Token
 	if len(masked) > 6 {
 		masked = masked[:6] + "..."
 	}
-	return fmt.Sprintf("git auth=user=%q token=%s", c.Git.User, masked)
+	return fmt.Sprintf("git auth=per-user (폴백 user=%q token=%s)", c.Git.User, masked)
 }
 
 func applyDefaults(cfg *Config) {

@@ -185,9 +185,9 @@ func doInstall(gateway string) error {
 	}
 
 	if cfg.Git.User == "" || cfg.Git.Token == "" {
-		fmt.Printf("\n설치 완료. git.user/git.token 이 비어있습니다 — 폐쇄망 Gitea 인증에 필요하면\n~/.gojira/%s 를 채우고 install 을 다시 실행하세요(기존 데몬을 자동으로 내리고\n새 설정으로 재기동합니다).\n", configFileName)
+		fmt.Printf("\n설치 완료. Gitea 인증은 로그인한 사용자 본인의 PAT 를 Platform-API 에서\n자동으로 받아 사용합니다 — git.user/git.token 은 비워두어도 됩니다.\n백엔드에 PAT 가 없는 환경에서만 ~/.gojira/%s 에 폴백 자격을 채우세요.\n", configFileName)
 	} else {
-		fmt.Println("\n설치 완료.")
+		fmt.Println("\n설치 완료. (launcher.json 의 git.user/git.token 은 폴백으로만 쓰입니다 — 평시에는 사용자 본인 PAT 사용)")
 	}
 	return nil
 }

@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const version = "0.1.33"
+const version = "0.1.34"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -40,6 +40,11 @@ type Server struct {
 	// 정렬 서브프로세스들이 체감 지연의 주범이었다. 값이 user 인 이유: 유저 전환 시 branch 가
 	// docs/{다른유저} 로 남아있으면 안 되므로 user 불일치면 풀 정렬 경로로 되돌린다.
 	alignedRepos sync.Map
+
+	// gitCreds — user(knoxId) → gitCred. Gitea 자격을 사용자별로 캐시한다(gitcreds.go).
+	// 이전처럼 launcher.json 의 단일 PAT 를 쓰지 않고 요청 사용자 본인의 PAT 로
+	// clone/fetch/push 하기 위한 것 — Gitea 상 pusher 가 실제 작업자로 기록된다.
+	gitCreds sync.Map
 }
 
 // setSSOToken/ssoToken — 웹이 보낸 SSO 세션토큰 캡처/조회.
