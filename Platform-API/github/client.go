@@ -689,10 +689,7 @@ func CreatePR(owner, repo, title, body, head, base string, userToken ...string) 
 		"head":  head,
 		"base":  base,
 	}
-	token := ""
-	if len(userToken) > 0 {
-		token = userToken[0]
-	}
+	token := firstToken(userToken)
 	data, status, err := doRequestAs("POST", path, payload, token)
 	if err != nil {
 		return nil, err
@@ -740,10 +737,7 @@ func CreateReview(owner, repo string, prNumber int, event, body string, userToke
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, prNumber)
 	payload := map[string]string{"event": event, "body": body}
-	token := ""
-	if len(userToken) > 0 {
-		token = userToken[0]
-	}
+	token := firstToken(userToken)
 	data, status, err := doRequestAs("POST", path, payload, token)
 	if err != nil {
 		return 0, err
@@ -769,10 +763,7 @@ func MergePR(owner, repo string, prNumber int, mergeMethod string, userToken ...
 			"force_merge": true,
 		}
 	}
-	token := ""
-	if len(userToken) > 0 {
-		token = userToken[0]
-	}
+	token := firstToken(userToken)
 
 	// Gitea 405 (repo lock) 재시도
 	maxRetries := 5
@@ -842,9 +833,23 @@ func CompareBranches(owner, repo, base, head string) (map[string]interface{}, er
 
 // --- Reviewers ---
 
-func RequestReviewers(owner, repo string, prNumber int, reviewers []string) error {
+// RequestReviewers PR 에 리뷰어를 지정한다.
+//
+// userToken 을 주면 그 사용자 행위로 기록된다(Gitea 타임라인의 "requested review" 주체).
+// 실패하면 관리자 토큰으로 재시도한다 — 리뷰어가 안 붙으면 승인 흐름 자체가 막히므로
+// 신원 정확성보다 동작 보장이 우선이다.
+func RequestReviewers(owner, repo string, prNumber int, reviewers []string, userToken ...string) error {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, prNumber)
 	payload := map[string]interface{}{"reviewers": reviewers}
+
+	if tok := firstToken(userToken); tok != "" {
+		data, status, err := doRequestAs("POST", path, payload, tok)
+		if err == nil && status < 400 {
+			return nil
+		}
+		log.Printf("RequestReviewers: 사용자 토큰 실패(status=%d, err=%v) — 관리자 토큰으로 재시도: %s", status, err, string(data))
+	}
+
 	data, status, err := doRequest("POST", path, payload)
 	if err != nil {
 		return err
@@ -855,11 +860,27 @@ func RequestReviewers(owner, repo string, prNumber int, reviewers []string) erro
 	return nil
 }
 
-// RemoveRequestedReviewer 리뷰 완료 후 requested_reviewers에서 제거
-func RemoveRequestedReviewer(owner, repo string, prNumber int, username string) {
+// RemoveRequestedReviewer 리뷰 완료 후 requested_reviewers에서 제거.
+// userToken 이 있으면 본인 행위로 기록하고, 실패 시 관리자 토큰으로 재시도한다.
+func RemoveRequestedReviewer(owner, repo string, prNumber int, username string, userToken ...string) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, prNumber)
 	payload := map[string]interface{}{"reviewers": []string{username}}
+
+	if tok := firstToken(userToken); tok != "" {
+		if _, status, err := doRequestAs("DELETE", path, payload, tok); err == nil && status < 400 {
+			return
+		}
+	}
 	doRequest("DELETE", path, payload)
+}
+
+// firstToken — 가변인자로 받은 사용자 토큰의 첫 값(없으면 "").
+// CreatePR/CreateReview/MergePR 이 쓰던 인라인 패턴을 한 곳으로 모은 것.
+func firstToken(userToken []string) string {
+	if len(userToken) > 0 {
+		return userToken[0]
+	}
+	return ""
 }
 
 // --- Branch Protection ---
@@ -919,14 +940,14 @@ func setBranchProtectionGitHub(owner, repo, branch string, requiredReviewers int
 func setBranchProtectionGitea(owner, repo, branch string, requiredReviewers int) error {
 	path := fmt.Sprintf("/repos/%s/%s/branch_protections", owner, repo)
 	body := map[string]interface{}{
-		"branch_name":                   branch,
-		"enable_push":                   false,
-		"enable_merge_whitelist":        false,
-		"enable_approvals_whitelist":    false,
-		"required_approvals":            requiredReviewers,
-		"dismiss_stale_approvals":       true,
-		"block_on_rejected_reviews":     true,
-		"block_on_outdated_branch":      false,
+		"branch_name":                branch,
+		"enable_push":                false,
+		"enable_merge_whitelist":     false,
+		"enable_approvals_whitelist": false,
+		"required_approvals":         requiredReviewers,
+		"dismiss_stale_approvals":    true,
+		"block_on_rejected_reviews":  true,
+		"block_on_outdated_branch":   false,
 	}
 	data, status, err := doRequest("POST", path, body)
 	if err != nil {

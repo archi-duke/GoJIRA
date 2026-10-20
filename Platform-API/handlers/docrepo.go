@@ -590,8 +590,8 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		Date    string   `json:"date"`
 		Parents []string `json:"parents"`
 		Refs    []string `json:"refs"`
-		Lane    int      `json:"lane"`      // 그래프 lane 번호
-		Lanes   []int    `json:"lanes"`     // merge 커밋의 모든 parent lane
+		Lane    int      `json:"lane"`  // 그래프 lane 번호
+		Lanes   []int    `json:"lanes"` // merge 커밋의 모든 parent lane
 	}
 	commitMap := map[string]*graphCommit{}
 	var branchNames []string
@@ -678,7 +678,9 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i < len(queue); i++ {
 			for j := i + 1; j < len(queue); j++ {
 				ci, cj := commitMap[queue[i]], commitMap[queue[j]]
-				if ci == nil || cj == nil { continue }
+				if ci == nil || cj == nil {
+					continue
+				}
 				// main ref가 있으면 우선
 				iMain := hasRef(ci.Refs, "main")
 				jMain := hasRef(cj.Refs, "main")
@@ -850,7 +852,7 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 	prNum := int(pr["number"].(float64))
 	prURL, _ := pr["html_url"].(string)
 	prTitle, _ := pr["title"].(string)
-	if errs := github.RequestReviewers(owner, name, prNum, auditors); errs != nil {
+	if errs := github.RequestReviewers(owner, name, prNum, auditors, userToken); errs != nil {
 		log.Printf("리뷰어 등록 실패: %v", errs)
 	}
 
@@ -923,7 +925,7 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 	// 승인/반려 후 requested_reviewers에서 해당 사용자 제거
 	knoxID := authmw.UserID(r.Context())
 	if knoxID != "" {
-		github.RemoveRequestedReviewer(owner, name, num, knoxID)
+		github.RemoveRequestedReviewer(owner, name, num, knoxID, userToken)
 	}
 
 	respondJSON(w, http.StatusOK, "review submitted")
@@ -1133,18 +1135,18 @@ func uniqueRepoSlug(base string) (string, error) {
 // slugifyRepoName: GitHub repo 이름으로 변환.
 //
 // 입력은 LLM 의 영문 slug 응답 또는 한국어 원문 모두 가능.
-//   1) 공백·하이픈 기준으로 단어 분리
-//   2) 각 단어에서 영문 소문자/숫자만 보존
-//   3) 빈 단어 제거 후 '-' 로 join
+//  1. 공백·하이픈 기준으로 단어 분리
+//  2. 각 단어에서 영문 소문자/숫자만 보존
+//  3. 빈 단어 제거 후 '-' 로 join
 //
 // 길이 제한 없음 (Gitea/GitHub 의 100자 한도까지 허용).
 // 한국어만 있어 결과가 빈 문자열이면 호출자가 에러 처리.
 //
 // 예: "Test Prj" → "test-prj"
 //
-//   "GoJIRA Sample 2" → "gojira-sample-2"
-//   "security-enhancement" → "security-enhancement"
-//   "클라우드마이그레이션" → ""
+//	"GoJIRA Sample 2" → "gojira-sample-2"
+//	"security-enhancement" → "security-enhancement"
+//	"클라우드마이그레이션" → ""
 func slugifyRepoName(name string) string {
 	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
 		return r == '-' || r == ' ' || r == '_'
