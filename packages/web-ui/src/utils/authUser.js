@@ -5,6 +5,15 @@ function getCookie(name) {
   return match ? decodeURIComponent(match[2]) : null;
 }
 
+// SSO 콜백 진입인지 — ADFSLogin 이 <origin>?auth=1&code=... 로 돌려보낸 상태.
+// 이 시점엔 아직 쿠키가 없다(교환 전). App 의 콜백 useEffect 가 code 를 교환해
+// SSO_SESSION 을 심으므로, 여기서 쿠키 없음을 보고 재로그인시키면 안 된다.
+function isSsoCallback() {
+  if (typeof window === 'undefined') return false;
+  const p = new URLSearchParams(window.location.search);
+  return !!(p.get('auth') && p.get('code'));
+}
+
 /**
  * 사용자 인증 확인.
  * - USE_SSO=true: SSO_SESSION 토큰 쿠키 확인. 없으면 SSO 리다이렉트, 있으면 '__pending__'
@@ -15,6 +24,13 @@ function getCookie(name) {
 export function getAuthUser() {
   if (!USE_SSO) {
     return DEV_USER;
+  }
+
+  // 콜백 진입은 쿠키가 없는 게 정상 — 교환을 기다린다. 이 분기가 없으면 렌더 중에
+  // ADFSLogin 으로 재이동해 방금 받은 code 를 버리게 된다. 그 재로그인은 사용자
+  // 지정(?user=)이 없는 기본 URL 이라, 개발용 사용자 전환이 직전 사용자로 되돌아간다.
+  if (isSsoCallback()) {
+    return '__pending__';
   }
 
   const sessionToken = getCookie('SSO_SESSION');

@@ -124,9 +124,16 @@ function App() {
               const info = await res.json();
               if (info.loginid) setUser(info.loginid);
             }
+          } else {
+            throw new Error('sessionToken 없음');
           }
         })
-        .catch(err => console.error('SSO exchange 실패:', err));
+        .catch(err => {
+          // 교환 실패 — 위에서 code 를 URL 에서 지웠고 쿠키도 없으므로 그대로 두면
+          // '__pending__' 상태로 멈춘다. 재로그인으로 복구한다.
+          console.error('SSO exchange 실패:', err);
+          window.location.href = `${config.SSO_URL}/Account/ADFSLogin?client=${window.location.origin}`;
+        });
     }
   }, []);
 
