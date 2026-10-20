@@ -34,11 +34,10 @@ type Server struct {
 	ssoMu  sync.Mutex
 	ssoTok string
 
-	// alignedRepos — code → 마지막으로 정렬(origin URL·branch checkout·identity·assets)을
-	// 마친 user. no-fetch 조회 경로(/files 등)는 같은 (code,user) 면 정렬을 통째로 건너뛴다.
+	// alignedRepos — repoKey(code,user) → 정렬(origin URL·branch checkout·identity·assets)
+	// 완료 표시. no-fetch 조회 경로(/files 등)는 이미 정렬된 (code,user) 면 정렬을 통째로 건너뛴다.
 	// Windows 사내망에서 git 프로세스 기동이 spawn 당 0.5s+ 로 느려, 매 /files 마다 반복되던
-	// 정렬 서브프로세스들이 체감 지연의 주범이었다. 값이 user 인 이유: 유저 전환 시 branch 가
-	// docs/{다른유저} 로 남아있으면 안 되므로 user 불일치면 풀 정렬 경로로 되돌린다.
+	// 정렬 서브프로세스들이 체감 지연의 주범이었다. clone 이 사용자별 경로라 키도 (code,user) 단위.
 	alignedRepos sync.Map
 
 	// gitCreds — user(knoxId) → gitCred. Gitea 자격을 사용자별로 캐시한다(gitcreds.go).
@@ -246,6 +245,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 			s.sessions.markDead(other.Code, other.PID)
 		}
+	}
+	// 같은 과제라도 다른 사용자 clone 에서 떠 있는 에이전트(사용자 전환)는 재사용하면 남의
+	// 작업본에 쓰게 되므로 종료하고 이 사용자 clone 에서 새로 띄운다.
+	if existing := s.sessions.live(req.Code); existing != nil && existing.Dir != spawnDir {
+		log.Printf("handleChat 사용자 전환: code=%s 기존 에이전트(pid=%d, dir=%s) 종료", req.Code, existing.PID, existing.Dir)
+		if err := killProcessTree(existing.PID); err != nil {
+			log.Printf("handleChat 사용자 전환 kill 실패 code=%s pid=%d: %v", req.Code, existing.PID, err)
+		}
+		s.sessions.markDead(req.Code, existing.PID)
 	}
 	// Design B: 같은 과제에 이미 살아있는 에이전트가 있으면 중복 spawn 하지 않고 기존
 	// 세션을 알려준다(과제별 1 에이전트). 사용자는 창 제목 "GoJIRA · CODE" 로 찾는다.
@@ -479,9 +487,11 @@ type removeCloneReq struct {
 	User string `json:"user"`
 }
 
-// POST /remove-clone — 프로젝트 아카이브 후처리: 로컬 clone(RepoRoot/{code}) 전체 삭제.
+// POST /remove-clone — 프로젝트 아카이브 후처리: 이 PC 의 해당 프로젝트 로컬 clone 전체 삭제.
 // 서버측 archive(Gitea repo + Mongo)는 Platform-API 가 처리하고, 사용자 PC 의 clone 은
 // 서버가 닿을 수 없어 이 핸들러가 담당한다(웹 삭제 흐름이 archive 성공 후 호출).
+// 프로젝트 자체가 없어지므로 요청 user 뿐 아니라 모든 사용자 clone(RepoRoot/*/{code})과
+// 분리 이전 공유 clone(RepoRoot/{code})까지 지운다.
 // 멱등: 이미 없으면 성공(removed:false) — 수동 삭제된 경우도 정상 처리(끝까지 정리 원칙).
 func (s *Server) handleRemoveClone(w http.ResponseWriter, r *http.Request) {
 	var req removeCloneReq
@@ -494,23 +504,50 @@ func (s *Server) handleRemoveClone(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "잘못된 code")
 		return
 	}
-	path := s.repoPath(req.Code) // filepath.Join(RepoRoot, code)
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			// 이미 없음 — 멱등 성공.
-			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "removed": false, "reason": "not found"})
+	paths := s.clonePathsOf(req.Code)
+	if len(paths) == 0 {
+		// 이미 없음 — 멱등 성공.
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "removed": false, "reason": "not found"})
+		return
+	}
+	for _, path := range paths {
+		if err := os.RemoveAll(path); err != nil {
+			writeErr(w, http.StatusInternalServerError, "clone 삭제 실패: "+err.Error())
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+		log.Printf("/remove-clone code=%s → %s 삭제", req.Code, path)
 	}
-	if err := os.RemoveAll(path); err != nil {
-		writeErr(w, http.StatusInternalServerError, "clone 삭제 실패: "+err.Error())
-		return
+	// 정렬 캐시에서도 제거 — 키는 repoKey(code,user) = "<user>/<code>".
+	s.alignedRepos.Range(func(k, _ any) bool {
+		if strings.HasSuffix(k.(string), "/"+req.Code) {
+			s.alignedRepos.Delete(k)
+		}
+		return true
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "removed": true, "repoPaths": paths})
+}
+
+// clonePathsOf — code 의 로컬 clone 경로 전부: 사용자별 RepoRoot/*/{code} + 공유 RepoRoot/{code}.
+// .git 이 있는 디렉터리만 clone 으로 본다(우연히 같은 이름의 일반 폴더는 건드리지 않음).
+func (s *Server) clonePathsOf(code string) []string {
+	var out []string
+	isClone := func(p string) bool {
+		_, err := os.Stat(filepath.Join(p, ".git"))
+		return err == nil
 	}
-	s.alignedRepos.Delete(req.Code) // 정렬 캐시에서도 제거
-	log.Printf("/remove-clone code=%s → %s 삭제", req.Code, path)
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "removed": true, "repoPath": path})
+	if legacy := s.legacyRepoPath(code); isClone(legacy) {
+		out = append(out, legacy)
+	}
+	entries, _ := os.ReadDir(s.cfg.RepoRoot)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if p := filepath.Join(s.cfg.RepoRoot, e.Name(), code); isClone(p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type renameReq struct {
@@ -889,7 +926,7 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	repoPath := s.repoPath(code)
+	repoPath := s.repoPath(code, user)
 	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
 		writeErr(w, http.StatusNotFound, "로컬 clone 이 없습니다: "+code)
 		return
@@ -964,10 +1001,11 @@ func (s *Server) handleIssueJournal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "path": path})
 }
 
-// GET /status?code= — 로컬 작업/브랜치 진행 상태 (§2.1).
+// GET /status?code=&user= — 로컬 작업/브랜치 진행 상태 (§2.1).
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
-	st, err := s.Status(code)
+	user := r.URL.Query().Get("user")
+	st, err := s.Status(code, user)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

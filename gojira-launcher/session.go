@@ -10,6 +10,9 @@ type agentSession struct {
 	Code  string `json:"code"`
 	Agent string `json:"agent"`
 	PID   int    `json:"pid"`
+	// Dir — 에이전트 cwd(사용자별 clone 경로). 같은 과제라도 Dir 이 다르면 다른 사용자의
+	// 세션이므로 재사용하면 안 된다(남의 작업본에 쓰게 됨) — handleChat 이 비교한다.
+	Dir   string `json:"dir"`
 	alive bool   // cmd.Wait 회수 시 false 로 전환(registry.markDead).
 }
 
@@ -40,12 +43,12 @@ func (r *sessionRegistry) live(code string) *agentSession {
 }
 
 // add — 새 세션 등록(같은 code 의 기존 항목은 덮어씀). code=="" 는 추적 제외.
-func (r *sessionRegistry) add(code, agent string, pid int) {
+func (r *sessionRegistry) add(code, agent, dir string, pid int) {
 	if code == "" {
 		return
 	}
 	r.mu.Lock()
-	r.byCode[code] = &agentSession{Code: code, Agent: agent, PID: pid, alive: true}
+	r.byCode[code] = &agentSession{Code: code, Agent: agent, Dir: dir, PID: pid, alive: true}
 	r.mu.Unlock()
 }
 

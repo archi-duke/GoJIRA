@@ -195,7 +195,7 @@ func (s *Server) SpawnAgent(agent, repoPath, label, code string, env []string) (
 		return "", fmt.Errorf("%s 실행 실패: %w", agent, err)
 	}
 	log.Printf("[TEMP-DEBUG] SpawnAgent SUCCESS pid=%d", pid)
-	s.sessions.add(code, agent, pid)
+	s.sessions.add(code, agent, repoPath, pid)
 	// 좀비 방지 + 종료 시 레지스트리 정리: 백그라운드에서 회수 후 해당 세션 dead 처리.
 	go func() {
 		wait()
