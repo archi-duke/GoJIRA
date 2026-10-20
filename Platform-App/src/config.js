@@ -23,6 +23,11 @@ const config = {
   USE_SSO: pick('REACT_APP_USE_SSO', 'false') === 'true',
   // dev 폴백 신원 — 런타임 키로 주입 가능 (백엔드 env DEV_USER 와 짝, 계약 05 §6)
   DEV_USER: pick('REACT_APP_DEV_USER', 'duke.kimm'),
+  // 개발용 사용자 전환 — 메뉴바 셀렉트로 바꾼 사용자를 SSO 세션에까지 반영한다.
+  // mock SSO 의 ADFSLogin?user= 오버라이드에 의존하므로 실 ADFS 에서는 동작하지 않는다
+  // (파라미터가 무시되어 같은 사용자로 재로그인). 그래서 기본값은 false 이고,
+  // 운영 배포에서는 절대 켜면 안 된다.
+  DEV_USER_SWITCH: pick('REACT_APP_DEV_USER_SWITCH', 'false') === 'true',
   // 로컬 런처 (사용자 PC) — 로고/타이틀 클릭 → /chat 으로 에이전트 spawn.
   LAUNCHER_BASE: pick('REACT_APP_LAUNCHER_BASE', 'http://127.0.0.1:5599'),
 };

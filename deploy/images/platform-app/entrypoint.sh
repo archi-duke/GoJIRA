@@ -22,6 +22,7 @@ window._env_ = {
   REACT_APP_SSO_URL: "$(esc "${REACT_APP_SSO_URL:-}")",
   REACT_APP_USE_SSO: "$(esc "${REACT_APP_USE_SSO:-}")",
   REACT_APP_DEV_USER: "$(esc "${REACT_APP_DEV_USER:-}")",
+  REACT_APP_DEV_USER_SWITCH: "$(esc "${REACT_APP_DEV_USER_SWITCH:-}")",
   REACT_APP_RAGAAS_APP_REMOTE: "$(esc "${REACT_APP_RAGAAS_APP_REMOTE:-}")"
 };
 EOF
