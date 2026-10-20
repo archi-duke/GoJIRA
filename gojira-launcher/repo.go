@@ -66,18 +66,22 @@ func (s *Server) repoPath(code string) string {
 	return filepath.Join(s.cfg.RepoRoot, code)
 }
 
-// cloneURL — git.user/token 이 설정돼 있으면 http://<user>:<token>@<host>/... 형태로 임베드한다.
+// cloneURL — 자격이 있으면 http://<user>:<token>@<host>/... 형태로 임베드한다.
 // 폐쇄망 Gitea (익명 차단) 에서 사용자 PC 의 GCM/netrc 설정 없이도 clone/fetch/push 가 자동 인증.
-func (s *Server) cloneURL(repoName string) string {
+//
+// 자격은 요청 사용자(user=knoxId) 본인의 Gitea PAT 를 우선 사용한다(gitcreds.go).
+// 조회 실패 시 launcher.json 의 git.user/git.token 으로 폴백.
+func (s *Server) cloneURL(repoName, user string) string {
 	base := strings.TrimRight(s.cfg.Git.Base, "/")
 	org := strings.Trim(s.cfg.Git.Org, "/")
-	if s.cfg.Git.Token != "" && s.cfg.Git.User != "" {
+	gitUser, gitToken := s.userGitCreds(user)
+	if gitToken != "" && gitUser != "" {
 		// 스킴 분리해서 user:token@ 삽입. user/token 의 @ : / 같은 특수문자 url-encode.
 		if idx := strings.Index(base, "://"); idx > 0 {
 			scheme := base[:idx+3]
 			host := base[idx+3:]
-			u := url.QueryEscape(s.cfg.Git.User)
-			t := url.QueryEscape(s.cfg.Git.Token)
+			u := url.QueryEscape(gitUser)
+			t := url.QueryEscape(gitToken)
 			base = fmt.Sprintf("%s%s:%s@%s", scheme, u, t, host)
 		}
 	}
@@ -234,7 +238,7 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 		}
 		// code ≠ Gitea repo 이름일 수 있으므로 repoName 으로 clone (로컬 디렉터리명은 code).
 		repoName := s.resolveRepoName(code, user)
-		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(repoName), code); err != nil {
+		if _, err := gitCmd(s.cfg.RepoRoot, "clone", s.cloneURL(repoName, user), code); err != nil {
 			return "", err
 		}
 	} else {
@@ -290,7 +294,9 @@ func (s *Server) ensureExcluded(path, entry string) {
 //
 // 보안: 로그에 token 이 노출되지 않도록 cloneURL 결과는 출력하지 않는다.
 func (s *Server) ensureOriginURL(path, code, user string) {
-	if s.cfg.Git.Token == "" || s.cfg.Git.User == "" {
+	// 자격이 전혀 없으면(사용자 PAT 조회 실패 + launcher.json 미설정) 익명 URL 을
+	// 덮어쓸 이유가 없으므로 그대로 둔다.
+	if gitUser, gitToken := s.userGitCreds(user); gitToken == "" || gitUser == "" {
 		return
 	}
 	current, _ := gitCmd(path, "remote", "get-url", "origin")
@@ -303,7 +309,7 @@ func (s *Server) ensureOriginURL(path, code, user string) {
 	if repoName == "" {
 		repoName = s.resolveRepoName(code, user)
 	}
-	desired := s.cloneURL(repoName)
+	desired := s.cloneURL(repoName, user)
 	if current == desired {
 		return
 	}

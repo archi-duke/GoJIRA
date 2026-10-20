@@ -124,9 +124,16 @@ function App() {
               const info = await res.json();
               if (info.loginid) setUser(info.loginid);
             }
+          } else {
+            throw new Error('sessionToken 없음');
           }
         })
-        .catch(err => console.error('SSO exchange 실패:', err));
+        .catch(err => {
+          // 교환 실패 — 위에서 code 를 URL 에서 지웠고 쿠키도 없으므로 그대로 두면
+          // '__pending__' 상태로 멈춘다. 재로그인으로 복구한다.
+          console.error('SSO exchange 실패:', err);
+          window.location.href = `${config.SSO_URL}/Account/ADFSLogin?client=${window.location.origin}`;
+        });
     }
   }, []);
 
@@ -165,7 +172,7 @@ function App() {
         setAuthority(data.authority || {});
         // 마스터 그룹이면 (이 스코프의) 전체 사용자 목록 로드 — platform 스코프는 전체
         // 사용자 전환이 가능해야 하므로 app=all 로 조회한다(D9, 다른 앱 스코프는 기존대로).
-        if ((data.authority?.USR || 0) >= 15) {
+        if ((data.authority?.USR || 0) >= 15 || config.DEV_USER_SWITCH) {
           const usersApp = scope === 'platform' ? 'all' : scope;
           authFetch(`${API_BASE}/Account/users?app=${encodeURIComponent(usersApp)}`)
             .then(r => r.json())
@@ -227,6 +234,17 @@ function App() {
   }, [scope]);
 
   function switchUser(knoxId) {
+    // SSO 모드에서 프런트 상태만 바꾸면 백엔드 신원은 그대로다 — authFetch 가
+    // Bearer SSO_SESSION 을 보내고 백엔드는 그 토큰을 introspect 해서 신원을 정하기
+    // 때문이다. 그래서 세션 자체를 해당 사용자로 재발급받아야 실제로 전환된다.
+    // mock SSO 의 ADFSLogin?user= 오버라이드를 쓰므로 개발 환경 전용이다.
+    if (config.USE_SSO && config.DEV_USER_SWITCH) {
+      document.cookie = 'SSO_SESSION=; path=/; max-age=0';
+      const sso = `${config.SSO_URL}/Account/ADFSLogin?client=${encodeURIComponent(window.location.origin)}&user=${encodeURIComponent(knoxId)}`;
+      window.location.href = sso; // 콜백(?auth=1&code=)에서 새 세션으로 복귀
+      return;
+    }
+    // dev(USE_SSO=false): 백엔드가 X-User-Id/DEV_USER 폴백을 쓰므로 프런트 전환으로 충분.
     document.cookie = `ADSSO_USER=${encodeURIComponent(knoxId)}; path=/; max-age=${60*60*24*365}`;
     setUser(knoxId);
     setAuthority(null);

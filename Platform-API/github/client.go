@@ -8,8 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -689,10 +687,7 @@ func CreatePR(owner, repo, title, body, head, base string, userToken ...string) 
 		"head":  head,
 		"base":  base,
 	}
-	token := ""
-	if len(userToken) > 0 {
-		token = userToken[0]
-	}
+	token := firstToken(userToken)
 	data, status, err := doRequestAs("POST", path, payload, token)
 	if err != nil {
 		return nil, err
@@ -731,8 +726,8 @@ func GetPR(owner, repo string, prNumber int) (map[string]interface{}, error) {
 	return result, nil
 }
 
-// CreateReview PR에 리뷰(승인/반려)를 생성하고, 리뷰 ID를 반환한다.
-func CreateReview(owner, repo string, prNumber int, event, body string, userToken ...string) (int, error) {
+// CreateReview PR에 리뷰(승인/반려)를 생성한다.
+func CreateReview(owner, repo string, prNumber int, event, body string, userToken ...string) error {
 	// Gitea 1.25 는 event="APPROVE" 를 PENDING 으로 저장하는 버그 — 정확한 값은 state name "APPROVED".
 	// REQUEST_CHANGES 는 정상 동작. GitHub 호환을 위해 클라이언트는 "APPROVE" 를 그대로 보내고 여기서 변환.
 	if IsGitea() && event == "APPROVE" {
@@ -740,54 +735,85 @@ func CreateReview(owner, repo string, prNumber int, event, body string, userToke
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, prNumber)
 	payload := map[string]string{"event": event, "body": body}
-	token := ""
-	if len(userToken) > 0 {
-		token = userToken[0]
-	}
+	token := firstToken(userToken)
 	data, status, err := doRequestAs("POST", path, payload, token)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if status >= 400 {
-		return 0, fmt.Errorf("create review failed (%d): %s", status, string(data))
+		return fmt.Errorf("create review failed (%d): %s", status, string(data))
 	}
-	var result map[string]interface{}
-	json.Unmarshal(data, &result)
-	id, _ := result["id"].(float64)
-	return int(id), nil
+	return nil
 }
 
+// MergePR PR 을 머지한다.
+//
+// 정상 경로는 "요청 사용자 토큰 + branch protection 준수" 다. 즉 Gitea 가 집계한
+// official 승인 수가 required_approvals 를 만족해야 머지된다 — 누가 머지했는지가
+// Gitea 이력에 실제 작업자로 남는다.
+//
+// 과거에는 force_merge=true(protection 우회, admin 권한 필요)를 항상 썼다. Gitea 가
+// APPROVE 리뷰를 PENDING 으로 저장해 승인 수가 0으로 집계되던 문제 때문인데, 그 원인은
+// event 값이었고 CreateReview 에서 "APPROVED" 로 교정된 뒤로는 official=true 로 정상
+// 집계된다(실측 확인). 따라서 우회는 평시에 필요하지 않다.
+//
+// 다만 앱이 집계한 승인과 Gitea 의 official 집계가 어긋나는 과거 데이터가 있어
+// (official=false 인 승인 레코드 존재), 승인 부족으로 거절되면 관리자 토큰 +
+// force_merge 로 한 번 더 시도한다 — 머지가 막히는 회귀를 만들지 않기 위한 안전망이다.
+// 승인 검증 자체는 호출 측(DocRepoPRMergeHandler)이 선행 수행한다.
 func MergePR(owner, repo string, prNumber int, mergeMethod string, userToken ...string) error {
+	token := firstToken(userToken)
+
+	err := mergePRAttempt(owner, repo, prNumber, mergeMethod, token, false)
+	if err == nil {
+		return err
+	}
+	if !IsGitea() || !isApprovalShortfall(err) {
+		return err
+	}
+
+	// 안전망: Gitea 집계가 앱 판단과 어긋남 → 관리자 권한으로 protection 우회.
+	log.Printf("MergePR: 승인 집계 불일치로 거절됨(%v) — 관리자 force_merge 로 재시도 (PR #%d)", err, prNumber)
+	return mergePRAttempt(owner, repo, prNumber, mergeMethod, "", true)
+}
+
+// isApprovalShortfall — Gitea 가 "승인 부족" 으로 머지를 거절했는지. 다른 405(repo lock
+// 등)와 구분해 force_merge 폴백을 승인 문제에만 쓰기 위한 판별.
+func isApprovalShortfall(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "enough approvals")
+}
+
+// mergePRAttempt — 머지 1회 시도. force=true 면 branch protection 을 우회한다
+// (admin 권한 필요). Gitea 의 일시적 405(repo lock)는 재시도한다.
+func mergePRAttempt(owner, repo string, prNumber int, mergeMethod, token string, force bool) error {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, prNumber)
 	method := "PUT"
 	var payload interface{} = map[string]string{"merge_method": mergeMethod}
 	if IsGitea() {
 		method = "POST"
-		// force_merge: branch protection 우회 (admin 권한 필요)
-		payload = map[string]interface{}{
-			"Do":          mergeMethod,
-			"force_merge": true,
+		body := map[string]interface{}{"Do": mergeMethod}
+		if force {
+			body["force_merge"] = true
 		}
-	}
-	token := ""
-	if len(userToken) > 0 {
-		token = userToken[0]
+		payload = body
 	}
 
-	// Gitea 405 (repo lock) 재시도
+	// Gitea 405 (repo lock) 재시도. 단 "승인 부족" 도 405 로 오므로 그 경우는
+	// 재시도해도 결과가 같다 — 즉시 반환해 호출 측이 폴백을 판단하게 한다.
 	maxRetries := 5
 	for i := 0; i <= maxRetries; i++ {
 		data, status, err := doRequestAs(method, path, payload, token)
 		if err != nil {
 			return err
 		}
-		if status == 405 && i < maxRetries {
-			log.Printf("MergePR: repo locked (405), retry %d/%d after 2s", i+1, maxRetries)
-			time.Sleep(2 * time.Second)
-			continue
-		}
 		if status >= 400 {
-			return fmt.Errorf("merge PR failed (%d): %s", status, string(data))
+			msg := fmt.Errorf("merge PR failed (%d): %s", status, string(data))
+			if status == 405 && i < maxRetries && !isApprovalShortfall(msg) {
+				log.Printf("MergePR: repo locked (405), retry %d/%d after 2s", i+1, maxRetries)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			return msg
 		}
 		return nil
 	}
@@ -842,9 +868,23 @@ func CompareBranches(owner, repo, base, head string) (map[string]interface{}, er
 
 // --- Reviewers ---
 
-func RequestReviewers(owner, repo string, prNumber int, reviewers []string) error {
+// RequestReviewers PR 에 리뷰어를 지정한다.
+//
+// userToken 을 주면 그 사용자 행위로 기록된다(Gitea 타임라인의 "requested review" 주체).
+// 실패하면 관리자 토큰으로 재시도한다 — 리뷰어가 안 붙으면 승인 흐름 자체가 막히므로
+// 신원 정확성보다 동작 보장이 우선이다.
+func RequestReviewers(owner, repo string, prNumber int, reviewers []string, userToken ...string) error {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, prNumber)
 	payload := map[string]interface{}{"reviewers": reviewers}
+
+	if tok := firstToken(userToken); tok != "" {
+		data, status, err := doRequestAs("POST", path, payload, tok)
+		if err == nil && status < 400 {
+			return nil
+		}
+		log.Printf("RequestReviewers: 사용자 토큰 실패(status=%d, err=%v) — 관리자 토큰으로 재시도: %s", status, err, string(data))
+	}
+
 	data, status, err := doRequest("POST", path, payload)
 	if err != nil {
 		return err
@@ -855,11 +895,27 @@ func RequestReviewers(owner, repo string, prNumber int, reviewers []string) erro
 	return nil
 }
 
-// RemoveRequestedReviewer 리뷰 완료 후 requested_reviewers에서 제거
-func RemoveRequestedReviewer(owner, repo string, prNumber int, username string) {
+// RemoveRequestedReviewer 리뷰 완료 후 requested_reviewers에서 제거.
+// userToken 이 있으면 본인 행위로 기록하고, 실패 시 관리자 토큰으로 재시도한다.
+func RemoveRequestedReviewer(owner, repo string, prNumber int, username string, userToken ...string) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, prNumber)
 	payload := map[string]interface{}{"reviewers": []string{username}}
+
+	if tok := firstToken(userToken); tok != "" {
+		if _, status, err := doRequestAs("DELETE", path, payload, tok); err == nil && status < 400 {
+			return
+		}
+	}
 	doRequest("DELETE", path, payload)
+}
+
+// firstToken — 가변인자로 받은 사용자 토큰의 첫 값(없으면 "").
+// CreatePR/CreateReview/MergePR 이 쓰던 인라인 패턴을 한 곳으로 모은 것.
+func firstToken(userToken []string) string {
+	if len(userToken) > 0 {
+		return userToken[0]
+	}
+	return ""
 }
 
 // --- Branch Protection ---
@@ -919,14 +975,14 @@ func setBranchProtectionGitHub(owner, repo, branch string, requiredReviewers int
 func setBranchProtectionGitea(owner, repo, branch string, requiredReviewers int) error {
 	path := fmt.Sprintf("/repos/%s/%s/branch_protections", owner, repo)
 	body := map[string]interface{}{
-		"branch_name":                   branch,
-		"enable_push":                   false,
-		"enable_merge_whitelist":        false,
-		"enable_approvals_whitelist":    false,
-		"required_approvals":            requiredReviewers,
-		"dismiss_stale_approvals":       true,
-		"block_on_rejected_reviews":     true,
-		"block_on_outdated_branch":      false,
+		"branch_name":                branch,
+		"enable_push":                false,
+		"enable_merge_whitelist":     false,
+		"enable_approvals_whitelist": false,
+		"required_approvals":         requiredReviewers,
+		"dismiss_stale_approvals":    true,
+		"block_on_rejected_reviews":  true,
+		"block_on_outdated_branch":   false,
 	}
 	data, status, err := doRequest("POST", path, body)
 	if err != nil {
@@ -946,47 +1002,6 @@ func setBranchProtectionGitea(owner, repo, branch string, requiredReviewers int)
 	return nil
 }
 
-// FixReviewState Gitea DB에서 리뷰 type을 직접 업데이트 (Gitea 1.25 API 버그 우회).
-// event: "APPROVE" → type=1, "REQUEST_CHANGES" → type=2.
-//
-// 환경 의존성 (사내 환경에서는 동작 불가):
-//   - docker 가 호스트 PATH 에 있어야 함
-//   - Gitea 가 'gojira-gitea' 라는 docker 컨테이너로 실행 중이어야 함 (env GITEA_CONTAINER 로 override)
-//   - sqlite 백엔드여야 함 (MySQL/Postgres 사용 시 동작 안 함)
-//
-// 사내망 (Gitea 별도 서버 직접 설치, docker 미사용) 에서는 자동 skip — silent return nil.
-// 명시적 비활성화는 GOJIRA_FIX_REVIEW=0. 결과: PR 리뷰 의 official 플래그가 안 붙음 — 운영자 수동 처리.
-func FixReviewState(reviewID int, event string) error {
-	typeVal := 0
-	switch event {
-	case "APPROVE":
-		typeVal = 1
-	case "REQUEST_CHANGES":
-		typeVal = 2
-	default:
-		return nil
-	}
-	// 명시적 비활성화
-	if os.Getenv("GOJIRA_FIX_REVIEW") == "0" {
-		return nil
-	}
-	// docker 명령 자체가 PATH 에 없으면 silent skip — 사내 / Docker 미사용 환경
-	if _, err := exec.LookPath("docker"); err != nil {
-		return nil
-	}
-	container := os.Getenv("GITEA_CONTAINER")
-	if container == "" {
-		container = "gojira-gitea"
-	}
-	cmd := exec.Command("docker", "exec", container, "sqlite3", "/data/gitea/gitea.db",
-		fmt.Sprintf("UPDATE review SET type=%d, official=1 WHERE id=%d;", typeVal, reviewID))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("fix review state failed: %v (%s)", err, string(out))
-	}
-	return nil
-}
-
-// IsGitea API URL로 Gitea 여부 판별
 func IsGitea() bool {
 	return strings.Contains(config.GitHubAPI, "/api/v1")
 }

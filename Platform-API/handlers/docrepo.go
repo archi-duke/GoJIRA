@@ -590,8 +590,8 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		Date    string   `json:"date"`
 		Parents []string `json:"parents"`
 		Refs    []string `json:"refs"`
-		Lane    int      `json:"lane"`      // 그래프 lane 번호
-		Lanes   []int    `json:"lanes"`     // merge 커밋의 모든 parent lane
+		Lane    int      `json:"lane"`  // 그래프 lane 번호
+		Lanes   []int    `json:"lanes"` // merge 커밋의 모든 parent lane
 	}
 	commitMap := map[string]*graphCommit{}
 	var branchNames []string
@@ -678,7 +678,9 @@ func DocRepoGraphHandler(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i < len(queue); i++ {
 			for j := i + 1; j < len(queue); j++ {
 				ci, cj := commitMap[queue[i]], commitMap[queue[j]]
-				if ci == nil || cj == nil { continue }
+				if ci == nil || cj == nil {
+					continue
+				}
 				// main ref가 있으면 우선
 				iMain := hasRef(ci.Refs, "main")
 				jMain := hasRef(cj.Refs, "main")
@@ -850,7 +852,7 @@ func DocRepoPRCreateHandler(w http.ResponseWriter, r *http.Request) {
 	prNum := int(pr["number"].(float64))
 	prURL, _ := pr["html_url"].(string)
 	prTitle, _ := pr["title"].(string)
-	if errs := github.RequestReviewers(owner, name, prNum, auditors); errs != nil {
+	if errs := github.RequestReviewers(owner, name, prNum, auditors, userToken); errs != nil {
 		log.Printf("리뷰어 등록 실패: %v", errs)
 	}
 
@@ -906,24 +908,32 @@ func DocRepoPRReviewHandler(w http.ResponseWriter, r *http.Request) {
 		req.Body = "LGTM"
 	}
 
+	knoxID := authmw.UserID(r.Context())
+
+	// 자가승인 선차단. Gitea 도 거부하지만("approve your own pull is not allowed")
+	// 그 422 가 사용자에게 영문 원문 그대로 노출돼 원인을 알기 어려웠다.
+	// 조회 실패 시에는 막지 않고 진행한다 — 판단 근거가 없는데 차단하면 안 된다.
+	if knoxID != "" {
+		if pr, _ := github.GetPR(owner, name, num); pr != nil {
+			if author, ok := pr["user"].(map[string]interface{}); ok {
+				if login, _ := author["login"].(string); login != "" && login == knoxID {
+					respondError(w, http.StatusConflict,
+						"본인이 작성한 발행 신청은 본인이 승인할 수 없습니다. 지정된 승인자에게 요청하세요.")
+					return
+				}
+			}
+		}
+	}
+
 	userToken := getUserToken(r)
-	reviewID, err := github.CreateReview(owner, name, num, req.Event, req.Body, userToken)
-	if err != nil {
+	if err := github.CreateReview(owner, name, num, req.Event, req.Body, userToken); err != nil {
 		respondError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 
-	// Gitea 1.25 API 버그: APPROVE/REQUEST_CHANGES가 PENDING으로 저장됨 → DB 직접 수정
-	if reviewID > 0 {
-		if err := github.FixReviewState(reviewID, req.Event); err != nil {
-			log.Printf("review state fix 실패 (id=%d): %v", reviewID, err)
-		}
-	}
-
 	// 승인/반려 후 requested_reviewers에서 해당 사용자 제거
-	knoxID := authmw.UserID(r.Context())
 	if knoxID != "" {
-		github.RemoveRequestedReviewer(owner, name, num, knoxID)
+		github.RemoveRequestedReviewer(owner, name, num, knoxID, userToken)
 	}
 
 	respondJSON(w, http.StatusOK, "review submitted")
@@ -1015,8 +1025,10 @@ func DocRepoPRMergeHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("merge: PR #%d 자동 동기화 성공", num)
 	}
 
-	// force_merge로 branch protection 우회하여 머지
-	if err := github.MergePR(owner, name, num, "merge"); err != nil {
+	// 머지는 요청 사용자 토큰으로 — Gitea 이력의 머지 주체가 실제 작업자가 된다.
+	// (승인 집계가 어긋나면 github.MergePR 내부에서 관리자 force_merge 로 폴백)
+	userToken := getUserToken(r)
+	if err := github.MergePR(owner, name, num, "merge", userToken); err != nil {
 		if strings.Contains(err.Error(), "405") {
 			respondError(w, http.StatusConflict, "머지할 수 없습니다. 변경사항이 없거나 충돌이 있습니다. PR을 확인해주세요.")
 			return
@@ -1133,18 +1145,18 @@ func uniqueRepoSlug(base string) (string, error) {
 // slugifyRepoName: GitHub repo 이름으로 변환.
 //
 // 입력은 LLM 의 영문 slug 응답 또는 한국어 원문 모두 가능.
-//   1) 공백·하이픈 기준으로 단어 분리
-//   2) 각 단어에서 영문 소문자/숫자만 보존
-//   3) 빈 단어 제거 후 '-' 로 join
+//  1. 공백·하이픈 기준으로 단어 분리
+//  2. 각 단어에서 영문 소문자/숫자만 보존
+//  3. 빈 단어 제거 후 '-' 로 join
 //
 // 길이 제한 없음 (Gitea/GitHub 의 100자 한도까지 허용).
 // 한국어만 있어 결과가 빈 문자열이면 호출자가 에러 처리.
 //
 // 예: "Test Prj" → "test-prj"
 //
-//   "GoJIRA Sample 2" → "gojira-sample-2"
-//   "security-enhancement" → "security-enhancement"
-//   "클라우드마이그레이션" → ""
+//	"GoJIRA Sample 2" → "gojira-sample-2"
+//	"security-enhancement" → "security-enhancement"
+//	"클라우드마이그레이션" → ""
 func slugifyRepoName(name string) string {
 	words := strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
 		return r == '-' || r == ' ' || r == '_'

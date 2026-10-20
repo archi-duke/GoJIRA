@@ -34,6 +34,10 @@ x-react-env: &react-env
   REACT_APP_USE_SSO: "${REACT_APP_USE_SSO:-false}"
   # dev 폴백 신원 — 백엔드 DEV_USER 와 같은 소스 (계약 05 §6)
   REACT_APP_DEV_USER: "${DEV_USER:-duke.kimm}"
+  # 개발용 사용자 전환 — 메뉴바 셀렉트가 SSO 세션까지 재발급받게 한다.
+  # mock SSO 의 ADFSLogin?user= 오버라이드 전용이라 실 ADFS 에선 동작하지 않는다.
+  # 운영 배포에서는 설정하지 말 것 (기본 false).
+  REACT_APP_DEV_USER_SWITCH: "${DEV_USER_SWITCH:-false}"
   # RAGaaS remote origin (온보딩 B2) — 기본 빈값 = 셸에 RAGaaS 탭 미노출.
   # RAGaaS 스택 합류 시 .env 에 RAGAAS_APP_REMOTE 지정 (게이트웨이 경유 권장:
   # RAGAAS_APP_REMOTE=${URL_SCHEME}://${GATEWAY_HOST}:${GATEWAY_PORT}/ragaas)
