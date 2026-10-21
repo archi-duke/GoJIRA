@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const version = "0.1.34"
+const version = "0.1.36"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -912,9 +912,9 @@ func blobShaRaw(path string, size int64) (string, error) {
 //
 // 읽기 전용 — EnsureRepo 를 호출하지 않는다(clone 자동 생성 금지). clone 이 없거나
 // data/issues 가 없으면 404 + {"error":...} — 웹은 이를 보고 공식본(Mongo)으로 폴백한다.
-// user 는 /files 와 동일하게 받되(파라미터 검증 일관성), 경로 해석에는 code 만 쓰인다 —
-// 로컬 clone 은 code 당 1개이고 현재 체크아웃된 브랜치 그대로 반환한다(사용자 전환/
-// 브랜치 정렬은 /files 등 다른 조회 경로가 이미 책임짐).
+// 경로는 사용자별 clone(repoRoot/<user>/<code>). 아직 없고 분리 이전 공유 clone 이 이 사용자
+// 브랜치 상태라면 /files 보다 먼저 호출돼도 이관한 뒤 조회한다(이관 실패는 409 + 안내).
+// 브랜치 정렬은 /files 등 다른 조회 경로가 책임진다.
 func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	user := r.URL.Query().Get("user")
@@ -927,6 +927,16 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repoPath := s.repoPath(code, user)
+	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
+		mu := getRepoLock(repoKey(code, user))
+		mu.Lock()
+		err := s.migrateLegacyClone(code, user, repoPath)
+		mu.Unlock()
+		if err != nil {
+			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
 	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
 		writeErr(w, http.StatusNotFound, "로컬 clone 이 없습니다: "+code)
 		return

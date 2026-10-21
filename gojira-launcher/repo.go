@@ -78,28 +78,46 @@ func repoKey(code, user string) string {
 	return user + "/" + code
 }
 
+// migrateRetries / migrateRetryDelay — 공유 clone 이관 재시도. 백신·에디터·터미널이 폴더를
+// 잠깐 잡고 있는 경우(Windows rename 실패)가 흔해 짧게 여러 번 다시 시도한다. 테스트에서 delay 0.
+var (
+	migrateRetries    = 5
+	migrateRetryDelay = time.Second
+)
+
 // migrateLegacyClone — 공유 clone(repoRoot/<code>)이 이 사용자의 docs/<user> 를 체크아웃한
 // 상태라면 사용자별 경로로 옮긴다(재clone 없이 미커밋·미push 작업 보존). 다른 사용자 브랜치면
 // 건드리지 않는다 — 그 사용자가 접근할 때 이관되도록 남겨두고, 이 사용자는 새로 clone 한다.
-// 이관 실패(Windows 에서 다른 프로세스가 cwd 로 점유 등)는 로그만 남기고 새 clone 으로 진행.
-func (s *Server) migrateLegacyClone(code, user, path string) {
+//
+// 이관 대상인데 끝내 옮기지 못하면 오류를 반환한다 — 새로 clone 하면 안 된다. 사용자 눈에는
+// 미커밋 작업이 사라진 것처럼 보이고, 새 경로가 생겨 이후에도 공유 clone 이 자동 이관되지 않는다.
+func (s *Server) migrateLegacyClone(code, user, path string) error {
 	legacy := s.legacyRepoPath(code)
 	if _, err := os.Stat(filepath.Join(legacy, ".git")); err != nil {
-		return
+		return nil
 	}
 	cur, err := gitCmd(legacy, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil || cur != "docs/"+user {
-		return
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		log.Printf("migrateLegacyClone mkdir 실패 (%s): %v", path, err)
-		return
+		return fmt.Errorf("기존 clone 이동 준비 실패 (%s): %w", path, err)
 	}
-	if err := os.Rename(legacy, path); err != nil {
-		log.Printf("migrateLegacyClone 이관 실패 (%s → %s): %v — 새로 clone", legacy, path, err)
-		return
+	var lastErr error
+	for i := 1; i <= migrateRetries; i++ {
+		if lastErr = os.Rename(legacy, path); lastErr == nil {
+			log.Printf("migrateLegacyClone 공유 clone 이관 (%s → %s)", legacy, path)
+			return nil
+		}
+		log.Printf("migrateLegacyClone 이관 실패 %d/%d (%s → %s): %v", i, migrateRetries, legacy, path, lastErr)
+		if i < migrateRetries {
+			time.Sleep(migrateRetryDelay)
+		}
 	}
-	log.Printf("migrateLegacyClone 공유 clone 이관 (%s → %s)", legacy, path)
+	return fmt.Errorf("기존 작업 폴더(%s)를 사용자별 위치(%s)로 옮기지 못했습니다: %v. "+
+		"이 폴더를 열어 둔 VS Code·터미널·탐색기 창을 닫고 다시 시도하세요. "+
+		"계속 실패하면 런처를 종료한 뒤 폴더를 직접 %s 로 옮기면 됩니다(미커밋 작업 보존)",
+		legacy, path, lastErr, path)
 }
 
 // cloneURL — 자격이 있으면 http://<user>:<token>@<host>/... 형태로 임베드한다.
@@ -270,7 +288,9 @@ func (s *Server) ensureRepoImpl(code, user string, withFetch bool) (string, erro
 	branch := "docs/" + user
 
 	if _, err := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(err) {
-		s.migrateLegacyClone(code, user, path)
+		if err := s.migrateLegacyClone(code, user, path); err != nil {
+			return "", err
+		}
 	}
 	if _, err := os.Stat(filepath.Join(path, ".git")); os.IsNotExist(err) {
 		userRoot := filepath.Dir(path)
