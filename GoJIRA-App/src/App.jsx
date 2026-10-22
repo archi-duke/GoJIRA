@@ -51,7 +51,9 @@ function App() {
       .then(data => {
         setAuthority(data.authority || {});
         if ((data.authority?.USR || 0) >= 15) {
-          authFetch(`${PLATFORM_API}/Account/users`).then(r => r.json())
+          // app=gojira — 미지정이면 platform 스코프라, gojira 권한그룹만 받은
+          // 사용자가 목록에서 빠진다.
+          authFetch(`${PLATFORM_API}/Account/users?app=gojira`).then(r => r.json())
             .then(d => setAllUsers(Array.isArray(d) ? d : []));
         }
       })
