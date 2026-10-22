@@ -84,53 +84,98 @@ func UserCreateHandler(w http.ResponseWriter, r *http.Request) {
 	// 저장 전 중복 검증
 	knoxId, _ := doc["knoxId"].(string)
 	email, _ := doc["email"].(string)
+
+	// 삭제(비활성화)된 같은 knoxId 레코드 — 재등록 대상.
+	// users.knoxId 가 unique 라 insert 하면 E11000 이 나므로 되살리는 방식으로 처리한다.
+	var inactive bson.M
 	if knoxId != "" {
 		if exists, _ := db.KnoxIdExists(ctx, knoxId); exists {
 			respondError(w, http.StatusConflict, fmt.Sprintf("Knox ID '%s'이(가) 이미 등록되어 있습니다.", knoxId))
 			return
 		}
+		inactive = db.FindInactiveUserByKnoxID(ctx, knoxId)
 	}
 	if email != "" {
 		if exists, _ := db.EmailExists(ctx, email); exists {
 			respondError(w, http.StatusConflict, fmt.Sprintf("이메일 '%s'이(가) 이미 등록되어 있습니다. 다른 이메일을 입력하세요.", email))
 			return
 		}
-		if knoxId != "" && github.CheckEmailExists(email) {
+		// 이미 그 사용자 본인의 Gitea 계정에 달린 이메일이면 충돌이 아니다 —
+		// 재등록(계정이 남아 있음)이나 고아 Gitea 계정이 있는 경우가 여기 해당한다.
+		if knoxId != "" && github.CheckEmailExists(email) && !github.IsOwnEmail(knoxId, email) {
 			respondError(w, http.StatusConflict, fmt.Sprintf("이메일 '%s'이(가) Git 플랫폼에서 이미 사용 중입니다. 다른 이메일을 입력하세요.", email))
 			return
 		}
 	}
 
-	if err := db.InsertUser(ctx, doc); err != nil {
+	// 소속은 지정 조직의 상위 조직까지 포함해 저장한다 (0004).
+	db.WithOrgAncestors(ctx, doc)
+
+	existingToken := ""
+	if inactive != nil {
+		existingToken, _ = inactive["giteaToken"].(string)
+		updates := db.ReactivateFields(doc, inactive)
+		if err := db.ReactivateUser(ctx, inactive["_id"], updates); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// 응답에는 보존된 식별자·이력을 실어 준다 (클라이언트가 _id 를 쓴다).
+		for _, k := range []string{"_id", "createdAt", "createdBy", "giteaToken"} {
+			if v, ok := inactive[k]; ok {
+				doc[k] = v
+			}
+		}
+		log.Printf("사용자 재활성화: %s", knoxId)
+	} else if err := db.InsertUser(ctx, doc); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Gitea에 사용자 자동 등록 (knoxId → username)
 	if knoxId != "" {
-		if email == "" {
-			email = knoxId + "@gojira.local"
-		}
 		fullName, _ := doc["name"].(string)
-		password := knoxId + "!2026"
-		if err := github.CreateUser(knoxId, email, fullName, password); err != nil {
-			log.Printf("Gitea 사용자 생성 실패 (%s): %v", knoxId, err)
-		} else {
-			log.Printf("Gitea 사용자 생성 완료: %s", knoxId)
-			if err := github.AddUserToOrgTeam(knoxId); err != nil {
-				log.Printf("Gitea 조직 멤버 추가 실패 (%s): %v", knoxId, err)
-			}
-			// Gitea API 토큰 생성 → DB 저장
-			if token, err := github.CreateUserToken(knoxId, password); err != nil {
-				log.Printf("Gitea 토큰 생성 실패 (%s): %v", knoxId, err)
-			} else {
-				db.UpdateUserGiteaToken(ctx, knoxId, token)
-				log.Printf("Gitea 토큰 생성 완료: %s", knoxId)
-			}
-		}
+		provisionGiteaUser(ctx, knoxId, email, fullName, existingToken)
 	}
 
-	respondJSON(w, http.StatusOK, doc)
+	respondJSON(w, http.StatusOK, stripSecrets(doc))
+}
+
+// provisionGiteaUser — Gitea 계정과 API 토큰을 확보한다.
+//
+// 이미 있으면 그대로 쓰고 없을 때만 만든다. 재등록 시 계정과 토큰을 새로 발급하면
+// 과거 커밋·PR 이력과의 연결이 끊기고, 발급은 사용자 비밀번호 basic 인증을 요구해
+// 실패하기도 쉽다. 각 단계 실패는 비치명적 — 로그만 남기고 계정 생성 자체는 성공시킨다.
+func provisionGiteaUser(ctx context.Context, knoxID, email, fullName, existingToken string) {
+	if email == "" {
+		email = knoxID + "@gojira.local"
+	}
+	password := knoxID + "!2026"
+
+	if missing := github.CheckUsersExist([]string{knoxID}); len(missing) > 0 {
+		if err := github.CreateUser(knoxID, email, fullName, password); err != nil {
+			log.Printf("Gitea 사용자 생성 실패 (%s): %v", knoxID, err)
+			return
+		}
+		log.Printf("Gitea 사용자 생성 완료: %s", knoxID)
+	} else {
+		log.Printf("Gitea 사용자 이미 존재 — 재사용: %s", knoxID)
+	}
+
+	if err := github.AddUserToOrgTeam(knoxID); err != nil {
+		log.Printf("Gitea 조직 멤버 추가 실패 (%s): %v", knoxID, err)
+	}
+
+	if existingToken != "" {
+		log.Printf("Gitea 토큰 재사용: %s", knoxID)
+		return
+	}
+	token, err := github.CreateUserToken(knoxID, password)
+	if err != nil {
+		log.Printf("Gitea 토큰 생성 실패 (%s): %v", knoxID, err)
+		return
+	}
+	db.UpdateUserGiteaToken(ctx, knoxID, token)
+	log.Printf("Gitea 토큰 생성 완료: %s", knoxID)
 }
 
 func UserUpdateHandler(w http.ResponseWriter, r *http.Request) {
@@ -159,6 +204,9 @@ func UserUpdateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// 생성과 동일 규칙. orgUnitIds 가 없는 부분 수정은 건드리지 않는다.
+	db.WithOrgAncestors(ctx, updates)
 
 	if err := db.UpdateUser(ctx, id, updates); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())

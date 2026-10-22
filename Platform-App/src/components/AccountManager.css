@@ -244,3 +244,79 @@
   cursor: pointer;
   color: #000;
 }
+
+/* --- 사내 임직원 조회 (Knox lookup) --- */
+.am-lookup-input {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 200px;
+}
+.am-lookup-btn {
+  border: none;
+  background: lightgray;
+  color: #000;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.am-lookup-btn:disabled { opacity: .6; cursor: default; }
+.am-field-row { display: flex; gap: 6px; align-items: center; }
+.am-field-row input { flex: 1; min-width: 0; }
+.am-lookup-summary {
+  background: #f4f4f4;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #555;
+}
+
+/* 동명이인 선택 목록 */
+.am-candidates {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  max-height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+.am-candidates-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid #eee;
+  font-size: 12px;
+  color: #555;
+}
+.am-candidates-filters { display: flex; gap: 6px; padding: 6px 10px; }
+.am-candidates-filters input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.am-candidates-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.am-candidate {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-top: 1px solid #f2f2f2;
+}
+.am-candidate:hover { background: #f7f7f7; }
+.am-candidate-disabled { color: #aaa; cursor: default; }
+.am-candidate-disabled:hover { background: transparent; }
+.am-candidate-name { font-weight: 600; }
+.am-candidate-id { color: #777; font-size: 12px; }
+.am-candidate-meta { color: #888; font-size: 12px; margin-left: auto; }
+.am-candidate-badge { color: #999; font-size: 11px; }
+.am-candidate-empty { padding: 10px; color: #888; font-size: 12px; }

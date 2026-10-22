@@ -34,6 +34,13 @@ var (
 	NotifyAPIURL   string
 	NotifyAPIToken string
 
+	// 사내 사용자 조회 API (CommonAPI) — Knox 임직원 조회용.
+	// 사외에서는 비워 둔다. 미설정이면 조회 엔드포인트가 503 을 돌려준다.
+	UserAPIBase string
+	// true 일 때만 TLS 검증을 우회한다. 사내 CA 가 신뢰 저장소에 없는 환경 대응용이며
+	// 기본값은 false — 검증 우회가 기본이 되면 안 된다.
+	UserAPIInsecureTLS bool
+
 	// SMTP — 메일 기능 미사용 시 비어있어도 무방
 	SMTPHost string
 	SMTPPort string
@@ -64,6 +71,8 @@ func init() {
 	WebhookSecret = envOrDefault("PLATFORM_WEBHOOK_SECRET", "gojira-webhook-secret")
 	NotifyProvider = envOrDefault("NOTIFY_PROVIDER", "")
 	NotifyAPIURL = envOrDefault("NOTIFY_API_URL", "")
+	UserAPIBase = strings.TrimRight(envOrDefault("USER_API_BASE", ""), "/")
+	UserAPIInsecureTLS = envOrDefault("USER_API_INSECURE_TLS", "") == "true"
 	SMTPHost = envOrDefault("SMTP_HOST", "")
 	SMTPPort = envOrDefault("SMTP_PORT", "587")
 	SMTPUser = envOrDefault("SMTP_USER", "")

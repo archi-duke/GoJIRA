@@ -236,6 +236,33 @@ func KnoxIdExists(ctx context.Context, knoxId string) (bool, error) {
 	return count > 0, err
 }
 
+// ActiveKnoxIDs 주어진 knoxId 중 활성 사용자로 등록된 것들을 한 번에 조회한다.
+// 동명이인 목록처럼 여러 건의 등록 여부를 표시할 때 건별 조회를 피하기 위한 것.
+func ActiveKnoxIDs(ctx context.Context, knoxIDs []string) map[string]bool {
+	found := make(map[string]bool, len(knoxIDs))
+	if len(knoxIDs) == 0 {
+		return found
+	}
+	cursor, err := Users().Find(ctx,
+		bson.M{"knoxId": bson.M{"$in": knoxIDs}, "isActive": true},
+		options.Find().SetProjection(bson.M{"knoxId": 1}))
+	if err != nil {
+		log.Printf("ActiveKnoxIDs 조회 실패: %v", err)
+		return found
+	}
+	var rows []bson.M
+	if err := cursor.All(ctx, &rows); err != nil {
+		log.Printf("ActiveKnoxIDs 디코드 실패: %v", err)
+		return found
+	}
+	for _, row := range rows {
+		if id, ok := row["knoxId"].(string); ok {
+			found[id] = true
+		}
+	}
+	return found
+}
+
 // EmailExists 이메일 중복 여부 확인
 func EmailExists(ctx context.Context, email string) (bool, error) {
 	count, err := Users().CountDocuments(ctx, bson.M{"email": email, "isActive": true})
