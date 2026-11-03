@@ -7,6 +7,10 @@ import './SATAM.css';
 import { authFetch } from '../platform/auth';
 import useIssueSource from '../hooks/useIssueSource';
 import { localUpdateIssue, localCreateIssue, localCreateLink, localDeleteLink } from '../utils/localIssueWrite';
+import {
+  parseRST, serializeRST, buildDictionaries, getCellInfo,
+  buildResolvedRisks, isRiskResolved, mitigationTargetText,
+} from './satamRST';
 
 const API_BASE = config.API_BASE;
 
@@ -24,144 +28,6 @@ const MARK_COLORS = {
   M: '#4cafe8',   // Mitigation - 파랑
 };
 
-/* ---------- YAML-like 파서 ---------- */
-
-function parseRST(yamlText) {
-  if (!yamlText || typeof yamlText !== 'string') return [];
-  const items = [];
-  const lines = yamlText.split('\n');
-  let current = null;
-
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-
-    // 새 항목 시작: "- ID : R1" or "- ID: R1"
-    const idMatch = line.match(/^-\s*ID\s*:\s*(.+)/i);
-    if (idMatch) {
-      if (current) items.push(current);
-      current = { id: idMatch[1].trim(), qa: [], counterRisk: [], description: '' };
-      continue;
-    }
-
-    if (!current) continue;
-
-    // QA : [GOJIRA-001, GOJIRA-002] — bare 형식 공식, ["..", ".."] quoted 도 허용
-    const qaMatch = line.match(/^QA\s*:\s*\[([^\]]*)\]/i);
-    if (qaMatch) {
-      current.qa = qaMatch[1]
-        .split(',')
-        .map((s) => s.trim().replace(/^["']|["']$/g, ''))
-        .filter(Boolean);
-      continue;
-    }
-
-    // Counter Risk : ["R1:GOJIRA-001", ...]
-    const crMatch = line.match(/^Counter\s*Risk\s*:\s*\[([^\]]*)\]/i);
-    if (crMatch) {
-      current.counterRisk = crMatch[1]
-        .split(',')
-        .map((s) => s.trim().replace(/"/g, ''))
-        .filter(Boolean);
-      continue;
-    }
-
-    // Description : ...
-    const descMatch = line.match(/^Description\s*:\s*(.*)/i);
-    if (descMatch) {
-      current.description = descMatch[1].trim();
-      continue;
-    }
-  }
-  if (current) items.push(current);
-  return items;
-}
-
-/* risk/sensitivity/mitigation 데이터를 직렬화 */
-function serializeRST(items) {
-  return items.map((item) => {
-    let s = `- ID : ${item.id}`;
-    if (item.qa && item.qa.length > 0) {
-      s += `\n  QA : [${item.qa.join(', ')}]`;
-    }
-    if (item.counterRisk && item.counterRisk.length > 0) {
-      s += `\n  Counter Risk : [${item.counterRisk.map((cr) => `"${cr}"`).join(', ')}]`;
-    }
-    if (item.description) {
-      s += `\n  Description : ${item.description}`;
-    }
-    return s;
-  }).join('\n');
-}
-
-/* ---------- 사전 빌드 ---------- */
-
-function buildDictionaries(designIssues) {
-  // designKey -> { risks: [...], sensitivities: [...], mitigations: [...] }
-  const byDesign = {};
-  // qaKey -> { risks: [...], sensitivities: [...], mitigations: [...] } (requirement key 기준)
-  const byQA = {};
-  // 전역 risk/sensitivity/mitigation 딕셔너리: id -> item (with designKey)
-  const riskDict = {};
-  const sensDict = {};
-  const mitiDict = {};
-
-  designIssues.forEach((d) => {
-    const risks = parseRST(d.risk);
-    const sensitivities = parseRST(d.sensitivity);
-    const mitigations = parseRST(d.mitigation);
-    const concerns = parseRST(d.concerns);
-
-    byDesign[d.key] = { risks, sensitivities, mitigations, concerns };
-
-    risks.forEach((r) => {
-      riskDict[`${d.key}:${r.id}`] = { ...r, designKey: d.key };
-      r.qa.forEach((qaKey) => {
-        if (!byQA[qaKey]) byQA[qaKey] = { risks: [], sensitivities: [], mitigations: [] };
-        byQA[qaKey].risks.push({ ...r, designKey: d.key });
-      });
-    });
-
-    sensitivities.forEach((s) => {
-      sensDict[`${d.key}:${s.id}`] = { ...s, designKey: d.key };
-      s.qa.forEach((qaKey) => {
-        if (!byQA[qaKey]) byQA[qaKey] = { risks: [], sensitivities: [], mitigations: [] };
-        byQA[qaKey].sensitivities.push({ ...s, designKey: d.key });
-      });
-    });
-
-    mitigations.forEach((m) => {
-      mitiDict[`${d.key}:${m.id}`] = { ...m, designKey: d.key };
-      m.qa.forEach((qaKey) => {
-        if (!byQA[qaKey]) byQA[qaKey] = { risks: [], sensitivities: [], mitigations: [] };
-        byQA[qaKey].mitigations.push({ ...m, designKey: d.key });
-      });
-    });
-  });
-
-  return { byDesign, byQA, riskDict, sensDict, mitiDict };
-}
-
-/* ---------- 셀 교차점 계산 ---------- */
-
-function getCellInfo(designIssue, reqIssue, dicts) {
-  const designData = dicts.byDesign[designIssue.key] || { risks: [], sensitivities: [], mitigations: [] };
-
-  // 해당 requirement key가 등록된 R/S/M
-  const risks = designData.risks.filter((r) => r.qa.includes(reqIssue.key));
-  const sensitivities = designData.sensitivities.filter((s) => s.qa.includes(reqIssue.key));
-  const mitigations = designData.mitigations.filter((m) => m.qa.includes(reqIssue.key));
-
-  // issueLink contains 확인
-  const hasContains = (reqIssue.issueLinks || []).some((link) => {
-    const linkType = link.type?.name || '';
-    const isContains = linkType.toLowerCase().includes('contains');
-    const targetKey = link.inwardIssue?.key || link.outwardIssue?.key;
-    return isContains && targetKey === designIssue.key;
-  });
-
-  return { risks, sensitivities, mitigations, hasContains };
-}
 
 /* ---------- subtype / sorting helpers (공통) ---------- */
 
@@ -207,7 +73,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
     if (isAddMode) return { Sensitivity: true, Risk: true, Mitigation: true };
     if (!editItem) return { Sensitivity: true, Risk: true, Mitigation: true };
 
-    const isResolved = editItem.type === 'R' && globalResolvedRiskIds && globalResolvedRiskIds.has(editItem.id);
+    const isResolved = editItem.type === 'R' && isRiskResolved(resolvedRisks, designIssue.key, editItem.id);
 
     if (editItem.type === 'R' && !isResolved) {
       // mitigate 되지 않은 risk → Sensitivity로만 변경 가능
@@ -221,19 +87,14 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
     return { Sensitivity: false, Risk: false, Mitigation: false };
   };
 
-  // globalResolvedRiskIds는 부모에서 전달받지 않으므로 직접 계산
-  const globalResolvedRiskIds = useMemo(() => {
-    const resolved = new Set();
-    Object.values(dicts.byDesign).forEach((data) => {
-      data.mitigations.forEach((m) => {
-        m.counterRisk.forEach((cr) => {
-          const [rId] = cr.split(':');
-          resolved.add(rId);
-        });
-      });
-    });
-    return resolved;
-  }, [dicts]);
+  // resolvedRisks는 부모에서 전달받지 않으므로 직접 계산
+  const resolvedRisks = useMemo(() => buildResolvedRisks(dicts.byDesign), [dicts]);
+
+  // SATAM v2 cross-ADSN Mitigation(Target ADSN/Target Risk) — 대상은 스킬이 정한 것이므로
+  // 팝업에서는 읽기 전용으로 보여주고, 저장 시 Counter Risk 를 덧붙이지 않는다.
+  const targetMitigation = editItem && editItem.type === 'M'
+    ? designData.mitigations.find((m) => m.id === editItem.id && m.targetRisk)
+    : null;
 
   const enabledTypes = getEnabledTypes();
 
@@ -300,7 +161,7 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
         const item = lists[origType].find((i) => i.id === editItem.id);
         if (item) {
           item.description = description;
-          if (origType === 'M') {
+          if (origType === 'M' && !item.targetRisk) {
             item.counterRisk = Object.entries(counterRiskChecked).filter(([, v]) => v).map(([rId]) => `${rId}:${reqIssue.key}`);
           }
         }
@@ -385,7 +246,17 @@ function SATAMEditPopup({ designIssue, reqIssue, editItem, mode, dicts, onSave, 
         </div>
 
         {/* Counter-Risk (Mitigation인 경우에만) */}
-        {selectedType === 'Mitigation' && (
+        {selectedType === 'Mitigation' && targetMitigation && (
+          <div className="satam-popup-section">
+            <div className="satam-popup-label">Target Risk:</div>
+            <div className="satam-popup-checks">
+              <span>
+                {(dicts.subkeyOf[targetMitigation.targetKey] || targetMitigation.targetAdsn)} · {targetMitigation.targetRisk}
+              </span>
+            </div>
+          </div>
+        )}
+        {selectedType === 'Mitigation' && !targetMitigation && (
           <div className="satam-popup-section">
             <div className="satam-popup-label">Counter-Risk:</div>
             <div className="satam-popup-checks">
@@ -489,7 +360,7 @@ function EffectsLegend() {
 
 /* ---------- Effects Description Table ---------- */
 
-function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
+function EffectsTable({ designIssues, dicts, resolvedRisks }) {
   const rows = [];
 
   designIssues.forEach((d) => {
@@ -497,15 +368,13 @@ function EffectsTable({ designIssues, dicts, resolvedRiskIds }) {
     if (!data) return;
 
     data.risks.forEach((r) => {
-      rows.push({ designKey: d.subkey, id: r.id, type: 'Risk', description: r.description, resolved: resolvedRiskIds.has(r.id) });
+      rows.push({ designKey: d.subkey, id: r.id, type: 'Risk', description: r.description, resolved: isRiskResolved(resolvedRisks, d.key, r.id) });
     });
     data.sensitivities.forEach((s) => {
       rows.push({ designKey: d.subkey, id: s.id, type: 'Sensitivity', description: s.description, resolved: false });
     });
     data.mitigations.forEach((m) => {
-      const crText = m.counterRisk.length > 0
-        ? ` [Counter: ${m.counterRisk.join(', ')}]`
-        : '';
+      const crText = mitigationTargetText(m, dicts.subkeyOf);
       rows.push({ designKey: d.subkey, id: m.id, type: 'Mitigation', description: m.description + crText, resolved: false });
     });
   });
@@ -654,21 +523,8 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
   /* 사전 빌드 */
   const dicts = useMemo(() => buildDictionaries(designIssues), [designIssues]);
 
-  /* 전역 resolved Risk ID (모든 디자인의 mitigation counterRisk에서 수집) */
-  const globalResolvedRiskIds = useMemo(() => {
-    const resolved = new Set();
-    designIssues.forEach((d) => {
-      const data = dicts.byDesign[d.key];
-      if (!data) return;
-      data.mitigations.forEach((m) => {
-        m.counterRisk.forEach((cr) => {
-          const [rId] = cr.split(':');
-          resolved.add(rId);
-        });
-      });
-    });
-    return resolved;
-  }, [designIssues, dicts]);
+  /* 전역 resolved Risk (v2 Target ADSN/Risk + 레거시 Counter Risk 에서 수집) */
+  const resolvedRisks = useMemo(() => buildResolvedRisks(dicts.byDesign), [dicts]);
 
   /* 이슈 추가 — subkey 는 넘기지 않는다(서버 원자 할당, RelationMap 과 동일 정책). */
   async function addIssue(subtype) {
@@ -748,12 +604,16 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
     const item = lists[editItem.type].find((i) => i.id === editItem.id);
     if (item) {
       item.qa = item.qa.filter((k) => k !== reqKey);
+      // v2 cross-ADSN Mitigation 은 표시 위치가 대상 Risk 에서 파생되므로 셀 삭제 = 항목 삭제.
+      if (editItem.type === 'M' && item.targetRisk) item.removed = true;
     }
 
+    // v2 Mitigation 은 QA 없이 Target 만 가지므로 QA 유무가 아닌 removed 로 판단한다.
+    const keep = (i) => !i.removed && (i.qa.length > 0 || !!i.targetRisk);
     const data = {
-      risk: serializeRST(newRisks.filter((r) => r.qa.length > 0)),
-      sensitivity: serializeRST(newSens.filter((s) => s.qa.length > 0)),
-      mitigation: serializeRST(newMiti.filter((m) => m.qa.length > 0)),
+      risk: serializeRST(newRisks.filter(keep)),
+      sensitivity: serializeRST(newSens.filter(keep)),
+      mitigation: serializeRST(newMiti.filter(keep)),
     };
     await handleSave(designIssue.key, data);
   }
@@ -975,7 +835,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
                             borderStyle: 'solid',
                           }}
                         >
-                          <span className={mark.type === 'R' && globalResolvedRiskIds.has(mark.item.id) ? 'satam-resolved' : ''}>
+                          <span className={mark.type === 'R' && isRiskResolved(resolvedRisks, d.key, mark.item.id) ? 'satam-resolved' : ''}>
                             {mark.item.id}
                           </span>
                         </span>
@@ -1057,7 +917,7 @@ export default function SATAM({ project, user, onBack, currentPage, onNavigate }
         <EffectsLegend />
 
         {/* Effects 상세 테이블 */}
-        <EffectsTable designIssues={designIssues} dicts={dicts} resolvedRiskIds={globalResolvedRiskIds} />
+        <EffectsTable designIssues={designIssues} dicts={dicts} resolvedRisks={resolvedRisks} />
 
         {/* 기타 우려 사항 목록 */}
         <ConcernsList designIssues={designIssues} />
