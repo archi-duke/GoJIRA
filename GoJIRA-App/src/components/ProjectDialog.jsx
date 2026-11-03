@@ -47,7 +47,9 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
       .then((r) => r.json())
       .then((d) => setOrgUnits(Array.isArray(d) ? d : []))
       .catch(() => {});
-    authFetch(`${PLATFORM_API}/Account/users`)
+    // app=gojira — 미지정이면 platform 스코프라, gojira 권한그룹만 받은 신규
+    // 사용자가 멤버/Architect/PL/Auditor 후보에서 누락된다.
+    authFetch(`${PLATFORM_API}/Account/users?app=gojira`)
       .then((r) => r.json())
       .then((d) => setUsers(Array.isArray(d) ? d : []))
       .catch(() => {});

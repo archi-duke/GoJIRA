@@ -72,6 +72,10 @@ func main() {
 			r.Get("/me", handlers.UserMeHandler)
 			// 본인 Gitea 자격(username+PAT) — 런처가 clone/push URL 용으로 조회.
 			r.Get("/me/gitCredentials", handlers.UserGitCredentialsHandler)
+			// 사내 사용자 조회(CommonAPI 대리) — 등록 시 이름·이메일 채우기용.
+			// USER_API_BASE 미설정(사외 기본)이면 503.
+			r.Get("/lookup/{knoxId}", handlers.UserLookupHandler)
+			r.Get("/lookupByName", handlers.UserLookupByNameHandler)
 
 			r.Get("/users", handlers.UserListHandler)
 			r.Get("/users/{id}", handlers.UserGetHandler)
