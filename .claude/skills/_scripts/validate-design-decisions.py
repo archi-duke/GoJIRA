@@ -3,6 +3,8 @@
 
 v2 변경점: 1 Design Point = N+1 ADSN (후보 N + 선정 ADSN 가능). 후보별 QA 점수 /
 구조·동적 diagram / 가중치 기반 선정 근거. document 는 {index, dpFiles} 로 분리.
+v3: 후보별 description(설계안 설명문) 필수. 혼합 채택(chosen ≥ 2) 시 mixedFinal
+(혼합 최종 구조: 서술 + 구성 + 다이어그램) 필수 — Step 5 에서 별도 ADSN 으로 등록된다.
 
 stdin JSON:
 {
@@ -23,6 +25,7 @@ stdin JSON:
         {
           "candidateId": "A",
           "name": "...",
+          "description": "...",                  // 설계안 설명문 (구성·동작 방식 2~4문장)
           "pros": "...",
           "cons": "...",
           "qaScores": {"Performance": 4, "Security": 3},
@@ -35,6 +38,17 @@ stdin JSON:
         },
         ...
       ],
+      "mixedFinal": {                            // chosen=true 후보가 2개 이상(혼합 채택)일 때 필수
+        "name": "...",                           // 혼합 최종 구조 이름
+        "description": "...",                    // 혼합 최종 구조 서술 (결합 방식·단계·경계)
+        "composition": [                         // 구성 후보별 반영 부분 — chosen 후보 전부 포함
+          {"candidateId": "A", "part": "..."},
+          {"candidateId": "C", "part": "..."}
+        ],
+        "pros": "...", "cons": "...",            // optional
+        "structuralDiagram": "```plantuml ...```",  // Step 1.5 에서 채움
+        "dynamicDiagram": "```plantuml ...```"
+      },
       "decisionSummary": "Candidate B 단독 / Mix of A+C 등",
       "decisionRationale": "Driver 역추적 + 가중합 근거",
       "tradeoffs": "",                           // optional, 기각 대안 트레이드오프
@@ -77,10 +91,11 @@ DP_REQUIRED = {
     "decisionRationale", "relatedRequirements", "mode",
 }
 APPROACH_REQUIRED = {
-    "candidateId", "name", "pros", "cons", "qaScores",
+    "candidateId", "name", "description", "pros", "cons", "qaScores",
     "weightedScore", "eval", "chosen",
 }
 APPROACH_DIAGRAM_FIELDS = {"structuralDiagram", "dynamicDiagram"}
+MIXED_FINAL_REQUIRED_TEXT = ("name", "description")
 
 VALID_MODES = {"create", "reuse", "modify", "delete_mark"}
 VALID_LEVELS = {"Architectural", "Detailed"}
@@ -201,6 +216,7 @@ def validate(payload: dict) -> dict:
                 if chosen_count == 0:
                     critical.append({"type": "no_chosen_candidate", "docId": doc_id,
                                      "detail": "chosen=true 인 후보가 없음 — 최종 선정 미기록"})
+                _validate_mixed_final(d, val, chosen_count, doc_id, critical)
             elif field == "relatedRequirements":
                 if not isinstance(val, list):
                     critical.append({"type": "bad_relatedRequirements_type",
@@ -300,7 +316,7 @@ def _validate_approaches(
                 critical.append({"type": "approach_missing_field", "docId": doc_id,
                                  "detail": f"approaches[{cid or i}].{field} 누락"})
                 continue
-            if field in {"name", "pros", "cons", "eval", "candidateId"}:
+            if field in {"name", "description", "pros", "cons", "eval", "candidateId"}:
                 if not _has_text(val):
                     critical.append({"type": "approach_empty_field", "docId": doc_id,
                                      "detail": f"approaches[{cid or i}].{field} 비어있음"})
@@ -365,6 +381,61 @@ def _validate_approaches(
                          "detail": f"candidateId={cid} 중복"})
 
     return chosen_count
+
+
+def _check_diagrams(obj: dict, label: str, doc_id: str, critical: list) -> None:
+    for df in APPROACH_DIAGRAM_FIELDS:
+        diag = obj.get(df, "")
+        if not isinstance(diag, str) or not pu.has_block(diag):
+            critical.append({"type": "missing_diagram", "docId": doc_id,
+                             "detail": f"{label}.{df} 에 ```plantuml 블록 없음 (Step 1.5 미수행?)"})
+            continue
+        if any(not pu.has_uml_pair(b) for b in pu.find_blocks(diag)):
+            critical.append({"type": "plantuml_missing_pair", "docId": doc_id,
+                             "detail": f"{label}.{df} plantuml 블록에 @startuml/@enduml 쌍 누락"})
+
+
+def _validate_mixed_final(
+    design: dict, approaches: list, chosen_count: int, doc_id: str, critical: list
+) -> None:
+    """혼합 채택(chosen ≥ 2) 이면 mixedFinal(혼합 최종 구조) 필수."""
+    mf = design.get("mixedFinal")
+    if chosen_count < 2:
+        if mf:
+            critical.append({"type": "mixedFinal_without_mix", "docId": doc_id,
+                             "detail": "chosen=true 후보가 2개 미만인데 mixedFinal 이 있음 — 단독 채택이면 제거"})
+        return
+    if not isinstance(mf, dict) or not mf:
+        critical.append({"type": "mixedFinal_missing", "docId": doc_id,
+                         "detail": f"혼합 채택(chosen={chosen_count}) 인데 mixedFinal(혼합 최종 구조) 누락"})
+        return
+    for f in MIXED_FINAL_REQUIRED_TEXT:
+        if not _has_text(mf.get(f)):
+            critical.append({"type": "mixedFinal_empty_field", "docId": doc_id,
+                             "detail": f"mixedFinal.{f} 비어있음"})
+    chosen_ids = {a.get("candidateId") for a in approaches
+                  if isinstance(a, dict) and a.get("chosen") is True}
+    comp = mf.get("composition")
+    if not isinstance(comp, list) or not comp:
+        critical.append({"type": "mixedFinal_bad_composition", "docId": doc_id,
+                         "detail": "mixedFinal.composition 은 [{candidateId, part}] 배열 필수"})
+    else:
+        comp_ids = set()
+        for i, c in enumerate(comp):
+            if not isinstance(c, dict) or not _has_text(c.get("part")):
+                critical.append({"type": "mixedFinal_bad_composition", "docId": doc_id,
+                                 "detail": f"mixedFinal.composition[{i}] 에 part(반영 부분) 비어있음"})
+                continue
+            cid = c.get("candidateId")
+            if cid not in chosen_ids:
+                critical.append({"type": "mixedFinal_bad_composition", "docId": doc_id,
+                                 "detail": f"composition candidateId={cid!r} 는 chosen=true 후보가 아님"})
+            comp_ids.add(cid)
+        missing = chosen_ids - comp_ids
+        if missing:
+            critical.append({"type": "mixedFinal_bad_composition", "docId": doc_id,
+                             "detail": f"composition 에 chosen 후보 {sorted(missing)} 반영 부분 누락"})
+    _check_diagrams(mf, "mixedFinal", doc_id, critical)
 
 
 def _validate_index_doc(
@@ -433,6 +504,12 @@ def _validate_dp_files(
         approaches = d.get("approaches") or []
         plantuml_in_body = pu.find_blocks(body)
         expected_min = 2 * len(approaches)  # candidate 당 structural+dynamic
+        if d.get("mixedFinal"):
+            expected_min += 2  # 혼합 최종 구조 structural+dynamic
+            if not re.search(r"혼합 최종 구조", body):
+                suggestions.append({"type": "dp_file_mixed_final_section_missing",
+                                    "docId": did,
+                                    "detail": f"{did}: 혼합 채택인데 '혼합 최종 구조' 서술이 문서에 없음"})
         if len(plantuml_in_body) < expected_min:
             suggestions.append({"type": "dp_file_diagram_count_low",
                                 "docId": did,

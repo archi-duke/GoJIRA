@@ -7,6 +7,11 @@ ADSN/DDSN 이슈(designPoint != "시스템 스타일 결정") + archSettings.des
 DP 그룹핑: 이슈의 designPoint 필드. DP-NN 번호 = 그룹 내 가장 작은 subkey 의 alphabetical
 순서로 안정 정렬.
 
+혼합 채택: labels 에 "mix-final" 이 있는 이슈 = 혼합 최종 구조 ADSN (decision 보유),
+"mix-component" = 최종안에 통합된 구성 후보 (decision 비움, eval 에 통합 기록).
+후보 비교(3절) 에서는 mix-final 을 제외하고, 4절에 "혼합 최종 구조" 로 서술한다.
+라벨 없는 기존 데이터(decision 다수 = 구 Mix) 는 종전 방식으로 렌더링.
+
 입력:
   --from-mongo CODE [--user USER]
   --out-dir DIR (선택, 미지정 시 stdout 으로 index 만)
@@ -75,6 +80,45 @@ def group_by_designpoint(issues: list) -> list[tuple[str, list]]:
     return sorted(groups.items(), key=lambda kv: kv[1][0].get("subkey") or "")
 
 
+def _labels(issue: dict) -> list:
+    v = issue.get("labels") or []
+    return v if isinstance(v, list) else []
+
+
+def is_mix_final(issue: dict) -> bool:
+    return "mix-final" in _labels(issue)
+
+
+def is_mix_component(issue: dict) -> bool:
+    return "mix-component" in _labels(issue)
+
+
+_DESC_PREFIX_RE = re.compile(r"^DP-\d+\s*(?:후보\s*\S+|혼합 최종안)\.\s*")
+
+
+def _candidate_description(cand: dict) -> str:
+    """이슈 description 에서 'DP-N 후보 X. ' 접두어를 떼고 설명문만 반환.
+    구 데이터(설명문 없이 eval 을 그대로 복사한 description) 는 빈 문자열."""
+    desc = (cand.get("description") or "").strip()
+    body = _DESC_PREFIX_RE.sub("", desc, count=1).strip()
+    if not body or body == (cand.get("eval") or "").strip():
+        return ""
+    return body
+
+
+def _diagram(lines: list, title: str, diagram) -> None:
+    lines.append(f"**{title}**")
+    lines.append("")
+    diagram = (diagram or "").strip()
+    if diagram:
+        lines.append("```plantuml")
+        lines.append(diagram)
+        lines.append("```")
+    else:
+        lines.append("_(미작성)_")
+    lines.append("")
+
+
 def get_dp_qa_weights(arch: dict, design_point: str) -> dict | None:
     """archSettings.designDecideQAWeights 는 [{designPoint, qaWeights}, ...] 형태."""
     arr = arch.get("designDecideQAWeights") or []
@@ -110,9 +154,15 @@ def build_index(grouped: list[tuple[str, list]], arch: dict) -> str:
         slug = slugify(dp_name)
         first = group[0]
         level = first.get("designLevel") or "Architectural"
-        candidates = len(group)
+        candidates = len([g for g in group if not is_mix_final(g)])
         chosen = [g for g in group if (g.get("decision") or "").strip()]
-        chosen_str = "Mix" if len(chosen) > 1 else (chosen[0].get("subkey") or chosen[0].get("key") or "?") if chosen else "—"
+        finals = [g for g in group if is_mix_final(g)]
+        if finals:
+            chosen_str = f"Mix → {finals[0].get('subkey') or finals[0].get('key') or '?'}"
+        elif len(chosen) > 1:
+            chosen_str = "Mix"
+        else:
+            chosen_str = (chosen[0].get("subkey") or chosen[0].get("key") or "?") if chosen else "—"
         link = f"[DP-{num}](./design-decisions/DP-{num}-{slug}.md)"
         lines.append(f"| DP-{num} | {dp_name} | {level} | {candidates} | {chosen_str} | {link} |")
     lines.append("")
@@ -193,6 +243,8 @@ def build_dp_file(dp_name: str, group: list, arch: dict, dp_num: int) -> str:
 
     first = group[0]
     chosen = [g for g in group if (g.get("decision") or "").strip()]
+    finals = [g for g in group if is_mix_final(g)]
+    candidates = [g for g in group if not is_mix_final(g)]
 
     # 1 Design Objective
     lines.append("## 1. Design Objective")
@@ -241,38 +293,28 @@ def build_dp_file(dp_name: str, group: list, arch: dict, dp_num: int) -> str:
     # 3 후보 대안
     lines.append("## 3. 후보 대안 비교")
     lines.append("")
-    for idx, cand in enumerate(group, start=1):
+    final_key = (finals[0].get("subkey") or finals[0].get("key") or "?") if finals else ""
+    for idx, cand in enumerate(candidates, start=1):
         subkey = cand.get("subkey") or cand.get("key") or "?"
         # candidate name: summary 가 "DP명: NAME" → NAME 추출
         cand_name = _candidate_name(cand, dp_name)
         is_chosen = bool((cand.get("decision") or "").strip())
-        marker = " ✅" if is_chosen else ""
+        if is_chosen:
+            marker = " ✅"
+        elif is_mix_component(cand):
+            marker = f" 🔀 (혼합 최종안 {final_key} 에 통합)" if final_key else " 🔀 (혼합 구성)"
+        else:
+            marker = ""
         lines.append(f"### 3.{idx} {subkey}: {cand_name}{marker}")
         lines.append("")
         lines.append(f"- **ADSN 키**: {cand.get('key','?')}")
         lines.append("")
-        # Structural
-        lines.append("**Structural View (정적)**")
-        lines.append("")
-        adiagram = (cand.get("adiagram") or "").strip()
-        if adiagram:
-            lines.append("```plantuml")
-            lines.append(adiagram)
-            lines.append("```")
-        else:
-            lines.append("_(미작성)_")
-        lines.append("")
-        # Dynamic
-        lines.append("**Dynamic View (동적)**")
-        lines.append("")
-        bdiagram = (cand.get("bdiagram") or "").strip()
-        if bdiagram:
-            lines.append("```plantuml")
-            lines.append(bdiagram)
-            lines.append("```")
-        else:
-            lines.append("_(미작성)_")
-        lines.append("")
+        desc = _candidate_description(cand)
+        if desc:
+            lines.append(f"**설명**: {desc}")
+            lines.append("")
+        _diagram(lines, "Structural View (정적)", cand.get("adiagram"))
+        _diagram(lines, "Dynamic View (동적)", cand.get("bdiagram"))
         # Pros / Cons
         lines.append(f"**Pros**: {(cand.get('pros') or '').strip() or '_(없음)_'}")
         lines.append("")
@@ -294,7 +336,48 @@ def build_dp_file(dp_name: str, group: list, arch: dict, dp_num: int) -> str:
     # 4 최종 선정
     lines.append("## 4. 최종 선정")
     lines.append("")
-    if not chosen:
+    if finals:
+        f = finals[0]
+        fkey = f.get("subkey") or f.get("key") or "?"
+        fname = _candidate_name(f, dp_name)
+        comp_keys = ", ".join(c.get("subkey") or "?" for c in candidates if is_mix_component(c))
+        lines.append(f"**Mix 채택 → 혼합 최종안**: {fkey} — {fname}")
+        if comp_keys:
+            lines.append("")
+            lines.append(f"구성 후보: {comp_keys}")
+        lines.append("")
+        lines.append(f"### 4.1 혼합 최종 구조: {fname}")
+        lines.append("")
+        lines.append(f"- **ADSN 키**: {f.get('key','?')}")
+        lines.append("")
+        fdesc = _candidate_description(f)
+        if fdesc:
+            lines.append(fdesc)
+            lines.append("")
+        comp = (f.get("eval") or "").strip()
+        if comp:
+            lines.append(f"**구성**: {comp}")
+            lines.append("")
+        _diagram(lines, "Structural View (정적)", f.get("adiagram"))
+        _diagram(lines, "Dynamic View (동적)", f.get("bdiagram"))
+        if (f.get("pros") or "").strip():
+            lines.append(f"**Pros**: {f['pros'].strip()}")
+            lines.append("")
+        if (f.get("cons") or "").strip():
+            lines.append(f"**Cons**: {f['cons'].strip()}")
+            lines.append("")
+        lines.append("### 4.2 선정 근거")
+        lines.append("")
+        for c in chosen:
+            rationale = (c.get("decisionRationale") or "").strip()
+            if rationale:
+                lines.append(f"**근거**: {rationale}")
+                lines.append("")
+            decision = (c.get("decision") or "").strip()
+            if decision:
+                lines.append(f"**결정 노트**: {decision}")
+                lines.append("")
+    elif not chosen:
         lines.append("_(선정 후보 없음)_")
     else:
         if len(chosen) > 1:

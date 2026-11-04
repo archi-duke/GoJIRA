@@ -33,6 +33,8 @@
 - **ADSN 이슈 키**: {생성 후 Step 5.3 에서 치환, 초안에는 `{A_KEY}`}
 - **mode**: `create` / `reuse` (existingKey) / `modify` / `delete_mark`
 
+**설명**: (이 설계안이 무엇을 어떻게 하는지 2~4 문장 — 핵심 구성요소, 배치/경계, 주요 동작 흐름. Pros/Cons/QA 평가를 반복하지 않는다)
+
 **Structural View (정적 관점)**
 
 ```plantuml
@@ -95,10 +97,31 @@ A --> U: response
 - Driver {X} ({QA/CNST 이름}) 에 대해 {이 대안이 만족시키는 방식}
 - Driver {Y} 추적성: ...
 
-**(혼합 채택 시 혼합 방식)**:
-- Candidate A 의 {X 부분}: ...
-- Candidate C 의 {Y 부분}: ...
-- 통합 시 고려사항: ...
+### 4.1 혼합 최종 구조: {최종 구조 이름} (혼합 채택 시 필수)
+
+- **ADSN 키**: {혼합 최종안 ADSN — 라벨 mix-final, decision 은 이 이슈에만 기록}
+
+(혼합된 최종 구조 서술 3~6 문장 — 구성 후보들이 어떻게 결합되는지(동시 적용 / 영역 분할 / 단계 전환), 전환·연결 지점, 최종 상태)
+
+**구성**: A({후보 이름}): {반영 부분} / C({후보 이름}): {반영 부분}
+
+**Structural View (정적)** — 결합된 하나의 구조
+
+```plantuml
+@startuml
+' 혼합 최종 구조
+@enduml
+```
+
+**Dynamic View (동적)** — 단계형이면 == 1단계 == / == 2단계 == 구분
+
+```plantuml
+@startuml
+' 혼합 최종 구조 시나리오
+@enduml
+```
+
+> 구성 후보(A, C) 이슈는 decision 을 비우고, eval 에 "혼합 최종안에 통합 적용됨 — 반영 부분" 을 기록한다 (라벨 mix-component).
 
 ---
 
