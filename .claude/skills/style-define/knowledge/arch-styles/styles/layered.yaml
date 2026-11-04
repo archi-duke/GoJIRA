@@ -1,0 +1,94 @@
+id: layered
+name: "Layered (N-Tier)"
+scope: module_boundary
+category: internal-structure
+summary: "프레젠테이션/비즈니스/데이터 등 역할별 레이어로 수직 분할한 모듈 구조."
+description: |
+  가장 전통적이고 보편적인 내부 구조 스타일. 팀 러닝커브가 낮고 단순 시스템에
+  적합. 규모/복잡도 증가 시 레이어 간 결합과 확장 한계 노출. Clean/Hexagonal은
+  이 스타일의 의존성 규칙을 강화한 파생.
+
+fit_signals:
+  simple_crud: high
+  team_size: small
+  ops_maturity: low
+  strong_consistency: high
+  short_lifecycle: medium_or_higher
+
+avoid_signals:
+  scalability: required
+  team_independent_deploy: high
+  domain_complexity: high
+  event_volume: high
+
+prerequisites:
+  technical: []
+  design:
+    - layer_responsibility_separation
+  organizational: {}
+
+quality_attributes:
+  - attribute: simplicity
+    effect: positive
+    strength: high
+  - attribute: learnability
+    effect: positive
+    strength: high
+  - attribute: consistency
+    effect: positive
+    strength: medium
+  - attribute: modifiability
+    effect: negative
+    strength: medium
+  - attribute: scalability
+    effect: negative
+    strength: medium
+
+combines_well_with:
+  - style: clean-architecture
+    reason: "clean은 layered의 의존성 규칙 강화 버전"
+  - style: hexagonal
+    reason: "레이어 경계를 포트/어댑터로 강화 가능"
+
+conflicts_with: []   # module_boundary scope 내 다른 스타일과 경쟁보다는 특화 관계
+
+operational_complexity: low
+observability_requirement: low
+testing_complexity: low
+consistency_model: strong
+interaction_mode: synchronous
+team_maturity_required: low
+failure_handling_patterns:
+  - exception_translation
+
+decision_rules:
+  - if:
+      simple_crud: high
+      team_size: small
+    then:
+      score: +3
+      reason: "작은 팀의 단순 CRUD에 학습/적용이 가장 빠름"
+  - if:
+      domain_complexity: high
+    then:
+      score: -2
+      reason: "복잡 도메인에서 레이어 경계가 약화되면 '빅 볼 오브 머드' 위험"
+  - if:
+      scalability: required
+    then:
+      score: -2
+      reason: "수직 레이어 구조는 극단적 확장 요구에 불리"
+
+tradeoffs:
+  pros:
+    - "학습/적용 용이"
+    - "작은 시스템에 빠른 구현"
+    - "강한 일관성 유지 자연스러움"
+  cons:
+    - "레이어 경계 약화 시 결합도 증가"
+    - "확장성/유연성 한계"
+
+related_patterns: [clean-architecture, hexagonal]
+
+references:
+  - "Fowler, Patterns of Enterprise Application Architecture"

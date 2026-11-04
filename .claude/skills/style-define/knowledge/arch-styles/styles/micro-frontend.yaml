@@ -1,0 +1,105 @@
+id: micro-frontend
+name: "Micro-Frontend"
+scope: system_structure
+category: frontend-distributed
+summary: "프론트엔드를 독립 배포 가능한 여러 애플리케이션으로 분할하는 구조."
+description: |
+  백엔드의 Microservices 이념을 프론트엔드로 확장. 팀별로 도메인 영역을
+  독립 개발/배포하고 셸(shell) 애플리케이션이 통합한다. 백엔드 구조와 독립
+  적으로 적용 가능하나 UI 일관성/번들 관리 부담이 증가.
+
+fit_signals:
+  ui_team_independence: high
+  release_frequency: high
+  large_ui_codebase: high
+  polyglot_frontend_tech: medium_or_higher
+
+avoid_signals:
+  team_size: small
+  simple_crud: high
+  ops_maturity: low
+  strict_ui_consistency: high
+
+prerequisites:
+  technical:
+    - frontend_build_infra
+    - module_federation_or_equivalent
+    - shared_routing
+  design:
+    - shared_design_system
+    - cross_app_communication_contract
+  organizational:
+    team_size: medium_or_higher
+    release_frequency: medium_or_higher
+
+quality_attributes:
+  - attribute: modifiability
+    effect: positive
+    strength: high
+  - attribute: deployability
+    effect: positive
+    strength: high
+  - attribute: team_autonomy
+    effect: positive
+    strength: high
+  - attribute: simplicity
+    effect: negative
+    strength: medium
+  - attribute: ui_consistency
+    effect: negative
+    strength: medium
+  - attribute: initial_load_time
+    effect: negative
+    strength: medium
+
+combines_well_with:
+  - style: microservices
+    reason: "백엔드 독립 배포와 짝을 이루는 프론트 독립 배포"
+  - style: event-driven
+    reason: "앱 간 통신을 메시지/이벤트 기반으로 느슨하게 유지 가능"
+
+conflicts_with: []
+
+operational_complexity: medium
+observability_requirement: medium
+testing_complexity: high
+consistency_model: n/a
+interaction_mode: n/a
+team_maturity_required: medium_or_higher
+failure_handling_patterns:
+  - graceful_fallback
+  - fragment_isolation
+
+decision_rules:
+  - if:
+      team_size: small
+    then:
+      score: -3
+      reason: "프론트 분할/빌드 파이프라인 운영 부담 대비 효익 낮음"
+  - if:
+      ui_team_independence: high
+      release_frequency: high
+    then:
+      score: +3
+      reason: "팀별 독립 배포와 릴리즈 빈도 향상에 직접 기여"
+  - if:
+      strict_ui_consistency: high
+    then:
+      score: -2
+      reason: "디자인 일관성 유지 비용이 커짐"
+
+tradeoffs:
+  pros:
+    - "프론트 팀 독립 배포"
+    - "도메인별 기술 선택 유연성"
+    - "대형 프론트 코드베이스 분할"
+  cons:
+    - "번들 중복/로드 시간 증가"
+    - "디자인 일관성 유지 비용"
+    - "공유 상태/통신 설계 난이도"
+
+related_patterns: [microservices]
+
+references:
+  - "Geers, Micro Frontends in Action"
+  - "Single-SPA / Module Federation 문서"

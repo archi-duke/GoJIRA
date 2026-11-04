@@ -1,0 +1,110 @@
+id: serverless
+name: "Serverless (FaaS)"
+scope: deployment
+category: deployment
+summary: "함수 단위로 배포되고 요청 발생 시 실행되는 이벤트 기반 컴퓨팅 모델."
+description: |
+  실행 기반 과금과 자동 확장. 짧은 수명/이벤트 기반 워크로드에 적합.
+  콜드 스타트, 벤더 락인, 실행 시간 제한 등 제약 존재. 시스템 구조 스타일
+  (모놀리스/마이크로서비스)과 독립적으로 적용 가능한 배포 모델.
+
+fit_signals:
+  sporadic_workload: high
+  event_volume: medium_or_higher
+  scalability: high
+  ops_maturity: low
+  release_frequency: high
+
+avoid_signals:
+  synchronous_low_latency: high
+  long_running_job: high
+  strong_vendor_independence: high
+  stateful_heavy: high
+
+prerequisites:
+  technical:
+    - cloud_platform
+    - function_runtime
+  design:
+    - stateless_functions
+    - idempotency
+    - cold_start_mitigation
+  organizational: {}
+
+quality_attributes:
+  - attribute: scalability
+    effect: positive
+    strength: high
+  - attribute: cost_efficiency
+    effect: positive
+    strength: high
+  - attribute: operability
+    effect: positive
+    strength: high
+  - attribute: latency
+    effect: negative
+    strength: medium
+  - attribute: portability
+    effect: negative
+    strength: high
+  - attribute: debuggability
+    effect: negative
+    strength: medium
+
+combines_well_with:
+  - style: event-driven
+    reason: "이벤트 트리거 기반 실행 모델과 자연스럽게 결합"
+  - style: micro-frontend
+    reason: "프론트별 BFF를 함수로 가볍게 배포"
+  - style: microservices
+    reason: "특정 서비스만 함수로 운용하는 혼합 구성 가능"
+
+conflicts_with: []
+
+operational_complexity: low
+observability_requirement: medium
+testing_complexity: medium
+consistency_model: n/a
+interaction_mode: mixed
+team_maturity_required: low
+failure_handling_patterns:
+  - retry
+  - dead_letter_queue
+  - idempotency
+
+decision_rules:
+  - if:
+      sporadic_workload: high
+    then:
+      score: +3
+      reason: "가변 부하에 자동 확장과 사용량 과금이 경제적"
+  - if:
+      synchronous_low_latency: high
+    then:
+      score: -3
+      reason: "콜드 스타트로 저지연 동기 경로에 부적합"
+  - if:
+      long_running_job: high
+    then:
+      score: -3
+      reason: "실행 시간 제한으로 장시간 작업에 부적합"
+  - if:
+      strong_vendor_independence: high
+    then:
+      score: -2
+      reason: "플랫폼 고유 런타임/이벤트 형식에 강한 결합"
+
+tradeoffs:
+  pros:
+    - "운영 부담 최소"
+    - "가변 부하에 자동 확장"
+    - "사용량 기반 비용"
+  cons:
+    - "콜드 스타트 레이턴시"
+    - "벤더 락인"
+    - "실행 시간/메모리 제한"
+
+related_patterns: [event-driven]
+
+references:
+  - "AWS Lambda / Azure Functions 공식 문서"

@@ -147,7 +147,7 @@ echo "$NORM"
 #### 0.3.2 카탈로그 읽기
 
 ```bash
-KN="$(git rev-parse --show-toplevel)/Agent-Service/knowledge/arch-styles"
+KN="${PROJECT_ROOT}/.claude/skills/style-define/knowledge/arch-styles"
 cat "${KN}/index.yaml"
 ls "${KN}/styles/"
 ```
