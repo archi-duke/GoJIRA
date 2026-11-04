@@ -4,7 +4,8 @@
 stdin JSON:
 {
   "req": {"scalability":"high", "team_size":"large", ...},     # normalizedAttributes
-  "knowledge_dir": "<optional absolute path>"                   # 없으면 Agent-Service/knowledge/arch-styles 자동
+  "knowledge_dir": "<optional absolute path>"                   # 없으면 엔진 기본값. 카탈로그는
+                                                                #   .claude/skills/style-define/knowledge/arch-styles
 }
 
 stdout JSON:

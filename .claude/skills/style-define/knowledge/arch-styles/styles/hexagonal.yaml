@@ -1,0 +1,97 @@
+id: hexagonal
+name: "Hexagonal (Ports & Adapters)"
+scope: module_boundary
+category: internal-structure
+summary: "도메인을 중심에 두고 포트/어댑터로 외부 기술과의 경계를 분리하는 모듈 구조."
+description: |
+  비즈니스 로직(도메인)이 외부(DB/UI/메시징)에 의존하지 않고, 포트 인터페이스를
+  통해 어댑터로 교체 가능한 구조. 시스템 수준이 아니라 모듈/서비스 내부 구조로
+  채택. 시스템 스타일(모놀리스/마이크로서비스)과 직교.
+
+fit_signals:
+  modifiability: high
+  testability: high
+  domain_complexity: medium_or_higher
+  long_term_maintenance: high
+
+avoid_signals:
+  simple_crud: high
+  short_lifecycle: high
+  team_size: small                              # 규율 유지 난이도
+
+prerequisites:
+  technical: []
+  design:
+    - port_interface_definition
+    - dependency_inversion
+  organizational:
+    developer_discipline: medium_or_higher
+
+quality_attributes:
+  - attribute: modifiability
+    effect: positive
+    strength: high
+  - attribute: testability
+    effect: positive
+    strength: high
+  - attribute: portability
+    effect: positive
+    strength: medium
+  - attribute: simplicity
+    effect: negative
+    strength: medium
+
+combines_well_with:
+  - style: modular-monolith
+    reason: "모놀리스 내부 모듈 경계를 포트/어댑터로 명확화"
+  - style: microservices
+    reason: "서비스 내부 구조로 채택 시 외부 기술 교체 용이"
+  - style: clean-architecture
+    reason: "의존성 규칙이 동치에 가까움 — 혼용 가능"
+  - style: cqrs
+    reason: "쓰기/읽기 어댑터를 포트 단위로 분리"
+  - style: event-driven
+    reason: "이벤트 브로커를 아웃바운드 어댑터로 추상화"
+
+conflicts_with: []
+
+operational_complexity: low
+observability_requirement: low
+testing_complexity: low
+consistency_model: n/a
+interaction_mode: n/a
+team_maturity_required: medium_or_higher
+failure_handling_patterns: []
+
+decision_rules:
+  - if:
+      simple_crud: high
+    then:
+      score: -3
+      reason: "단순 CRUD에 포트/어댑터 도입은 과설계"
+  - if:
+      modifiability: high
+      domain_complexity: high
+    then:
+      score: +3
+      reason: "도메인 규칙 복잡도와 변경 용이성 요구에 부합"
+  - if:
+      testability: high
+    then:
+      score: +2
+      reason: "도메인 단위 테스트 용이성 확보"
+
+tradeoffs:
+  pros:
+    - "도메인과 인프라 분리로 테스트 용이"
+    - "외부 기술(DB/프레임워크) 교체 용이"
+    - "비즈니스 규칙 순수성 확보"
+  cons:
+    - "초기 설계/코드 양 증가"
+    - "단순 과제에 과설계 위험"
+    - "포트/어댑터 규율이 흐트러지면 효익 소실"
+
+related_patterns: [clean-architecture, layered]
+
+references:
+  - "Alistair Cockburn, Hexagonal Architecture"

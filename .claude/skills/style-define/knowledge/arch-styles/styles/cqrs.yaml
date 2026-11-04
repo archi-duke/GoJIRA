@@ -1,0 +1,112 @@
+id: cqrs
+name: "CQRS (Command Query Responsibility Segregation)"
+scope: data
+category: data-pattern
+summary: "쓰기(명령)와 읽기(조회) 모델을 분리해 각각 최적화하는 데이터 패턴."
+description: |
+  명령 모델과 조회 모델을 분리한다. 복잡한 도메인/대량 조회 트래픽/서로 다른
+  확장 특성에 유리하나 이중 모델 유지 비용이 발생한다. Event Sourcing과
+  자주 결합되지만 강제는 아니다.
+
+fit_signals:
+  domain_complexity: high
+  read_write_ratio_skewed: high
+  auditability: medium_or_higher
+  event_volume: high
+  scalability: high
+
+avoid_signals:
+  simple_crud: high
+  team_size: small
+  strong_consistency: high
+  ops_maturity: low
+
+prerequisites:
+  technical:
+    - read_model_store
+  design:
+    - command_model_separation
+    - projection_sync_mechanism
+    - idempotency
+  organizational:
+    developer_discipline: medium_or_higher
+
+quality_attributes:
+  - attribute: scalability
+    effect: positive
+    strength: high
+  - attribute: modifiability
+    effect: positive
+    strength: medium
+  - attribute: auditability
+    effect: positive
+    strength: medium
+  - attribute: performance
+    effect: positive
+    strength: high
+  - attribute: consistency
+    effect: negative
+    strength: medium
+  - attribute: simplicity
+    effect: negative
+    strength: high
+
+combines_well_with:
+  - style: event-driven
+    reason: "이벤트를 읽기 모델 갱신 트리거로 자연스럽게 활용"
+  - style: microservices
+    reason: "서비스 경계 내 쓰기/읽기 모델 분리에 적합"
+  - style: hexagonal
+    reason: "명령/조회 포트 분리로 어댑터 설계 단순화"
+
+conflicts_with: []
+
+operational_complexity: high
+observability_requirement: medium
+testing_complexity: high
+consistency_model: eventual
+interaction_mode: mixed
+team_maturity_required: medium_or_higher
+failure_handling_patterns:
+  - projection_rebuild
+  - idempotent_consumer
+  - outbox_pattern
+
+decision_rules:
+  - if:
+      simple_crud: high
+    then:
+      score: -3
+      reason: "단순 CRUD에 이중 모델 도입은 과설계"
+  - if:
+      read_write_ratio_skewed: high
+      scalability: high
+    then:
+      score: +3
+      reason: "읽기/쓰기 독립 확장이 핵심 이익"
+  - if:
+      strong_consistency: high
+    then:
+      score: -2
+      reason: "프로젝션 지연으로 즉시 일관성 보장 어려움"
+  - if:
+      auditability: high
+    then:
+      score: +2
+      reason: "명령 로그를 감사/재처리 근거로 활용"
+
+tradeoffs:
+  pros:
+    - "읽기/쓰기 독립 확장"
+    - "복잡 도메인 규칙과 조회 요구 분리"
+    - "감사 로그/리포트 생성 용이"
+  cons:
+    - "이중 모델 유지 비용"
+    - "프로젝션 지연과 결과적 일관성 관리"
+    - "단순 도메인에 과설계"
+
+related_patterns: [event-driven]
+
+references:
+  - "Young, CQRS Documents"
+  - "Fowler, CQRS"

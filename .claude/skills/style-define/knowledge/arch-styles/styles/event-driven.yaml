@@ -1,0 +1,126 @@
+id: event-driven
+name: "Event-Driven Architecture"
+scope: integration
+category: integration
+summary: "컴포넌트 간 통신을 이벤트 발행/구독 기반의 비동기 방식으로 구성하는 통합 스타일."
+description: |
+  이벤트 브로커(Kafka, RabbitMQ, SNS/SQS 등)를 통해 생산자와 소비자를 분리한다.
+  느슨한 결합과 확장성을 제공하지만, 결과적 일관성과 운영/디버깅 복잡성을 수반한다.
+  시스템 구조 스타일이 아니라 통합 계층 스타일이므로 모놀리스/분산 구조 어느 쪽과도 결합 가능.
+
+fit_signals:
+  scalability: high
+  event_volume: high
+  auditability: medium_or_higher
+  availability: high
+  async_processing_need: high
+
+avoid_signals:
+  strong_consistency: high
+  ops_maturity: low
+  synchronous_low_latency: high
+  domain_complexity: low
+  simple_crud: high
+
+prerequisites:
+  technical:
+    - message_broker
+  design:
+    - idempotency
+    - retry_policy
+    - dead_letter_queue
+    - schema_versioning
+  organizational:
+    ops_maturity: medium_or_higher
+
+quality_attributes:
+  - attribute: scalability
+    effect: positive
+    strength: high
+  - attribute: decoupling
+    effect: positive
+    strength: high
+  - attribute: auditability
+    effect: positive
+    strength: medium
+  - attribute: availability
+    effect: positive
+    strength: medium
+  - attribute: consistency
+    effect: negative
+    strength: medium
+  - attribute: debuggability
+    effect: negative
+    strength: high
+  - attribute: simplicity
+    effect: negative
+    strength: medium
+
+combines_well_with:
+  - style: microservices
+    reason: "서비스 간 비동기 통합과 독립 배포 구조에 적합"
+  - style: cqrs
+    reason: "이벤트를 읽기 모델 갱신 트리거로 활용 가능"
+  - style: serverless
+    reason: "이벤트 트리거 기반 실행 모델과 자연스럽게 결합"
+  - style: modular-monolith
+    reason: "모놀리스 내부 모듈 간 통합에도 비동기 이벤트 적용 가능"
+
+conflicts_with: []   # integration scope에 같은 수준 대체 스타일이 현 카탈로그에 없음
+
+operational_complexity: high
+observability_requirement: high
+testing_complexity: high
+consistency_model: eventual
+interaction_mode: asynchronous
+team_maturity_required: medium_or_higher
+failure_handling_patterns:
+  - retry
+  - dead_letter_queue
+  - idempotent_consumer
+  - outbox_pattern
+
+decision_rules:
+  - if:
+      strong_consistency: high
+    then:
+      score: -3
+      reason: "즉시 강한 일관성이 핵심인 흐름에 부적합"
+  - if:
+      event_volume: high
+      scalability: high
+    then:
+      score: +3
+      reason: "이벤트 중심 고확장성 요구에 적합"
+  - if:
+      ops_maturity: low
+    then:
+      score: -3
+      reason: "브로커/DLQ/재시도/관측성 운영 난이도가 큼"
+  - if:
+      auditability: high
+    then:
+      score: +2
+      reason: "이벤트 로그를 감사 추적 근거로 활용 가능"
+  - if:
+      synchronous_low_latency: high
+    then:
+      score: -2
+      reason: "동기 저지연 경로에서 브로커 경유가 불리"
+
+tradeoffs:
+  pros:
+    - "생산자/소비자 간 느슨한 결합"
+    - "비동기 처리로 피크 흡수 및 확장성 확보"
+    - "이벤트 로그를 감사/재처리 근거로 활용 가능"
+  cons:
+    - "결과적 일관성 수용 필요"
+    - "전역 흐름 추적/디버깅 난이도 증가"
+    - "브로커 및 소비자 운영 부담 증가"
+    - "흔한 실패 패턴: 이벤트로 위장한 분산 모놀리스, 스키마 버전 관리 부재"
+
+related_patterns: [cqrs, serverless]
+
+references:
+  - "Richardson, Microservices Patterns"
+  - "Stopford, Designing Event-Driven Systems"
