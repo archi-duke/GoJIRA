@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const version = "0.1.37"
+const version = "0.1.38"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -858,16 +858,20 @@ func hashObjectsBatch(repoPath string, paths []string) (map[string]string, error
 	return result, nil
 }
 
-// listHeadTree — `git ls-tree -r HEAD` 결과를 파싱해 평면 리스트로 반환.
+// listHeadTree — `git ls-tree -r -z HEAD` 결과를 파싱해 평면 리스트로 반환.
 // HEAD 가 없거나(빈 레포) 실패면 빈 리스트 + err (호출 측이 비치명적으로 처리).
-// 포맷: <mode> <type> <sha>\t<path>
+// 포맷: <mode> <type> <sha>\t<path>\0
+//
+// -z 필수: 없으면 core.quotepath(기본 true) 때문에 비 ASCII(한글) 경로가
+// "\353\246\254..." 처럼 따옴표+8진수 이스케이프로 나와 listLocalTree 의 UTF-8 경로와
+// 매칭되지 않는다 → 웹이 커밋된 한글 파일을 전부 미커밋으로 보고 "발행" 대신 "등록" 을 띄움.
 func listHeadTree(repoPath string) ([]map[string]any, error) {
-	out, err := gitCmd(repoPath, "ls-tree", "-r", "HEAD")
+	out, err := gitCmd(repoPath, "ls-tree", "-r", "-z", "HEAD")
 	if err != nil {
 		return []map[string]any{}, err
 	}
 	var entries []map[string]any
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(out, "\x00") {
 		if line == "" {
 			continue
 		}
