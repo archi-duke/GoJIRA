@@ -175,6 +175,7 @@ Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (PlantUML 은 S
 - `dmodel` — 적용 도메인/시스템 영역 (optional)
 - `qaWeights` — 이 DP 에 한정되는 QA 가중치 (근거 포함, 합=1.0)
 - `approaches` — 후보 대안 배열 (2개 이상 필수)
+- `mixedFinal` — **혼합 채택(chosen=true 후보 2개 이상) 시 필수**. 혼합된 최종 구조 (1.4a 참조). 단독 채택이면 넣지 않는다
 - `decisionSummary` — 최종 선정 요약 (단독 or "Mix of A+C")
 - `decisionRationale` — Driver 역추적 가능한 선정 근거
 - `relatedRequirements` — Driver/Requirement 이슈 key 배열
@@ -185,6 +186,7 @@ Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (PlantUML 은 S
 각 후보는 다음 필드를 갖는다 (plantuml 은 Step 1.5 에서 추가):
 - `candidateId` — DP 내에서 A/B/C... (유일)
 - `name` — 대안 이름
+- `description` — **설계안 설명문 (필수)**. 이 후보가 *무엇을 어떻게* 하는지 2~4 문장: 핵심 구성요소, 배치/경계, 주요 동작 흐름. 장단점·점수 근거(`pros`/`cons`/`eval`)를 반복하지 말고, 다이어그램 없이도 구조가 그려지도록 서술. ADSN 이슈의 description 으로 들어간다
 - `pros` / `cons`
 - `qaScores` — DP 의 qaWeights 키와 동일한 QA 에 대해 1~5 정수
 - `weightedScore` — Σ(score × weight), 소수 둘째자리
@@ -196,8 +198,25 @@ Step 1 은 모든 DP 의 후보 텍스트를 한 draft 로 flush (PlantUML 은 S
 ### 1.4 선정 규칙
 
 - 총점 최고 1개 단독 채택 → 그 후보만 `chosen=true`
-- 최고점 근소(0.3 이하) 또는 상호 보완적 → 혼합 채택 가능. 관련 후보 모두 `chosen=true`, `decisionNote` 에 혼합 방식 기록
+- 최고점 근소(0.3 이하) 또는 상호 보완적 → 혼합 채택 가능. 관련 후보 모두 `chosen=true`, `decisionNote` 에 그 후보가 혼합에서 맡는 부분 기록. **반드시 `mixedFinal` 작성** (1.4a)
 - 기존 후보 어느것도 그대로 쓰기 곤란 → **신규 "합성" 후보 추가** (candidateId 를 새로 부여하고 이것만 `chosen=true`). 원래 후보들은 `chosen=false` 유지. 이 경우 DP 내 candidate 개수가 N+1
+
+### 1.4a 혼합 최종 구조 (`mixedFinal`)
+
+혼합 채택이면 "A 와 B 를 섞는다" 로 끝내지 말고 **혼합된 최종 구조 자체**를 하나의 설계로 서술한다. Step 5 에서 별도 ADSN 이슈(라벨 `mix-final`)로 등록되며, **최종 결정(`decision`)은 이 이슈에만 기록**된다.
+
+| 필드 | 필수 | 내용 |
+|---|---|---|
+| `name` | ✅ | 최종 구조 이름 (예: "단계형: 관전 릴레이(1단계) → Hub 서버 이전(2단계)") |
+| `description` | ✅ | 최종 구조 서술 3~6 문장 — 구성 후보들이 **어떻게 결합**되는지(동시 적용 / 영역 분할 / 단계 전환), 전환·연결 지점, 최종 상태 |
+| `composition` | ✅ | `[{candidateId, part}]` — chosen=true 후보 **전부**에 대해 최종 구조에 반영된 부분 |
+| `pros` / `cons` | 선택 | 혼합으로 생기는 이점·부담 |
+| `structuralDiagram` / `dynamicDiagram` | ✅ (Step 1.5) | 혼합된 최종 구조의 정적/동적 다이어그램 — 후보 다이어그램을 나열하지 말고 **결합된 하나의 구조**를 그린다 |
+
+이슈 반영 규칙 (Step 5.1 이 자동 처리):
+- 혼합 최종안 ADSN — `decision` = 혼합 결정 노트, `decisionRationale` / `tradeoffs` 기록, 라벨 `mix-final`
+- 구성 후보 ADSN — **`decision` 비움**, `eval` 끝에 "혼합 최종안에 통합 적용됨 — 반영 부분: …" 기록, 라벨 `mix-component`
+- 따라서 SATAM / design-integrate 등 `decision` 기준 하위 단계는 혼합 최종안 하나만 채택안으로 본다
 
 ### 1.5 QA 가중치 원칙
 
@@ -230,7 +249,8 @@ Step 1 에서 index + 각 DP 파일 **뼈대**를 작성한다. 후보별 plantu
 
 섹션 필수:
 - index (`design-decisions.md`): 1. Design Point 목록 / 2. Driver 추적성 / 3. QA 가중치 요약 / 4. 리스크 요약
-- DP 파일 (`design-decisions/DP-NN-*.md`): 1. Design Objective / 2. QA 가중치 / 3. 후보 대안 / 4. 최종 선정 / 5. 트레이드오프
+- DP 파일 (`design-decisions/DP-NN-*.md`): 1. Design Objective / 2. QA 가중치 / 3. 후보 대안 (후보마다 **설명** 문단 포함) / 4. 최종 선정 (혼합 채택이면 **4.1 혼합 최종 구조** — 서술·구성·다이어그램) / 5. 트레이드오프
+- 이 초안 문서는 자가검증용이며, 최종 문서는 Step 5.3 에서 이슈 기반으로 결정적 재조립된다
 
 템플릿 참조:
 ```bash
@@ -240,7 +260,7 @@ cat "${PROJECT_ROOT}/.claude/skills/design-decide/templates/dp.md"              
 
 ### Step 1 종료 — draft flush (필수)
 
-**JSON 필드명은 스키마 그대로 사용**. validator 는 아래 키만 인식 — `point` / `alternatives` / `rationale` / `goal` 등 변형 금지. `approaches[]` 필수 필드: `candidateId, name, pros, cons, qaScores, weightedScore, eval, chosen`. `chosen=true` 인 후보는 `decisionNote` 필수.
+**JSON 필드명은 스키마 그대로 사용**. validator 는 아래 키만 인식 — `point` / `alternatives` / `rationale` / `goal` 등 변형 금지. `approaches[]` 필수 필드: `candidateId, name, description, pros, cons, qaScores, weightedScore, eval, chosen`. `chosen=true` 인 후보는 `decisionNote` 필수. chosen=true 가 2개 이상이면 DP 에 `mixedFinal` 필수 (Step 1 에서는 `structuralDiagram`/`dynamicDiagram` 제외).
 
 ```bash
 cat > /tmp/${CODE}-dd-draft-input.json <<'JSON'
@@ -263,6 +283,7 @@ cat > /tmp/${CODE}-dd-draft-input.json <<'JSON'
         {
           "candidateId":"A",
           "name":"2PC (Strong consistency)",
+          "description":"주문·결제·재고 서비스가 하나의 트랜잭션 코디네이터 아래 2단계 커밋에 참여한다. 코디네이터가 prepare 응답을 모두 받은 뒤에만 commit 을 지시하므로 세 저장소가 항상 같은 상태를 유지한다.",
           "pros":"원자성 보장, 데이터 정합성 강력",
           "cons":"동기 대기 오버헤드, 가용성 저하",
           "qaScores":{"Performance":3,"Security":5,"Maintainability":3},
@@ -274,6 +295,7 @@ cat > /tmp/${CODE}-dd-draft-input.json <<'JSON'
         {
           "candidateId":"B",
           "name":"Saga + Outbox",
+          "description":"각 서비스가 로컬 트랜잭션으로 상태를 바꾸고 같은 트랜잭션에서 Outbox 테이블에 이벤트를 기록한다. 릴레이가 Outbox 를 메시지 브로커로 발행하고, 실패 시 앞 단계 서비스가 보상 트랜잭션을 실행한다.",
           "pros":"비동기로 가용성·응답성 우수, 결합도 낮음",
           "cons":"최종 일관성, 보상 트랜잭션 복잡도",
           "qaScores":{"Performance":5,"Security":4,"Maintainability":4},
@@ -304,6 +326,21 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/draft-io.sh" save "${CODE}" "dd" "
   < /tmp/${CODE}-dd-draft-input.json
 ```
 
+혼합 채택 DP 의 `mixedFinal` 예 (해당 DP 객체에 추가, chosen=true 후보 A·B):
+
+```json
+"mixedFinal":{
+  "name":"단계형: 단방향 관전 릴레이(1단계) → Room Hub 서버 이전(2단계)",
+  "description":"1단계는 Room Hub 를 로컬에 두고 공유 중인 대화방 이벤트만 사내 릴레이로 단방향 미러링한다. 2단계에서 Room Hub 를 사내 서버로 옮기고 관전은 view 스코프 토큰으로 구분하며, 릴레이는 폐기한다. 릴레이 수신 프로토콜을 Hub 이벤트 프로토콜과 동일하게 정의해 두 단계 사이 클라이언트 변경을 없앤다. 에이전트 실행(Runtime Host)은 두 단계 모두 로컬에 남는다.",
+  "composition":[
+    {"candidateId":"B","part":"1단계 — 단방향 미러링 퍼블리셔 + 수신 전용 릴레이"},
+    {"candidateId":"A","part":"2단계(최종 상태) — Hub 서버 이전 + OIDC view 스코프 토큰"}
+  ],
+  "pros":"관전 수요가 확인되기 전 서버 운영 부담 없이 시작, 최종 웹 메신저 구조로 무중단 전환",
+  "cons":"단계 전환 시 보안 보장이 구조적(쓰기 경로 없음) → 로직 의존(스코프 검사)으로 바뀌어 재검증 필요"
+}
+```
+
 출력 한 줄만 assistant 메시지에. JSON 재출력 금지.
 
 ---
@@ -317,6 +354,7 @@ Step 1 draft 를 로드하고 **각 후보에 structuralDiagram / dynamicDiagram
 - **Dynamic View**: PlantUML **sequence 다이어그램** — 주요 시나리오의 시간 흐름 (`participant` + 화살표. 공백 있는 이름은 따옴표 또는 `as` 별칭 필수)
 - 각 다이어그램은 ` ```plantuml ` / ` ``` ` 블록으로 감싸고 **반드시 `@startuml` / `@enduml` 쌍** 포함
 - 같은 DP 안의 후보들은 **같은 문제를 다르게 푸는** 것이므로 공통 입력/출력을 표시해 비교 가시성 확보
+- **혼합 채택 DP 는 `mixedFinal.structuralDiagram` / `mixedFinal.dynamicDiagram` 도 작성** — 구성 후보 다이어그램을 이어 붙이지 말고 결합된 최종 구조 하나를 그린다. 단계형 혼합이면 단계 전환(예: `== 1단계 ==` / `== 2단계 ==` 구분선)을 동적 다이어그램에 표시
 - document.dpFiles[DP-N] 의 plantuml placeholder 도 함께 실제 내용으로 교체
 
 작업 예:
@@ -336,6 +374,12 @@ for design in d["designs"]:
         # 아래 두 문자열을 실제 plantuml 로 대체
         a["structuralDiagram"] = a.get("structuralDiagram") or "```plantuml\n@startuml\ncomponent Client\ncomponent API\ndatabase DB\nClient --> API\nAPI --> DB\n@enduml\n```"
         a["dynamicDiagram"]   = a.get("dynamicDiagram")   or "```plantuml\n@startuml\nactor User as U\nparticipant API as A\nU -> A: request\nA --> U: response\n@enduml\n```"
+
+    # 혼합 채택 DP: 혼합 최종 구조 다이어그램
+    mf = design.get("mixedFinal")
+    if mf:
+        mf["structuralDiagram"] = "..."  # 결합된 최종 구조 component 다이어그램
+        mf["dynamicDiagram"]    = "..."  # 최종 구조 sequence 다이어그램
 
     # DP 파일 본문의 plantuml placeholder 를 실제 블록으로 교체
     body = d["document"]["dpFiles"].get(dp_id, "")
@@ -387,7 +431,10 @@ cat /tmp/${CODE}-dd-validation.json
 - `no_chosen_candidate` — chosen=true 후보 0건
 - `chosen_without_note` — chosen=true 인데 decisionNote 비어있음
 - `duplicate_candidateId`
-- `missing_diagram` — Step 1.5 미수행 (structuralDiagram / dynamicDiagram 에 plantuml 블록 없음)
+- `approach_empty_field` — 후보의 name / **description** / pros / cons / eval 비어있음
+- `mixedFinal_missing` / `mixedFinal_empty_field` / `mixedFinal_bad_composition` — 혼합 채택인데 최종 구조 누락·서술 비어있음·구성 후보 불일치
+- `mixedFinal_without_mix` — 단독 채택인데 mixedFinal 존재
+- `missing_diagram` — Step 1.5 미수행 (후보 또는 mixedFinal 의 structuralDiagram / dynamicDiagram 에 plantuml 블록 없음)
 - `plantuml_missing_pair` — plantuml 블록에 `@startuml` / `@enduml` 쌍 누락
 - `driver_uncovered` / `relatedRequirements_hallucination` / `no_requirement_link`
 - `bad_designLevel` / `bad_docId_format` / `duplicate_docId`
@@ -442,7 +489,8 @@ cat /tmp/${CODE}-dd-draft.json \
 - `Architectural` → issueType `"Architectural Design"` (subkey `ADSN_NNN`)
 - `Detailed` → issueType `"Detailed Design"` (subkey `DDSN_NNN`)
 
-한 DP 에 N 후보가 있으면 N 이슈 생성. `chosen=true` 인 후보(들) 에만 `decision` 필드를 채운다. 나머지는 decision 빈 문자열.
+한 DP 에 N 후보가 있으면 N 이슈 생성. 단독 채택이면 `chosen=true` 후보에만 `decision` 을 채운다.
+**혼합 채택(`mixedFinal` 존재)이면 N+1 이슈** — 후보 N 개 뒤에 혼합 최종안 ADSN 1개를 추가하고, `decision` 은 **혼합 최종안에만** 채운다. 구성 후보(chosen=true)는 decision 을 비우고 `eval` 에 통합 적용 사실을 기록한다 (1.4a).
 
 ```bash
 # draft 에서 후보를 평탄화해 items 배열 구성
@@ -459,28 +507,62 @@ for design in d["designs"]:
         for a in design["approaches"]
     ], ensure_ascii=False)
 
+    mf = design.get("mixedFinal")
+    by_id = {a["candidateId"]: a for a in design["approaches"]}
+    part_of = {c["candidateId"]: c["part"] for c in (mf or {}).get("composition", [])}
+    if mf:
+        approaches_json = json.dumps(
+            json.loads(approaches_json) + [{"candidateId": "MIX", "name": mf["name"],
+                                            "mixOf": list(part_of.keys())}],
+            ensure_ascii=False)
+
+    base = {
+        "issueType":   issue_type,
+        "designLevel": design["designLevel"],
+        "designPoint": design["designPoint"],
+        "objectives":  design["objectives"],
+        "dmodel":      design.get("dmodel", ""),
+        "approaches":  approaches_json,
+    }
+
     for a in design["approaches"]:
-        item = {
-            "issueType":         issue_type,
-            "summary":           f"{design['designPoint']}: {a['name']}",
-            "desc":              f"{dp_id} 후보 {a['candidateId']}. {a.get('eval','')}",
-            "designLevel":       design["designLevel"],
-            "designPoint":       design["designPoint"],
-            "objectives":        design["objectives"],
-            "dmodel":            design.get("dmodel", ""),
-            "approaches":        approaches_json,
-            "pros":              a["pros"],
-            "cons":              a["cons"],
-            "score":             str(a["weightedScore"]),
-            "eval":              a["eval"],
-            "adiagram":          a.get("structuralDiagram", ""),
-            "bdiagram":          a.get("dynamicDiagram", ""),
-        }
-        if a.get("chosen"):
+        item = dict(base, **{
+            "summary":   f"{design['designPoint']}: {a['name']}",
+            "desc":      f"{dp_id} 후보 {a['candidateId']}. {a['description']}",
+            "pros":      a["pros"],
+            "cons":      a["cons"],
+            "score":     str(a["weightedScore"]),
+            "eval":      a["eval"],
+            "adiagram":  a.get("structuralDiagram", ""),
+            "bdiagram":  a.get("dynamicDiagram", ""),
+        })
+        if mf and a.get("chosen"):
+            # 혼합 구성 후보 — decision 비움, eval 에 통합 기록
+            item["eval"]   = (f"{a['eval']}\n\n[혼합 최종안 통합] '{mf['name']}' 에 통합 적용됨 — "
+                              f"반영 부분: {part_of.get(a['candidateId'], a.get('decisionNote',''))}")
+            item["labels"] = ["mix-component"]
+        elif a.get("chosen"):
             item["decision"]          = a.get("decisionNote", "")
             item["decisionRationale"] = design["decisionRationale"]
             item["tradeoffs"]         = design.get("tradeoffs", "")
         items.append(item)
+
+    if mf:
+        comp_text = " / ".join(
+            f"{cid}({by_id[cid]['name']}): {part}" for cid, part in part_of.items() if cid in by_id)
+        items.append(dict(base, **{
+            "summary":           f"{design['designPoint']}: {mf['name']}",
+            "desc":              f"{dp_id} 혼합 최종안. {mf['description']}",
+            "pros":              mf.get("pros", ""),
+            "cons":              mf.get("cons", ""),
+            "eval":              comp_text,
+            "adiagram":          mf.get("structuralDiagram", ""),
+            "bdiagram":          mf.get("dynamicDiagram", ""),
+            "decision":          design["decisionSummary"] + " — " + comp_text,
+            "decisionRationale": design["decisionRationale"],
+            "tradeoffs":         design.get("tradeoffs", ""),
+            "labels":            ["mix-final"],
+        }))
 
 open("/tmp/dd_items.json","w").write(json.dumps(items, ensure_ascii=False, indent=2))
 print(f"{len(items)}건 준비")
@@ -491,11 +573,11 @@ bash "${PROJECT_ROOT}/.claude/skills/_scripts/issue-batch-create.sh" "${CODE}" "
 cat /tmp/dd_result.json
 ```
 
-`issue-batch-create.sh` 가 POST 후 PUT 으로 ADSN/DDSN 필드 (designLevel / designPoint / objectives / approaches / decision / decisionRationale / pros / cons / score / eval / adiagram / bdiagram / tradeoffs) 를 자동 반영한다.
+`issue-batch-create.sh` 가 POST 시 `labels`(mix-final / mix-component) 를, 이어서 PUT 으로 ADSN/DDSN 필드 (designLevel / designPoint / objectives / approaches / decision / decisionRationale / pros / cons / score / eval / adiagram / bdiagram / tradeoffs) 를 자동 반영한다. 혼합 최종안은 `score` 를 두지 않는다 (가중 점수는 구성 후보 비교용).
 
 ### 5.2 Requirement → 후보 ADSN Contains 링크
 
-각 DP 의 `relatedRequirements` 는 **그 DP 의 모든 후보 ADSN** 에 동일하게 연결 (candidate 하나씩 개별 이슈이므로).
+각 DP 의 `relatedRequirements` 는 **그 DP 의 모든 후보 ADSN + 혼합 최종안 ADSN** 에 동일하게 연결 (candidate 하나씩 개별 이슈이므로). 혼합 최종안 링크는 index 의 Driver 추적성 매트릭스에 쓰이므로 누락 금지.
 
 > **중복 제거 필수** — `POST /Issue/link` idempotent 아님. Step 0 수집한 issueLinks 와 차집합 POST.
 
@@ -514,7 +596,9 @@ d = json.load(open("/tmp/%s-dd-draft.json" % os.environ["CODE"]))
 links = []
 idx = 0
 for design in d["designs"]:
-    for a in design["approaches"]:
+    # 5.1 items 순서와 동일: 후보 N 개 → (혼합이면) 혼합 최종안 1개
+    n_issues = len(design["approaches"]) + (1 if design.get("mixedFinal") else 0)
+    for _ in range(n_issues):
         candidate_key = keys[idx]
         idx += 1
         for req_key in design.get("relatedRequirements", []):
@@ -596,7 +680,7 @@ PATCH 실패 시 최종 보고에 ⚠. fast path 재생성 시 가중치 섹션 
 
 - 진입 drift: design-decide=<NO-BASELINE|CLEAN|DRIFT>, style=<...> (Step 0.1 결과)
 - Design Point: N개 (DP-01 ~ DP-NN)
-- ADSN/DDSN 생성: 총 K건 (채택 C건 / 미채택 K-C건)   (forced-doc-regen 은 0)
+- ADSN/DDSN 생성: 총 K건 (채택 C건 / 미채택 K-C건, 혼합 최종안 M건 포함)   (forced-doc-regen 은 0)
   - Architectural: A건 / Detailed: D건
 - Requirement-Design 링크: L건
 - 문서:
@@ -613,7 +697,7 @@ PATCH 실패 시 최종 보고에 ⚠. fast path 재생성 시 가중치 섹션 
 | DP | 주제 | 후보 수 | 선정안 |
 |---|---|---|---|
 | DP-01 | 데이터 일관성 | 2 | Candidate B 단독 |
-| DP-02 | 통신 패턴 | 3 | Mix of A+C |
+| DP-02 | 통신 패턴 | 3 | Mix of A+C → 혼합 최종안 ADSN_0NN |
 
 ### Self-loop
 - iter N회 / selected=iter X (score_eff Y) / stop=pass|max_iter|...
@@ -638,7 +722,9 @@ python3 "${PROJECT_ROOT}/.claude/skills/_scripts/drift-check.py" "${CODE}" "${US
 - `issueType` 은 정확히 `Architectural Design` / `Detailed Design` (공백 포함)
 - 링크 linkType 은 정확히 `Contains(WBSGantt)` — Requirement 가 inward, ADSN 이 outward
 - `qaWeights` 합 = 1.0 ±0.02 / `qaScores` 는 1~5 정수 / `weightedScore` 는 Σ(score×weight)
-- `chosen=true` 후보는 반드시 `decisionNote` 기록. 혼합 채택은 여러 후보를 `chosen=true` 로 동시에
+- `chosen=true` 후보는 반드시 `decisionNote` 기록. 혼합 채택은 여러 후보를 `chosen=true` 로 동시에 + `mixedFinal`(혼합 최종 구조) 필수
+- 모든 후보에 `description`(설계안 설명문) 필수 — pros/cons/eval 반복 금지, 구조·동작 서술
+- 혼합 채택 시 이슈상 `decision` 은 혼합 최종안(라벨 `mix-final`)에만. 구성 후보(라벨 `mix-component`)는 decision 비우고 eval 에 통합 기록
 - **Step 1 에서 plantuml 쓰지 말 것** (Step 1.5 에서만). Step 1 에서 plantuml 생성하면 스톨 리스크
 - `relatedRequirements` hallucination 금지 — Step 0 에서 수집한 실존 key 만
 - Step 0, 1, 1.5, 2, 3, 5 만 실제 Bash 호출, Step 4 는 내부 판단
