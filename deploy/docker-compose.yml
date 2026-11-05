@@ -123,6 +123,13 @@ services:
       GITHUB_URL: "http://${GITEA_SERVER:?required}/"
       GOJIRA_API_URL: "http://gojira-api:9001/api/v2"
       GOJIRA_ENC_KEY: "${GOJIRA_ENC_KEY:-}"
+      # Gitea webhook — 과제(DocRepo) 생성 시 이 URL 로 webhook 을 등록한다.
+      # ⚠️ 미설정(빈 값)이면 CreateWebhook 이 조용히 skip 되어 webhook 이 안 걸린다.
+      #    그러면 PR 머지(main push) 후 data/issues/*.yaml 변경이 Mongo 로 reconcile
+      #    되지 않아 웹 `공식` 뷰에 이슈 변경이 반영되지 않는다(수동 resync 필요).
+      # 값: Gitea 컨테이너에서 게이트웨이로 도달하는 주소 + /platform/webhook/github
+      PLATFORM_WEBHOOK_URL: "${PLATFORM_WEBHOOK_URL:-}"
+      PLATFORM_WEBHOOK_SECRET: "${PLATFORM_WEBHOOK_SECRET:-gojira-webhook-secret}"
       <<: *sso-backend-env
       # 사내 사용자 조회 API (CommonAPI) — 사용자 등록 시 Knox 임직원 조회.
       # 사외에서는 비워 둔다(미설정이면 조회 엔드포인트가 503).
