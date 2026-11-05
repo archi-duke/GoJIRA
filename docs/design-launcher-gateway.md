@@ -214,7 +214,8 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 | 경로 | 내용 |
 |---|---|
 | `GET /api/v2/launcher/version`, `/download/{os}` | 런처 자기 업데이트. 응답에 `sig`(루트 키 서명) 필드 **추가만** 하고 기존 필드·형식 유지 → ≤0.1.38 런처 무영향(§10.7) |
-| `GET /api/v2/launcher/manifest` | (신규) 서명 대상 런처 매니페스트 원문 + `.sig` — 신버전 런처가 사용 |
+| `GET /api/v2/launcher/manifest` | **(기존, 변경 없음)** 웹 설치 모달용 — OS별 호스팅 여부·크기. 서명과 무관 |
+| `GET /api/v2/launcher/release-manifest`, `…/release-manifest.sig` | (신규) 서명 대상 런처 매니페스트 원문 + 서명 — 신버전 런처가 사용. 원문은 **파일 바이트 그대로** 서빙(서버가 JSON 을 재조립하면 서명이 깨진다) |
 | `GET /api/v2/launcher/catalog` | `catalog.json` + 서명 |
 | `GET /api/v2/launcher/services/{name}/{version}/{file}` | 서비스 패키지 다운로드 |
 
@@ -295,7 +296,7 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 [런처 릴리스 태그]    launcher-release 워크플로 (environment: launcher-release, 승인자 승인 후 실행)
   launcher-v*          1. OS별 크로스 컴파일 + 스킬 임베드 (Actions 에서 빌드 — §10.7)
                        2. 런처 매니페스트 {version, platforms:{os:{sha256,size}}, issuedAt} 생성
-                       3. 루트 키로 서명 → manifest.json.sig, version.txt·*.sha256(구형식)도 함께 생성
+                       3. 루트 키로 서명 → release-manifest.json.sig, version.txt·*.sha256(구형식)도 함께 생성
                        4. 산출물을 deploy/launcher-dist/ 로 게시 → Platform-API 서빙
 ```
 
@@ -391,7 +392,8 @@ jobs:
 | B. 필수 모드 | 0.1.40(가칭)~ | 서명 검증 실패 시 **교체 거부**. A 가 충분히 퍼진 뒤 배포(Platform-API 접속 로그의 런처 버전 분포로 판단) |
 
 - `/api/v2/launcher/version` 은 기존 필드(`version`, `platforms.{os}.sha256/size/ready`)를 그대로 두고 `sig` 만 **추가** —
-  0.1.37 이하가 쓰는 매니페스트 구제 경로를 유지한다. 서명 원문은 신규 `/api/v2/launcher/manifest` 로 제공.
+  0.1.37 이하가 쓰는 매니페스트 구제 경로를 유지한다. 서명 원문은 신규 `/api/v2/launcher/release-manifest` 로 제공한다
+  (설계 초안은 `/api/v2/launcher/manifest` 를 지목했으나 그 경로는 이미 웹 설치 모달이 쓰고 있어 분리 — 구현 PR #118).
 - ≤0.1.38 런처가 A 버전으로 올라오는 첫 업데이트 자체는 sha256 만으로 이뤄진다(불가피). 이 1회 구간은 Actions 빌드 + 서명
   산출물만 서버에 올리는 것으로 위험을 줄인다.
 
