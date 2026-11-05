@@ -39,6 +39,9 @@ func main() {
 	go srv.syncCatalog()
 
 	// 임베드 스킬을 추출(첫 기동/버전 변경 시만 실제 쓰기). 실패는 비치명적.
+	// 직전 업데이트의 성패 판정 — 교체했는데 버전이 안 올랐으면 그 버전을 건너뛴다.
+	reconcileUpdateState()
+
 	if err := ExtractSkills(cfg.SkillsSourceDir, version, false); err != nil {
 		log.Printf("스킬 추출 실패(비치명적): %v", err)
 	}

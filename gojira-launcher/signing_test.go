@@ -91,3 +91,37 @@ func TestAcceptManifest(t *testing.T) {
 		}
 	})
 }
+
+// 업데이트 실패 기억 — 서버 매니페스트와 실제 바이너리가 어긋나도
+// 클라이언트가 무한 재시도에 빠지지 않아야 한다.
+func TestUpdateStateLoopGuard(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	t.Run("기록 없으면 아무것도 건너뛰지 않는다", func(t *testing.T) {
+		if shouldSkipVersion("9.9.9") {
+			t.Fatal("빈 상태에서 건너뛰었다")
+		}
+	})
+
+	t.Run("교체했는데 버전이 그대로면 그 버전을 실패로 기록", func(t *testing.T) {
+		markUpdateAttempt("99.0.0") // 현재 version 보다 높은 목표
+		reconcileUpdateState()      // 재기동 시점 — 실제 버전은 그대로다
+		if !shouldSkipVersion("99.0.0") {
+			t.Fatal("실패한 버전을 건너뛰지 않는다 — 무한 루프에 빠진다")
+		}
+	})
+
+	t.Run("더 높은 새 버전은 다시 시도한다", func(t *testing.T) {
+		if shouldSkipVersion("99.0.1") {
+			t.Fatal("다른 버전까지 막혔다")
+		}
+	})
+
+	t.Run("목표만큼 올라왔으면 기록을 지운다", func(t *testing.T) {
+		markUpdateAttempt("0.0.1") // 현재 version 보다 낮은 목표 = 성공 상태
+		reconcileUpdateState()
+		if shouldSkipVersion("0.0.1") || loadUpdateState().Pending != "" {
+			t.Fatalf("성공인데 상태가 남았다: %+v", loadUpdateState())
+		}
+	})
+}
