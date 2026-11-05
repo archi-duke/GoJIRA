@@ -1,5 +1,42 @@
 {
-  "issuedAt": "1970-01-01T00:00:00Z",
   "expiresAt": "1970-01-01T00:00:00Z",
-  "services": []
+  "issuedAt": "1970-01-01T00:00:00Z",
+  "services": [
+    {
+      "name": "ragaas-converter",
+      "os": [
+        "windows"
+      ],
+      "packages": {
+        "windows-amd64": {
+          "file": "ragaas-converter-0.1.0-windows-amd64.zip",
+          "sha256": "7a5900ef695212a2bfb2fc59f7ecfb15393f67c1c906c03f4c7d7beb31614dbd"
+        }
+      },
+      "policy": "optional",
+      "requires": [
+        "powershell",
+        "office-com"
+      ],
+      "routes": [
+        {
+          "maxBodyMB": 200,
+          "methods": [
+            "POST"
+          ],
+          "prefix": "/v1/docs/pptx",
+          "timeoutSec": 240
+        },
+        {
+          "maxBodyMB": 200,
+          "methods": [
+            "POST"
+          ],
+          "prefix": "/v1/docs/docx",
+          "timeoutSec": 240
+        }
+      ],
+      "version": "0.1.0"
+    }
+  ]
 }
