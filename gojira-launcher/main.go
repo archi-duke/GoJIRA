@@ -25,6 +25,12 @@ func main() {
 		log.Fatalf("설정 로드 실패: %v", err)
 	}
 	srv := &Server{cfg: cfg, sessions: newSessionRegistry()}
+	// Supervisor — 내장 서비스를 먼저 등록하고, 외부 서비스는 Installer 묶음에서 더한다.
+	srv.sup = newSupervisor(srv)
+	for _, spec := range builtinServices() {
+		srv.sup.register(spec)
+	}
+	srv.sup.startIdleWatch()
 
 	// 임베드 스킬을 추출(첫 기동/버전 변경 시만 실제 쓰기). 실패는 비치명적.
 	if err := ExtractSkills(cfg.SkillsSourceDir, version, false); err != nil {
@@ -88,6 +94,10 @@ func main() {
 		mux.HandleFunc(m+" /launcher/health", srv.secure(false, srv.handleHealth))
 	}
 	mux.HandleFunc("POST /launcher/shutdown", srv.secure(true, srv.handleShutdown))
+	mux.HandleFunc("GET /launcher/capabilities", srv.secure(true, srv.handleCapabilities))
+	mux.HandleFunc("GET /launcher/services", srv.secure(true, srv.handleServices))
+	mux.HandleFunc("POST /launcher/services/{name}/install", srv.secure(true, srv.handleServiceInstall))
+	mux.HandleFunc("POST /launcher/services/{name}/restart", srv.secure(true, srv.handleServiceRestart))
 
 	// /v1/workspace/* — Git 작업본 (②)
 	mux.HandleFunc("GET /v1/workspace/{code}/status", srv.secure(true, srv.withQueryCode(srv.handleStatus)))
