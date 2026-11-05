@@ -1,8 +1,6 @@
 {
-  "commit": "local-test",
-  "expiresAt": "2026-12-05T09:39:40Z",
-  "issuedAt": "2026-11-05T09:39:40Z",
-  "runId": "0",
+  "expiresAt": "1970-01-01T00:00:00Z",
+  "issuedAt": "1970-01-01T00:00:00Z",
   "services": [
     {
       "name": "ragaas-converter",
