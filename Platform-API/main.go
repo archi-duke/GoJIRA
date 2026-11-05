@@ -133,6 +133,9 @@ func main() {
 		// Launcher 바이너리 호스팅 — 웹이 런처 미감지 상태에서 다운로드.
 		r.Get("/launcher/manifest", handlers.LauncherManifestHandler)
 		r.Get("/launcher/version", handlers.LauncherVersionHandler)
+		// 서명 릴리스 매니페스트 — 원문과 서명을 파일 그대로 서빙(설계 §10.6).
+		r.Get("/launcher/release-manifest", handlers.LauncherReleaseManifestHandler)
+		r.Get("/launcher/release-manifest.sig", handlers.LauncherReleaseManifestSigHandler)
 		r.Get("/launcher/download/{os}", handlers.LauncherDownloadHandler)
 
 		// DocRepo — 문서 이력관리 (projectCode 기반)

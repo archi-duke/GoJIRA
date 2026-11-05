@@ -1,0 +1,39 @@
+# 서비스 카탈로그 자동 서명 — main 머지 시 (설계 §10.6, D11).
+#
+# 배포 빈도가 높아 담당자 수동 서명은 병목이 된다. 통제는 PR 리뷰 + 보호 브랜치 +
+# environment(main 한정)가 맡고, 서명 자체는 자동으로 돌린다.
+name: catalog-sign
+
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/launcher-dist/catalog.json"]
+  schedule:
+    - cron: "0 3 * * 1"            # 주 1회 재서명 — expiresAt 갱신(내용 불변)
+  workflow_dispatch: {}            # environment 가 main 으로 제한하므로 타 브랜치에서는 키 접근 불가
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-sign
+  cancel-in-progress: false        # 서명·게시 직렬화
+
+jobs:
+  sign:
+    runs-on: [self-hosted, signer]
+    environment: catalog-signing
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate
+        run: deploy/scripts/build-catalog.sh validate
+      - name: Sign
+        env:
+          CATALOG_SIGNING_KEY: ${{ secrets.CATALOG_SIGNING_KEY }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: deploy/scripts/build-catalog.sh sign       # issuedAt/expiresAt/commit/runId 기록 후 서명
+      - name: Publish
+        env:
+          LAUNCHER_DIST_PUBLISH_DIR: ${{ vars.LAUNCHER_DIST_PUBLISH_DIR }}
+        run: deploy/scripts/build-catalog.sh publish    # catalog.json + .sig → 배포 디렉터리

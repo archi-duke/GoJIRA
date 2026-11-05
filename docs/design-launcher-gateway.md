@@ -1,7 +1,7 @@
 # 로컬 런처 게이트웨이화 — 단일 진입점 + 기능 경로 + 로컬 서비스 배포
 
 > 기록 일자: 2026-11-05
-> 상태: **설계 (구현 대기)**
+> 상태: **구현 중** — §14 0단계(서명 기반) PR #118, 1단계(런처 코어) 착수 예정
 > 대체 범위: [`Long-term Considerations/local-agent-mvp.md`](./Long-term%20Considerations/local-agent-mvp.md) §2 "로컬 런처 서비스" 의
 > 역할 정의("소환 + 상태 회신 전용")를 이 문서가 대체한다. MVP 문서의 나머지(에이전트 로컬 실행,
 > `docs/{user}` push→PR 흐름)는 유효.
@@ -10,6 +10,9 @@
 > 계기로 삼는다.
 > 반영 이력: 2026-11-05 이슈 #116(런처 관련 검토 필요 사항 — 사내 GHES 실측·서명 지점 검토) 반영 —
 > 런처 매니페스트 서명, 루트/카탈로그 키 분리, Actions 빌드 이전, 2단계 이행(§10.6, §10.7, §14 0단계).
+> 2026-11-05 §14 0단계 구현(PR #118) — gojira-sign 도구, 런처 경고 모드(v0.1.39), Platform-API
+> release-manifest 서빙, launcher-dist 컴파일 제거, 서명 워크플로 3종·CODEOWNERS·build-catalog.sh.
+> 코드 밖 선행 작업(GHES runner 구축, 키 생성·등록, environment·보호 브랜치, 게시 경로 §15-2)은 미완.
 
 ## 0. 한 줄 요약
 
@@ -214,7 +217,8 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 | 경로 | 내용 |
 |---|---|
 | `GET /api/v2/launcher/version`, `/download/{os}` | 런처 자기 업데이트. 응답에 `sig`(루트 키 서명) 필드 **추가만** 하고 기존 필드·형식 유지 → ≤0.1.38 런처 무영향(§10.7) |
-| `GET /api/v2/launcher/manifest` | (신규) 서명 대상 런처 매니페스트 원문 + `.sig` — 신버전 런처가 사용 |
+| `GET /api/v2/launcher/manifest` | **(기존, 변경 없음)** 웹 설치 모달용 — OS별 호스팅 여부·크기. 서명과 무관 |
+| `GET /api/v2/launcher/release-manifest`, `…/release-manifest.sig` | (신규) 서명 대상 런처 매니페스트 원문 + 서명 — 신버전 런처가 사용. 원문은 **파일 바이트 그대로** 서빙(서버가 JSON 을 재조립하면 서명이 깨진다) |
 | `GET /api/v2/launcher/catalog` | `catalog.json` + 서명 |
 | `GET /api/v2/launcher/services/{name}/{version}/{file}` | 서비스 패키지 다운로드 |
 
@@ -295,7 +299,7 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 [런처 릴리스 태그]    launcher-release 워크플로 (environment: launcher-release, 승인자 승인 후 실행)
   launcher-v*          1. OS별 크로스 컴파일 + 스킬 임베드 (Actions 에서 빌드 — §10.7)
                        2. 런처 매니페스트 {version, platforms:{os:{sha256,size}}, issuedAt} 생성
-                       3. 루트 키로 서명 → manifest.json.sig, version.txt·*.sha256(구형식)도 함께 생성
+                       3. 루트 키로 서명 → release-manifest.json.sig, version.txt·*.sha256(구형식)도 함께 생성
                        4. 산출물을 deploy/launcher-dist/ 로 게시 → Platform-API 서빙
 ```
 
@@ -308,10 +312,10 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 | Environment `catalog-signing` | Deployment branches: `main` 만. Required reviewers 없음 | 카탈로그 키는 main 에서 도는 job 만 접근. 잦은 배포 병목 회피 |
 | Environment `launcher-release` | Deployment branches/tags: `main`, `launcher-v*` 만. **Required reviewers: 플랫폼 담당 1+** | 루트 키 사용 직전 사람 승인 |
 | Environment secret | `CATALOG_SIGNING_KEY`(catalog-signing), `ROOT_SIGNING_KEY`(launcher-release) — ed25519 개인키, base64 | 레포·조직 secret 금지, **environment secret** 으로만 보관 |
-| self-hosted runner | **현재 0개(GHES 실측) → 선행 구축**(§14 0단계). 라벨 `signer`, ephemeral(job 마다 초기화) | GitHub 호스팅 runner 없음 |
+| self-hosted runner | **현재 0개(GHES 실측) → 선행 구축**(§14 0단계). **signer = GoJIRA 운영 서버(VM)에 컨테이너로**(ephemeral 이 기본 동작), **일반 runner = 개발 PC**(PR 검증, 키 없음) | GitHub 호스팅 runner 없음. signer 를 운영 서버에 두면 상시 가동 + 게시 경로가 로컬 복사로 끝난다 |
 | runner group | 서명 runner 는 전용 group, **허용 레포 = GoJIRA, 허용 워크플로 = `launcher-release.yml`, `catalog-sign.yml`** | 같은 runner 를 쓰는 다른 워크플로가 키·잔여물에 접근하는 경로 차단 |
 | Actions 권한 | 워크플로 기본 `permissions: contents: read`, 포크 PR 워크플로에 secret 미전달(기본값 유지) | 최소 권한 |
-| 게시 경로 | 서명 runner 가 Platform-API 호스트의 `deploy/launcher-dist/` 에 쓰기 (bind mount 또는 전용 배포 계정 rsync) | 서명과 게시를 한 job 에서 끝냄 |
+| 게시 경로 | **확정: 같은 호스트 복사.** signer runner 가 Platform-API 와 같은 호스트(운영 서버)에 있으므로 `$LAUNCHER_DIST_PUBLISH_DIR`(컨테이너면 bind mount)로 복사한다 — rsync·배포 계정 불요. `deploy/scripts/publish-dist.sh` | 서명과 게시를 한 job 에서 끝냄 |
 
 #### 워크플로 골격
 
@@ -391,7 +395,8 @@ jobs:
 | B. 필수 모드 | 0.1.40(가칭)~ | 서명 검증 실패 시 **교체 거부**. A 가 충분히 퍼진 뒤 배포(Platform-API 접속 로그의 런처 버전 분포로 판단) |
 
 - `/api/v2/launcher/version` 은 기존 필드(`version`, `platforms.{os}.sha256/size/ready`)를 그대로 두고 `sig` 만 **추가** —
-  0.1.37 이하가 쓰는 매니페스트 구제 경로를 유지한다. 서명 원문은 신규 `/api/v2/launcher/manifest` 로 제공.
+  0.1.37 이하가 쓰는 매니페스트 구제 경로를 유지한다. 서명 원문은 신규 `/api/v2/launcher/release-manifest` 로 제공한다
+  (설계 초안은 `/api/v2/launcher/manifest` 를 지목했으나 그 경로는 이미 웹 설치 모달이 쓰고 있어 분리 — 구현 PR #118).
 - ≤0.1.38 런처가 A 버전으로 올라오는 첫 업데이트 자체는 sha256 만으로 이뤄진다(불가피). 이 1회 구간은 Actions 빌드 + 서명
   산출물만 서버에 올리는 것으로 위험을 줄인다.
 
@@ -483,6 +488,9 @@ const res = await local.post('/v1/docs/pptx/text', file, { headers: { 'X-File-Na
 > Actions 빌드 이전(D14), 2단계 검증 도입(D15), converter 는 Windows 전용 — macOS/Linux 는 `unsupported` 표시(§12.2).
 
 1. **패키지 저장소** — 사내 GitHub Releases vs Platform-API 배포 디렉터리 직접 게시.
-2. **게시 경로 구현** — 서명 runner → Platform-API 호스트 `deploy/launcher-dist/` 쓰기 방식(같은 호스트 bind mount vs 배포 계정 rsync).
-3. **Authenticode 코드서명** — 최초 설치 SmartScreen 경고 제거용. 사내 코드서명 인증서 보유 여부 확인 필요.
-4. **A→B 전환 기준** — 경고 모드 런처 보급률 임계값(예: 접속 런처의 95%)과 관측 기간.
+2. **Authenticode 코드서명** — 최초 설치 SmartScreen 경고 제거용. 사내 코드서명 인증서 보유 여부 확인 필요.
+3. **A→B 전환 기준** — 경고 모드 런처 보급률 임계값(예: 접속 런처의 95%)과 관측 기간.
+
+> 2026-11-05 확정(해소): **게시 경로** — signer runner 를 GoJIRA 운영 서버(VM)에 두어
+> Platform-API 와 같은 호스트에서 `deploy/launcher-dist/` 로 복사한다. rsync·배포 계정 불요.
+> runner 배치는 signer = 운영 서버(컨테이너), 일반 = 개발 PC.

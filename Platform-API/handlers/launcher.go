@@ -95,7 +95,13 @@ func LauncherVersionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		platforms[osKey] = pi
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"version": ver, "platforms": platforms})
+	out := map[string]any{"version": ver, "platforms": platforms}
+	// 서명 매니페스트가 게시돼 있으면 sig 를 **추가만** 한다 — 기존 필드·형식은 그대로라
+	// 서명을 모르는 ≤0.1.38 런처에 영향이 없다(설계 §10.7 구버전 호환).
+	if sig, err := os.ReadFile(filepath.Join(distDir, releaseManifestFile+".sig")); err == nil {
+		out["sig"] = strings.TrimSpace(string(sig))
+	}
+	respondJSON(w, http.StatusOK, out)
 }
 
 // GET /api/v2/launcher/manifest — 다운로드 가능한 OS 목록 + 크기.
@@ -121,4 +127,39 @@ func LauncherManifestHandler(w http.ResponseWriter, r *http.Request) {
 		out = append(out, e)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"platforms": out})
+}
+
+
+// releaseManifestFile — 루트 키로 서명되는 런처 릴리스 매니페스트 원문 파일명.
+// launcher-release 워크플로가 빌드·서명해 launcher-dist 에 게시한다(설계 §10.6).
+const releaseManifestFile = "release-manifest.json"
+
+// GET /api/v2/launcher/release-manifest      — 서명 대상 원문(JSON) 그대로
+// GET /api/v2/launcher/release-manifest.sig  — base64 ed25519 서명
+//
+// 서명 검증은 **원문 바이트**에 대해 이뤄지므로 서버가 JSON 을 다시 조립하면 안 된다 —
+// 파일을 그대로 흘려보낸다. 미게시(파일 없음)면 404 → 런처는 조용히 기존 경로로 폴백한다.
+// 설계서 §10.2 는 이 용도로 `/launcher/manifest` 를 지목했으나 그 경로는 이미
+// 웹 설치 모달용(OS별 다운로드 가능 여부)으로 쓰이고 있어 별도 경로로 분리했다.
+func LauncherReleaseManifestHandler(w http.ResponseWriter, r *http.Request) {
+	serveLauncherDistFile(w, releaseManifestFile, "application/json")
+}
+
+func LauncherReleaseManifestSigHandler(w http.ResponseWriter, r *http.Request) {
+	serveLauncherDistFile(w, releaseManifestFile+".sig", "text/plain; charset=utf-8")
+}
+
+func serveLauncherDistFile(w http.ResponseWriter, name, contentType string) {
+	distDir := os.Getenv("LAUNCHER_DIST_DIR")
+	if distDir == "" {
+		distDir = "/app/launcher-dist"
+	}
+	data, err := os.ReadFile(filepath.Join(distDir, name))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
 }

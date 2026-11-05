@@ -1,0 +1,15 @@
+# 서명 체계의 통제 지점 (설계 §10.6 "사내 GitHub 설정").
+#
+# 카탈로그 내용뿐 아니라 **서명 워크플로·스크립트·공개키·검증 코드** 변경도 승인 대상이다 —
+# 워크플로를 고쳐 키를 빼돌리는 경로를 막기 위함이다.
+#
+# TODO: @archi-duke/platform 을 실제 사내 GitHub 팀 핸들로 교체할 것.
+
+/deploy/launcher-dist/catalog.json      @archi-duke/platform
+/deploy/scripts/build-catalog.sh        @archi-duke/platform
+/deploy/scripts/build-launcher.sh       @archi-duke/platform
+/.github/workflows/catalog-*.yml        @archi-duke/platform
+/.github/workflows/launcher-release.yml @archi-duke/platform
+/.github/CODEOWNERS                     @archi-duke/platform
+/gojira-launcher/                       @archi-duke/platform
+/tools/gojira-sign/                     @archi-duke/platform
