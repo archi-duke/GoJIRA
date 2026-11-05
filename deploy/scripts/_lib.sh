@@ -38,10 +38,16 @@ load_env() {
     # 'readonly variable' 에러. 이들을 제외하고 source 하고, 컨테이너 권한용
     # UID/GID 는 docker compose 가 .env 에서 직접 읽으므로 여기선 검증용으로만
     # 별도 변수(ENV_UID/ENV_GID)에 추출한다.
+    # macOS 기본 bash 3.2 는 `source <(...)` 프로세스 치환으로 env 를 읽으면 변수가
+    # 셸에 남지 않는다(조용히 실패 — 에러도 없이 전부 미설정). 임시 파일 경유로 통일.
+    local _env_tmp
+    _env_tmp="$(mktemp)"
+    grep -vE '^[[:space:]]*(UID|EUID|PPID|BASHPID)[[:space:]]*=' "$env_file" > "$_env_tmp"
     set -a
     # shellcheck disable=SC1090
-    source <(grep -vE '^[[:space:]]*(UID|EUID|PPID|BASHPID)[[:space:]]*=' "$env_file")
+    source "$_env_tmp"
     set +a
+    rm -f "$_env_tmp"
     ENV_UID="$(sed -nE 's/^[[:space:]]*UID[[:space:]]*=[[:space:]]*([^[:space:]#]+).*/\1/p' "$env_file" | tail -1)"
     ENV_GID="$(sed -nE 's/^[[:space:]]*GID[[:space:]]*=[[:space:]]*([^[:space:]#]+).*/\1/p' "$env_file" | tail -1)"
     : "${ENV_UID:=${UID:-1000}}"
