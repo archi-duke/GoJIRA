@@ -312,10 +312,10 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 | Environment `catalog-signing` | Deployment branches: `main` 만. Required reviewers 없음 | 카탈로그 키는 main 에서 도는 job 만 접근. 잦은 배포 병목 회피 |
 | Environment `launcher-release` | Deployment branches/tags: `main`, `launcher-v*` 만. **Required reviewers: 플랫폼 담당 1+** | 루트 키 사용 직전 사람 승인 |
 | Environment secret | `CATALOG_SIGNING_KEY`(catalog-signing), `ROOT_SIGNING_KEY`(launcher-release) — ed25519 개인키, base64 | 레포·조직 secret 금지, **environment secret** 으로만 보관 |
-| self-hosted runner | **현재 0개(GHES 실측) → 선행 구축**(§14 0단계). 라벨 `signer`, ephemeral(job 마다 초기화) | GitHub 호스팅 runner 없음 |
+| self-hosted runner | **현재 0개(GHES 실측) → 선행 구축**(§14 0단계). **signer = GoJIRA 운영 서버(VM)에 컨테이너로**(ephemeral 이 기본 동작), **일반 runner = 개발 PC**(PR 검증, 키 없음) | GitHub 호스팅 runner 없음. signer 를 운영 서버에 두면 상시 가동 + 게시 경로가 로컬 복사로 끝난다 |
 | runner group | 서명 runner 는 전용 group, **허용 레포 = GoJIRA, 허용 워크플로 = `launcher-release.yml`, `catalog-sign.yml`** | 같은 runner 를 쓰는 다른 워크플로가 키·잔여물에 접근하는 경로 차단 |
 | Actions 권한 | 워크플로 기본 `permissions: contents: read`, 포크 PR 워크플로에 secret 미전달(기본값 유지) | 최소 권한 |
-| 게시 경로 | 서명 runner 가 Platform-API 호스트의 `deploy/launcher-dist/` 에 쓰기 (bind mount 또는 전용 배포 계정 rsync) | 서명과 게시를 한 job 에서 끝냄 |
+| 게시 경로 | **확정: 같은 호스트 복사.** signer runner 가 Platform-API 와 같은 호스트(운영 서버)에 있으므로 `$LAUNCHER_DIST_PUBLISH_DIR`(컨테이너면 bind mount)로 복사한다 — rsync·배포 계정 불요. `deploy/scripts/publish-dist.sh` | 서명과 게시를 한 job 에서 끝냄 |
 
 #### 워크플로 골격
 
@@ -488,6 +488,9 @@ const res = await local.post('/v1/docs/pptx/text', file, { headers: { 'X-File-Na
 > Actions 빌드 이전(D14), 2단계 검증 도입(D15), converter 는 Windows 전용 — macOS/Linux 는 `unsupported` 표시(§12.2).
 
 1. **패키지 저장소** — 사내 GitHub Releases vs Platform-API 배포 디렉터리 직접 게시.
-2. **게시 경로 구현** — 서명 runner → Platform-API 호스트 `deploy/launcher-dist/` 쓰기 방식(같은 호스트 bind mount vs 배포 계정 rsync).
-3. **Authenticode 코드서명** — 최초 설치 SmartScreen 경고 제거용. 사내 코드서명 인증서 보유 여부 확인 필요.
-4. **A→B 전환 기준** — 경고 모드 런처 보급률 임계값(예: 접속 런처의 95%)과 관측 기간.
+2. **Authenticode 코드서명** — 최초 설치 SmartScreen 경고 제거용. 사내 코드서명 인증서 보유 여부 확인 필요.
+3. **A→B 전환 기준** — 경고 모드 런처 보급률 임계값(예: 접속 런처의 95%)과 관측 기간.
+
+> 2026-11-05 확정(해소): **게시 경로** — signer runner 를 GoJIRA 운영 서버(VM)에 두어
+> Platform-API 와 같은 호스트에서 `deploy/launcher-dist/` 로 복사한다. rsync·배포 계정 불요.
+> runner 배치는 signer = 운영 서버(컨테이너), 일반 = 개발 PC.

@@ -124,7 +124,7 @@ sign() {
   [ -n "${CATALOG_SIGNING_KEY:-}" ] || die "CATALOG_SIGNING_KEY 미설정 (environment secret)"
   local now expires
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  expires="$(python3 -c "import datetime,os;print((datetime.datetime.utcnow()+datetime.timedelta(days=int(os.environ['D']))).strftime('%Y-%m-%dT%H:%M:%SZ'))" D="$EXPIRE_DAYS")"
+  expires="$(D="$EXPIRE_DAYS" python3 -c "import datetime,os;print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=int(os.environ['D']))).strftime('%Y-%m-%dT%H:%M:%SZ'))")"
 
   # 메타 주입 — 서명 대상 원문을 여기서 확정한다(이후 재포맷 금지).
   python3 - "$CATALOG" "$now" "$expires" "${COMMIT:-}" "${RUN_ID:-}" <<'PY'
@@ -147,12 +147,11 @@ PY
 }
 
 # ── publish ─────────────────────────────────────────────────────────────────
-# 카탈로그 원본이 이미 launcher-dist 안에 있으므로 여기서는 존재 확인만 한다.
-# 게시 경로(배포 서버 반영)는 §15 미해결 2번 — 확정되면 이 단계에 연결한다.
+# signer runner 가 Platform-API 와 같은 호스트(운영 서버)에서 도는 전제 —
+# LAUNCHER_DIST_PUBLISH_DIR 로 로컬 복사한다(§10.6 게시 경로 확정).
 publish() {
   [ -f "${CATALOG}.sig" ] || die "서명(.sig) 없음 — sign 을 먼저 실행"
-  ok "게시 대상 준비됨: $(basename "$CATALOG") + .sig"
-  warn "TODO(§15-2): Platform-API 호스트 게시 경로 확정 후 연결 (bind mount 또는 rsync)"
+  "${SCRIPT_DIR}/publish-dist.sh" catalog
 }
 
 case "$cmd" in

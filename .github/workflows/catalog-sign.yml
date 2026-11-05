@@ -34,4 +34,6 @@ jobs:
           COMMIT: ${{ github.sha }}
         run: deploy/scripts/build-catalog.sh sign       # issuedAt/expiresAt/commit/runId 기록 후 서명
       - name: Publish
-        run: deploy/scripts/build-catalog.sh publish    # catalog.json + .sig → launcher-dist
+        env:
+          LAUNCHER_DIST_PUBLISH_DIR: ${{ vars.LAUNCHER_DIST_PUBLISH_DIR }}
+        run: deploy/scripts/build-catalog.sh publish    # catalog.json + .sig → 배포 디렉터리

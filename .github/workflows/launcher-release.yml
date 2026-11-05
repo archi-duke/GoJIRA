@@ -50,8 +50,10 @@ jobs:
             -sig deploy/launcher-dist/release-manifest.json.sig \
             -pub "${{ vars.ROOT_PUBLIC_KEY }}"
 
-      # 게시 경로는 §15 미해결 2번 — 배포 서버 bind mount 또는 전용 계정 rsync 로 확정되면 교체한다.
+      # signer runner 는 Platform-API 와 같은 호스트(운영 서버)에서 돈다 — 로컬 복사로 끝난다(§10.6).
+      # LAUNCHER_DIST_PUBLISH_DIR 은 runner 환경변수 또는 repo variable 로 준다
+      # (컨테이너 runner 면 호스트 배포 디렉터리를 bind mount 한 경로).
       - name: Publish
-        run: |
-          echo "TODO(§15-2): deploy/launcher-dist → Platform-API 호스트 게시 경로 확정 후 연결"
-          ls -R deploy/launcher-dist
+        env:
+          LAUNCHER_DIST_PUBLISH_DIR: ${{ vars.LAUNCHER_DIST_PUBLISH_DIR }}
+        run: deploy/scripts/publish-dist.sh launcher
