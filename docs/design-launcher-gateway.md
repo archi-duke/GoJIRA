@@ -1,7 +1,7 @@
 # 로컬 런처 게이트웨이화 — 단일 진입점 + 기능 경로 + 로컬 서비스 배포
 
 > 기록 일자: 2026-11-05
-> 상태: **설계 (구현 대기)**
+> 상태: **구현 중** — §14 0단계(서명 기반) PR #118, 1단계(런처 코어) 착수 예정
 > 대체 범위: [`Long-term Considerations/local-agent-mvp.md`](./Long-term%20Considerations/local-agent-mvp.md) §2 "로컬 런처 서비스" 의
 > 역할 정의("소환 + 상태 회신 전용")를 이 문서가 대체한다. MVP 문서의 나머지(에이전트 로컬 실행,
 > `docs/{user}` push→PR 흐름)는 유효.
@@ -10,6 +10,9 @@
 > 계기로 삼는다.
 > 반영 이력: 2026-11-05 이슈 #116(런처 관련 검토 필요 사항 — 사내 GHES 실측·서명 지점 검토) 반영 —
 > 런처 매니페스트 서명, 루트/카탈로그 키 분리, Actions 빌드 이전, 2단계 이행(§10.6, §10.7, §14 0단계).
+> 2026-11-05 §14 0단계 구현(PR #118) — gojira-sign 도구, 런처 경고 모드(v0.1.39), Platform-API
+> release-manifest 서빙, launcher-dist 컴파일 제거, 서명 워크플로 3종·CODEOWNERS·build-catalog.sh.
+> 코드 밖 선행 작업(GHES runner 구축, 키 생성·등록, environment·보호 브랜치, 게시 경로 §15-2)은 미완.
 
 ## 0. 한 줄 요약
 
