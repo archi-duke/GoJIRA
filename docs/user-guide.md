@@ -30,6 +30,9 @@ GoJIRA 는 **웹(조회·관리) + 로컬 런처(편집·에이전트)** 조합�
 3. 접속하면 **플랫폼 셸(NETRIX)** 의 앱 목록이 먼저 나옵니다. **GoJIRA** 카드를 클릭해
    들어갑니다. (같은 셸에 RAGaaS 등 다른 앱이 함께 놓입니다)
 4. 로그인 루프가 반복되면 브라우저 하드 리로드(Ctrl/Cmd+Shift+R)로 캐시를 비우세요.
+![플랫폼 셸 — 여기서 GoJIRA 를 선택해 들어갑니다](images/01-platform-shell.jpg)
+*플랫폼 셸 — 여기서 GoJIRA 를 선택해 들어갑니다*
+
 
 ### 1.3 화면 구성 한눈에
 
@@ -123,6 +126,12 @@ macOS/Linux 는 모달의 OS 탭에서 절차를 확인하세요 (`chmod +x` 후
 
 > **신규 과제 저장은 런처가 동작 중이어야 진행됩니다.** 저장 직후 내 PC 에 로컬 clone 이
 > 백그라운드로 준비됩니다(prewarm).
+![과제 편집 — 기본 정보와 담당자](images/04-project-create-top.jpg)
+*과제 편집 — 기본 정보와 담당자*
+
+![아래쪽에 마일스톤과 Doc Repo 이름(필수)](images/05-project-create-bottom.jpg)
+*아래쪽에 마일스톤과 Doc Repo 이름(필수)*
+
 
 ### 3.2 Doc Repo 와 내 PC 로컬 clone
 
@@ -150,6 +159,9 @@ Project Map 에서 과제를 **우클릭** → `상세정보 / 편집 / 삭제 /
 
 삭제는 과제명을 정확히 입력해야 실행되며, 서버에 백업 zip 이 만들어진 뒤 이슈·문서·repo 와
 내 PC 로컬 clone 이 모두 정리됩니다.
+![과제 우클릭 메뉴](images/03-project-context-menu.jpg)
+*과제 우클릭 메뉴*
+
 
 ---
 
@@ -245,6 +257,9 @@ issue-create-vos 로 VOS 등록해줘.
 
 값이 빠지면 에이전트가 되묻습니다. 또 **생성 전에 기존 이슈를 조회해 중복·유사 이슈를
 확인**하도록 되어 있어, 비슷한 이슈가 있으면 새로 만들지 않고 재사용·수정을 권합니다.
+![VOS 상세 — 탭 없이 한 화면, 요청자(Client) 포함](images/07-issue-vos.jpg)
+*VOS 상세 — 탭 없이 한 화면, 요청자(Client) 포함*
+
 
 ### 5.3 수정 · 삭제 · 연결
 
@@ -323,6 +338,8 @@ relink 는 **기존 이슈를 보존하고 링크와 문서만 재작성**합니
 
 ## 7. 결과 확인 화면
 
+> 아래 화면 예시는 **숫자야구(NBBALL)** 과제 기준입니다.
+
 ### 7.1 Project Map
 
 과제 타임라인(간트) 뷰입니다.
@@ -332,6 +349,9 @@ relink 는 **기존 이슈를 보존하고 링크와 문서만 재작성**합니
 - 행의 원 = 마일스톤(원 안 숫자 = 이전 마일스톤과의 일수), 빨간 점선 = 오늘
 - **과제명 클릭** → Issues 진입 / **우클릭** → 메뉴(상세·편집·삭제·Relation Map·SATAM)
 - **알림 아이콘**: 🟠 앰버 = 내 문서 브랜치가 main 과 다름 / 🟢 녹색 = 열린 PR 있음
+![Project Map — 조회기간 슬라이더, 정렬, 마일스톤, 오늘(빨간 점선)](images/02-project-map.jpg)
+*Project Map — 조회기간 슬라이더, 정렬, 마일스톤, 오늘(빨간 점선)*
+
 
 ### 7.2 Issues
 
@@ -368,6 +388,18 @@ relink 는 **기존 이슈를 보존하고 링크와 문서만 재작성**합니
 | Detailed Design | Basic + **Detailed Design** (다이어그램·Design Model) |
 
 이슈 간 연결은 상세가 아니라 **Relation Map** 에서 봅니다.
+![Issues 목록 — 공식/내작업 전환과 V·F·R·A·D 타입 필터](images/06-issues-list.jpg)
+*Issues 목록 — 공식/내작업 전환과 V·F·R·A·D 타입 필터*
+
+![Feature 상세의 Use Scenario 탭](images/09-issue-feature-usecase.jpg)
+*Feature 상세의 Use Scenario 탭*
+
+![NFR 상세의 Quality Attribute Scenario 탭](images/11-issue-nfr-qas.jpg)
+*NFR 상세의 Quality Attribute Scenario 탭*
+
+![설계(ADSN) 상세의 Trade Off 탭 — SATAM 분석 결과가 여기 기록됩니다](images/13-issue-adsn-tradeoff.jpg)
+*설계(ADSN) 상세의 Trade Off 탭 — SATAM 분석 결과가 여기 기록됩니다*
+
 
 ### 7.3 Relation Map
 
@@ -381,6 +413,9 @@ relink 는 **기존 이슈를 보존하고 링크와 문서만 재작성**합니
 - 상태 색: ASR 미지정 FR = 연빨강, 결정 전 ADSN = 회색 — 프로세스 진행도가 색으로 드러납니다
 - 토글 오른쪽의 **⬇ / ⤴ 버튼** 으로 내려받기·내보내기
 - 상단에 **`공식` / `내작업`** 뷰 전환이 있습니다 (§7.2 와 동일)
+![Relation Map — VOS → Feature → Requirement → Design 추적성](images/14-relation-map.jpg)
+*Relation Map — VOS → Feature → Requirement → Design 추적성*
+
 
 ### 7.4 SATAM
 
@@ -396,6 +431,9 @@ relink 는 **기존 이슈를 보존하고 링크와 문서만 재작성**합니
 - 설계·요구사항이 아직 없으면 빈 매트릭스로 보입니다 (`Design 0건 × Requirement 0건`)
 - 상단에 **`공식` / `내작업`** 뷰 전환이 있습니다 — SATAM 분석을 막 끝냈다면 결과는
   `내작업`에 먼저 보이고, 머지 후 `공식`에 반영됩니다 (§4.3)
+![SATAM — 행=Requirement, 열=Design. S(주황)=Sensitivity, R(빨강)=Risk, M(파랑)=Mitigation](images/15-satam.jpg)
+*SATAM — 행=Requirement, 열=Design. S(주황)=Sensitivity, R(빨강)=Risk, M(파랑)=Mitigation*
+
 
 ### 7.5 Docs (설계 문서)
 
@@ -417,6 +455,12 @@ relink 는 **기존 이슈를 보존하고 링크와 문서만 재작성**합니
 파일 트리에는 문서(`business/`, `architecture/`)뿐 아니라 **`data/issues/*.yaml`**
 (이슈 원본)도 함께 보입니다. 이슈를 추가·수정하면 여기에 변경으로 잡히며, 문서와 같은
 방식으로 등록·발행합니다.
+![Docs Local 탭 — 설계 산출물 트리와 발행 버튼](images/16-docs-local-tree.jpg)
+*Docs Local 탭 — 설계 산출물 트리와 발행 버튼*
+
+![Main 탭에서는 `main` + Pull 버튼이 보이고, 편집은 할 수 없습니다](images/19-docs-main-pull.jpg)
+*Main 탭에서는 `main` + Pull 버튼이 보이고, 편집은 할 수 없습니다*
+
 
 **보기 모드** — 문서를 열면 상단에 파일 경로와 함께 **미리보기 / Raw 보기** 가 있고,
 오른쪽 끝에 **편집** 버튼이 있습니다.
@@ -435,6 +479,12 @@ relink 는 **기존 이슈를 보존하고 링크와 문서만 재작성**합니
   **우측 상단의 `✎ 편집`** 클릭 → 요소·라벨을 드래그로 배치 조정 → **✓ 적용**(문서의
   plantuml 블록이 자동 갱신되어 로컬 저장) / **✗ 취소**
   - `✎ 편집` 은 **Local 탭 + 런처 동작 중**일 때만 나타납니다. Main 탭에서는 보이지 않습니다.
+![PlantUML 배포 다이어그램 렌더 — 설계 결정(ADSN)이 주석으로 연결됩니다](images/17-docs-plantuml.jpg)
+*PlantUML 배포 다이어그램 렌더 — 설계 결정(ADSN)이 주석으로 연결됩니다*
+
+![다이어그램 우측 상단의 `✎ 편집` 버튼](images/18-docs-plantuml-edit.jpg)
+*다이어그램 우측 상단의 `✎ 편집` 버튼*
+
 
 ---
 
