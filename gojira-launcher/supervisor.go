@@ -309,6 +309,18 @@ func (sv *Supervisor) health(name string) (ready, busy bool) {
 	return h.Ready, h.Busy
 }
 
+// endpoint — 중계에 쓸 (포트, 비밀값). 미기동이면 (0, "").
+func (sv *Supervisor) endpoint(name string) (int, string) {
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	p, ok := sv.procs[name]
+	if !ok {
+		return 0, ""
+	}
+	p.lastUsed = time.Now() // idle 판정 갱신
+	return p.port, p.secret
+}
+
 // stop — 정상 종료를 요청하고, 유예 시간이 지나면 강제 종료한다(§9.2).
 func (sv *Supervisor) stop(name string) {
 	sv.mu.Lock()

@@ -163,3 +163,39 @@ func serveLauncherDistFile(w http.ResponseWriter, name, contentType string) {
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
 }
+
+
+// ── 서비스 카탈로그·패키지 서빙 (설계 §10.2) ────────────────────────────────
+//
+// 런처는 Platform-API 한 곳만 바라본다(D6). `/launcher/` 는 신원 미들웨어 공개 구간이라
+// 인증 없이 서빙하고, 무결성·출처는 카탈로그 서명으로 보장한다.
+
+const catalogFile = "catalog.json"
+
+// GET /api/v2/launcher/catalog      — 서명 대상 원문(JSON) 그대로
+// GET /api/v2/launcher/catalog.sig  — base64 ed25519 서명 (카탈로그 키)
+func LauncherCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	serveLauncherDistFile(w, catalogFile, "application/json")
+}
+
+func LauncherCatalogSigHandler(w http.ResponseWriter, r *http.Request) {
+	serveLauncherDistFile(w, catalogFile+".sig", "text/plain; charset=utf-8")
+}
+
+// GET /api/v2/launcher/services/{name}/{version}/{file} — 서비스 패키지 다운로드.
+//
+// 경로 세그먼트가 그대로 파일 경로가 되므로 `..` 이나 구분자가 섞인 값을 막는다
+// (디렉터리 탈출 방지). sha256 검증은 받는 쪽(런처)이 카탈로그 값으로 수행한다.
+func LauncherServicePackageHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	version := chi.URLParam(r, "version")
+	file := chi.URLParam(r, "file")
+	for _, seg := range []string{name, version, file} {
+		if seg == "" || seg == "." || seg == ".." ||
+			strings.ContainsAny(seg, `/\`) || strings.Contains(seg, "..") {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+	}
+	serveLauncherDistFile(w, filepath.Join("services", name, version, file), "application/zip")
+}
