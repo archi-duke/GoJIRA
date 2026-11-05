@@ -122,5 +122,33 @@ rm -rf "${LAUNCHER_SRC}/dist-out"
 printf '%s\n' "$VERSION" > "${DIST_DIR}/version.txt"
 ok "version.txt = v${VERSION}"
 
+# ── 서명 대상 릴리스 매니페스트 (설계 §10.6) ────────────────────────────────
+# {version, platforms:{os:{sha256,size,ready}}, issuedAt} 한 장에 서명한다.
+# 서명은 이 스크립트가 하지 않는다 — launcher-release 워크플로가 루트 키로
+# `gojira-sign sign -in release-manifest.json` 을 돌려 .sig 를 만든다.
+# 서명 대상은 **파일 바이트 그대로**이므로 생성 후 재포맷·재정렬 금지.
+MANIFEST="${DIST_DIR}/release-manifest.json"
+{
+  printf '{\n'
+  printf '  "version": "%s",\n' "$VERSION"
+  printf '  "issuedAt": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [ -n "${GITHUB_SHA:-}" ] && printf '  "commit": "%s",\n' "$GITHUB_SHA"
+  [ -n "${GITHUB_RUN_ID:-}" ] && printf '  "runId": "%s",\n' "$GITHUB_RUN_ID"
+  printf '  "platforms": {\n'
+  first=1
+  for spec in "windows amd64 windows-amd64" "linux amd64 linux-amd64" "darwin arm64 darwin-arm64"; do
+    set -- $spec; goos="$1"; sub="$3"
+    fname="gojira-launcher"; [ "$goos" = windows ] && fname="gojira-launcher.exe"
+    fpath="${DIST_DIR}/${sub}/${fname}"
+    [ -f "$fpath" ] || continue
+    [ $first -eq 1 ] || printf ',\n'
+    first=0
+    printf '    "%s": {"sha256": "%s", "size": %s, "ready": true}' \
+      "$goos" "$(cat "${fpath}.sha256")" "$(wc -c < "$fpath" | tr -d ' ')"
+  done
+  printf '\n  }\n}\n'
+} > "$MANIFEST"
+ok "release-manifest.json 생성 — 서명은 launcher-release 워크플로가 수행"
+
 ok "런처 빌드 완료 → ${DIST_DIR}"
 log "다음: docker compose up -d platform-api (launcher-dist bind mount 즉시 반영)"

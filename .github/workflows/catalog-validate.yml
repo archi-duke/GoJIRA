@@ -1,0 +1,20 @@
+# 카탈로그 PR 검증 — 키 없음, 일반 runner (설계 §10.6).
+# 사람의 통제 지점은 이 검증 + CODEOWNERS 승인이다. 서명은 main 머지 후 catalog-sign 이 한다.
+name: catalog-validate
+
+on:
+  pull_request:
+    paths:
+      - "deploy/launcher-dist/catalog.json"
+      - "deploy/scripts/build-catalog.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: [self-hosted, linux]     # signer runner 아님 — secret 미사용
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate catalog
+        run: deploy/scripts/build-catalog.sh validate

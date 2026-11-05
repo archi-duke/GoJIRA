@@ -1,0 +1,57 @@
+# 런처 릴리스 — Actions 에서 빌드·서명해 배포 서버에 게시 (설계 §10.6, D13·D14).
+#
+# 배포 서버의 docker build 에서 컴파일하던 것을 이리로 옮겼다. 서버에서 재빌드하면
+# 서명한 바이너리와 실제 배포물이 달라져 서명이 무의미해지기 때문이다(#116).
+#
+# 루트 키는 런처가 신뢰 루트로 품는 공개키의 짝이라 통제 수준이 가장 높다 —
+# environment `launcher-release` 에 Required reviewers 를 걸어 사용 직전 사람 승인을 받는다.
+name: launcher-release
+
+on:
+  push:
+    tags: ["launcher-v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-release
+  cancel-in-progress: false      # 게시가 겹치지 않게 직렬화
+
+jobs:
+  release:
+    # signer runner group — 허용 레포·워크플로를 이 파일로 제한하고 ephemeral 로 운영한다.
+    # environment secret 만으로는 같은 runner 를 쓰는 다른 워크플로의 잔여물 접근을 못 막는다(#116).
+    runs-on: [self-hosted, signer]
+    environment: launcher-release
+    steps:
+      - uses: actions/checkout@v4
+
+      # OS 3종 크로스 컴파일 + 스킬 임베드 + version.txt/.sha256/release-manifest.json 생성.
+      - name: Build
+        run: deploy/scripts/build-launcher.sh --no-pull
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+
+      - name: Sign manifest (root key)
+        env:
+          SIGNING_KEY: ${{ secrets.ROOT_SIGNING_KEY }}
+        run: |
+          cd tools/gojira-sign && GOWORK=off go build -o "$RUNNER_TEMP/gojira-sign" . && cd -
+          "$RUNNER_TEMP/gojira-sign" sign -in deploy/launcher-dist/release-manifest.json
+
+      # 서명 직후 같은 job 에서 검증 — 키 슬롯 오등록·원문 변조를 여기서 걸러낸다.
+      - name: Verify
+        run: |
+          "$RUNNER_TEMP/gojira-sign" verify \
+            -in  deploy/launcher-dist/release-manifest.json \
+            -sig deploy/launcher-dist/release-manifest.json.sig \
+            -pub "${{ vars.ROOT_PUBLIC_KEY }}"
+
+      # 게시 경로는 §15 미해결 2번 — 배포 서버 bind mount 또는 전용 계정 rsync 로 확정되면 교체한다.
+      - name: Publish
+        run: |
+          echo "TODO(§15-2): deploy/launcher-dist → Platform-API 호스트 게시 경로 확정 후 연결"
+          ls -R deploy/launcher-dist

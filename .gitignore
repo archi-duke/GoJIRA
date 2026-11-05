@@ -78,6 +78,12 @@ package-lock.json
 # 미리 빌드된 런처 바이너리 (호스팅 dist) — 거대한 산출물, 커밋 X
 deploy/launcher-dist/*/
 deploy/launcher-dist/version.txt
+# 릴리스 매니페스트·서명은 빌드 산출물 — Actions(launcher-release)가 생성·게시한다.
+deploy/launcher-dist/release-manifest.json
+deploy/launcher-dist/release-manifest.json.sig
+# catalog.json 은 PR 로 편집하므로 추적하되, 서명은 파이프라인 산출물이라 제외.
+deploy/launcher-dist/catalog.json.sig
+deploy/launcher-dist/services/
 
 # launcher embed: 에이전트 자산(.claude/.opencode/opencode.json)은 빌드시 복사되며 레포 루트가 단일 진실
 gojira-launcher/assets/.claude/

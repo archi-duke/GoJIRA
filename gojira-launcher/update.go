@@ -88,6 +88,17 @@ func (s *Server) startUpdater() {
 // checkAndUpdate — 매니페스트를 받아 현재 버전보다 높으면 새 exe 를 받아 교체한다.
 // 실패는 전부 비치명적(로그만) — 다음 주기에 재시도.
 func (s *Server) checkAndUpdate(mURL string) {
+	// 서명된 릴리스 매니페스트를 먼저 시도한다(§10.6). 성공하면 그 내용으로 업데이트하고,
+	// 없거나 검증에 실패하면 경고 모드에서는 기존 /launcher/version 경로로 내려간다(§10.7 A).
+	if m, ok := s.signedManifest(mURL); ok {
+		s.applyUpdate(m, mURL)
+		return
+	}
+	if signatureMode == "require" {
+		log.Printf("서명 매니페스트를 쓸 수 없어 업데이트를 건너뜁니다(필수 모드)")
+		return
+	}
+
 	m, err := fetchManifest(mURL)
 	if err != nil {
 		log.Printf("업데이트 체크 실패(manifest): %v", err)
@@ -278,3 +289,111 @@ func parseVer(v string) [3]int {
 	}
 	return out
 }
+
+
+// ── 서명 릴리스 매니페스트 (§10.6, §10.7) ──────────────────────────────────
+
+// signedManifest — `/launcher/release-manifest` 원문과 `.sig` 를 받아 검증한다.
+// 성공 시 (UpdateManifest, true). 미존재·검증 실패면 (nil, false) — 호출자가 모드에 따라 처리.
+func (s *Server) signedManifest(mURL string) (*UpdateManifest, bool) {
+	base := mURL
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[:i] // .../launcher/version → .../launcher
+	}
+	raw, err := fetchBytes(base + "/release-manifest")
+	if err != nil {
+		return nil, false // 구버전 서버 — 경고 없이 조용히 폴백
+	}
+	sigRaw, err := fetchBytes(base + "/release-manifest.sig")
+	if err != nil {
+		log.Printf("⚠️  릴리스 매니페스트는 있으나 서명(.sig)을 받지 못했습니다: %v", err)
+		sigRaw = nil
+	}
+	rm, err := parseReleaseManifest(raw)
+	if err != nil {
+		log.Printf("⚠️  릴리스 매니페스트 해석 실패: %v", err)
+		return nil, false
+	}
+	ok, err := acceptManifest(raw, string(sigRaw), rm, s.lastManifestIssuedAt())
+	if err != nil {
+		log.Printf("업데이트 중단 — %v", err)
+		return nil, false
+	}
+	if !ok {
+		return nil, false
+	}
+	if rm.IssuedAt != "" {
+		s.saveManifestIssuedAt(rm.IssuedAt)
+	}
+	return &UpdateManifest{Version: rm.Version, Platforms: rm.Platforms}, true
+}
+
+// applyUpdate — 매니페스트 기준으로 버전 비교 후 내려받아 교체한다(서명·구형식 공통 경로).
+func (s *Server) applyUpdate(m *UpdateManifest, mURL string) {
+	if !isNewer(m.Version, version) {
+		log.Printf("업데이트 없음 — 현재 v%s, 최신 v%s", version, m.Version)
+		return
+	}
+	pi, ok := m.Platforms[runtime.GOOS]
+	if !ok || !pi.Ready {
+		log.Printf("업데이트 보류 — 새 v%s 발견했으나 %s 바이너리가 호스팅되지 않음", m.Version, runtime.GOOS)
+		return
+	}
+	log.Printf("새 버전 발견 v%s (현재 v%s) — 다운로드 시작", m.Version, version)
+
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Printf("업데이트 중단 — 실행 파일 경로 확인 실패: %v", err)
+		return
+	}
+	exePath, _ = filepath.EvalSymlinks(exePath)
+	newPath := exePath + ".new"
+	if err := downloadVerify(downloadURL(mURL), newPath, pi.SHA256); err != nil {
+		log.Printf("업데이트 중단 — 다운로드/검증 실패: %v", err)
+		_ = os.Remove(newPath)
+		return
+	}
+	log.Printf("새 exe 다운로드/검증 완료: %s — 교체 후 재시작합니다", newPath)
+	if err := applySwapAndRestart(exePath, newPath); err != nil {
+		log.Printf("업데이트 중단 — 교체 실패: %v", err)
+		_ = os.Remove(newPath)
+	}
+}
+
+// fetchBytes — 작은 텍스트 리소스(매니페스트·서명)를 받는다. 404 등은 error.
+func fetchBytes(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
+// lastManifestIssuedAt / saveManifestIssuedAt — 재전송·다운그레이드 방지용 수용 기록(§10.6).
+// 실패는 무해 — 기록이 없으면 역행 검사를 건너뛴다.
+func (s *Server) lastManifestIssuedAt() string {
+	dir, err := gojiraDir()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(dir, manifestStateFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func (s *Server) saveManifestIssuedAt(issuedAt string) {
+	dir, err := gojiraDir()
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(dir, manifestStateFile), []byte(issuedAt+"\n"), 0o600)
+}
+
+const manifestStateFile = ".launcher-manifest-issued"
