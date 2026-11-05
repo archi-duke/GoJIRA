@@ -1,9 +1,0 @@
-{
-  "version": "0.1.39",
-  "issuedAt": "2026-11-05T03:28:49Z",
-  "platforms": {
-    "windows": {"sha256": "267401a51ca97ca0207542fbcea0cddfd7e4e24b404cf0d11ade728bd31baf88", "size": 8242176, "ready": true},
-    "linux": {"sha256": "99be315d872a53055144e860e6949507ca63acfb2b20dc1b4d6ac8e07d960418", "size": 7995554, "ready": true},
-    "darwin": {"sha256": "a673833d09919f1c907b31eefb1581a0cd5a616cb35ac13b3682b5a6718e27eb", "size": 7593634, "ready": true}
-  }
-}
