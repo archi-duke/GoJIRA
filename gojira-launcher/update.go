@@ -108,6 +108,12 @@ func (s *Server) checkAndUpdate(mURL string) {
 		log.Printf("업데이트 없음 — 현재 v%s, 최신 v%s", version, m.Version)
 		return
 	}
+	// 직전에 교체했는데 버전이 오르지 않았던 버전이면 건너뛴다(무한 루프 차단).
+	if shouldSkipVersion(m.Version) {
+		log.Printf("업데이트 건너뜀 — v%s 는 이전에 교체해도 버전이 오르지 않았습니다 "+
+			"(서버 배포본 확인 필요). 더 높은 버전이 올라오면 다시 시도합니다", m.Version)
+		return
+	}
 	pi, ok := m.Platforms[runtime.GOOS]
 	if !ok || !pi.Ready {
 		log.Printf("업데이트 보류 — 새 v%s 발견했으나 %s 바이너리가 호스팅되지 않음", m.Version, runtime.GOOS)
@@ -131,6 +137,7 @@ func (s *Server) checkAndUpdate(mURL string) {
 	}
 	log.Printf("새 exe 다운로드/검증 완료: %s — 교체 후 재시작합니다", newPath)
 
+	markUpdateAttempt(m.Version) // 재기동 후 reconcileUpdateState 가 성패를 판정한다
 	if err := applySwapAndRestart(exePath, newPath); err != nil {
 		log.Printf("업데이트 중단 — 교체 실패: %v", err)
 		_ = os.Remove(newPath)
@@ -334,6 +341,12 @@ func (s *Server) applyUpdate(m *UpdateManifest, mURL string) {
 		log.Printf("업데이트 없음 — 현재 v%s, 최신 v%s", version, m.Version)
 		return
 	}
+	// 직전에 교체했는데 버전이 오르지 않았던 버전이면 건너뛴다(무한 루프 차단).
+	if shouldSkipVersion(m.Version) {
+		log.Printf("업데이트 건너뜀 — v%s 는 이전에 교체해도 버전이 오르지 않았습니다 "+
+			"(서버 배포본 확인 필요). 더 높은 버전이 올라오면 다시 시도합니다", m.Version)
+		return
+	}
 	pi, ok := m.Platforms[runtime.GOOS]
 	if !ok || !pi.Ready {
 		log.Printf("업데이트 보류 — 새 v%s 발견했으나 %s 바이너리가 호스팅되지 않음", m.Version, runtime.GOOS)
@@ -354,6 +367,7 @@ func (s *Server) applyUpdate(m *UpdateManifest, mURL string) {
 		return
 	}
 	log.Printf("새 exe 다운로드/검증 완료: %s — 교체 후 재시작합니다", newPath)
+	markUpdateAttempt(m.Version) // 재기동 후 reconcileUpdateState 가 성패를 판정한다
 	if err := applySwapAndRestart(exePath, newPath); err != nil {
 		log.Printf("업데이트 중단 — 교체 실패: %v", err)
 		_ = os.Remove(newPath)
@@ -397,3 +411,83 @@ func (s *Server) saveManifestIssuedAt(issuedAt string) {
 }
 
 const manifestStateFile = ".launcher-manifest-issued"
+
+// ── 업데이트 실패 기억 (무한 루프 차단) ─────────────────────────────────────
+//
+// 실제 사고: 서버의 version.txt 는 0.1.39 인데 실제 바이너리가 0.1.38 이었다.
+// 런처는 "새 버전 발견 → 다운로드 → sha256 통과 → 교체 → 재시작" 을 끝내지만
+// 재시작한 자기 버전이 그대로라, 다음 체크에서 또 같은 버전을 발견해 영원히 반복했다.
+// 1초 간격으로 다운로드가 반복되며 로그가 가득 찼다.
+//
+// 서버가 어떤 상태든 클라이언트는 스스로를 보호해야 한다:
+//   업데이트 직전 목표 버전을 pending 으로 적고, 재기동 시 자기 버전이 그만큼
+//   오르지 않았으면 그 버전을 failed 로 기록해 다시 시도하지 않는다.
+//   더 높은 새 버전이 나오면 그때 다시 시도한다.
+
+const updateStateFile = ".launcher-update-state"
+
+type updateState struct {
+	Pending string `json:"pending,omitempty"` // 교체를 시도한 목표 버전
+	Failed  string `json:"failed,omitempty"`  // 올라가지 않아 건너뛸 버전
+}
+
+func loadUpdateState() updateState {
+	var st updateState
+	dir, err := gojiraDir()
+	if err != nil {
+		return st
+	}
+	b, err := os.ReadFile(filepath.Join(dir, updateStateFile))
+	if err != nil {
+		return st
+	}
+	_ = json.Unmarshal(b, &st)
+	return st
+}
+
+func saveUpdateState(st updateState) {
+	dir, err := gojiraDir()
+	if err != nil {
+		return
+	}
+	// 최초 실행이면 ~/.gojira 가 아직 없을 수 있다 — 없으면 기록이 조용히 사라져
+	// 루프 차단이 동작하지 않는다.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	b, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(dir, updateStateFile), b, 0o600)
+}
+
+// reconcileUpdateState — 기동 시 1회. 직전 교체 시도의 성패를 판정한다.
+func reconcileUpdateState() {
+	st := loadUpdateState()
+	if st.Pending == "" {
+		return
+	}
+	if !isNewer(st.Pending, version) {
+		// 목표 버전 이상으로 올라왔다 — 성공.
+		log.Printf("업데이트 성공 확인 — v%s", version)
+		saveUpdateState(updateState{})
+		return
+	}
+	// 교체했는데 버전이 그대로다. 서버 매니페스트와 실제 바이너리가 어긋난 상태로 보인다.
+	log.Printf("⚠️  업데이트 실패 — v%s 로 교체했으나 실행 버전은 v%s 입니다. "+
+		"이 버전은 더 시도하지 않습니다(서버 배포본 확인 필요)", st.Pending, version)
+	saveUpdateState(updateState{Failed: st.Pending})
+}
+
+// shouldSkipVersion — 이전에 실패한 버전이면 건너뛴다.
+func shouldSkipVersion(v string) bool {
+	return loadUpdateState().Failed == v
+}
+
+// markUpdateAttempt — 교체 직전에 목표 버전을 기록한다.
+func markUpdateAttempt(v string) {
+	st := loadUpdateState()
+	st.Pending = v
+	saveUpdateState(st)
+}

@@ -90,6 +90,11 @@ func (s *Server) installService(cs *CatalogService, progress func(string)) (*Ser
 		_ = os.RemoveAll(staging)
 		return nil, err
 	}
+	// minLauncher(§9.1) — 이 런처로는 못 쓰는 서비스를 깔아두면 호출 때마다 실패한다.
+	if err := checkMinLauncher(spec.MinLauncher); err != nil {
+		_ = os.RemoveAll(staging)
+		return nil, err
+	}
 	if spec.Name != cs.Name || spec.Version != cs.Version {
 		_ = os.RemoveAll(staging)
 		return nil, fmt.Errorf("패키지 내용이 카탈로그와 다릅니다 — service.json=%s@%s, 카탈로그=%s@%s",
@@ -260,4 +265,19 @@ func installedServices() []ServiceSpec {
 		out = append(out, *spec)
 	}
 	return out
+}
+
+
+// checkMinLauncher — 서비스가 요구하는 최소 런처 버전을 만족하는지(§9.1).
+// 빈 값이면 제약 없음. 형식이 이상하면 막지 않는다 — 설치를 못 하게 하는 것보다
+// 느슨하게 통과시키고 로그를 남기는 쪽이 운영에 안전하다.
+func checkMinLauncher(min string) error {
+	min = strings.TrimSpace(min)
+	if min == "" {
+		return nil
+	}
+	if isNewer(min, version) {
+		return fmt.Errorf("런처 버전이 낮습니다 — 이 서비스는 v%s 이상을 요구하지만 현재 v%s 입니다", min, version)
+	}
+	return nil
 }

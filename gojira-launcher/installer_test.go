@@ -194,3 +194,27 @@ func TestInstallService(t *testing.T) {
 
 	_ = fmt.Sprint()
 }
+
+func TestCheckMinLauncher(t *testing.T) {
+	t.Run("빈 값은 제약 없음", func(t *testing.T) {
+		if err := checkMinLauncher(""); err != nil {
+			t.Fatalf("제약 없어야 하는데 막혔다: %v", err)
+		}
+	})
+	t.Run("현재 버전과 같으면 통과", func(t *testing.T) {
+		if err := checkMinLauncher(version); err != nil {
+			t.Fatalf("동일 버전이 막혔다: %v", err)
+		}
+	})
+	t.Run("현재보다 높으면 거부", func(t *testing.T) {
+		err := checkMinLauncher("99.0.0")
+		if err == nil || !strings.Contains(err.Error(), "런처 버전이 낮습니다") {
+			t.Fatalf("상위 버전 요구를 막지 못했다: %v", err)
+		}
+	})
+	t.Run("현재보다 낮으면 통과", func(t *testing.T) {
+		if err := checkMinLauncher("0.0.1"); err != nil {
+			t.Fatalf("하위 버전 요구가 막혔다: %v", err)
+		}
+	})
+}

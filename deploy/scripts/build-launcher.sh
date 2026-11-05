@@ -118,6 +118,21 @@ for key in "${SELECT[@]}"; do
 done
 rm -rf "${LAUNCHER_SRC}/dist-out"
 
+# ── 매니페스트 갱신은 "전체 빌드" 일 때만 ──────────────────────────────────
+#
+# 부분 빌드(--os)에서 version.txt 를 갱신하면 배포본이 어긋난다. 실제 사고:
+# darwin 만 빌드했는데 version.txt 가 올라가, Windows 런처가
+#   "새 버전 있다" → 받아보면 구버전 → 재시작해도 버전 그대로 → 다시 받는다
+# 는 무한 업데이트 루프에 빠졌다(sha256 은 맞으니 검증도 통과한다).
+#
+# 그래서 일부만 빌드했으면 version.txt·release-manifest.json 을 건드리지 않는다.
+if [[ ${#SELECT[@]} -lt 3 ]]; then
+  warn "부분 빌드(${SELECT[*]}) — version.txt·release-manifest.json 을 갱신하지 않습니다."
+  warn "  배포에 쓰려면 OS 전체를 빌드하세요: $(basename "$0")"
+  ok "런처 부분 빌드 완료 → ${DIST_DIR}"
+  exit 0
+fi
+
 # 자동 업데이트 매니페스트 버전.
 printf '%s\n' "$VERSION" > "${DIST_DIR}/version.txt"
 ok "version.txt = v${VERSION}"

@@ -72,7 +72,9 @@ for i, s in enumerate(services):
         if not re.fullmatch(r"[0-9a-f]{64}", sha):
             errors.append(f"{name}/{plat}: sha256 형식 오류")
         # 패키지가 이미 게시돼 있으면 실제 해시와 대조한다(게시 전이면 건너뜀).
-        local = os.path.join(dist, "services", f)
+        # 경로 규약은 Platform-API 서빙과 같아야 한다(§10.2):
+        #   services/{name}/{version}/{file}
+        local = os.path.join(dist, "services", name, str(s.get("version", "")), f)
         if os.path.exists(local):
             import hashlib
             h = hashlib.sha256(open(local, "rb").read()).hexdigest()
