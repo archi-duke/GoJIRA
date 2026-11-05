@@ -100,43 +100,61 @@ docker load -i build-cache.tar
 
 ### launcher (로컬 런처) 변경 시
 
-런처는 **`launcher-dist` 이미지**로 빌드·배포된다 — 별도 cross-compile 손작업이 필요 없다.
-`docker compose build` 가 OS 3종(windows/linux/darwin) cross-compile + 에이전트 자산 embed +
-`version.txt`/`.sha256` 생성까지 한 번에 수행하고, 기동 시 init job 이 공유 볼륨을 채우면
-platform-api 가 `/api/v2/launcher/download/{os}` · `/launcher/version` 으로 서빙한다.
+런처는 **Actions(`launcher-release`)가 빌드·서명**하고, 산출물을 배포 서버의
+`deploy/launcher-dist/` 에 게시한다. platform-api 는 그 디렉터리를 **bind mount 로
+직접 서빙**하므로 파일이 놓이는 즉시 반영된다 — 이미지 재빌드도, 볼륨 init job 도 없다.
+
+> **왜 서버에서 빌드하지 않나** (설계 §10.7 / D14): 서버에서 다시 빌드하면 서명한
+> 바이너리와 실제 배포 바이너리가 달라져 서명이 무의미해진다. 그래서 `launcher-dist`
+> 이미지의 컴파일 단계를 걷어냈고, 이미지 자체도 bind mount 로 대체했다.
 
 ```bash
-# 사내망 빌드 서버 — 런처 소스(gojira-launcher/) 또는 embed 자산(.claude/skills,
-# opencode.json, .opencode/agents) 또는 버전(handlers.go const version) 변경 시
+# 정상 경로 — 태그를 밀면 Actions 가 빌드·서명·게시까지 한다.
+git tag launcher-v0.2.0 && git push origin launcher-v0.2.0
+#   → launcher-release 워크플로 (environment: launcher-release, 승인 필요)
+#   → OS 3종 cross-compile + 자산 embed + release-manifest.json + 루트 키 서명
+#   → deploy/launcher-dist/ 에 게시 → 즉시 서빙
+```
+
+Actions 가 아직 없는 환경(GHES runner 미구축)에서는 수동으로:
+
+```bash
+# platform-api 가 도는 그 서버에서
 git pull
-docker compose -f deploy/docker-compose.yml build launcher-dist
-docker compose -f deploy/docker-compose.yml up -d launcher-dist platform-api
+deploy/scripts/build-launcher.sh            # 3종 빌드 + version.txt/.sha256 + release-manifest.json
+LAUNCHER_DIST_PUBLISH_DIR=<배포 디렉터리> \
+  deploy/scripts/publish-dist.sh launcher   # 서명 산출물 게시 (src==dest 면 복사 생략)
 ```
 
-→ init job 이 재실행되어 공유 볼륨을 새 바이너리로 덮어쓴다. platform-api 본체 재빌드 불필요.
-자동 업데이트(`/launcher/version`)도 즉시 새 버전을 인식한다.
+> 서명(`release-manifest.json.sig`)은 루트 키가 필요해 수동 경로에서는 만들 수 없다.
+> 런처는 **경고 모드(A)** 라 서명이 없어도 sha256 으로 업데이트하지만, 필수 모드(B)로
+> 올린 뒤에는 Actions 경로만 유효하다(설계 §10.7).
 
-> 런처 바이너리는 **클라이언트 OS용**(서버 arch 와 무관)이므로, 빌드 호스트가 arm64 든 amd64 든
-> 동일한 산출물이 나온다. `deploy/launcher-dist/` 폴더 수동 반입은 더 이상 필요 없다.
+`handlers.go` 의 `const version` 을 bump 한 경우에만 클라이언트가 자동 업데이트를 받는다 —
+스킬·embed 만 바뀌고 version 이 그대로면 매니페스트가 같아 트리거되지 않는다.
 
-#### 런처 배포 이미지 빌드 위치 — 권장 **"platform-api 가 도는 그 서버"**
+런처 바이너리는 **클라이언트 OS용**(서버 arch 와 무관)이라 빌드 호스트가 arm64 든
+amd64 든 산출물은 같다.
 
-PR #40 이후 `launcher-dist` 가 compose 에 통합돼 같은 `docker compose build` 한 번으로
-끝난다. **빌드 위치를 platform-api 와 분리하지 말 것**:
+### 서비스 카탈로그·패키지 변경 시
 
-| 빌드 위치 | 권장도 | 이유 |
-|---|---|---|
-| 사내 배포 서버 (= platform-api 호스트) | ✅ **권장** | 단일 진실. 산출물 ↔ 서빙 위치 동일. compose 한 줄로 처리 |
-| 별도 빌드 전용 머신 | △ | sha256/embed drift 위험. 산출물 tar 반입 손작업 발생 |
-| 개발자 노트북 (Apple Silicon) | ❌ | embed 한 `.claude/skills` 가 사내 git 과 어긋날 수 있고, build-cache arch 도 mismatch 가능 |
+로컬 서비스(ragaas-converter 등)의 카탈로그와 패키지도 같은 디렉터리에서 서빙된다.
 
-런처만 hotfix 시:
+```
+deploy/launcher-dist/
+  catalog.json (+ .sig)                       서비스 목록 — catalog-sign 워크플로가 서명
+  services/<name>/<version>/<pkg>.zip         서비스 패키지
+```
+
+카탈로그는 **서명 단계에서 `issuedAt`/`expiresAt` 이 채워진다.** 서명하지 않은
+카탈로그(초기값 1970)는 런처가 만료로 보고 거부하므로, `build-catalog.sh sign` 을
+거치지 않은 카탈로그를 그대로 게시하면 안 된다(`publish` 가 `.sig` 없으면 막는다).
+
 ```bash
-docker compose build launcher-dist && docker compose up -d
+deploy/scripts/build-catalog.sh validate     # 스키마·경로 충돌·sha256 대조
+CATALOG_SIGNING_KEY=... deploy/scripts/build-catalog.sh sign
+LAUNCHER_DIST_PUBLISH_DIR=<배포 디렉터리> deploy/scripts/build-catalog.sh publish
 ```
-
-`handlers.go` 의 `const version` 을 bump 한 경우만 클라이언트가 자동 업데이트 받는다 —
-스킬/embed 만 바뀌었는데 version 그대로면 manifest 가 같아 자동 업데이트 트리거 안 됨.
 
 ## 어떤 변경이 어떤 경로?
 
