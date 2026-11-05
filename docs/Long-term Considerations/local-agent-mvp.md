@@ -4,6 +4,9 @@
 > 상태: **설계 노트 (실행 대기)** — 다음 세션에서 구현 착수 예정
 > 상위 결정: [`architecture-pivot-vscode.md` §2026-05-22 재검토](./architecture-pivot-vscode.md) 의
 > "좁은 안" 을 **실행 가능한 수준**으로 구체화한 문서. 충돌 시 pivot 문서의 결정이 우선.
+>
+> **2026-11-05 갱신**: §2 런처의 역할 정의는 [`design-launcher-gateway.md`](../design-launcher-gateway.md)
+> (단일 진입점 + 기능 경로 + 로컬 서비스 배포)로 대체됨. 기존 런처 기능은 `gojira-workspace` 서비스로 이관 예정.
 
 ## 0. 한 줄 요약
 
