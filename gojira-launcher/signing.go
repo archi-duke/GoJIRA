@@ -17,12 +17,9 @@ package main
 // 현재 단계는 아래 signatureMode 로 전환한다.
 
 import (
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 )
 
@@ -49,37 +46,14 @@ type ReleaseManifest struct {
 	RunID     string                  `json:"runId,omitempty"`
 }
 
-// verifyManifestSignature — raw(원문 바이트)가 rootPublicKeys 중 하나로 서명됐는지 검증.
-// 슬롯이 전부 비었거나 서명이 없으면 ok=false 와 사유를 돌려준다(판단은 호출자 몫).
+// verifyManifestSignature — 런처 매니페스트를 루트 공개키로 검증한다.
+// 실제 검증은 카탈로그와 공유하는 verifyWithKeys(catalog.go)가 수행한다 — 키 슬롯만 다르다.
 func verifyManifestSignature(raw []byte, sigB64 string) (bool, string) {
-	sigB64 = strings.TrimSpace(sigB64)
-	if sigB64 == "" {
-		return false, "서명 없음"
-	}
-	sig, err := base64.StdEncoding.DecodeString(sigB64)
-	if err != nil {
-		return false, "서명 형식 오류"
-	}
-	configured := 0
-	for i, pk := range rootPublicKeys {
-		pk = strings.TrimSpace(pk)
-		if pk == "" {
-			continue
-		}
-		configured++
-		key, err := base64.StdEncoding.DecodeString(pk)
-		if err != nil || len(key) != ed25519.PublicKeySize {
-			log.Printf("서명 검증: 루트 공개키 슬롯 %d 형식 오류 — 건너뜀", i)
-			continue
-		}
-		if ed25519.Verify(ed25519.PublicKey(key), raw, sig) {
-			return true, ""
-		}
-	}
-	if configured == 0 {
+	ok, reason := verifyWithKeys(rootPublicKeys, raw, sigB64)
+	if !ok && reason == "공개키 미설정" {
 		return false, "루트 공개키 미설정"
 	}
-	return false, "서명 불일치"
+	return ok, reason
 }
 
 // acceptManifest — 서명 검증 + 재전송/다운그레이드 방지를 적용해 매니페스트 수용 여부를 정한다.

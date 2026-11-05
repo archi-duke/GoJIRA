@@ -31,6 +31,12 @@ func main() {
 		srv.sup.register(spec)
 	}
 	srv.sup.startIdleWatch()
+	// 설치된 외부 서비스를 등록하고, 카탈로그는 백그라운드로 받아 required 를 채운다.
+	// 조회 실패는 무해 — 이미 설치된 것은 그대로 동작한다(§10.5).
+	for _, spec := range installedServices() {
+		srv.sup.register(spec)
+	}
+	go srv.syncCatalog()
 
 	// 임베드 스킬을 추출(첫 기동/버전 변경 시만 실제 쓰기). 실패는 비치명적.
 	if err := ExtractSkills(cfg.SkillsSourceDir, version, false); err != nil {

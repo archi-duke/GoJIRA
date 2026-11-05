@@ -136,6 +136,10 @@ func main() {
 		// 서명 릴리스 매니페스트 — 원문과 서명을 파일 그대로 서빙(설계 §10.6).
 		r.Get("/launcher/release-manifest", handlers.LauncherReleaseManifestHandler)
 		r.Get("/launcher/release-manifest.sig", handlers.LauncherReleaseManifestSigHandler)
+		// 서비스 카탈로그·패키지 (설계 §10.2) — 서명으로 무결성·출처를 보장하므로 공개 구간.
+		r.Get("/launcher/catalog", handlers.LauncherCatalogHandler)
+		r.Get("/launcher/catalog.sig", handlers.LauncherCatalogSigHandler)
+		r.Get("/launcher/services/{name}/{version}/{file}", handlers.LauncherServicePackageHandler)
 		r.Get("/launcher/download/{os}", handlers.LauncherDownloadHandler)
 
 		// DocRepo — 문서 이력관리 (projectCode 기반)

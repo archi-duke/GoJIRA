@@ -7,6 +7,8 @@ package main
 // 필요하면 설치·재기동을 요청한다.
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"runtime"
 )
@@ -71,7 +73,8 @@ func routeState(spec *ServiceSpec) (string, []string) {
 	return "available", nil
 }
 
-// specOf — 등록된 서비스의 선언을 찾는다.
+// specOf — 서비스 선언을 찾는다. 내장 → 설치됨 → 카탈로그 순으로 본다.
+// 카탈로그 항목은 아직 설치 전이라 requires·os 만 의미가 있다(설치 가능 여부 판정용).
 func (s *Server) specOf(name string) *ServiceSpec {
 	for _, svc := range builtinServices() {
 		if svc.Name == name {
@@ -79,7 +82,18 @@ func (s *Server) specOf(name string) *ServiceSpec {
 			return &sp
 		}
 	}
-	// TODO(Installer 묶음): 설치된 외부 서비스의 service.json 도 여기서 찾는다.
+	for _, svc := range installedServices() {
+		if svc.Name == name {
+			sp := svc
+			return &sp
+		}
+	}
+	if cs := cachedCatalog().findService(name); cs != nil {
+		return &ServiceSpec{
+			Name: cs.Name, Version: cs.Version, OS: cs.OS,
+			Requires: cs.Requires, Routes: cs.Routes,
+		}
+	}
 	return nil
 }
 
@@ -88,12 +102,45 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": s.sup.snapshot()})
 }
 
-// handleServiceInstall — optional 서비스 설치(§6).
-// Installer 는 다음 묶음 — 지금은 "아직 구현 전" 을 기계 판독 가능하게 알린다.
+// handleServiceInstall — optional 서비스 설치(§6). 진행률을 SSE 로 흘린다.
+// 이미 설치돼 있으면 no-op 으로 끝난다.
 func (s *Server) handleServiceInstall(w http.ResponseWriter, r *http.Request) {
-	writeRouteErr(w, http.StatusNotImplemented, "not_implemented",
-		"서비스 설치는 아직 구현 전입니다 (카탈로그·Installer 묶음)",
-		map[string]any{"service": r.PathValue("name")})
+	name := r.PathValue("name")
+
+	cat := cachedCatalog()
+	if cat == nil {
+		if c, err := s.fetchCatalog(); err == nil {
+			cat = c
+		}
+	}
+	cs := cat.findService(name)
+	if cs == nil {
+		writeRouteErr(w, http.StatusNotFound, "service_unknown",
+			"카탈로그에 없는 서비스입니다: "+name, map[string]any{"service": name})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	flusher, _ := w.(http.Flusher)
+	send := func(event string, payload map[string]any) {
+		payload["service"] = name
+		b, _ := json.Marshal(payload)
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	spec, err := s.installService(cs, func(msg string) {
+		send("progress", map[string]any{"message": msg})
+	})
+	if err != nil {
+		send("error", map[string]any{"error": err.Error()})
+		return
+	}
+	s.sup.register(*spec)
+	send("done", map[string]any{"version": spec.Version})
 }
 
 // handleServiceRestart — 재기동(§6).

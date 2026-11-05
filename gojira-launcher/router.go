@@ -22,20 +22,46 @@ import (
 
 // routeEntry — 라우팅 표의 한 줄.
 type routeEntry struct {
-	route   Route
-	service string
-	builtin bool
+	route     Route
+	service   string
+	builtin   bool
+	installed bool
 }
 
-// routeTable — 설치된 서비스들의 경로 선언을 모은 표. 최장 prefix 우선으로 정렬해 둔다.
+// routeTable — 내장 + 설치된 서비스 + 카탈로그(미설치) 의 경로 선언을 모은 표.
+// 최장 prefix 우선으로 정렬한다(§7.2). 미설치 항목도 넣어야 "설치하면 쓸 수 있다"(409)와
+// "그런 경로 자체가 없다"(404)를 구분할 수 있다.
 func (s *Server) routeTable() []routeEntry {
 	var out []routeEntry
+	seen := map[string]bool{} // prefix 중복 시 먼저 등록된 쪽을 유지(§7.2)
+
+	add := func(prefix string, rt Route, svc string, builtin, installed bool) {
+		if seen[prefix] {
+			return
+		}
+		seen[prefix] = true
+		out = append(out, routeEntry{route: rt, service: svc, builtin: builtin, installed: installed})
+	}
+
 	for _, svc := range builtinServices() {
 		for _, rt := range svc.Routes {
-			out = append(out, routeEntry{route: rt, service: svc.Name, builtin: svc.builtin})
+			add(rt.Prefix, rt, svc.Name, true, true)
 		}
 	}
-	// TODO(1단계 3묶음): 설치된 외부 서비스의 service.json 선언을 여기에 더한다.
+	for _, svc := range installedServices() {
+		for _, rt := range svc.Routes {
+			add(rt.Prefix, rt, svc.Name, false, true)
+		}
+	}
+	// 카탈로그에만 있는 것 — 설치 안내(409)용. routes 사본이 카탈로그에 있는 이유다(§10.3).
+	if cat := cachedCatalog(); cat != nil {
+		for _, cs := range cat.Services {
+			for _, rt := range cs.Routes {
+				add(rt.Prefix, rt, cs.Name, false, false)
+			}
+		}
+	}
+
 	sort.SliceStable(out, func(i, j int) bool {
 		return len(out[i].route.Prefix) > len(out[j].route.Prefix)
 	})
@@ -70,10 +96,26 @@ func (s *Server) handleDynamicRoute(w http.ResponseWriter, r *http.Request) {
 				"내장 서비스 "+e.service+" 가 처리하지 않는 하위 경로입니다: "+path, nil)
 			return
 		}
-		// TODO(1단계 3묶음): 설치됐으면 프록시, 미설치면 409 service_not_installed,
-		// 요건 불충족이면 424 requirement_missing (§7.2).
-		writeRouteErr(w, http.StatusServiceUnavailable, "service_not_running",
-			"서비스 "+e.service+" 중계는 아직 구현 전입니다", map[string]any{"service": e.service})
+		// 요건 불충족 → 424 (§7.2). 설치 여부보다 먼저 본다 — 깔아도 못 쓰기 때문이다.
+		if spec := s.specOf(e.service); spec != nil {
+			if ok, missing := checkRequirements(spec.Requires); !ok {
+				keys := make([]string, 0, len(missing))
+				for _, m := range missing {
+					keys = append(keys, m.Key+": "+m.Why)
+				}
+				writeRouteErr(w, http.StatusFailedDependency, "requirement_missing",
+					"서비스 "+e.service+" 의 요건이 충족되지 않았습니다",
+					map[string]any{"service": e.service, "missing": keys})
+				return
+			}
+		}
+		if !e.installed {
+			writeRouteErr(w, http.StatusConflict, "service_not_installed",
+				"서비스 "+e.service+" 가 설치되지 않았습니다",
+				map[string]any{"service": e.service, "installable": true})
+			return
+		}
+		s.proxyToService(w, r, e)
 		return
 	}
 
