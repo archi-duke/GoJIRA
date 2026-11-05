@@ -76,6 +76,56 @@ func main() {
 	mux.HandleFunc("OPTIONS /issue-journal", srv.secure(true, srv.handleIssueJournal))
 	mux.HandleFunc("POST /shutdown", srv.secure(true, srv.handleShutdown))
 
+	// ── 신규 기능 경로 (설계 §5, §11) ──────────────────────────────────────
+	// 기존 경로(위)는 **호환 별칭**으로 그대로 둔다(D7) — 웹을 일괄 수정하지 않아도 되고
+	// 동작이 변하지 않는다. 아래 신규 경로는 같은 핸들러를 재사용하며, 경로 변수 {code}
+	// 와 X-Launcher-User 헤더를 핸들러가 읽는 자리(POST=바디, GET=쿼리)에 넣어준다.
+	//
+	// 파라미터 위치는 기존 핸들러에 맞췄다 — 설계 §5 는 file 삭제를 `?path=` 쿼리로
+	// 적었으나 현행 handleDelete 는 바디를 읽는다. 3단계에서 gojira-workspace 로
+	// 떼어낼 때 정리한다.
+	for _, m := range []string{"GET", "OPTIONS"} {
+		mux.HandleFunc(m+" /launcher/health", srv.secure(false, srv.handleHealth))
+	}
+	mux.HandleFunc("POST /launcher/shutdown", srv.secure(true, srv.handleShutdown))
+
+	// /v1/workspace/* — Git 작업본 (②)
+	mux.HandleFunc("GET /v1/workspace/{code}/status", srv.secure(true, srv.withQueryCode(srv.handleStatus)))
+	mux.HandleFunc("GET /v1/workspace/{code}/files", srv.secure(true, srv.withQueryCode(srv.handleFiles)))
+	mux.HandleFunc("GET /v1/workspace/{code}/file", srv.secure(true, srv.withQueryCode(srv.handleFile)))
+	mux.HandleFunc("PUT /v1/workspace/{code}/file", srv.secure(true, srv.withBodyCode(srv.handleWrite)))
+	mux.HandleFunc("DELETE /v1/workspace/{code}/file", srv.secure(true, srv.withBodyCode(srv.handleDelete)))
+	mux.HandleFunc("POST /v1/workspace/{code}/rename", srv.secure(true, srv.withBodyCode(srv.handleRename)))
+	mux.HandleFunc("POST /v1/workspace/{code}/sync", srv.secure(true, srv.withBodyCode(srv.handleSync)))
+	mux.HandleFunc("POST /v1/workspace/{code}/push", srv.secure(true, srv.withBodyCode(srv.handlePush)))
+	mux.HandleFunc("POST /v1/workspace/{code}/pull", srv.secure(true, srv.withBodyCode(srv.handlePull)))
+	mux.HandleFunc("POST /v1/workspace/{code}/open", srv.secure(true, srv.withBodyCode(srv.handleOpen)))
+	mux.HandleFunc("POST /v1/workspace/{code}/prewarm", srv.secure(true, srv.withBodyCode(srv.handlePrewarm)))
+	mux.HandleFunc("DELETE /v1/workspace/{code}", srv.secure(true, srv.withBodyCode(srv.handleRemoveClone)))
+
+	// /v1/agents/* — 에이전트 소환 (①)
+	mux.HandleFunc("POST /v1/agents/chat", srv.secure(true, srv.withBodyCode(srv.handleChat)))
+	mux.HandleFunc("POST /v1/agents/edit", srv.secure(true, srv.withBodyCode(srv.handleEdit)))
+	mux.HandleFunc("GET /v1/agents/sessions", srv.secure(true, srv.withQueryCode(srv.handleSessions)))
+
+	// /v1/issues/* — 이슈 (④)
+	mux.HandleFunc("GET /v1/issues/{code}", srv.secure(true, srv.withQueryCode(srv.handleIssues)))
+	mux.HandleFunc("POST /v1/issues/{code}/journal", srv.secure(true, srv.withBodyCode(srv.handleIssueJournal)))
+
+	// CORS preflight — 신규 경로도 기존과 같은 처리를 받아야 한다.
+	for _, p := range []string{
+		"/v1/workspace/{code}/status", "/v1/workspace/{code}/files", "/v1/workspace/{code}/file",
+		"/v1/workspace/{code}/rename", "/v1/workspace/{code}/sync", "/v1/workspace/{code}/push",
+		"/v1/workspace/{code}/pull", "/v1/workspace/{code}/open", "/v1/workspace/{code}/prewarm",
+		"/v1/workspace/{code}", "/v1/agents/chat", "/v1/agents/edit", "/v1/agents/sessions",
+		"/v1/issues/{code}", "/v1/issues/{code}/journal",
+	} {
+		mux.HandleFunc("OPTIONS "+p, srv.secure(true, func(w http.ResponseWriter, r *http.Request) {}))
+	}
+
+	// 등록되지 않은 경로 — 외부 서비스 라우팅 대상이거나 오타다(§7.2).
+	mux.HandleFunc("/", srv.secure(true, srv.handleDynamicRoute))
+
 	// 127.0.0.1 전용 bind — 외부 인터페이스 노출 금지 (§2.3).
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	log.Printf("gojira-launcher v%s — http://%s", version, addr)
