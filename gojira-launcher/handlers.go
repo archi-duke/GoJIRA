@@ -27,6 +27,7 @@ const version = "0.1.39"
 type Server struct {
 	cfg      *Config
 	sessions *sessionRegistry // 과제별 에이전트 세션 추적(Design B). session.go.
+	sup      *Supervisor      // 로컬 서비스 프로세스 생명주기. supervisor.go.
 
 	// SSO 세션토큰(Phase 4 C) — 웹이 X-Gojira-Session 헤더로 매 요청 보낸다(secure 가 캡처).
 	// 런처의 백엔드 호출(ingest/resolveRepoName)에 Bearer 로 쓰고 에이전트 env 로 주입한다.
