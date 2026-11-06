@@ -32,6 +32,11 @@ type Server struct {
 	// SSO 세션토큰(Phase 4 C) — 웹이 X-Gojira-Session 헤더로 매 요청 보낸다(secure 가 캡처).
 	// 런처의 백엔드 호출(ingest/resolveRepoName)에 Bearer 로 쓰고 에이전트 env 로 주입한다.
 	// 단일 사용자 로컬 데몬이라 "마지막 값" 보관으로 충분(함수 시그니처 threading 회피).
+	// 카탈로그 동기화 실패 사유. 비어 있으면 정상.
+	// 웹이 "설치할 서비스 없음" 과 "카탈로그를 못 받음" 을 구분할 수 있어야 한다.
+	catMu  sync.Mutex
+	catErr string
+
 	ssoMu  sync.Mutex
 	ssoTok string
 
