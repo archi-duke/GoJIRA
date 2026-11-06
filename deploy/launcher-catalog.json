@@ -1,8 +1,7 @@
 {
-  "expiresAt": "1970-01-01T00:00:00Z",
-  "issuedAt": "1970-01-01T00:00:00Z",
   "services": [
     {
+      "minLauncher": "0.2.0",
       "name": "ragaas-converter",
       "os": [
         "windows"

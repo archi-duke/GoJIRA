@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # build-catalog.sh — 서비스 카탈로그 검증·서명·게시 (설계 §10.6).
 #
+#   stamp      issuedAt·expiresAt 기록 (키 불필요 — 경고 모드 로컬 게시에 사용)
 #   validate   스키마 / 경로 충돌 / prefix 규칙 / 패키지 sha256 검사 (키 불필요 — PR 에서 실행)
 #   sign       issuedAt·expiresAt·commit·runId 기록 후 ed25519 서명 (CATALOG_SIGNING_KEY 필요)
 #   publish    catalog.json + .sig 를 launcher-dist 에 배치
@@ -13,24 +14,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/_lib.sh"
 
 ROOT_DIR="$(cd "${DEPLOY_DIR}/.." && pwd)"
+# 소스와 게시본을 나눐다.
+#   SRC  — 사람이 고치고 git 이 추적하는 카탈로그 (issuedAt 등 메타 없음)
+#   CATALOG — stamp·sign 이 메타를 박은 산출물, Platform-API 가 그대로 서뱙한다(gitignore)
+#
+# 한 파일에 섬으면 게시 날짜가 커밋에 섮이고, 거구로 되돌리다 보니
+# 1970 같은 가짜 메타가 살아나 러처가 카탈로기를 만료로 거부하는 사고가 났다.
+SRC_CATALOG="${DEPLOY_DIR}/launcher-catalog.json"
 CATALOG="${DEPLOY_DIR}/launcher-dist/catalog.json"
 EXPIRE_DAYS="${CATALOG_EXPIRE_DAYS:-30}"
 
 cmd="${1:-}"
 case "$cmd" in
   validate) ;;
+  stamp) ;;
   sign) ;;
   publish) ;;
-  *) die "사용: build-catalog.sh validate|sign|publish" ;;
+  *) die "사용: build-catalog.sh validate|stamp|sign|publish" ;;
 esac
 
-[ -f "$CATALOG" ] || die "카탈로그 없음: $CATALOG"
+[ -f "$SRC_CATALOG" ] || die "카탈로그 소스 없음: $SRC_CATALOG"
+mkdir -p "$(dirname "$CATALOG")"
 
 # ── validate ────────────────────────────────────────────────────────────────
 # 경로 충돌은 런타임이 아니라 여기서 막는다(§7.2) — 런처는 최장 prefix 일치로 중계하므로
 # 중첩 prefix + 메서드 교집합이 있으면 어느 서비스가 받을지 등록 순서에 좌우된다.
 validate() {
-  python3 - "$CATALOG" "${DEPLOY_DIR}/launcher-dist" <<'PY'
+  python3 - "$SRC_CATALOG" "${DEPLOY_DIR}/launcher-dist" <<'PY'
 import json, sys, os, re
 
 path, dist = sys.argv[1], sys.argv[2]
@@ -122,8 +132,14 @@ PY
 }
 
 # ── sign ────────────────────────────────────────────────────────────────────
-sign() {
-  [ -n "${CATALOG_SIGNING_KEY:-}" ] || die "CATALOG_SIGNING_KEY 미설정 (environment secret)"
+# ── stamp ────────────────────────────────────────────────────────────────────
+# 메타(issuedAt·expiresAt)만 기록한다 — 키 불필요.
+#
+# 서명 검증이 경고 모드(A)인 동안엔 서명 없이도 카탈로기가 유효해야 한다(설계 §12).
+# 메타가 비어 있으면 러처는 만료 검증을 건넌다만, 1970 같은 과거 날짜가 박혀 있으면
+# "만료된 카탈로그" 로 거부한다 — 그래서 게시 전엔 stamp 를 반드시 거쳤어야 한다.
+stamp() {
+  cp "$SRC_CATALOG" "$CATALOG"   # 소스는 건들지 않는다
   local now expires
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   expires="$(D="$EXPIRE_DAYS" python3 -c "import datetime,os;print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(days=int(os.environ['D']))).strftime('%Y-%m-%dT%H:%M:%SZ'))")"
@@ -141,6 +157,11 @@ with open(path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
   log "메타 기록 — issuedAt=$now expiresAt=$expires"
+}
+
+sign() {
+  [ -n "${CATALOG_SIGNING_KEY:-}" ] || die "CATALOG_SIGNING_KEY 미설정 (environment secret)"
+  stamp
 
   local signer="${RUNNER_TEMP:-/tmp}/gojira-sign"
   ( cd "${ROOT_DIR}/tools/gojira-sign" && GOWORK=off go build -o "$signer" . )
@@ -152,12 +173,18 @@ PY
 # signer runner 가 Platform-API 와 같은 호스트(운영 서버)에서 도는 전제 —
 # LAUNCHER_DIST_PUBLISH_DIR 로 로컬 복사한다(§10.6 게시 경로 확정).
 publish() {
-  [ -f "${CATALOG}.sig" ] || die "서명(.sig) 없음 — sign 을 먼저 실행"
+  if [ ! -f "${CATALOG}.sig" ]; then
+    # 서명 검증이 경고 모드(A)인 동안의 로컬 검증 경로. 필수 모드(B)로 바뀜밌
+    # 러처가 미서명 카탈로기를 거부하므로 이 길은 자연히 마혀다.
+    [ "${ALLOW_UNSIGNED:-}" = "1" ] || die "서명(.sig) 없음 — sign 을 먼저 실행하거나 ALLOW_UNSIGNED=1 (경고 모드 전용)"
+    warn "미서명 카탈로기를 게시합니다 — 경고 모드(A) 전용, 필수 모드에서는 거부됩니다"
+  fi
   "${SCRIPT_DIR}/publish-dist.sh" catalog
 }
 
 case "$cmd" in
-  validate) log "카탈로그 검증 — $CATALOG"; validate ;;
+  validate) log "카탈로그 검증 — $SRC_CATALOG"; validate ;;
+  stamp)    log "카탈로그 메타 기록 — $CATALOG"; validate; stamp ;;
   sign)     log "카탈로그 서명 — $CATALOG"; validate; sign ;;
   publish)  publish ;;
 esac

@@ -5,7 +5,7 @@
 #
 # TODO: @archi-duke/platform 을 실제 사내 GitHub 팀 핸들로 교체할 것.
 
-/deploy/launcher-dist/catalog.json      @archi-duke/platform
+/deploy/launcher-catalog.json           @archi-duke/platform
 /deploy/scripts/build-catalog.sh        @archi-duke/platform
 /deploy/scripts/build-launcher.sh       @archi-duke/platform
 /.github/workflows/catalog-*.yml        @archi-duke/platform
