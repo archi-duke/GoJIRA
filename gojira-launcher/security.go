@@ -89,8 +89,14 @@ func (s *Server) writeCORS(w http.ResponseWriter, origin string) {
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, "+tokenHeader+", "+sessionHeader)
+	w.Header().Set("Access-Control-Allow-Headers", corsAllowHeaders)
 }
+
+// corsAllowHeaders — 브라우저가 보낼 수 있는 요청 헤더. 서비스 경로 계약 헤더도 여기 있어야
+// preflight 를 통과한다 — X-File-Name: 변환 서비스 원본 파일명(§12.2, URL 인코딩).
+var corsAllowHeaders = strings.Join([]string{
+	"Content-Type", "Authorization", tokenHeader, sessionHeader, "X-File-Name",
+}, ", ")
 
 func (s *Server) tokenValid(r *http.Request) bool {
 	got := r.Header.Get(tokenHeader)
