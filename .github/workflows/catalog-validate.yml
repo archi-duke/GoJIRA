@@ -5,7 +5,7 @@ name: catalog-validate
 on:
   pull_request:
     paths:
-      - "deploy/launcher-dist/catalog.json"
+      - "deploy/launcher-catalog.json"
       - "deploy/scripts/build-catalog.sh"
 
 permissions:

@@ -146,15 +146,28 @@ deploy/launcher-dist/
   services/<name>/<version>/<pkg>.zip         서비스 패키지
 ```
 
-카탈로그는 **서명 단계에서 `issuedAt`/`expiresAt` 이 채워진다.** 서명하지 않은
-카탈로그(초기값 1970)는 런처가 만료로 보고 거부하므로, `build-catalog.sh sign` 을
-거치지 않은 카탈로그를 그대로 게시하면 안 된다(`publish` 가 `.sig` 없으면 막는다).
+### 소스와 게시본은 다른 파일이다
+
+| | 파일 | git | 메타(`issuedAt`·`expiresAt`) |
+|---|---|---|---|
+| 소스 | `deploy/launcher-catalog.json` | 추적 — 제품이 PR 로 항목 추가 | 없음 |
+| 게시본 | `deploy/launcher-dist/catalog.json` | 제외(산출물) | `stamp`·`sign` 이 기록 |
+
+한 파일에 섞으면 게시 날짜가 커밋에 섞이고, 그걸 거꾸로 되돌리다 **1970 같은 가짜 메타가
+살아남아 런처가 카탈로그를 만료로 거부**하는 사고가 난다. 런처는 `expiresAt` 이 비어 있으면
+만료 검증을 건너뛰지만, 과거 날짜가 박혀 있으면 거부한다.
 
 ```bash
-deploy/scripts/build-catalog.sh validate     # 스키마·경로 충돌·sha256 대조
-CATALOG_SIGNING_KEY=... deploy/scripts/build-catalog.sh sign
+deploy/scripts/build-catalog.sh validate   # 스키마·경로 충돌·sha256 대조 (키 불필요)
+deploy/scripts/build-catalog.sh stamp      # 소스 → 게시본 + 메타 기록 (키 불필요)
+CATALOG_SIGNING_KEY=... deploy/scripts/build-catalog.sh sign    # stamp + ed25519 서명
 LAUNCHER_DIST_PUBLISH_DIR=<배포 디렉터리> deploy/scripts/build-catalog.sh publish
 ```
+
+서명 검증이 **경고 모드(A)** 인 동안에는 `stamp` 만으로도 런처가 카탈로그를 받아들인다 —
+서명 인프라(§14 0단계)가 아직 없는 로컬 검증용 경로다. `publish` 는 `.sig` 가 없으면
+막고, `ALLOW_UNSIGNED=1` 로만 통과한다. **필수 모드(B)** 로 전환하면 런처가 미서명
+카탈로그를 거부하므로 이 경로는 자연히 닫힌다.
 
 ## 어떤 변경이 어떤 경로?
 

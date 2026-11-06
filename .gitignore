@@ -82,6 +82,7 @@ deploy/launcher-dist/version.txt
 deploy/launcher-dist/release-manifest.json
 deploy/launcher-dist/release-manifest.json.sig
 # catalog.json 은 PR 로 편집하므로 추적하되, 서명은 파이프라인 산출물이라 제외.
+deploy/launcher-dist/catalog.json
 deploy/launcher-dist/catalog.json.sig
 deploy/launcher-dist/services/
 

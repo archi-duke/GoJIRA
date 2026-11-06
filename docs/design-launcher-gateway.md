@@ -210,7 +210,7 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 - 패키지: `{name}-{version}-{os}-{arch}.zip` = 실행 파일 + `service.json` (+ 필요 자산).
   Go 외 언어도 단일 실행물이면 허용(PyInstaller 등).
 - 제품 레포 Actions → `publish-service.sh` → 패키지 저장소에 zip + `.sha256` (§10.6 패키지 저장소).
-- 카탈로그 원본: `deploy/launcher-dist/catalog.json` — 각 제품이 PR 로 항목 추가, 플랫폼 담당이
+- 카탈로그 원본: `deploy/launcher-catalog.json` — 각 제품이 PR 로 항목 추가, 플랫폼 담당이
   `permissions`·경로 충돌을 **PR 리뷰**로 검토. main 머지 시 사내 GitHub Actions 가 **자동 서명**(`catalog.json.sig`, §10.6).
 
 ### 10.2 Platform-API (기존 `/api/v2/launcher/*` 확장)
@@ -308,7 +308,7 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 | 설정 | 값 | 목적 |
 |---|---|---|
 | 보호 브랜치 `main` | PR 필수, CODEOWNERS 승인 1+, `catalog-validate` 통과 필수, force-push·삭제 금지, 관리자 포함 | 리뷰 안 된 카탈로그가 main 에 못 들어감 |
-| CODEOWNERS | `deploy/launcher-dist/catalog.json` · `.github/workflows/catalog-*.yml` · `.github/workflows/launcher-release.yml` · `deploy/scripts/build-catalog.sh` · `gojira-launcher/` (공개키·검증 코드) → 플랫폼 담당 | 카탈로그뿐 아니라 **서명 워크플로·스크립트 변경도** 승인 대상 (워크플로를 고쳐 키를 빼돌리는 경로 차단) |
+| CODEOWNERS | `deploy/launcher-catalog.json` · `.github/workflows/catalog-*.yml` · `.github/workflows/launcher-release.yml` · `deploy/scripts/build-catalog.sh` · `gojira-launcher/` (공개키·검증 코드) → 플랫폼 담당 | 카탈로그뿐 아니라 **서명 워크플로·스크립트 변경도** 승인 대상 (워크플로를 고쳐 키를 빼돌리는 경로 차단) |
 | Environment `catalog-signing` | Deployment branches: `main` 만. Required reviewers 없음 | 카탈로그 키는 main 에서 도는 job 만 접근. 잦은 배포 병목 회피 |
 | Environment `launcher-release` | Deployment branches/tags: `main`, `launcher-v*` 만. **Required reviewers: 플랫폼 담당 1+** | 루트 키 사용 직전 사람 승인 |
 | Environment secret | `CATALOG_SIGNING_KEY`(catalog-signing), `ROOT_SIGNING_KEY`(launcher-release) — ed25519 개인키, base64 | 레포·조직 secret 금지, **environment secret** 으로만 보관 |
@@ -325,7 +325,7 @@ name: catalog-sign
 on:
   push:
     branches: [main]
-    paths: ["deploy/launcher-dist/catalog.json"]
+    paths: ["deploy/launcher-catalog.json"]
   schedule:
     - cron: "0 3 * * 1"          # 주 1회 재서명 (expiresAt 갱신)
   workflow_dispatch: {}            # 수동 재실행 — environment 가 main 으로 제한하므로 다른 브랜치에서는 키 접근 불가
