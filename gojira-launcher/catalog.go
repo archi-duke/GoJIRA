@@ -182,9 +182,18 @@ func (s *Server) syncCatalog() {
 	run := func() {
 		cat, err := s.fetchCatalog()
 		if err != nil {
-			log.Printf("카탈로그 동기화 실패: %v", err)
+			// 비치명적이지만 조용히 넘기면 안 된다 — 카탈로그가 없으면 웹에는
+			// "설치할 서비스 없음" 으로만 보이고, 서버 게시 누락인지 네트워크
+			// 문제인지 구분할 수 없다.
+			log.Printf("⚠️  카탈로그 동기화 실패 — 로컬 서비스를 설치할 수 없습니다: %v", err)
+			s.catMu.Lock()
+			s.catErr = err.Error()
+			s.catMu.Unlock()
 			return
 		}
+		s.catMu.Lock()
+		s.catErr = ""
+		s.catMu.Unlock()
 		for i := range cat.Services {
 			cs := &cat.Services[i]
 			if cs.Policy != "required" {

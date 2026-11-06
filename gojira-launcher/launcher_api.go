@@ -38,7 +38,16 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			State: state, Missing: missing,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"routes": out})
+	res := map[string]any{"routes": out}
+	// 카탈로그를 받지 못했으면 그 사실을 알린다 — 경로 목록이 빈 것과
+	// 카탈로그 자체가 없는 것은 원인이 다르다(서버 게시 누락 / 네트워크).
+	s.catMu.Lock()
+	catErr := s.catErr
+	s.catMu.Unlock()
+	if catErr != "" {
+		res["catalogError"] = catErr
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // routeState — 경로의 가용 상태(§6).

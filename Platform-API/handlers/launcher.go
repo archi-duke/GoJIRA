@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -129,7 +130,6 @@ func LauncherManifestHandler(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"platforms": out})
 }
 
-
 // releaseManifestFile — 루트 키로 서명되는 런처 릴리스 매니페스트 원문 파일명.
 // launcher-release 워크플로가 빌드·서명해 launcher-dist 에 게시한다(설계 §10.6).
 const releaseManifestFile = "release-manifest.json"
@@ -154,16 +154,25 @@ func serveLauncherDistFile(w http.ResponseWriter, name, contentType string) {
 	if distDir == "" {
 		distDir = "/app/launcher-dist"
 	}
-	data, err := os.ReadFile(filepath.Join(distDir, name))
+	path := filepath.Join(distDir, name)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		// 게시본 누락은 배포 설정 오류지 사용자 잘못이 아니다. 로그가 없으면
+		// 런처에는 "카탈로그 없음", 웹에는 "설치할 서비스 없음" 으로만 보여
+		// 원인을 추적할 수 없다(실제로 겪음 — 체크아웃이 산출물을 지웠다).
+		if os.IsNotExist(err) {
+			log.Printf("[launcher-dist] 게시본 없음: %s — build-launcher.sh / build-catalog.sh stamp 로 게시하세요", path)
+			http.Error(w, "launcher-dist 에 "+name+" 이 게시되지 않았습니다", http.StatusNotFound)
+			return
+		}
+		log.Printf("[launcher-dist] 읽기 실패: %s — %v", path, err)
+		http.Error(w, "launcher-dist 파일을 읽을 수 없습니다", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
 }
-
 
 // ── 서비스 카탈로그·패키지 서빙 (설계 §10.2) ────────────────────────────────
 //
