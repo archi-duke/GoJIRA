@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@module-federation/vite": "^1.7.0",
+    "@types/node": "^22.20.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^4.7.0",
