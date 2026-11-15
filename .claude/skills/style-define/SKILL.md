@@ -158,14 +158,27 @@ ls "${KN}/styles/"
 
 **엔진은 개별 스타일 랭킹 도구로만 활용**. 최종 Primary/Secondary/Supporting 선정은 이번 스킬에서는 LLM 의 조합 설계가 담당 — 엔진 분류 그대로 쓰지 않는다.
 
+> **엔진은 현재 동작하지 않는다 (2026-05-22 이후).** `style-score.py` 는 Agent-Service 의
+> `style_define` 엔진을 감싼 wrapper 인데, 그 Agent-Service 가 커밋 `89b379f9` 에서 제거됐다.
+> 호출하면 `{"error":"agent_service_not_found"}` 를 stderr 로 내고 exit 1 이다.
+>
+> 엔진은 원래 **참고용**(아래 "참조만, 뒤집어도 무방")이므로 **없어도 진행한다.**
+> 실패하면 0.3.2 에서 읽은 카탈로그(`knowledge/arch-styles/styles/*.yaml`)의
+> `fit_signals` / `avoid_signals` 를 직접 보고 판단한다 — 그 파일들이 적합/회피 신호의
+> 단일 진실 출처다(`index.yaml` 머리 주석). 엔진 점수는 그 신호를 기계적으로 합산한 것뿐이다.
+
 ```bash
 REQ_JSON=$(cat "/tmp/${CODE}-styledef-norm.json")
 
-jq -n --argjson r "$REQ_JSON" '{req:$r}' \
-  | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-score.py" \
-  > "/tmp/${CODE}-styledef-engine.json"
-
-cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}], primary, secondary, supporting}'
+# 엔진이 없으면 실패한다 — 그래도 멈추지 않는다(참고용).
+if jq -n --argjson r "$REQ_JSON" '{req:$r}' \
+     | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-score.py" \
+     > "/tmp/${CODE}-styledef-engine.json" 2>"/tmp/${CODE}-styledef-engine.err"; then
+  cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}], primary, secondary, supporting}'
+else
+  echo "엔진 미사용 — 카탈로그 fit_signals/avoid_signals 로 직접 판단한다"
+  cat "/tmp/${CODE}-styledef-engine.err"
+fi
 ```
 
 산출:
