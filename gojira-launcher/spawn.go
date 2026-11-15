@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // 실행 명령 화이트리스트 (설계 §2.3) — 임의 명령 실행 경로를 만들지 않는다.
@@ -81,12 +82,13 @@ func OpenInEditor(repoPath, fullFile string) error {
 
 // agentEnv — spawn 되는 CLI/에이전트가 로컬 clone 과 백엔드를 찾도록 주입할 env.
 // gojira-cli(common.go)·doc-save.sh · .claude/skills/*/SKILL.md 가 이 변수들을 읽는다:
-//   GOJIRA_REPO_ROOT — 로컬 YAML/문서 write 대상 clone 루트 (트랙 D/E 로컬화)
-//   GOJIRA_USER      — 이슈 write/ingest 의 X-User-Id
-//   GOJIRA_API / GOJIRA_API_URL  — gojira-api 주소 (스킬·CLI 둘 다 주입)
-//   PLATFORM_API / GOJIRA_PLATFORM_URL — platform-api 주소 (스킬·CLI 둘 다 주입)
-//   GOJIRA_ISSUE_JOURNAL — 웹 로컬뷰발 이슈 변경 저널(~/.gojira/journal/<code>.yaml) 절대경로
-//     (D10 Phase 3 §옵션(a)). code 가 빈 문자열(프로젝트 없는 일반 채팅)이면 미주입.
+//
+//	GOJIRA_REPO_ROOT — 로컬 YAML/문서 write 대상 clone 루트 (트랙 D/E 로컬화)
+//	GOJIRA_USER      — 이슈 write/ingest 의 X-User-Id
+//	GOJIRA_API / GOJIRA_API_URL  — gojira-api 주소 (스킬·CLI 둘 다 주입)
+//	PLATFORM_API / GOJIRA_PLATFORM_URL — platform-api 주소 (스킬·CLI 둘 다 주입)
+//	GOJIRA_ISSUE_JOURNAL — 웹 로컬뷰발 이슈 변경 저널(~/.gojira/journal/<code>.yaml) 절대경로
+//	  (D10 Phase 3 §옵션(a)). code 가 빈 문자열(프로젝트 없는 일반 채팅)이면 미주입.
 func (s *Server) agentEnv(repoPath, user, code string) []string {
 	env := []string{"GOJIRA_REPO_ROOT=" + repoPath}
 	// 프로젝트 코드 주입 + bare 이름 자동 매핑(BASH_ENV).
@@ -182,19 +184,17 @@ func findGitBash() string {
 // Design B: label 을 창 제목으로 달아 과제별 에이전트를 구분하고, code 로 세션 레지스트리에
 // 등록한다(종료 시 자동 해제 — 과제전환 replace 가 이 PID 를 트리종료). code=="" 는 추적 제외.
 func (s *Server) SpawnAgent(agent, repoPath, label, code string, env []string) (string, error) {
-	log.Printf("[TEMP-DEBUG] SpawnAgent ENTRY agent=%q repoPath=%q label=%q code=%q envCount=%d goos=%s", agent, repoPath, label, code, len(env), runtime.GOOS)
 	bin, ok := agentBins[agent]
 	if !ok {
-		log.Printf("[TEMP-DEBUG] SpawnAgent rejected agent=%q (not in allowlist)", agent)
+		log.Printf("에이전트 거부 — 허용 목록에 없음: %q", agent)
 		return "", fmt.Errorf("허용되지 않은 agent: %q", agent)
 	}
-	log.Printf("[TEMP-DEBUG] SpawnAgent bin=%q", bin)
 	pid, wait, err := startAgent(bin, label, repoPath, env)
 	if err != nil {
-		log.Printf("[TEMP-DEBUG] SpawnAgent startAgent FAIL: %v", err)
+		log.Printf("에이전트 기동 실패 — %s: %v", agent, err)
 		return "", fmt.Errorf("%s 실행 실패: %w", agent, err)
 	}
-	log.Printf("[TEMP-DEBUG] SpawnAgent SUCCESS pid=%d", pid)
+	log.Printf("에이전트 기동 — %s pid=%d code=%s", agent, pid, code)
 	s.sessions.add(code, agent, repoPath, pid)
 	// 좀비 방지 + 종료 시 레지스트리 정리: 백그라운드에서 회수 후 해당 세션 dead 처리.
 	go func() {
@@ -219,24 +219,78 @@ func sanitizeLabel(label string) string {
 	return label
 }
 
+// writeSpawnScript — darwin 에서 Terminal 에 넘길 실행 스크립트를 만든다.
+//
+// env 에 토큰이 섞일 수 있어 0600 으로 쓰고, Terminal 이 읽을 시간을 준 뒤 지운다.
+// 고정 경로에 남겨 두면 비밀값이 디스크에 계속 남는다.
+func writeSpawnScript(bin, dir, title string, env []string) (string, error) {
+	f, err := os.CreateTemp("", "gojira-spawn-*.sh")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	if title != "" {
+		// 창 제목 — 스크립트 안에서는 이스케이프가 한 겹이라 안전하게 넣을 수 있다.
+		fmt.Fprintf(&b, "printf '\\033]0;%s\\007'\n", title)
+	}
+	for _, kv := range env {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			fmt.Fprintf(&b, "export %s=%s\n", kv[:i], shellQuote(kv[i+1:]))
+		}
+	}
+	fmt.Fprintf(&b, "cd %s || exit 1\n", shellQuote(dir))
+	fmt.Fprintf(&b, "exec %s\n", shellQuote(bin))
+
+	if _, err := f.WriteString(b.String()); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(f.Name(), 0o700); err != nil {
+		return "", err
+	}
+
+	// Terminal 이 읽은 뒤 삭제. 즉시 지우면 열리기 전에 사라진다.
+	name := f.Name()
+	go func() {
+		time.Sleep(10 * time.Second)
+		_ = os.Remove(name)
+	}()
+	return name, nil
+}
+
+// shellQuote — 값을 '…' 로 싸고 내부의 ' 를 안전하게 끊어 붙인다.
+// 토큰·경로에 따옴표나 공백이 섞여도 셸이 한 단어로 받는다.
+func shellQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+}
+
 // terminalCommand — unix(mac/linux)에서 대화형 CLI 를 새 터미널에서 실행하는 명령을 만든다.
 // windows 는 startAgent(spawn_windows.go)의 CreateProcess 경로를 쓰므로 여기 오지 않는다.
 // label 은 새 창의 제목으로 달려 과제별 에이전트를 구분한다(Design B). 빈 문자열이면 미지정.
 func terminalCommand(bin, dir, label string, env []string) *exec.Cmd {
-	log.Printf("[TEMP-DEBUG] terminalCommand goos=%s bin=%q dir=%q label=%q", runtime.GOOS, bin, dir, label)
 	title := sanitizeLabel(label)
 	switch runtime.GOOS {
 	case "darwin":
-		// NOTE: 제목(title) 주입은 AppleScript↔shell 이스케이프가 취약해 생략. mac 은
-		// 에이전트 spawn 의 실사용 환경이 아니다(사용자=Windows, 배포=헤드리스 Ubuntu).
-		exports := ""
-		for _, kv := range env {
-			if i := strings.IndexByte(kv, '='); i > 0 {
-				exports += fmt.Sprintf("export %s='%s'; ", kv[:i], kv[i+1:])
-			}
+		// `open -a Terminal <script>` 로 띄운다. osascript 는 Apple Event 권한을
+		// 요구해서, 권한이 없으면 -1743 으로 실패한다 — 그런데 exec 의 Start() 는
+		// osascript 프로세스를 띄운 것까지만 보므로 **실패를 성공으로 보고**했다.
+		// open 은 LaunchServices 를 쓰므로 그 권한이 필요 없다.
+		//
+		// 명령을 스크립트 파일로 넘기는 덕에 셸 이스케이프가 한 겹으로 줄어든다.
+		// 이전에는 AppleScript 문자열 안에 셸 명령을 중첩해 값에 따옴표가 섞이면
+		// 깨졌다(그래서 제목 주입도 포기했다).
+		sh, err := writeSpawnScript(bin, dir, title, env)
+		if err != nil {
+			log.Printf("spawn 스크립트 생성 실패: %v", err)
+			// 폴백: 터미널 없이 실행. 적어도 에이전트는 돈다.
+			c := exec.Command(bin)
+			c.Dir = dir
+			c.Env = append(os.Environ(), env...)
+			return c
 		}
-		script := fmt.Sprintf("tell app \"Terminal\" to do script \"cd %s && %s%s\"", dir, exports, bin)
-		return exec.Command("osascript", "-e", script)
+		return exec.Command("open", "-a", "Terminal", sh)
 	default: // linux/기타 — 흔한 터미널 에뮬레이터를 순서대로 시도.
 		for _, term := range []string{"x-terminal-emulator", "gnome-terminal", "konsole", "xterm"} {
 			if _, err := exec.LookPath(term); err == nil {
