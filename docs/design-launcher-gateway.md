@@ -104,6 +104,12 @@ README 는 "소환 + 상태 회신만" 이라 정의하지만, 실제 19개 엔�
 | `/v1/issues/*` | gojira-workspace | `GET /v1/issues/{code}`, `POST /v1/issues/{code}/journal` |
 | `/v1/docs/*` | 문서 처리 서비스들 (형식별) | `POST /v1/docs/pptx/text`, `POST /v1/docs/docx/text`, (향후) `POST /v1/docs/hwp/text` |
 
+> **현행과의 차이 (3단계에서 정리)**: 위 표의 `DELETE …/file?path=` 는 목표 규약이고,
+> **현재 런처는 삭제 대상 경로를 JSON 바디로 받는다**(`handlers.go` `handleDelete`: `deleteReq.Path`).
+> 쓰기·이름변경과 형태를 맞춘 것인데, DELETE 바디는 일부 프록시가 제거할 수 있어 쿼리가 안전하다.
+> 3단계에서 `gojira-workspace` 로 옮길 때 쿼리로 전환하고, 그때까지 기존 경로는 호환 별칭으로
+> 바디를 계속 받는다. **웹 클라이언트도 함께 바꿔야 하므로 단독 변경은 하지 않는다.**
+
 - 경로 규칙: `/v{버전}/{이름공간}/{리소스|형식}/{동작}` (D8). 예약 이름공간 판정은 버전 다음 세그먼트 기준.
   이하 표의 `/launcher/*` 외 경로는 모두 `/v1` 접두. 사용자 식별(`user`)은 바디가 아니라 런처가 주입하는
   헤더(§7.3)로 전달하는 것을 원칙으로 한다(현행 `{code, user}` 바디는 호환 별칭에서만 허용).
