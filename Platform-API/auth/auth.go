@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,7 +26,13 @@ type ctxKey string
 const userIDKey ctxKey = "authUser"
 
 // 비인증 허용 경로 — 런처 데몬(자동업데이트/다운로드)·Gitea 웹훅은 SSO 세션 없이 호출한다.
-var publicSubstrings = []string{"/launcher/", "/webhook/"}
+//
+// `/Notice/ws` 는 **핸드셰이크만** 통과시킨다. 브라우저 WebSocket 은 커스텀 헤더를
+// 실을 수 없어 Authorization 으로 인증할 수 없기 때문이다. 연결 직후 클라이언트가
+// 보내는 첫 메시지로 NoticeWSHandler 가 직접 인증하고, 실패하면 닫는다
+// (계약 05 §WebSocket 인증, 2026-07-07 D2). **핸들러의 인증이 유일한 관문이므로
+// 그 코드를 지우면 인증 없는 브로드캐스트가 열린다.**
+var publicSubstrings = []string{"/launcher/", "/webhook/", "/Notice/ws"}
 
 func isPublic(path string) bool {
 	for _, s := range publicSubstrings {
@@ -85,6 +92,38 @@ func Middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, withUser(r, loginID))
 	})
+}
+
+// AuthenticateToken — WebSocket 등 **헤더를 실을 수 없는 연결**이 첫 메시지로 보낸
+// 토큰을 검증한다 (계약 05 §WebSocket 인증). 성공 시 loginid 를 돌려준다.
+//
+// 브라우저 WebSocket 핸드셰이크는 커스텀 헤더를 지정할 수 없어 Authorization 을 쓸 수
+// 없다. 쿼리파라미터는 액세스 로그에 토큰이 남아 기각했다(2026-07-07 D2).
+//
+// dev(USE_SSO!=true)에서는 검증 없이 fallbackUser 또는 DEV_USER 를 돌려준다 —
+// Middleware 의 dev 분기와 같은 규칙이다.
+func AuthenticateToken(token, fallbackUser string) (string, error) {
+	if os.Getenv("USE_SSO") != "true" {
+		if fallbackUser != "" {
+			return fallbackUser, nil
+		}
+		return devUser(), nil
+	}
+	if token == "" {
+		return "", errors.New("token required")
+	}
+	// 신뢰 컴포넌트가 WS 로 붙는 경우 — 서비스 토큰도 받아준다.
+	if validServiceToken(token) {
+		return fallbackUser, nil
+	}
+	loginID, err := introspect(token)
+	if err != nil {
+		return "", err
+	}
+	if loginID == "" {
+		return "", errors.New("introspect returned empty loginid")
+	}
+	return loginID, nil
 }
 
 // validServiceToken — 상수시간 비교. SERVICE_TOKEN 미설정이면 항상 거부(서비스토큰 비활성).

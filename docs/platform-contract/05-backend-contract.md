@@ -29,6 +29,47 @@ handle(request):
 - SERVICE_TOKEN 미설정(빈 값)이면 3번은 **항상 거부** — "설정 안 하면 열리는" 폴백 금지.
 - 토큰 비교는 constant-time (Go: `subtle.ConstantTimeCompare`, 파이썬: `hmac.compare_digest`).
 
+## 1.5 WebSocket 인증 — 첫 메시지 토큰 (2026-11-15, D2 이행)
+
+브라우저 `WebSocket` 핸드셰이크는 **커스텀 헤더를 지정할 수 없다.** `EventSource` 도 같다.
+따라서 §1 의 `Authorization: Bearer` 로는 실시간 연결을 인증할 수 없다.
+
+**쿼리파라미터는 쓰지 않는다** — 토큰이 게이트웨이·프록시 액세스 로그에 남는다
+(2026-07-07 D2 에서 기각).
+
+### 규약
+
+1. 미들웨어는 WebSocket 경로의 **핸드셰이크만** 통과시킨다. (Go 참조 구현: `publicSubstrings` 에 `/Notice/ws`)
+2. 클라이언트는 연결 직후 **첫 메시지**로 인증 정보를 보낸다.
+
+```json
+{ "type": "auth", "token": "<sessionToken>", "user": "<dev 폴백 사용자>" }
+```
+
+3. 서버는 그 토큰을 §2 의 introspect 로 검증한다. `USE_SSO != true`(dev)면 검증을 건너뛰고
+   `user` 또는 `DEV_USER` 를 신원으로 쓴다 — §1 의 dev 분기와 같은 규칙이다.
+   서비스 토큰(§3)도 받아준다. 신뢰 컴포넌트가 WS 로 붙는 경우를 위한 것이다.
+4. **인증을 통과할 때까지 어떤 이벤트도 보내지 않고 브로드캐스트 대상에 등록하지 않는다.**
+5. 인증 성공 시 `{"event":"connected","data":"ok","user":"<loginid>"}` 를 보낸다.
+   클라이언트는 **이 메시지를 받은 시점부터** 연결됨으로 취급한다 (open 시점이 아니다).
+6. 실패 시 `{"event":"error","data":"<사유>"}` 를 한 번 보내고 `ClosePolicyViolation` 으로 닫는다.
+   사유를 먼저 보내는 것은 클라이언트가 재연결 전에 원인을 알 수 있게 하기 위함이다.
+7. 첫 메시지가 **10초** 안에 오지 않으면 닫는다. 인증되지 않은 연결이 쌓이는 것을 막는다.
+
+### 구현 시 주의
+
+- **핸들러의 인증이 유일한 관문이다.** 핸드셰이크를 공개 경로로 열어 두었으므로, 핸들러의
+  검증 코드를 지우면 인증 없는 브로드캐스트가 열린다.
+- 인증 후에는 읽기 기한(read deadline)을 해제한다. 그러지 않으면 10초 뒤 정상 연결이 끊긴다.
+- 클라이언트의 재연결 로직은 그대로 두어도 된다. 인증 실패는 close 로 이어지고, 재연결 시
+  다시 첫 메시지를 보낸다.
+
+### 참조 구현
+
+- 서버: `Platform-API/handlers/sse.go` (`NoticeWSHandler`), `Platform-API/auth/auth.go` (`AuthenticateToken`)
+- 클라이언트: `packages/web-ui/src/runtime/sseManager.js`
+- 테스트: `Platform-API/handlers/ws_auth_test.go`
+
 ## 2. 토큰 검증 — introspect (outbound 호출)
 
 **introspect 는 플랫폼이 호스팅하는 API 가 아니다.** 각 백엔드가 사내 SSO(MobilAve)로 **나가는** 검증 호출이다.

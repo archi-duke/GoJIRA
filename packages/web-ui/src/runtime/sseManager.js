@@ -1,4 +1,5 @@
 import { PLATFORM_API } from './env';
+import { getToken } from './auth';
 
 // SSE → WebSocket 전환 (HTTP/1.1 연결 한도 문제 해결)
 const WS_URL = PLATFORM_API.replace(/^http/, 'ws') + '/Notice/ws';
@@ -27,13 +28,34 @@ function ensureConnection() {
   const ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
-    notifyStatus(true);
+    // 첫 메시지로 인증한다. 브라우저 WebSocket 핸드셰이크는 Authorization 헤더를
+    // 실을 수 없고, 쿼리파라미터는 액세스 로그에 토큰이 남아 쓰지 않는다
+    // (계약 05 §WebSocket 인증 · 2026-07-07 D2).
+    // 서버는 인증 전에는 이벤트를 보내지 않으므로, 여기서 보내지 않으면 10초 후 닫힌다.
+    try {
+      ws.send(JSON.stringify({
+        type: 'auth',
+        token: getToken() || '',
+        // dev(USE_SSO!=true) 폴백 — 서버가 이 값을 사용자로 받아들인다.
+        user: (typeof window !== 'undefined' && window.__gojiraUser) || '',
+      }));
+    } catch {}
+    // connected 수신 시점에 연결됨으로 알린다 — 인증 실패면 error 가 먼저 온다.
   };
 
   ws.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      if (msg.event === 'connected') return;
+      if (msg.event === 'connected') {
+        // 인증까지 끝난 시점이다. 여기서 비로소 연결됨으로 본다.
+        notifyStatus(true);
+        return;
+      }
+      if (msg.event === 'error') {
+        // 인증 실패 등 — 서버가 곧 닫는다. onclose 의 재연결에 맡긴다.
+        console.warn('[ws]', msg.data);
+        return;
+      }
       // 디버그: 수신 메시지 표시 (테스트 시 주석 해제)
       // try { const d = JSON.parse(msg.data); window.alert(`[WS] ${msg.event}: ${d.type || ''} ${d.projectCode || ''} ${d.action || ''}`); } catch {}
       // SSE 호환: event명으로 라우팅, data는 JSON 문자열
