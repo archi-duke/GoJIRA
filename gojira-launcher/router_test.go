@@ -56,6 +56,10 @@ func TestRouteTableLongestFirst(t *testing.T) {
 }
 
 func TestHandleDynamicRoute(t *testing.T) {
+	// 실제 홈에 설치된 서비스(예: ragaas-converter 의 /v1/docs/pptx)가 라우트 테이블에 섞이지 않게 격리.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
 	s := &Server{}
 	call := func(method, path string) (int, map[string]any) {
 		rec := httptest.NewRecorder()

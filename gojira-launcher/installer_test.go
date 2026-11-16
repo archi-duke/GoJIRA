@@ -106,6 +106,7 @@ func TestAcceptCatalog(t *testing.T) {
 func TestInstallService(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows — os.UserHomeDir 는 USERPROFILE 을 본다
 
 	// 패키지 zip 구성: service.json + 더미 실행 파일
 	spec := ServiceSpec{

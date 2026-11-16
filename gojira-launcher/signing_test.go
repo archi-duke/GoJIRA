@@ -95,7 +95,9 @@ func TestAcceptManifest(t *testing.T) {
 // 업데이트 실패 기억 — 서버 매니페스트와 실제 바이너리가 어긋나도
 // 클라이언트가 무한 재시도에 빠지지 않아야 한다.
 func TestUpdateStateLoopGuard(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
 
 	t.Run("기록 없으면 아무것도 건너뛰지 않는다", func(t *testing.T) {
 		if shouldSkipVersion("9.9.9") {
