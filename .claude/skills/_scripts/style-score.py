@@ -49,8 +49,9 @@ from pathlib import Path
 DEFAULT_KB = "406b0eeb-8002-4a3f-8368-c580d397fa89"  # test-ontology
 DEFAULT_RAGAAS_API = "http://localhost:44300/ragaas/api/v2"
 HTTP_TIMEOUT = 10.0
-# RAGaaS plan 은 조건 12개를 넘기면 reject 한다. NORM 속성이 많으면(스타일 10종 ×
-# 비교 표기) 쉽게 넘으므로 나눠 던지고 결과를 합산한다. any(OR) 라서 분할해도 같다.
+# RAGaaS plan 의 조건 상한. 2026-11-16 서버가 12 → 64 로 올렸지만(RAGaaS a60812b),
+# 그 수정 전 서버가 돌고 있는 환경이 있을 수 있어 12 로 나눠 던지고 합산한다.
+# any(OR) 라서 분할해도 결과는 같다. 전 환경이 올라가면 올려도 된다.
 MAX_CONDITIONS = 12
 
 # 신호 가중치 — index.yaml 의 weights 에서 읽고, 못 읽으면 이 기본값.
@@ -303,6 +304,10 @@ def score_via_ragaas(req: dict, base: str, kb: str) -> tuple:
                 raise RuntimeError(f"{cls} 조회 reject — {res.get('message')}")
             for z in res.get("zero_conditions") or []:
                 warnings.append(f"{cls}: {z}")
+            # adjustments — 서버가 목록 밖 값을 빼고 조회했다는 뜻. describe 로 미리
+            # 걸러니 비어 있어야 정상이고, 차 있으면 KB 스키마가 바뀐 신호다.
+            for a in res.get("adjustments") or []:
+                warnings.append(f"{cls}: 서버 보정 — {a}")
             for ent in res.get("entities") or []:
                 sid = norm_style_id(ent.get("label") or "")
                 if not sid:
