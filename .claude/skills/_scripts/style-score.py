@@ -300,8 +300,14 @@ def score_via_ragaas(req: dict, base: str, kb: str) -> tuple:
                 "status": res.get("status"), "conditions": len(batch),
                 "matched_entities": res.get("total"),
             })
-            if res.get("status") == "reject":
-                raise RuntimeError(f"{cls} 조회 reject — {res.get('message')}")
+            # ok(매칭 있음) / zero(조건을 만족하는 스타일이 없음) 만 정상이다.
+            # reject(조건 오류) · error(그래프 조회 실패·시간초과) 는 **점수가 아니라
+            # 조회가 깨진 것**이므로 빈 결과로 넘기지 않고 올려서 yaml 로 내려간다.
+            # error 를 '충족 안 함' 으로 흘리면 점수가 조용히 낮아진다.
+            status = res.get("status")
+            if status not in ("ok", "zero"):
+                raise RuntimeError(
+                    f"{cls} 조회 {status} — {res.get('message') or '이유 없음'}")
             for z in res.get("zero_conditions") or []:
                 warnings.append(f"{cls}: {z}")
             # adjustments — 서버가 목록 밖 값을 빼고 조회했다는 뜻. describe 로 미리
