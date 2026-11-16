@@ -208,6 +208,17 @@
 **원칙**: 서버 배포본이 어떤 상태든 클라이언트가 무한 루프에 빠지면 안 된다. 서버 측 보호(부분 빌드 시 매니페스트 갱신 금지)도 함께 넣었지만, **클라이언트 보호가 더 중요하다** — 누가 무슨 실수를 하든 사용자 PC 가 망가지지 않아야 한다.
 **참조**: PR #122
 
+### Windows 에이전트 창 = Windows Terminal 우선 (conhost `cmd /k` 폐기)
+
+**결정일**: 2026-11-15
+
+**선택**: `wt.exe` 가 있으면 Windows Terminal 새 창의 PowerShell 에서 에이전트를 띄우고, 없거나 wt 기동이 실패하면 PowerShell 콘솔 창으로 폴백한다.
+**폐기한 것**: `cmd /k "title … && chcp 65001 && <bin>"` 로 띄우던 conhost 창.
+**왜 바꿨나**: conhost 에서는 `chcp 65001` 을 해도 에이전트 TUI 의 한글과 박스문자가 깨졌다. 폴백도 cmd 대신 PowerShell 로 바꿨다. npm 전역 CLI(`claude`)가 `claude.ps1` shim 으로 해석되므로 `-ExecutionPolicy Bypass` 가 필요하다.
+**대가**: `wt.exe` 는 요청만 넘기고 바로 종료해서 env 블록도 실제 셸 PID 도 전달되지 않는다. 그래서 주입 env 를 임시 `.ps1`(UTF-8 BOM. PS 5.1 이 BOM 없는 파일을 CP949 로 읽기 때문)에 쓰고, `.ps1` 이 자기 `$PID` 를 파일로 보고하면 런처가 `OpenProcess` 로 추적한다. 세션 레지스트리와 과제전환 트리종료는 이 PID 로 동작한다.
+**주의**: 임시 `.ps1` 에는 `GOJIRA_SESSION_TOKEN` 이 평문으로 들어간다. 스크립트가 실행 직후 자기 파일을 지우고, 20초 안에 PID 보고가 없을 때도 지운다. wt 가 없는 PC 의 폴백 경로는 실제로 띄워 보지 않았다.
+**참조**: PR #131
+
 ---
 
 ## 5. 알림 · 문서
