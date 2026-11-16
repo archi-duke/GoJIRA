@@ -1,6 +1,6 @@
 ---
 name: style-define
-description: Architecture Driver 로부터 정규화된 시스템 속성을 입력 받아, 카탈로그 스타일 엔진 점수를 참조해 **통합 스타일 조합 후보 2~3개** 를 구성하고 QA 가중 점수로 비교해 최종 선정합니다. 각 조합 후보를 ADSN 이슈로 생성(선정 조합만 decision 필드 기록, 혼합 허용), architecture/architecture-style.md (상위 index) + architecture/architecture-style/ADSN_NNN-*.md (후보별 상세, 파일명은 실제 subkey) 를 저장합니다. 개별 스타일은 ADSN 으로 만들지 않음. Self-loop 최대 3회. Claude Code 네이티브(curl/jq).
+description: Architecture Driver 로부터 정규화된 시스템 속성을 입력 받아, 카탈로그 적합·회피 신호 점수를 참조해 **통합 스타일 조합 후보 2~3개** 를 구성하고 QA 가중 점수로 비교해 최종 선정합니다. 각 조합 후보를 ADSN 이슈로 생성(선정 조합만 decision 필드 기록, 혼합 허용), architecture/architecture-style.md (상위 index) + architecture/architecture-style/ADSN_NNN-*.md (후보별 상세, 파일명은 실제 subkey) 를 저장합니다. 개별 스타일은 ADSN 으로 만들지 않음. Self-loop 최대 3회. Claude Code 네이티브(curl/jq).
 allowed-tools: Bash, Read
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Bash, Read
 
 - **한 generation 에서 Step 두 개 이상 처리 금지**. 각 Step 종료는 Bash tool call 로 마무리해 generation 경계 형성
 - **PlantUML 격리 (Option C)**: Step 1 에서는 plantuml **생성 금지**. Step 1.5 에서만 후보별 `structuralDiagram` / `dynamicDiagram` 을 생성해 draft merge
-- reasoning 은 각 Step 당 3~5 줄 이내. 엔진 점수/규칙 적용은 `style-score.py` 담당
+- reasoning 은 각 Step 당 3~5 줄 이내. 적합·회피 신호 점수 계산은 `style-score.py` 담당 (RAGaaS 조회 → 실패 시 로컬 카탈로그)
 - Step 1 / 1.5 / 3 종료마다 **반드시 `draft-io.sh save`** — draft JSON 전체 flush 후 generation 종료
 - Step 2 자가검증은 **반드시 `validate-style-doc.py` 호출** — 에이전트가 직접 필드/섹션 계산 금지
 - assistant 출력에는 draft JSON / 문서 본문 재노출 금지. "저장 완료 / critical N건" 한두 줄
@@ -18,7 +18,7 @@ allowed-tools: Bash, Read
 이 스킬 Step 체크리스트:
 ```
 # Todos
-[ ] Step 0 — 진입 점검 (drift-check + 분기) + 데이터 수집 + 엔진 점수 (참고용)
+[ ] Step 0 — 진입 점검 (drift-check + 분기) + 데이터 수집 + 신호 점수 (참고용)
 [ ] Step 1 — 통합 스타일 조합 후보 2~3개 + QA 가중 평가 (plantuml 없음)
 [ ] Step 1.5 — 후보별 Structural/Dynamic PlantUML 추가
 [ ] Step 2 — 자가검증 (validate-style-doc.py)
@@ -45,7 +45,7 @@ export USER="batman"
 
 ## 역할
 
-아키텍트. Architecture Driver 와 엔진 점수를 근거로 **시너지 있는 스타일 조합 2~3개** 를 설계하고, QA(NFR) 가중 평가로 최종안을 선정한다. 개별 스타일 랭킹이 아니라 **조합 단위** 가 의사결정 대상.
+아키텍트. Architecture Driver 와 신호 점수를 근거로 **시너지 있는 스타일 조합 2~3개** 를 설계하고, QA(NFR) 가중 평가로 최종안을 선정한다. 개별 스타일 랭킹이 아니라 **조합 단위** 가 의사결정 대상.
 
 ---
 
@@ -97,7 +97,7 @@ drift 모두 CLEAN 인 경우 **반드시 사용자에게 다음 3 옵션을 명
 
 진행 결정 후 Step 0.3 (데이터 수집) 으로 이동. [1] 종료면 Step 6 보고만 출력하고 baseline 갱신 없이 끝낸다.
 
-### 0.3 데이터 수집 + 엔진 점수
+### 0.3 데이터 수집 + 신호 점수
 
 #### 0.3.1 normalizedAttributes 확보
 
@@ -154,37 +154,42 @@ ls "${KN}/styles/"
 
 각 스타일 파일은 `id / name / scope / summary / fit_signals / avoid_signals / quality_attributes / prerequisites / combines_well_with / conflicts_with / tradeoffs` 를 담는다.
 
-#### 0.3.3 엔진 점수 계산 (참고용)
+#### 0.3.3 적합·회피 신호 점수 (참고용)
 
-**엔진은 개별 스타일 랭킹 도구로만 활용**. 최종 Primary/Secondary/Supporting 선정은 이번 스킬에서는 LLM 의 조합 설계가 담당 — 엔진 분류 그대로 쓰지 않는다.
+**점수는 개별 스타일 랭킹 도구로만 활용**. 최종 Primary/Secondary/Supporting 선정은 이번 스킬에서는 LLM 의 조합 설계가 담당 — 자동 분류를 그대로 쓰지 않는다.
 
-> **엔진은 현재 동작하지 않는다 (2026-05-22 이후).** `style-score.py` 는 Agent-Service 의
-> `style_define` 엔진을 감싼 wrapper 인데, 그 Agent-Service 가 커밋 `89b379f9` 에서 제거됐다.
-> 호출하면 `{"error":"agent_service_not_found"}` 를 stderr 로 내고 exit 1 이다.
->
-> 엔진은 원래 **참고용**(아래 "참조만, 뒤집어도 무방")이므로 **없어도 진행한다.**
-> 실패하면 0.3.2 에서 읽은 카탈로그(`knowledge/arch-styles/styles/*.yaml`)의
-> `fit_signals` / `avoid_signals` 를 직접 보고 판단한다 — 그 파일들이 적합/회피 신호의
-> 단일 진실 출처다(`index.yaml` 머리 주석). 엔진 점수는 그 신호를 기계적으로 합산한 것뿐이다.
+점수 출처는 **RAGaaS 지식그래프 조회**이고, 못 붙으면 **로컬 카탈로그 직접 읽기**로 내려간다.
+셈법은 두 경로가 같다(`index.yaml` 의 `weights`: 정확 일치 +10 / 완화 일치 +5 / 회피 -20).
+적합·회피 **신호만** 합산하며 품질속성 가중·전제조건·조합 보너스는 넣지 않는다 — 그건 Step 2~3 의 LLM 몫이다.
 
 ```bash
 REQ_JSON=$(cat "/tmp/${CODE}-styledef-norm.json")
 
-# 엔진이 없으면 실패한다 — 그래도 멈추지 않는다(참고용).
+# RAGAAS_API 미설정이면 PLATFORM_API 에서 유추한다(…/platform/api/v2 → …/ragaas/api/v2).
+# KB 를 옮겼으면 RAGAAS_STYLE_KB 로 지정. 조회 실패 시 자동으로 로컬 카탈로그로 내려간다.
 if jq -n --argjson r "$REQ_JSON" '{req:$r}' \
      | python3 "${PROJECT_ROOT}/.claude/skills/_scripts/style-score.py" \
      > "/tmp/${CODE}-styledef-engine.json" 2>"/tmp/${CODE}-styledef-engine.err"; then
-  cat "/tmp/${CODE}-styledef-engine.json" | jq '{top10:[.scored[:10][]|{id,score}], primary, secondary, supporting}'
+  jq '{source, scoring, top10:[.scored[:10][]|{id,score,fit_exact,fit_partial,avoid}],
+       primary, secondary, supporting, warnings}' "/tmp/${CODE}-styledef-engine.json"
 else
-  echo "엔진 미사용 — 카탈로그 fit_signals/avoid_signals 로 직접 판단한다"
+  echo "점수 없이 진행 — 0.3.2 의 fit_signals/avoid_signals 를 직접 보고 판단한다"
   cat "/tmp/${CODE}-styledef-engine.err"
 fi
 ```
 
 산출:
-- `scored` — 모든 스타일의 점수 랭킹 (조합 후보 구성의 **참조자료**)
-- `primary/secondary/supporting` — 엔진 자동 분류 (참조만, 뒤집어도 무방)
+- `source` — `ragaas`(지식그래프) 또는 `yaml`(로컬 카탈로그). `yaml` 이면 `warnings[0]` 에 내려온 이유가 있다.
+- `scored` — 모든 스타일의 점수 랭킹 + `breakdown`(어느 속성이 어느 신호에 걸렸는지). 조합 후보 구성의 **참조자료**이자 ADSN `decisionRationale` 의 근거.
+- `primary/secondary/supporting` — 임계값 자동 분류 (참조만, 뒤집어도 무방)
 - `catalog_summary` — 이후 validator 에 `styleCatalogIds` 로 전달하거나 조합 시 스타일 id 확인에 사용
+
+> **두 경로 모두 실패하면(exit 1) 멈추지 않는다** — 점수는 참고용이다. 0.3.2 에서 읽은
+> 카탈로그의 `fit_signals` / `avoid_signals` 를 직접 보고 판단한다. 그 파일들이 신호의
+> 단일 진실 출처이고(`index.yaml` 머리 주석), 점수는 그 신호를 기계적으로 합산한 것뿐이다.
+>
+> 이력: 2026-05-22 ~ 11-16 사이 이 스크립트는 Agent-Service `style_define` 엔진 wrapper 였고,
+> 그 Agent-Service 가 커밋 `89b379f9` 에서 제거돼 줄곧 exit 1 이었다. RAGaaS 조회로 대체(PR #133).
 
 #### 0.3.4 기존 ADSN 스캔 (선택)
 
@@ -216,7 +221,7 @@ fi
 
 ### 1.1 조합 후보 설계
 
-엔진 랭킹의 상위권과 카탈로그의 `combines_well_with` / `conflicts_with` 를 참고해 **정말로 검토할 가치 있는** 조합 **2~3개** 를 구성. 각 조합은 Primary/Secondary/Supporting 역할을 가진 스타일 세트:
+신호 점수 상위권과 카탈로그의 `combines_well_with` / `conflicts_with` 를 참고해 **정말로 검토할 가치 있는** 조합 **2~3개** 를 구성. 각 조합은 Primary/Secondary/Supporting 역할을 가진 스타일 세트:
 
 - **Primary** (scope 당 1개) — 전체 결정 계층을 지배하는 스타일 (예: Modular Monolith, Microservices, Layered)
 - **Secondary** — Primary 를 보완하거나 직교 관심사를 다루는 스타일
@@ -249,7 +254,7 @@ fi
 
 - 총점 최고 1개 단독 채택 → 해당 후보만 `chosen=true`
 - 최고점 근소(0.3 이하) / 상호 보완적 → **혼합 채택**: 관련 후보 모두 `chosen=true`, `decisionNote` 에 혼합 방식 기록
-- 엔진 점수와 가중합이 반대 방향이면 `eval` 에 그 불일치를 명시적으로 짚기
+- 신호 점수와 가중합이 반대 방향이면 `eval` 에 그 불일치를 명시적으로 짚기
 
 ### 1.5 조합(approach) 구조
 
