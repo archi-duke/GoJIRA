@@ -163,7 +163,7 @@
 **대가**: 점수가 외부 서비스에 의존한다. 그래서 출처를 2개로 두고 셈법을 한 곳(`satisfies` + `index.yaml` weights)에 모았다 — RAGaaS 와 로컬 YAML 이 점수·순위·근거까지 일치함을 NORM 2종으로 확인했다.
 **범위**: 적합·회피 **신호만** 합산한다. 품질속성 가중·전제조건·조합 보너스는 넣지 않았다 — 조합 설계와 QA 가중 평가는 LLM 몫이고 점수는 참고용이라는 원칙(Step 2~3)을 유지했다.
 **운영 주의**: RAGaaS `plan` 의 조건 상한은 **리프 64개**(RAGaaS ADR-004, 2026-11-17 운영 반영 — 그 전엔 12개여서 질의를 나눠 던졌다). 한 NORM 이 만드는 조건은 카탈로그 허용값 전체인 fit 29 / avoid 16 개가 최대라 상한의 절반도 쓰지 않아, 2026-11-17 분할을 걷어내고 종류별 1회씩 던진다. `in` 에 목록 밖 값이 섞이면 서버가 그 값만 빼고 평가하며 `adjustments` 로 알리지만, 스크립트는 `describe` 의 허용값으로 미리 걸러 `eq` 조건만 만든다(그래서 `adjustments` 가 차면 KB 스키마가 바뀐 신호다). 조회가 `reject`·`error` 면 점수를 조용히 낮추지 않고 로컬 카탈로그로 내려간다 — 구버전 RAGaaS 를 만나도 결과는 같다. KB·주소는 `RAGAAS_STYLE_KB` · `RAGAAS_API` 로 바꾼다.
-**참조**: PR #133 · `_scripts/style-score.py` (`--selftest`) · RAGaaS `skills/ragaas-query/SKILL.md`
+**참조**: PR #133 · #134 · #135 · `_scripts/style-score.py` (`--selftest`) · RAGaaS `skills/ragaas-query/SKILL.md`
 
 ---
 
