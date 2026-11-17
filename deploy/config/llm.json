@@ -4,7 +4,7 @@
   "models": [
     {
       "name": "zai-glm-5.2",
-      "endpoint": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+      "endpoint": "https://api.z.ai/api/paas/v4/chat/completions",
       "model": "glm-5.2",
       "apiKey": "${ZAI_API_KEY}",
       "extraBody": { "thinking": { "type": "disabled" } },
