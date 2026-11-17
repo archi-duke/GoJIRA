@@ -49,10 +49,11 @@ from pathlib import Path
 DEFAULT_KB = "406b0eeb-8002-4a3f-8368-c580d397fa89"  # test-ontology
 DEFAULT_RAGAAS_API = "http://localhost:44300/ragaas/api/v2"
 HTTP_TIMEOUT = 10.0
-# RAGaaS plan 의 조건 상한. 2026-11-16 서버가 12 → 64 로 올렸지만(RAGaaS a60812b),
-# 그 수정 전 서버가 돌고 있는 환경이 있을 수 있어 12 로 나눠 던지고 합산한다.
-# any(OR) 라서 분할해도 결과는 같다. 전 환경이 올라가면 올려도 된다.
-MAX_CONDITIONS = 12
+# RAGaaS plan 의 조건 상한은 리프 64 개다 (RAGaaS ADR-004, 2026-11-17 운영 반영).
+# 한 NORM 이 만들 수 있는 조건은 카탈로그 허용값 전체인 fit 29 / avoid 16 개가
+# 최대라 상한의 절반도 쓰지 않는다. 그래서 나누지 않고 한 번에 던진다.
+# 상한을 넘기거나 구버전 서버(상한 12)를 만나면 reject 가 오고, 아래에서 조회
+# 실패로 올려 yaml 경로로 내려간다 — 두 경로의 셈법이 같아 점수는 동일하다.
 
 # 신호 가중치 — index.yaml 의 weights 에서 읽고, 못 읽으면 이 기본값.
 W_FIT_EXACT = 10
@@ -290,48 +291,45 @@ def score_via_ragaas(req: dict, base: str, kb: str) -> tuple:
 
     for cls in ("fit_signals", "avoid_signals"):
         conds = build_conditions(req, allowed, cls)
-        batches = [conds[i:i + MAX_CONDITIONS]
-                   for i in range(0, len(conds), MAX_CONDITIONS)] or [[]]
-        for bi, batch in enumerate(batches):
-            res = plan_query(base, kb, batch)
-            meta["elapsed_ms"] += int(res.get("elapsed_ms") or 0)
-            meta["queries"].append({
-                "class": cls, "batch": bi + 1, "batches": len(batches),
-                "status": res.get("status"), "conditions": len(batch),
-                "matched_entities": res.get("total"),
-            })
-            # ok(매칭 있음) / zero(조건을 만족하는 스타일이 없음) 만 정상이다.
-            # reject(조건 오류) · error(그래프 조회 실패·시간초과) 는 **점수가 아니라
-            # 조회가 깨진 것**이므로 빈 결과로 넘기지 않고 올려서 yaml 로 내려간다.
-            # error 를 '충족 안 함' 으로 흘리면 점수가 조용히 낮아진다.
-            status = res.get("status")
-            if status not in ("ok", "zero"):
-                raise RuntimeError(
-                    f"{cls} 조회 {status} — {res.get('message') or '이유 없음'}")
-            for z in res.get("zero_conditions") or []:
-                warnings.append(f"{cls}: {z}")
-            # adjustments — 서버가 목록 밖 값을 빼고 조회했다는 뜻. describe 로 미리
-            # 걸러니 비어 있어야 정상이고, 차 있으면 KB 스키마가 바뀐 신호다.
-            for a in res.get("adjustments") or []:
-                warnings.append(f"{cls}: 서버 보정 — {a}")
-            for ent in res.get("entities") or []:
-                sid = norm_style_id(ent.get("label") or "")
-                if not sid:
+        res = plan_query(base, kb, conds)
+        meta["elapsed_ms"] += int(res.get("elapsed_ms") or 0)
+        meta["queries"].append({
+            "class": cls,
+            "status": res.get("status"), "conditions": len(conds),
+            "matched_entities": res.get("total"),
+        })
+        # ok(매칭 있음) / zero(조건을 만족하는 스타일이 없음) 만 정상이다.
+        # reject(조건 오류·상한 초과) · error(그래프 조회 실패·시간초과) 는 **점수가
+        # 아니라 조회가 깨진 것**이므로 빈 결과로 넘기지 않고 올려서 yaml 로 내려간다.
+        # error 를 '충족 안 함' 으로 흘리면 점수가 조용히 낮아진다.
+        status = res.get("status")
+        if status not in ("ok", "zero"):
+            raise RuntimeError(
+                f"{cls} 조회 {status} — {res.get('message') or '이유 없음'}")
+        for z in res.get("zero_conditions") or []:
+            warnings.append(f"{cls}: {z}")
+        # adjustments — 서버가 목록 밖 값을 빼고 조회했다는 뜻. describe 로 미리
+        # 걸러니 비어 있어야 정상이고, 차 있으면 KB 스키마가 바뀐 신호다.
+        for a in res.get("adjustments") or []:
+            warnings.append(f"{cls}: 서버 보정 — {a}")
+        for ent in res.get("entities") or []:
+            sid = norm_style_id(ent.get("label") or "")
+            if not sid:
+                continue
+            row = tally.setdefault(sid, {"fit_exact": 0, "fit_partial": 0,
+                                         "avoid": 0, "breakdown": []})
+            for ci in ent.get("matched_conditions") or []:
+                if not isinstance(ci, int) or ci >= len(conds):
                     continue
-                row = tally.setdefault(sid, {"fit_exact": 0, "fit_partial": 0,
-                                             "avoid": 0, "breakdown": []})
-                for ci in ent.get("matched_conditions") or []:
-                    if not isinstance(ci, int) or ci >= len(batch):
-                        continue
-                    c = batch[ci]
-                    if cls == "fit_signals":
-                        row["fit_exact" if c["_kind"] == "exact" else "fit_partial"] += 1
-                    else:
-                        row["avoid"] += 1
-                    row["breakdown"].append({
-                        "class": cls, "attr": c["_attr"], "norm": c["_norm"],
-                        "signal": c["value"], "match": c["_kind"],
-                    })
+                c = conds[ci]
+                if cls == "fit_signals":
+                    row["fit_exact" if c["_kind"] == "exact" else "fit_partial"] += 1
+                else:
+                    row["avoid"] += 1
+                row["breakdown"].append({
+                    "class": cls, "attr": c["_attr"], "norm": c["_norm"],
+                    "signal": c["value"], "match": c["_kind"],
+                })
 
     for sid in members:
         tally.setdefault(sid, {"fit_exact": 0, "fit_partial": 0,
