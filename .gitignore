@@ -12,7 +12,8 @@ gojira-launcher/gojira-launcher
 gojira-launcher/gojira-launcher.exe
 
 # Env
-.env
+.env*
+!.env.example
 
 # dev 런타임 주입 파일 — dev 에서 window._env_ 로 REACT_APP_* 주입용.
 # deploy 는 컨테이너 entrypoint 가 자체 생성하므로 레포에 커밋하지 않는다.
