@@ -161,10 +161,25 @@ func PushBundleToRepo(bundlePath, owner, repo, commitMsg string, rewrite Rewrite
 		if err != nil {
 			return nil, err
 		}
-		if out, err := gitCmd(mirror, "push", "--mirror", target); err != nil {
-			return nil, fmt.Errorf("mirror push 실패 (%s): %s", redactURL(target), firstLines(out, 5))
+		// `push --mirror` 를 쓰면 안 된다 — bundle 은 --all 로 떠서 Gitea 가 만드는
+		// refs/pull/<n>/head 까지 들고 있고, 그걸 올리려 하면 서버 훅이
+		// `hook declined to update refs/pull/1/head` 로 push 전체를 거부한다.
+		// 복원에 필요한 것은 브랜치와 태그뿐이므로 refspec 을 명시한다.
+		// (--force: auto_init 으로 생긴 main 커밋과 이력이 겹치지 않는다.)
+		args := []string{"push", "--force", target, "refs/heads/*:refs/heads/*"}
+		if hasTags(mirror) {
+			args = append(args, "refs/tags/*:refs/tags/*")
 		}
-		return refs, nil
+		if out, err := gitCmd(mirror, args...); err != nil {
+			return nil, fmt.Errorf("저장소 push 실패 (%s): %s", redactURL(target), firstLines(out, 5))
+		}
+		var heads []string
+		for _, r := range refs {
+			if strings.HasPrefix(r, "refs/heads/") {
+				heads = append(heads, strings.TrimPrefix(r, "refs/heads/"))
+			}
+		}
+		return heads, nil
 	}
 
 	work := filepath.Join(tmp, "work")
@@ -207,14 +222,20 @@ func PushBundleToRepo(bundlePath, owner, repo, commitMsg string, rewrite Rewrite
 	if out, err := gitCmd(work, "push", "--force", target, "--all"); err != nil {
 		return nil, fmt.Errorf("push --all 실패 (%s): %s", redactURL(target), firstLines(out, 5))
 	}
-	// 태그는 없을 수 있다 — 실패해도 복원을 막지 않는다.
-	if out, err := gitCmd(work, "push", "--force", target, "--tags"); err != nil {
-		if !strings.Contains(out, "everything up-to-date") {
-			// 로그만 남기고 진행 (태그 없는 저장소가 정상 케이스)
-			_ = out
+	// 태그는 없을 수 있다 — 있을 때만 보낸다(없이 --tags 를 보내면 실패한다).
+	if hasTags(work) {
+		if out, err := gitCmd(work, "push", "--force", target, "--tags"); err != nil {
+			return nil, fmt.Errorf("태그 push 실패 (%s): %s", redactURL(target), firstLines(out, 3))
 		}
 	}
 	return pushed, nil
+}
+
+// hasTags 태그가 하나라도 있는지 — 없을 때 refs/tags/* refspec 을 보내면
+// `src refspec does not match any` 로 push 가 실패한다.
+func hasTags(gitDir string) bool {
+	out, err := gitCmd(gitDir, "for-each-ref", "--count=1", "--format=%(refname)", "refs/tags")
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 // listRefs mirror/bare 저장소의 ref 전체 이름.
