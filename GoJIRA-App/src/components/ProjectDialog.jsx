@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import config from '../config';
 import './ProjectDialog.css';
 import { authFetch } from '../platform/auth';
@@ -34,6 +34,11 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
   // Gitea repo 이름 중복/유효성 검사 상태 — 신규 과제에서만 사용
   // status: idle | checking | ok | duplicate | invalid | error
   const [repoCheck, setRepoCheck] = useState({ status: 'idle', slug: '', suggestion: '', message: '' });
+  // 파일에서 가져오기 — 신규 과제에서만. null 이면 평소의 과제 생성 흐름.
+  // { file, manifest, issueCount, codeTaken, repoNameTaken } — 저장 시 onSave 로 넘어간다.
+  const [imported, setImported] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (project) {
@@ -90,6 +95,48 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
       setRepoCheck({ status: 'ok', slug: data.slug, suggestion: '', message: `사용 가능 (${data.slug})` });
     } catch (e) {
       setRepoCheck({ status: 'error', slug: '', suggestion: '', message: '검사 실패: ' + (e.message || e) });
+    }
+  }
+
+  // 내보낸 zip 을 읽어 폼을 채운다. 이 단계에서는 아무것도 만들지 않는다
+  // (서버 /Project/import/inspect 는 읽기 전용) — 사용자가 코드·저장소명을 확인하고
+  // [저장] 을 눌러야 실제 복원이 돌아간다.
+  async function handleImportFile(file) {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+      const res = await authFetch(`${PLATFORM_API}/Project/import/inspect`, { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert('가져오기 파일을 읽을 수 없습니다: ' + (data.error || res.statusText));
+        return;
+      }
+      const sug = data.suggested || {};
+      // 코드/저장소명이 이미 쓰이고 있으면 사용자가 고치도록 접미사를 붙여 제안한다.
+      const code = data.codeTaken ? '' : (sug.code || '');
+      const repoName = data.repoNameTaken ? '' : (sug.repoName || '');
+      setForm((prev) => ({
+        ...prev,
+        ...(data.project || {}),
+        name: sug.name || prev.name,
+        jiraCodes: { main: { jiraCode: code } },
+        repoName,
+      }));
+      setImported({
+        file,
+        manifest: data.manifest || {},
+        issueCount: data.issueCount || 0,
+        codeTaken: !!data.codeTaken,
+        repoNameTaken: !!data.repoNameTaken,
+      });
+      if (repoName) checkRepoName(repoName);
+      else setRepoCheck({ status: 'idle', slug: '', suggestion: '', message: '' });
+    } catch (e) {
+      alert('가져오기 파일 읽기 오류: ' + (e.message || e));
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -163,7 +210,9 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
       await ensureOrgUnit(form.devGroup, 'group', form.devTeam);
     }
     if (onSave) {
-      const result = await onSave(form);
+      // 가져오기로 만드는 과제면 파일을 함께 넘긴다 — 호출자가 import 경로로 보낸다.
+      const payload = imported ? { ...form, __import: { file: imported.file } } : form;
+      const result = await onSave(payload);
       // onSave 가 false 를 명시 반환하면 다이얼로그를 닫지 않는다 — 신규 과제 생성 시
       // 런처가 동작하지 않아 게이트에서 막힌 경우 등. 다른 반환값(undefined 포함)은 OK.
       if (result === false) return;
@@ -180,8 +229,68 @@ export default function ProjectDialog({ project, mode, onClose, onSave }) {
       <div className="dlg-container" onClick={(e) => e.stopPropagation()}>
         <div className="dlg-header">
           <span className="dlg-title">{title}</span>
-          <button className="dlg-close" onClick={onClose}>X</button>
+          <div className="dlg-header-actions">
+            {isNew && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".zip"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files && e.target.files[0];
+                    e.target.value = '';
+                    handleImportFile(f);
+                  }}
+                />
+                <button
+                  className="dlg-import-btn"
+                  disabled={importing}
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  title="다른 GoJIRA 에서 내보낸 과제 파일(.zip)을 읽어 폼을 채웁니다"
+                >
+                  {importing ? '읽는 중...' : '파일에서 가져오기'}
+                </button>
+              </>
+            )}
+            <button className="dlg-close" onClick={onClose}>X</button>
+          </div>
         </div>
+
+        {imported && (
+          <div className="dlg-import-banner">
+            <div className="dlg-import-row">
+              <b>가져온 내용</b>
+              <button
+                className="dlg-import-clear"
+                onClick={() => {
+                  setImported(null);
+                  setRepoCheck({ status: 'idle', slug: '', suggestion: '', message: '' });
+                }}
+              >
+                해제
+              </button>
+            </div>
+            <div className="dlg-import-meta">
+              원본 {imported.manifest.name || '-'} ({imported.manifest.code || '-'})
+              {imported.manifest.sourceSystem ? ` @ ${imported.manifest.sourceSystem}` : ''}
+            </div>
+            <div className="dlg-import-meta">
+              이슈 {imported.issueCount}건
+              {imported.manifest.repo?.fileCount ? ` · 문서 ${imported.manifest.repo.fileCount}개` : ''}
+              {imported.manifest.repo?.branches?.length
+                ? ` · 브랜치 ${imported.manifest.repo.branches.join(', ')}`
+                : ''}
+            </div>
+            {(imported.codeTaken || imported.repoNameTaken) && (
+              <div className="dlg-import-warn">
+                {imported.codeTaken && `과제 코드 ${imported.manifest.code} 는 이미 사용 중입니다. `}
+                {imported.repoNameTaken && `저장소 이름 ${imported.manifest.repoName} 은 이미 사용 중입니다. `}
+                다른 값을 입력해 주세요 — 코드를 바꾸면 이슈 키도 함께 재작성됩니다.
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="dlg-body">
           {/* Basic Info */}

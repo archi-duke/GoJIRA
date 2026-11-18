@@ -157,6 +157,7 @@ func main() {
 		r.Put("/Project", handlers.ProjectUpdateHandler)
 		r.Patch("/Project/{jiraCode}/archSettings", handlers.ProjectArchSettingsPatchHandler)
 		r.Post("/Project/{jiraCode}/reset", handlers.ProjectResetHandler)
+		r.Post("/Project/{jiraCode}/restore", handlers.ProjectRestoreHandler)
 		r.Get("/Project/{jiraCode}/dump", handlers.ProjectDumpHandler)
 		r.Get("/Project/{jiraCode}/usecase-artifacts", handlers.UsecaseArtifactGetHandler)
 		r.Put("/Project/{jiraCode}/usecase-artifacts", handlers.UsecaseArtifactPutHandler)

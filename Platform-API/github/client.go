@@ -369,6 +369,12 @@ func CreateWebhook(owner, repo, webhookURL, secret string, events []string) erro
 		"events": events,
 		"active": true,
 	}
+	// Gitea 는 hook 종류를 본문의 type 으로 받는다. 없으면 422 `[Type]: Required` 로
+	// 거부된다 — GitHub 에는 없는 필드라 그동안 Gitea 에서는 이 호출이 조용히 실패하고
+	// deploy/scripts/register-webhooks.sh 로 수동 등록해 왔다 (2026-11-18 발견).
+	if IsGitea() {
+		body["type"] = "gitea"
+	}
 	data, status, err := doRequest("POST", path, body)
 	if err != nil {
 		return err

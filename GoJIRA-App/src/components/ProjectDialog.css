@@ -255,3 +255,72 @@
   font-size: 12px;
   width: 140px;
 }
+
+/* ─── 파일에서 가져오기 (과제 생성 시에만 노출) ─────────────────────── */
+
+.dlg-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 기본 버튼 규칙: border 없음 · lightgray 배경 · 검은 글자 */
+.dlg-import-btn {
+  border: none;
+  background: lightgray;
+  color: #000;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.dlg-import-btn:hover:not(:disabled) {
+  background: #c4c4c4;
+}
+.dlg-import-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.dlg-import-banner {
+  margin: 0;
+  padding: 10px 20px;
+  background: #f6f8fa;
+  border-bottom: 1px solid #eee;
+  font-size: 12px;
+  color: #444;
+}
+
+.dlg-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.dlg-import-clear {
+  border: none;
+  background: lightgray;
+  color: #000;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.dlg-import-clear:hover {
+  background: #c4c4c4;
+}
+
+.dlg-import-meta {
+  line-height: 1.6;
+  color: #555;
+}
+
+.dlg-import-warn {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #fff6e5;
+  border-left: 3px solid #e0a000;
+  color: #7a5200;
+  line-height: 1.5;
+}

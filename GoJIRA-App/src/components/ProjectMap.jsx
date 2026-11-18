@@ -208,6 +208,52 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
         }
         break;
       }
+      case 'export': {
+        const code = getJiraCode(project);
+        setSaving({
+          title: '과제 내보내기 중...',
+          sub: '이슈와 설계문서 전체 이력을 묶는 중입니다. 수 초 걸릴 수 있습니다.',
+        });
+        try {
+          // 서버가 zip 을 만들어 그대로 흘려준다. 응답을 blob 으로 받아 내려받기.
+          const res = await authFetch(`${PLATFORM_API}/Project/${encodeURIComponent(code)}/export`);
+          if (!res.ok) {
+            let msg = res.statusText;
+            try { msg = (await res.json()).error || msg; } catch {}
+            await modalAlert('내보내기 실패: ' + msg);
+            return;
+          }
+          const issueCount = res.headers.get('X-Gojira-Issue-Count');
+          const fileCount = res.headers.get('X-Gojira-File-Count');
+          const blob = await res.blob();
+          // 파일명은 서버의 Content-Disposition 을 우선 사용.
+          let filename = `${code}.gojira.zip`;
+          const cd = res.headers.get('Content-Disposition') || '';
+          const m = cd.match(/filename="?([^";]+)"?/);
+          if (m) filename = m[1];
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          const kb = Math.max(1, Math.round(blob.size / 1024));
+          await modalAlert(
+            `"${project.name}" 내보내기 완료\n\n`
+            + `파일: ${filename} (${kb.toLocaleString()} KB)\n`
+            + (issueCount ? `이슈: ${issueCount}건\n` : '')
+            + (fileCount && fileCount !== '-1' ? `문서: ${fileCount}개\n` : '')
+            + `\n받는 쪽에서 [과제 생성] → [파일에서 가져오기] 로 복원합니다.`
+          );
+        } catch (e) {
+          await modalAlert('내보내기 오류: ' + (e.message || e));
+        } finally {
+          setSaving(null);
+        }
+        break;
+      }
       case 'relationMap':
         if (onRelationMap) onRelationMap(project);
         break;
@@ -264,20 +310,50 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       }
     }
 
+    // 가져오기로 만드는 과제는 평소의 POST /Project 대신 Platform-API 의 import 를 탄다.
+    // 저장소를 "새로 만들고 초기파일을 커밋"하는 대신 "받은 묶음을 밀어넣어야" 하기 때문.
+    const imp = updated.__import;
+
     setSaving({
-      title: isNew ? '과제 생성 중...' : '과제 정보 저장 중...',
-      sub: isNew ? '설계문서 저장소 자동 생성을 포함해 수 초 걸릴 수 있습니다.' : '',
+      title: imp ? '과제 가져오기 중...' : (isNew ? '과제 생성 중...' : '과제 정보 저장 중...'),
+      sub: imp
+        ? '설계문서 저장소 복원과 이슈 복원을 포함해 수십 초 걸릴 수 있습니다.'
+        : (isNew ? '설계문서 저장소 자동 생성을 포함해 수 초 걸릴 수 있습니다.' : ''),
     });
     try {
-      const res = await authFetch(`${API_BASE}/Project`, {
-        method: isNew ? 'POST' : 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      });
+      let res;
+      if (imp) {
+        const fd = new FormData();
+        fd.append('file', imp.file, imp.file.name);
+        fd.append('code', getJiraCode(updated));
+        fd.append('name', updated.name || '');
+        fd.append('repoName', updated.repoName || '');
+        res = await authFetch(`${PLATFORM_API}/Project/import`, { method: 'POST', body: fd });
+      } else {
+        res = await authFetch(`${API_BASE}/Project`, {
+          method: isNew ? 'POST' : 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updated),
+        });
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        await modalAlert((isNew ? '과제 생성 실패' : '과제 저장 실패') + ': ' + (err.error || res.statusText));
-        return;
+        await modalAlert(
+          (imp ? '과제 가져오기 실패' : isNew ? '과제 생성 실패' : '과제 저장 실패')
+          + ': ' + (err.error || res.statusText)
+        );
+        return false;
+      }
+      if (imp) {
+        const r = await res.json().catch(() => ({}));
+        await modalAlert(
+          `"${r.name || updated.name}" 가져오기 완료\n\n`
+          + `과제 코드: ${r.code}${r.keyRewritten ? `  (이슈 키 ${r.sourceCode}- → ${r.code}- 로 재작성)` : ''}\n`
+          + `설계문서: ${r.repoOwner}/${r.repoName}`
+          + (Array.isArray(r.branches) && r.branches.length ? `  브랜치 ${r.branches.join(', ')}` : '') + '\n'
+          + `이슈: ${r.restore?.issuesRestored ?? r.issueCount ?? 0}건\n`
+          + (r.sourceSystem ? `원본 시스템: ${r.sourceSystem}\n` : '')
+        );
       }
       // 신규 생성 직후 — 이미 게이트에서 launcher 확보됨. 백그라운드 prewarm 으로 미리 clone.
       // 사용자가 곧 이 과제를 로고 클릭으로 열 가능성이 높아 EnsureRepo 를 선행하면
