@@ -9,7 +9,7 @@ import { subscribe, onStatus } from '@platform/web-ui/runtime/sseManager';
 import { modalAlert } from '@platform/web-ui/components/AlertModal';
 import appRegistry, { loadAppManifest } from './apps/registry';
 import config from './config';
-import { detectLauncher, requestChat } from '@platform/web-ui/runtime/launcher';
+import { detectLauncher, requestChat, UI_DEFAULT_AGENT } from '@platform/web-ui/runtime/launcher';
 // 셸 인증 런타임 (계약 02) — 모듈 로드 시 window.__platformAuth 게시까지 수행.
 // 구 window.fetch monkey-patch 를 대체: 플랫폼 API 호출은 authFetch 로 명시.
 import { authFetch, __setSession } from './platform/auth';
@@ -287,7 +287,7 @@ function App() {
         return;
       }
       const code = activeProjectCode || '';
-      const res = await requestChat({ code, user, token: r.token });
+      const res = await requestChat({ code, user, agent: UI_DEFAULT_AGENT, token: r.token });
       if (!res.ok) {
         setLaunching(null);
         modalAlert(res.error || '에이전트 실행에 실패했습니다.');
@@ -299,13 +299,13 @@ function App() {
       if (res.data?.reused) {
         setLaunching(null);
         modalAlert(
-          `이 과제의 에이전트가 이미 실행 중입니다.\n터미널 창 제목 "${res.data.label || 'GoJIRA'}" 을(를) 확인하세요.`
+          `이 과제의 ${res.data.agent || '에이전트'} 가 이미 실행 중입니다.\n터미널 창 제목 "${res.data.label || 'GoJIRA'}" 을(를) 확인하세요.`
         );
         return;
       }
       // spawn 성공 — 새 터미널이 OS 에 의해 화면에 떠야 사용자가 인지 가능. 그 동안 안내 유지.
       setLaunching({
-        title: '에이전트 실행 중...',
+        title: `${res.data?.agent || '에이전트'} 실행 중...`,
         sub: `새 터미널 창(${res.data?.label || 'GoJIRA'})이 곧 표시됩니다`,
       });
       setTimeout(() => setLaunching(null), 2500);
