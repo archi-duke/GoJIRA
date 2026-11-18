@@ -60,12 +60,23 @@ export async function requestEdit({ code, user, file, token }) {
 }
 
 /**
+ * UI_DEFAULT_AGENT — 웹에서 에이전트를 띄울 때 쓰는 기본 에이전트.
+ *
+ * 비워 보내면 런처가 `launcher.json` 의 `defaultAgent`(현재 opencode)로 떨어진다.
+ * 웹에서 띄우는 경로는 **claude 로 명시**한다 (2026-11-18 사용자 지시).
+ * 호출 지점을 늘릴 때 이 상수를 쓸 것 — 한 곳만 claude 로 바꾸면 과제 전환 시
+ * 옛 세션이 opencode 로 되살아나 조용히 어긋난다.
+ */
+export const UI_DEFAULT_AGENT = 'claude';
+
+/**
  * "채팅" — 등록된 에이전트 CLI(opencode|claude)만 새 터미널로 spawn.
  *           VS Code 는 띄우지 않음 (필요하면 /edit 으로 분리 호출).
  * replace=true 면 다른 과제의 에이전트를 종료한 뒤 spawn (과제전환 — 단일 현재과제 에이전트).
+ * agent 미지정이면 UI_DEFAULT_AGENT 를 쓴다.
  */
 export async function requestChat({ code, user, agent, replace, token }) {
-  return post('/chat', { code, user, agent, replace: !!replace }, token);
+  return post('/chat', { code, user, agent: agent || UI_DEFAULT_AGENT, replace: !!replace }, token);
 }
 
 /**
