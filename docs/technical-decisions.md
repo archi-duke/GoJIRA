@@ -1,7 +1,7 @@
 # 기술 결정 이력
 
 **목적**: "왜 이 기술을 썼는가", "왜 바꿨는가" 를 주제별로 찾을 수 있게 모은 문서.
-**갱신**: 2026-11-17
+**갱신**: 2026-11-18
 
 ## 읽는 법
 
@@ -115,6 +115,34 @@
 **되돌림**: Mac `gojira-gitea` 컨테이너를 삭제하지 않고 정지 보존했다. 백업 2종이 `~/.gojira-backups/` 에 있다(`gitea-data-20261117.tar.gz`, `gitea-dump-20261117-1417.zip`).
 
 **미결**: 승계된 `[service]` 가 가입 열림·익명 열람 허용이다(Mac 시절부터 그랬다). 조일지는 별건으로 남겼다.
+
+### 과제 전달 단위 = `git bundle` 묶음 (bare 디렉터리 복사 폐기)
+
+**결정일**: 2026-11-18
+
+**선택**: 과제 한 벌(이슈 + 설계문서 전체 이력)을 zip 하나로 주고받는다. 저장소는 **`git bundle --all` 단일 파일**로 담는다. 내보내기는 우클릭 메뉴, 가져오기는 과제 생성 다이얼로그 우상단 버튼이다.
+**폐기한 것**: `config.RepoBaseDir` 의 bare 디렉터리를 zip 에 통째로 넣던 방식.
+**이유**: (a) 전달 단위가 파일 하나여야 한다. (b) bundle 은 전 브랜치·전체 이력이 보존된다. (c) **bare 트리에는 `hooks/` 의 실행 스크립트가 함께 들어간다** — 남의 시스템에서 받은 묶음을 푸는 경로라 받아들일 수 없다. bundle 은 ref 와 object 만 담는다.
+**형식**(schemaVersion 2): `manifest.json`(원본 코드·이름·시스템·이슈수·ref·브랜치·파일수) / `mongo/dump.json` / `mongo/usecase-artifacts.json` / `repo/<repoName>.bundle`
+**역할 분리**: Gitea·zip 은 Platform-API, Mongo 는 GoJIRA-API(`POST /Project/{code}/restore`). 기존 archive 흐름과 같은 선이다.
+
+**가져오기는 2단계다**: `POST /Project/import/inspect`(읽기 전용)로 폼을 채워 사용자가 코드·저장소명을 확인한 뒤 저장해야 복원이 돈다. 즉시 복원하는 안을 버린 이유는 받는 시스템에 같은 코드·저장소명이 이미 있으면 **보내는 쪽에 가서 이름을 바꿔 다시 내보내야** 하기 때문이다. 중복 검사는 기존 Doc Repo 검사를 재사용한다.
+
+**코드를 바꿔 받으면 이슈 키를 재작성한다**: 키는 과제 코드에 묶여 있어 선택이 아니다. 범위는 Mongo(`key` · `issueLinks.outwardIssue/inwardIssue.key` · `issueLinks.id` — `tmp_<ts>_OLD-20` 형태로 키가 박혀 있다 · `feature` · 유즈케이스 산출물)와 **저장소 YAML** 양쪽이다. `counters` 는 복원된 최대값으로 맞춰 다음 이슈가 이어지게 한다. 산문에 쓰인 제품명은 건드리지 않는다 — 사용자 판단 영역이다.
+
+**같이 고친 것 — 삭제 백업이 문서를 빠뜨리고 있었다**: `POST /Project/{code}/archive` 는 bare 디렉터리를 복사했는데, Gitea 이관 후 `/data/repos` 가 비어 `os.Stat` 실패 → `repoArchived = false` 로 **조용히 건너뛰어졌다**. 2026-05 백업에는 저장소가 들어 있고 그 이후 백업에는 없다. 삭제는 되돌릴 수 없으니 문서 빠진 백업은 영구 손실이다. 이제 내보내기와 같은 함수를 쓰고 **묶음이 실패하면 아무것도 지우지 않는다**.
+
+**같이 고친 것 — Gitea 웹훅 자동 등록이 처음부터 깨져 있었다**: `CreateWebhook` 이 Gitea 필수 필드 `type` 을 안 보내 422 `[Type]: Required` 로 실패했다. GitHub 에는 없는 필드다. 과제를 새로 만들어도 웹훅이 안 붙어 `deploy/scripts/register-webhooks.sh` 를 따로 돌려 왔고, 그게 아침 점검의 수동 절차로 굳어 있었다. `IsGitea()` 일 때 `type=gitea` 를 넣어 생성·가져오기 모두 자동 등록된다.
+
+**함정 — `git bundle verify` 는 저장소 안에서만 돈다**: 바깥에서 부르면 `need a repository to verify a bundle` 이다. prerequisite 커밋을 현재 저장소와 맞춰보기 때문이다. 빈 bare 저장소를 만들어 그 안에서 검증한다.
+
+**함정 — `%(refname:short)` 가 `origin/HEAD` 를 `origin` 으로 줄인다**: `refs/remotes/origin/HEAD` 가 `origin/HEAD` 가 아니라 **`origin`** 으로 나와, 그대로 쓰면 `checkout -B origin origin/origin` 으로 죽는다. 전체 `refname` 에서 접두사를 직접 떼고 `HEAD` 를 걸러낸다.
+
+**실측**(AT_Bkg — 이슈 108건 / 문서 134개): 내보내기 0.23s·269KB. 코드 바꿔 가져오기 1.4s — 이슈 108건 복원, 링크 67건 재작성, 옛 키 잔존 0, subkey 집합 원본과 동일, 브랜치 2개·blob 134개 일치. 삭제 백업 zip 으로 재가져오기까지 왕복 확인. push 실패 시 만든 저장소를 지우고 Mongo 에 흔적을 남기지 않는 것도 실제로 확인했다.
+
+**운영 주의**: 백업 기본 경로(`GOJIRA_BACKUP_DIR_HOST`)가 레포 안 `../backups` 다. 과제 전체 데이터가 든 zip 이 `git add -A` 로 빨려 들어갈 수 있어 `backups/` · `*.gojira.zip` 을 gitignore 에 넣었다.
+
+**참조**: PR #139 · `Platform-API/github/bundle.go` · `Platform-API/handlers/project_transfer.go` · `GoJIRA-API/handlers/project_restore.go`
 
 ---
 
