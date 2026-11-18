@@ -123,6 +123,10 @@ func main() {
 
 		// Project archive (zip 백업 + 모든 자원 정리)
 		r.Post("/Project/{code}/archive", handlers.ProjectArchiveHandler)
+		// 과제 내보내기 / 가져오기 — 다른 GoJIRA 시스템으로 과제 한 벌을 옮긴다.
+		r.Get("/Project/{code}/export", handlers.ProjectExportHandler)
+		r.Post("/Project/import/inspect", handlers.ProjectImportInspectHandler)
+		r.Post("/Project/import", handlers.ProjectImportHandler)
 
 		// LLM gateway — Platform-API 가 키/모델/엔드포인트를 단독 관리, 다른 서비스는 HTTP 호출
 		r.Post("/LLM/call", handlers.LLMCallHandler)

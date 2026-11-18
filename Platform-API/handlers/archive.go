@@ -100,6 +100,20 @@ func ProjectArchiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. zip 만들기 → getBackupDir()
+	//
+	// 내보내기와 같은 함수(buildProjectArchive)를 쓴다. 예전에는 config.RepoBaseDir 의
+	// bare 디렉터리를 복사했는데, Gitea 로 저장소가 넘어간 뒤 그 경로가 비어 있어
+	// repoArchived=false 로 **조용히 건너뛰어졌다** (2026-11-18 발견). 삭제는 되돌릴 수
+	// 없으므로 문서 빠진 백업은 그대로 영구 손실이다. 이제 묶음이 실패하면 삭제로
+	// 넘어가지 않는다.
+	build, err := buildProjectArchive(ctx, code, user)
+	if err != nil {
+		respondError(w, http.StatusBadGateway,
+			"백업 묶음 생성 실패 — 아무것도 삭제하지 않았다: "+err.Error())
+		return
+	}
+	defer build.Cleanup()
+
 	timestamp := time.Now().Format("20060102150405")
 	backupDir := getBackupDir()
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
@@ -107,65 +121,13 @@ func ProjectArchiveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	zipPath := filepath.Join(backupDir, fmt.Sprintf("%s-%s.zip", code, timestamp))
-	zipFile, err := os.Create(zipPath)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "zip 생성 실패: "+err.Error())
+	if err := copyFile(build.ZipPath, zipPath); err != nil {
+		respondError(w, http.StatusInternalServerError, "백업 저장 실패 — 삭제하지 않았다: "+err.Error())
 		return
 	}
-	zw := zip.NewWriter(zipFile)
-	cleanupZipOnError := func() {
-		_ = zw.Close()
-		_ = zipFile.Close()
-		_ = os.Remove(zipPath)
-	}
-
-	// 4-1. mongo dump
-	if err := writeZipBytes(zw, "mongo/dump.json", dumpData); err != nil {
-		cleanupZipOnError()
-		respondError(w, http.StatusInternalServerError, "zip mongo: "+err.Error())
-		return
-	}
-
-	// 4-2. manifest.json
-	manifest, _ := json.MarshalIndent(map[string]interface{}{
-		"schemaVersion": 1,
-		"code":          code,
-		"createdAt":     time.Now().Format(time.RFC3339),
-		"createdBy":     user,
-		"repoOwner":     repoOwner,
-		"repoName":      repoName,
-	}, "", "  ")
-	if err := writeZipBytes(zw, "manifest.json", manifest); err != nil {
-		cleanupZipOnError()
-		respondError(w, http.StatusInternalServerError, "zip manifest: "+err.Error())
-		return
-	}
-
-	// 4-3. bare repo 복사
-	repoArchived := false
-	if repoOwner != "" && repoName != "" {
-		bareDir := filepath.Join(config.RepoBaseDir, repoOwner, repoName+".git")
-		if _, statErr := os.Stat(bareDir); statErr == nil {
-			archiveBase := fmt.Sprintf("repo/%s/%s.git", repoOwner, repoName)
-			if err := zipDirectory(zw, bareDir, archiveBase); err != nil {
-				log.Printf("repo zip warn: %v", err)
-			} else {
-				repoArchived = true
-			}
-		}
-	}
-
-	if err := zw.Close(); err != nil {
-		_ = zipFile.Close()
-		_ = os.Remove(zipPath)
-		respondError(w, http.StatusInternalServerError, "zip close: "+err.Error())
-		return
-	}
-	if err := zipFile.Close(); err != nil {
-		_ = os.Remove(zipPath)
-		respondError(w, http.StatusInternalServerError, "file close: "+err.Error())
-		return
-	}
+	repoArchived := true
+	log.Printf("archive: %s 백업 %s (이슈 %d건, 문서 %d개)",
+		code, zipPath, build.Manifest.IssueCount, bundleFileCount(build.Manifest))
 
 	// 5. 자원 정리 — zip 성공한 후에만 실행
 	githubDeleted := false
@@ -249,29 +211,30 @@ func writeZipBytes(zw *zip.Writer, name string, data []byte) error {
 	return err
 }
 
-func zipDirectory(zw *zip.Writer, srcDir, baseInZip string) error {
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(srcDir, path)
-		if err != nil {
-			return err
-		}
-		nameInZip := filepath.ToSlash(filepath.Join(baseInZip, rel))
-		f, err := zw.Create(nameInZip)
-		if err != nil {
-			return err
-		}
-		src, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer src.Close()
-		_, err = io.Copy(f, src)
+// copyFile 임시 zip 을 백업 디렉터리로 옮긴다.
+// os.Rename 은 컨테이너에서 /tmp 와 /data 가 다른 파일시스템이라 쓸 수 없다.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
 		return err
-	})
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	return out.Close()
+}
+
+// bundleFileCount 로그용 — 요약이 없으면 -1.
+func bundleFileCount(m transferManifest) int {
+	if m.Repo == nil {
+		return -1
+	}
+	return m.Repo.FileCount
 }
