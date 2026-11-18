@@ -247,6 +247,23 @@ type importPayload struct {
 
 var codeRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,19}$`)
 
+// Gitea 가 받아주는 저장소 이름. 밑줄·점을 포함한다.
+var importRepoRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+
+// importRepoName 가져오기의 저장소 이름은 **원본 그대로** 살린다.
+//
+// slugifyRepoName 은 사용자가 한글/공백으로 입력한 과제명을 slug 로 만드는 함수라
+// `_` 를 `-` 로 바꾼다. 가져오기에 그걸 쓰면 `at_bkg` 로 내보낸 과제가 `at-bkg` 로
+// 복원돼 원본과 이름이 달라진다(2026-11-18 복원 중 발견). Gitea 는 밑줄을 허용하므로
+// 유효한 이름이면 손대지 않고, 유효하지 않을 때만 slug 로 떨어뜨린다.
+func importRepoName(raw string) string {
+	name := strings.TrimSpace(raw)
+	if name != "." && name != ".." && importRepoRe.MatchString(name) {
+		return name
+	}
+	return slugifyRepoName(name)
+}
+
 // readImportZip 업로드된 zip 을 열어 내용을 꺼낸다.
 func readImportZip(file multipart.File) (*importPayload, error) {
 	tmpDir, err := os.MkdirTemp("", "gojira-import-")
@@ -471,7 +488,7 @@ func ProjectImportHandler(w http.ResponseWriter, r *http.Request) {
 
 	targetCode := strings.ToUpper(strings.TrimSpace(formValue(form, "code", p.Manifest.Code)))
 	targetName := strings.TrimSpace(formValue(form, "name", p.Manifest.Name))
-	targetRepo := slugifyRepoName(formValue(form, "repoName", p.Manifest.RepoName))
+	targetRepo := importRepoName(formValue(form, "repoName", p.Manifest.RepoName))
 
 	if !codeRe.MatchString(targetCode) {
 		respondError(w, http.StatusBadRequest, "과제 코드는 영문 대문자로 시작하는 2~20자(대문자/숫자/밑줄)여야 한다: "+targetCode)

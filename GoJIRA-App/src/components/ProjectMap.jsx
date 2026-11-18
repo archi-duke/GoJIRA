@@ -165,7 +165,12 @@ export default function ProjectMap({ onProjectClick, onRelationMap, onSATAM, use
       case 'delete': {
         const code = getJiraCode(project);
         const input = await modalPrompt(
-          `"${project.name}" 과제를 영구 삭제합니다.\n서버에 백업 zip 이 만들어진 후 이슈/문서/repo 와 내 PC 로컬 클론이 모두 정리됩니다.\n계속하려면 과제명을 정확히 입력해주세요.`,
+          `"${project.name}" 과제를 영구 삭제합니다.\n`
+          + `이슈 · 설계문서 · Gitea 저장소 · 내 PC 로컬 클론이 모두 정리됩니다.\n\n`
+          + `삭제 전 서버에 백업 zip 이 만들어집니다 (이슈 + 설계문서 전체 이력).\n`
+          + `되살리려면 [과제 생성] → [파일에서 가져오기] 로 그 zip 을 넣으면 됩니다.\n`
+          + `백업 생성이 실패하면 아무것도 지우지 않습니다.\n\n`
+          + `계속하려면 과제명을 정확히 입력해주세요.`,
           '',
           {
             dangerous: true,
