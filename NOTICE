@@ -1,0 +1,27 @@
+GoJIRA
+Copyright 2026 Duke Kimm
+
+This product is licensed under the Apache License, Version 2.0
+(see the LICENSE file).
+
+--------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------
+
+pex-core (GoJIRA-App/public/pex-core/)
+  Copied from pumlex (https://github.com/archi-duke/pumlex),
+  licensed under the Apache License, Version 2.0.
+  Copyright 2026 Duke Kimm
+
+--------------------------------------------------------------------------
+Commercial dependency notice
+--------------------------------------------------------------------------
+
+packages/web-ui (@platform/web-ui), and Platform-App, which uses it,
+depend on Progress KendoReact (@progress/kendo-react-*). KendoReact is
+commercial software and is NOT covered by the Apache License. It is not
+included in this repository; it is installed from npm. To build or use
+these components you must hold a valid KendoReact license:
+https://www.telerik.com/purchase/license-agreement/progress-kendoreact
+
+GoJIRA-App does not depend on KendoReact.
