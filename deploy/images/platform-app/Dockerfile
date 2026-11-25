@@ -14,10 +14,10 @@ RUN cp -r /cache/Platform-App/node_modules ./node_modules && \
     cp /cache/Platform-App/package-lock.json* ./ 2>/dev/null || true
 COPY Platform-App/ ./
 # @platform/web-ui 소스 패키지 — vite.config 이 ../packages/web-ui/src 로 alias 해석
-# (/src 의 상위 = /packages). web-ui 는 자체 node_modules(Kendo)를 가지므로,
-# fresh clone(없음)이면 캐시에서 보충한다.
+# (/src 의 상위 = /packages). web-ui 는 현재 서드파티 의존이 없다. 의존이 생기면
+# fresh clone(node_modules 없음)일 때 캐시에서 보충한다 (캐시에 없으면 건너뜀).
 COPY packages/ /packages/
-RUN [ -d /packages/web-ui/node_modules ] || cp -r /cache/packages/web-ui/node_modules /packages/web-ui/node_modules
+RUN [ -d /packages/web-ui/node_modules ] || [ ! -d /cache/packages/web-ui/node_modules ] || cp -r /cache/packages/web-ui/node_modules /packages/web-ui/node_modules
 RUN npm run build
 
 FROM nginx:alpine

@@ -67,6 +67,19 @@
 
 ---
 
+### 데이터 그리드 = 자체 구현 (KendoReact 폐기)
+
+**결정일**: 2026-11-25 (도입: 2026-07-06 D13)
+
+**선택**: `@platform/web-ui` 의 `DataGrid` 를 외부 라이브러리 없이 다시 만든다. 정렬·포함 필터·페이징·컬럼 폭 조절·커스텀 셀, 그리고 부모가 상태를 쥐는 서버 모드를 지원한다. web-ui 의 서드파티 런타임 의존은 0 이 됐다.
+**이유**: 2026-11-23 Apache 2.0 으로 공개하면서 상용 KendoReact 가 남으면 코드를 받는 사람마다 별도 라이선스가 필요해진다. 실사용 표면이 Grid 하나(GoJIRA 1곳, RAGaaS 2곳)라 자체 구현 비용이 작다.
+**폐기한 대안**: KendoReact 유지 + NOTICE 고지(공개 코드를 자유롭게 쓸 수 없음), 오픈소스 그리드(AG Grid Community, TanStack Table) 채택(표면 대비 의존이 큼).
+**호환**: props 와 커스텀 셀 모양(`{dataItem}` → `<td>`)이 예전 래퍼와 같다. sort·filter JSON 은 Kendo descriptor 와 같은 모양이라 RAGaaS 백엔드의 쿼리 파라미터 계약을 바꾸지 않는다.
+**남은 일**: RAGaaS 의 GraphDataTable·ChunksModal 을 web-ui DataGrid 로 옮기고 `@progress/kendo-*` 를 제거(RAGaaS 담당).
+**참조**: `platform-contract/04-web-ui-contract.md` §0
+
+---
+
 ## 2. 인프라
 
 ### MongoDB · Gitea = shared-infra 로 이관

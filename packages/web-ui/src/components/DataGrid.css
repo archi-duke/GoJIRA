@@ -1,0 +1,122 @@
+/* 플랫폼 표준 데이터 그리드 (DataGrid.jsx) */
+.pf-grid {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 13px;
+  color: #333;
+}
+.pf-grid-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.pf-grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.pf-grid-table th,
+.pf-grid-table td {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-grid-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.pf-grid-table thead th {
+  position: relative;
+  background: #f5f5f5;
+  font-weight: 600;
+  border-bottom: 2px solid #ddd;
+  user-select: none;
+}
+.pf-grid-table thead tr.pf-grid-filter-row th {
+  padding: 5px 6px;
+  border-bottom: 1px solid #ddd;
+  font-weight: normal;
+}
+.pf-grid-sortable { cursor: pointer; }
+.pf-grid-sortable:hover { background: #ececec; }
+.pf-grid-sort { margin-left: 4px; font-size: 10px; color: #555; }
+.pf-grid-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+.pf-grid-resizer:hover { background: rgba(0, 0, 0, 0.12); }
+body.pf-grid-resizing { cursor: col-resize; user-select: none; }
+
+.pf-grid-filter {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.pf-grid-filter:focus { border-color: #2c3e50; }
+
+.pf-grid-table tbody tr:hover { background: #fafafa; }
+.pf-grid-empty td {
+  padding: 24px 10px;
+  text-align: center;
+  color: #888;
+}
+
+.pf-grid-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid #ddd;
+  background: #fafafa;
+}
+.pf-grid-pager-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.pf-grid-pager button {
+  min-width: 28px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 3px;
+  background: lightgray;
+  color: #000;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pf-grid-pager button:hover:not(:disabled) { opacity: 0.8; }
+.pf-grid-pager button:disabled { opacity: 0.4; cursor: default; }
+.pf-grid-pager button.pf-grid-page-current {
+  background: #2c3e50;
+  color: #fff;
+  font-weight: 600;
+}
+.pf-grid-pagesize {
+  margin-left: 8px;
+  padding: 3px 4px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 12px;
+  background: #fff;
+}
+.pf-grid-pager-info { color: #666; font-size: 12px; }

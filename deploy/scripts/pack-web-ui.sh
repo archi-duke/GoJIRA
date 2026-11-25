@@ -8,8 +8,7 @@
 # 소비측(RAGaaS) 설치:
 #   npm install ./platform-web-ui-<ver>.tgz
 #   → import DataGrid from '@platform/web-ui/components/DataGrid' 등 서브패스 그대로 사용.
-#   Kendo 의존은 tarball 의 dependencies 로 함께 설치됨 (react/react-dom 은 peer — 소비측 것 사용).
-#   폐쇄망이면 Kendo 패키지가 소비측 npm 캐시/미러에 있어야 한다 (RAGaaS 는 이미 동일 버전 사용 중).
+#   서드파티 런타임 의존 없음 (2026-11-25 Kendo 제거) — react/react-dom 은 peer, 소비측 것 사용.
 #
 # 사용:
 #   ./pack-web-ui.sh            # → deploy/dist/platform-web-ui-<ver>.tgz

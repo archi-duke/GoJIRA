@@ -243,7 +243,7 @@ export default function AccountManager({ user, app = 'platform' }) {
   );
 }
 
-// --- Users 테이블 (Kendo Grid — 소팅/필터, 계약 04 web-ui DataGrid 소비) ---
+// --- Users 테이블 (web-ui DataGrid — 정렬/필터/페이징, 계약 04) ---
 function UserTable({ users, authGroups, orgUnits, isPlatform, onEdit, onDelete, onCreate }) {
   const [lookupId, setLookupId] = useState('');
   const [searching, setSearching] = useState(false);
@@ -332,6 +332,9 @@ function UserTable({ users, authGroups, orgUnits, isPlatform, onEdit, onDelete, 
         data={rows}
         initialSort={[{ field: 'knoxId', dir: 'asc' }]}
         columns={columns}
+        pageSize={20}
+        pageSizes={[10, 20, 50, 100]}
+        resizable
       />
     </>
   );
