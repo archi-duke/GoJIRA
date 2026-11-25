@@ -7,26 +7,46 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
 
 // 실행 명령 화이트리스트 (설계 §2.3) — 임의 명령 실행 경로를 만들지 않는다.
 //   - 에디터: "code" (VS Code) 고정
-//   - 에이전트 CLI: agentBins 의 키만 허용
-var agentBins = map[string]string{
-	"opencode": "opencode",
-	"claude":   "claude",
+//   - 에이전트 CLI: agentBins 의 키만 허용. 인자도 여기 고정값만 붙는다(요청이 인자를 못 바꿈).
+type agentSpec struct {
+	Bin  string
+	Args []string
 }
 
-// availableAgents — PATH 에 존재하는 에이전트 CLI 목록(/health 용).
+var agentBins = map[string]agentSpec{
+	"opencode": {Bin: "opencode"},
+	"claude":   {Bin: "claude"},
+	// codex 는 반드시 --no-daemon 으로 연다. 그냥 codex 로 열면 공유 백그라운드 서버에서 돌아
+	// ATalk 가 세션 창을 찾지 못해 대화방 연동·깨우기가 안 된다 (ATalk 매뉴얼 2판 §2·§6).
+	"codex": {Bin: "codex", Args: []string{"--no-daemon"}},
+}
+
+// agentNames — 화이트리스트 이름을 정렬해 안내 문구에 쓴다.
+func agentNames() string {
+	names := make([]string, 0, len(agentBins))
+	for n := range agentBins {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return strings.Join(names, "|")
+}
+
+// availableAgents — PATH 에 존재하는 에이전트 CLI 목록(/health 용). 이름순.
 func availableAgents() []string {
 	out := []string{}
-	for name, bin := range agentBins {
-		if _, err := exec.LookPath(bin); err == nil {
+	for name, spec := range agentBins {
+		if _, err := exec.LookPath(spec.Bin); err == nil {
 			out = append(out, name)
 		}
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -46,7 +66,7 @@ func (s *Server) resolveAgent(agent string) (string, error) {
 		agent = s.cfg.DefaultAgent
 	}
 	if _, ok := agentBins[agent]; !ok {
-		return "", fmt.Errorf("허용되지 않은 agent: %q (opencode|claude)", agent)
+		return "", fmt.Errorf("허용되지 않은 agent: %q (%s)", agent, agentNames())
 	}
 	return agent, nil
 }
@@ -184,12 +204,12 @@ func findGitBash() string {
 // Design B: label 을 창 제목으로 달아 과제별 에이전트를 구분하고, code 로 세션 레지스트리에
 // 등록한다(종료 시 자동 해제 — 과제전환 replace 가 이 PID 를 트리종료). code=="" 는 추적 제외.
 func (s *Server) SpawnAgent(agent, repoPath, label, code string, env []string) (string, error) {
-	bin, ok := agentBins[agent]
+	spec, ok := agentBins[agent]
 	if !ok {
 		log.Printf("에이전트 거부 — 허용 목록에 없음: %q", agent)
 		return "", fmt.Errorf("허용되지 않은 agent: %q", agent)
 	}
-	pid, wait, err := startAgent(bin, label, repoPath, env)
+	pid, wait, err := startAgent(spec.Bin, spec.Args, label, repoPath, env)
 	if err != nil {
 		log.Printf("에이전트 기동 실패 — %s: %v", agent, err)
 		return "", fmt.Errorf("%s 실행 실패: %w", agent, err)
@@ -223,7 +243,7 @@ func sanitizeLabel(label string) string {
 //
 // env 에 토큰이 섞일 수 있어 0600 으로 쓰고, Terminal 이 읽을 시간을 준 뒤 지운다.
 // 고정 경로에 남겨 두면 비밀값이 디스크에 계속 남는다.
-func writeSpawnScript(bin, dir, title string, env []string) (string, error) {
+func writeSpawnScript(bin string, args []string, dir, title string, env []string) (string, error) {
 	f, err := os.CreateTemp("", "gojira-spawn-*.sh")
 	if err != nil {
 		return "", err
@@ -242,7 +262,11 @@ func writeSpawnScript(bin, dir, title string, env []string) (string, error) {
 		}
 	}
 	fmt.Fprintf(&b, "cd %s || exit 1\n", shellQuote(dir))
-	fmt.Fprintf(&b, "exec %s\n", shellQuote(bin))
+	b.WriteString("exec " + shellQuote(bin))
+	for _, a := range args {
+		b.WriteString(" " + shellQuote(a))
+	}
+	b.WriteString("\n")
 
 	if _, err := f.WriteString(b.String()); err != nil {
 		return "", err
@@ -269,7 +293,7 @@ func shellQuote(v string) string {
 // terminalCommand — unix(mac/linux)에서 대화형 CLI 를 새 터미널에서 실행하는 명령을 만든다.
 // windows 는 startAgent(spawn_windows.go)의 CreateProcess 경로를 쓰므로 여기 오지 않는다.
 // label 은 새 창의 제목으로 달려 과제별 에이전트를 구분한다(Design B). 빈 문자열이면 미지정.
-func terminalCommand(bin, dir, label string, env []string) *exec.Cmd {
+func terminalCommand(bin string, binArgs []string, dir, label string, env []string) *exec.Cmd {
 	title := sanitizeLabel(label)
 	switch runtime.GOOS {
 	case "darwin":
@@ -281,11 +305,11 @@ func terminalCommand(bin, dir, label string, env []string) *exec.Cmd {
 		// 명령을 스크립트 파일로 넘기는 덕에 셸 이스케이프가 한 겹으로 줄어든다.
 		// 이전에는 AppleScript 문자열 안에 셸 명령을 중첩해 값에 따옴표가 섞이면
 		// 깨졌다(그래서 제목 주입도 포기했다).
-		sh, err := writeSpawnScript(bin, dir, title, env)
+		sh, err := writeSpawnScript(bin, binArgs, dir, title, env)
 		if err != nil {
 			log.Printf("spawn 스크립트 생성 실패: %v", err)
 			// 폴백: 터미널 없이 실행. 적어도 에이전트는 돈다.
-			c := exec.Command(bin)
+			c := exec.Command(bin, binArgs...)
 			c.Dir = dir
 			c.Env = append(os.Environ(), env...)
 			return c
@@ -307,6 +331,7 @@ func terminalCommand(bin, dir, label string, env []string) *exec.Cmd {
 					}
 				}
 				args = append(args, "-e", bin)
+				args = append(args, binArgs...)
 				c := exec.Command(term, args...)
 				c.Dir = dir
 				c.Env = append(os.Environ(), env...)
@@ -314,7 +339,7 @@ func terminalCommand(bin, dir, label string, env []string) *exec.Cmd {
 			}
 		}
 		// 폴백: 터미널 없이 detached 실행(PoC — 비대화 환경).
-		c := exec.Command(bin)
+		c := exec.Command(bin, binArgs...)
 		c.Dir = dir
 		c.Env = append(os.Environ(), env...)
 		return c

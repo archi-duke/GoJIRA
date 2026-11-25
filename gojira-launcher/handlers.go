@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const version = "0.2.6"
+const version = "0.2.7"
 
 // Server — 핸들러가 공유하는 설정 보관.
 type Server struct {
@@ -89,6 +89,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"version": version,
 		"agents":  agents,
 		"ready":   hasGit() && hasEditor() && len(agents) > 0,
+	}
+	// 웹 채팅이 띄울 에이전트 — launcher.json chatAgent 가 화이트리스트에 있고 설치돼 있을 때만 알린다.
+	// 비면 웹이 자기 기본값(UI_DEFAULT_AGENT)을 쓴다.
+	if ca := strings.TrimSpace(s.cfg.ChatAgent); ca != "" {
+		for _, a := range agents {
+			if a == ca {
+				resp["chatAgent"] = ca
+				break
+			}
+		}
 	}
 	if s.originAllowed(r.Header.Get("Origin")) {
 		resp["token"] = s.cfg.Token

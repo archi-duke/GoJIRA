@@ -97,6 +97,7 @@ deploy/launcher-dist/services/
 gojira-launcher/assets/.claude/
 gojira-launcher/assets/.opencode/
 gojira-launcher/assets/opencode.json
+gojira-launcher/assets/AGENTS.md
 
 # launcher 런타임/빌드 산출물
 gojira-launcher/*.log

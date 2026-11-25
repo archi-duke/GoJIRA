@@ -480,17 +480,28 @@ func ensureWindowsShellConfig(target, src string) {
 		log.Printf("ensureWindowsShellConfig: opencode.json 파싱 실패 — 스킵: %v", err)
 		return
 	}
+	// Windows clone 의 opencode.json 은 원본 링크가 아니라 복사본이라 배포본의 모델 변경이
+	// 따라오지 않는다. 런처가 예전에 배포했다가 단종된 모델이면 원본 값으로 맞춘다
+	// (사용자가 직접 고른 다른 모델은 건드리지 않는다).
+	modelFixed := syncRetiredModels(m, filepath.Join(src, "opencode.json"))
 	// opencode 의 `shell` 키는 단순 문자열(경로 또는 짧은 이름)이다. 객체로 주면
 	// config 스키마 검증이 실패해 opencode 가 기동조차 못 한다(config.get 등 실패).
 	// - 이미 유효한 문자열이면 사용자 지정으로 보고 존중.
 	// - 객체/비문자열(과거 잘못된 주입 포함)이면 문자열로 정규화해 self-heal.
+	shellOK := false
 	if sv, ok := m["shell"]; ok {
 		if s, isStr := sv.(string); isStr && s != "" {
-			return
+			shellOK = true
+		} else {
+			log.Printf("ensureWindowsShellConfig: 잘못된 shell 설정(비문자열) 감지 → Git Bash 문자열로 정규화")
 		}
-		log.Printf("ensureWindowsShellConfig: 잘못된 shell 설정(비문자열) 감지 → Git Bash 문자열로 정규화")
 	}
-	m["shell"] = bashPath
+	if shellOK && !modelFixed {
+		return
+	}
+	if !shellOK {
+		m["shell"] = bashPath
+	}
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return
@@ -500,6 +511,36 @@ func ensureWindowsShellConfig(target, src string) {
 		return
 	}
 	log.Printf("ensureWindowsShellConfig: opencode.json 에 Git Bash 셸 주입 → %s", bashPath)
+}
+
+// retiredModels — 런처가 opencode.json 으로 배포했다가 제공이 끝난 모델.
+var retiredModels = map[string]bool{
+	"zai-coding-plan/glm-5.1":     true,
+	"zai-coding-plan/glm-4.5-air": true,
+}
+
+// syncRetiredModels — m 의 model/small_model 이 단종 모델이면 srcPath(배포 원본)의 값으로 바꾼다.
+// 바꾼 것이 있으면 true.
+func syncRetiredModels(m map[string]any, srcPath string) bool {
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return false
+	}
+	var src map[string]any
+	if json.Unmarshal(data, &src) != nil {
+		return false
+	}
+	changed := false
+	for _, k := range []string{"model", "small_model"} {
+		cur, _ := m[k].(string)
+		want, _ := src[k].(string)
+		if retiredModels[cur] && want != "" && want != cur {
+			m[k] = want
+			changed = true
+			log.Printf("opencode.json %s: 단종 모델 %s → %s", k, cur, want)
+		}
+	}
+	return changed
 }
 
 // linkOrCopy — src 를 dst 로 링크(불가 시 복사). isDir 에 따라 junction/트리복사 vs 단일파일 복사.

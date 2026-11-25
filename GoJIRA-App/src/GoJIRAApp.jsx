@@ -6,7 +6,7 @@ import SATAM from './components/SATAM';
 import DocEditor from './components/DocEditor';
 import AlertModal, { modalConfirm, modalAlert } from '@platform/web-ui/components/AlertModal';
 import config from './config';
-import { detectLauncher, requestSessions, requestChat } from '@platform/web-ui/runtime/launcher';
+import { detectLauncher, requestSessions, requestChat, chatAgentOf } from '@platform/web-ui/runtime/launcher';
 import { subscribe } from '@platform/web-ui/runtime/sseManager';
 import { createEventQueue } from '@platform/web-ui/runtime/eventQueue';
 // 플랫폼 인증 어댑터 (계약 02 §5) — 셸 게시본(window.__platformAuth) 우선, standalone 로컬 폴백.
@@ -74,7 +74,7 @@ export default function GoJIRAApp({ user, authority, resetKey, onNavigate: onShe
         `다른 과제(${names}) 에이전트가 실행 중입니다.\n'${code}' 로 전환하시겠습니까?\n(기존 에이전트는 닫히고 '${code}' 에이전트가 새로 열립니다)`
       );
       if (cancelled || !ok) return;
-      const res = await requestChat({ code, user, replace: true, token: r.token });
+      const res = await requestChat({ code, user, agent: chatAgentOf(r), replace: true, token: r.token });
       if (!res.ok) modalAlert(res.error || '에이전트 전환에 실패했습니다.');
     })();
     return () => { cancelled = true; };

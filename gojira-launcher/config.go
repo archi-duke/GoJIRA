@@ -17,7 +17,8 @@ import (
 // 토큰을 사용자 홈에 저장한다. 여기 Token 은 웹↔런처 핸드셰이크용 설치 토큰이며,
 // 설정에 없으면 첫 기동 시 자동 생성되어 token 파일에 영구 저장된다(§2.3).
 type Config struct {
-	DefaultAgent    string   `json:"defaultAgent"` // opencode | claude
+	DefaultAgent    string   `json:"defaultAgent"` // opencode | claude | codex — /chat·/edit 에 agent 가 비었을 때
+	ChatAgent       string   `json:"chatAgent"`    // 웹 채팅 버튼이 띄울 에이전트 (opencode | claude | codex). 비우면 웹 기본값(claude)
 	RepoRoot        string   `json:"repoRoot"`     // 로컬 clone 루트
 	Gateway         string   `json:"gateway"`      // 게이트웨이 base origin (예: https://gojira-host:44300). 설정 시 backend URL 2종 + webOrigins 를 자동 파생 → 손편집 불요.
 	Backend         Backend  `json:"backend"`
@@ -139,6 +140,7 @@ func writePlaceholderConfig(dir, path string) error {
 	// (deriveGateway). `install --gateway <origin>` 로 설치하면 이 값도 자동 기록됨.
 	content := `{
   "defaultAgent": "opencode",
+  "chatAgent": "",
   "repoRoot": "~/GoJIRA-projects",
   "gateway": "http://<gojira-host>:<gateway-port>",
   "port": 5599,
