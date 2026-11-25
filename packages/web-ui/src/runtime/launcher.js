@@ -42,6 +42,8 @@ export async function detectLauncher() {
     return {
       version: data.version,
       agents: Array.isArray(data.agents) ? data.agents : [],
+      // launcher.json chatAgent — 웹 채팅이 띄울 에이전트(설치돼 있을 때만 옴). 없으면 UI_DEFAULT_AGENT.
+      chatAgent: typeof data.chatAgent === 'string' ? data.chatAgent : '',
       ready: !!data.ready,
       token: data.token || '',
     };
@@ -64,13 +66,19 @@ export async function requestEdit({ code, user, file, token }) {
  *
  * 비워 보내면 런처가 `launcher.json` 의 `defaultAgent`(현재 opencode)로 떨어진다.
  * 웹에서 띄우는 경로는 **claude 로 명시**한다 (2026-11-18 사용자 지시).
+ * 단, 그 PC 의 `launcher.json` 에 `chatAgent`(예: codex)가 있으면 그것을 따른다 — chatAgentOf().
  * 호출 지점을 늘릴 때 이 상수를 쓸 것 — 한 곳만 claude 로 바꾸면 과제 전환 시
  * 옛 세션이 opencode 로 되살아나 조용히 어긋난다.
  */
 export const UI_DEFAULT_AGENT = 'claude';
 
+/** detectLauncher() 결과로 웹 채팅이 띄울 에이전트를 정한다 (런처 chatAgent 우선). */
+export function chatAgentOf(launcher) {
+  return (launcher && launcher.chatAgent) || UI_DEFAULT_AGENT;
+}
+
 /**
- * "채팅" — 등록된 에이전트 CLI(opencode|claude)만 새 터미널로 spawn.
+ * "채팅" — 등록된 에이전트 CLI(opencode|claude|codex)만 새 터미널로 spawn.
  *           VS Code 는 띄우지 않음 (필요하면 /edit 으로 분리 호출).
  * replace=true 면 다른 과제의 에이전트를 종료한 뒤 spawn (과제전환 — 단일 현재과제 에이전트).
  * agent 미지정이면 UI_DEFAULT_AGENT 를 쓴다.

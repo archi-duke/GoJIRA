@@ -61,7 +61,7 @@ log "런처 버전 v${VERSION}"
 #    exe 에 박혀 수십 MB 로 부풀고 시크릿 유출 위험. 에이전트가 실제 읽는 것만 embed:
 #      .claude/skills/ · .claude/CLAUDE.md(assets-extra 원본) · opencode.json · .opencode/agents/
 log "에이전트 자산 동기화 → gojira-launcher/assets/ (skills + CLAUDE.md + opencode.json + agents 만)"
-rm -rf "${LAUNCHER_SRC}/assets/.claude" "${LAUNCHER_SRC}/assets/.opencode" "${LAUNCHER_SRC}/assets/opencode.json"
+rm -rf "${LAUNCHER_SRC}/assets/.claude" "${LAUNCHER_SRC}/assets/.opencode" "${LAUNCHER_SRC}/assets/opencode.json" "${LAUNCHER_SRC}/assets/AGENTS.md"
 mkdir -p "${LAUNCHER_SRC}/assets/.claude"
 cp -r "${ROOT_DIR}/.claude/skills" "${LAUNCHER_SRC}/assets/.claude/skills"
 # 프로젝트 메모리(CLAUDE.md) — 원본은 assets-extra/ (레포 루트 .claude/CLAUDE.md 는
@@ -72,6 +72,12 @@ if [[ -e "${LAUNCHER_SRC}/assets-extra/CLAUDE.md" ]]; then
   cp "${LAUNCHER_SRC}/assets-extra/CLAUDE.md" "${LAUNCHER_SRC}/assets/.claude/CLAUDE.md"
 else
   warn "  assets-extra/CLAUDE.md 없음 — 스킵"
+fi
+# Codex 지시문(AGENTS.md) — 원본은 assets-extra/. clone 루트에 연결된다.
+if [[ -e "${LAUNCHER_SRC}/assets-extra/AGENTS.md" ]]; then
+  cp "${LAUNCHER_SRC}/assets-extra/AGENTS.md" "${LAUNCHER_SRC}/assets/AGENTS.md"
+else
+  warn "  assets-extra/AGENTS.md 없음 — 스킵"
 fi
 if [[ -e "${ROOT_DIR}/opencode.json" ]]; then
   cp "${ROOT_DIR}/opencode.json" "${LAUNCHER_SRC}/assets/opencode.json"

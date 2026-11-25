@@ -1,7 +1,7 @@
 # gojira-launcher
 
 웹→로컬 소환 전용 **경량 localhost 데몬**. 사용자 PC 에서 동작하며, GoJIRA 웹의 "수정"
-버튼이 누르면 로컬 clone 을 보장하고 VS Code + 에이전트 CLI(`opencode` | `claude`)를
+버튼이 누르면 로컬 clone 을 보장하고 VS Code + 에이전트 CLI(`opencode` | `claude` | `codex`)를
 띄운다. 편집 결과는 `docs/{user}` 브랜치 push → PR 로 흐른다.
 
 > 설계 근거: [`docs/Long-term Considerations/local-agent-mvp.md`](../docs/Long-term%20Considerations/local-agent-mvp.md) §2.
@@ -28,7 +28,7 @@
    `Authorization: Bearer`) 필요. 토큰은 첫 기동 시 `~/.gojira/launcher-token` 에 자동
    생성(0600)되며, 로그에 위치를 안내한다. 웹은 이 값을 헤더로 전송해야 한다.
    (구체 핸드셰이크 방식은 설계 §6 미해결 — PoC 는 파일 공유 토큰.)
-4. **명령 화이트리스트** — `git clone/checkout/...`, `code`, `opencode|claude` 만 실행.
+4. **명령 화이트리스트** — `git clone/checkout/...`, `code`, `opencode|claude|codex` 만 실행 (codex 는 항상 `codex --no-daemon` — ATalk 가 세션 창을 찾으려면 공유 백그라운드 서버를 쓰면 안 된다).
    `code`/`user`/`file` 은 영숫자·`. _ -` 만 허용하고 path traversal(`..`)을 차단한다.
 
 ## 설정 (§2.4)
@@ -37,7 +37,8 @@
 
 ```jsonc
 {
-  "defaultAgent": "opencode",          // opencode | claude
+  "defaultAgent": "opencode",          // opencode | claude | codex — /chat·/edit 에 agent 가 비었을 때
+  "chatAgent": "",                     // 웹 채팅 버튼이 띄울 에이전트. 비우면 웹 기본값(claude). 예: "codex"
   "repoRoot": "~/GoJIRA-projects",     // 로컬 clone 루트 (기본값). 실제 clone 은 <repoRoot>/<user>/<code>
   "backend": {
     "platformApi": "http://<host>:9000/api/v2",
@@ -126,8 +127,15 @@ docker run --rm -v "$PWD":/src -w /src -e CGO_ENABLED=0 -e GOWORK=off golang:1.2
 ./gojira-launcher        # 127.0.0.1:5599 에서 listen
 ```
 
-전제 툴체인: `git`, `code`(VS Code), (`opencode`|`claude`). `/health` 의 `ready` 는
+전제 툴체인: `git`, `code`(VS Code), (`opencode`|`claude`|`codex`). `/health` 의 `ready` 는
 이 셋이 모두 PATH 에 있을 때 `true`.
+
+### Codex 로 띄우기
+
+- `launcher.json` 에 `"chatAgent": "codex"` — 웹 채팅 버튼이 codex 를 띄운다 (`/health` 가 `chatAgent` 를 알리고 웹이 따른다).
+- 실행 명령은 `codex --no-daemon` 고정. Codex 는 clone 루트의 `AGENTS.md`(런처 배포)를 읽고 `.claude/CLAUDE.md`·`.claude/skills` 로 안내받는다.
+- 스킬은 bash 기준 — Windows 에서는 Git Bash(`bash -lc`)로 실행하라고 AGENTS.md 가 지시한다. 스킬이 API 를 호출하므로 Codex 샌드박스의 네트워크를 허용해야 한다.
+- ATalk 대화방 연동은 런처 일이 아니다: `atalk install codex`(훅 설치) + Codex 에서 `/hooks` 로 ATalk 훅 신뢰.
 
 ## 동작 흐름 (§2.2)
 

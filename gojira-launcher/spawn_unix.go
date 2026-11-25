@@ -16,8 +16,8 @@ import (
 // Start() 만 보면 터미널이 실제로 열렸는지 알 수 없다 — 이전에 osascript 가
 // Apple Event 권한(-1743)에 막혀 실패했는데도 "SUCCESS" 로 보고된 원인이다.
 // 종료 코드를 확인해 실패를 드러낸다.
-func startAgent(bin, label, dir string, env []string) (int, func(), error) {
-	c := terminalCommand(bin, dir, label, env)
+func startAgent(bin string, args []string, label, dir string, env []string) (int, func(), error) {
+	c := terminalCommand(bin, args, dir, label, env)
 	if err := c.Start(); err != nil {
 		return 0, nil, err
 	}

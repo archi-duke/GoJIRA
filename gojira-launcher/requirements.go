@@ -66,14 +66,11 @@ func evalRequirement(key string) requirementCheck {
 	case "code":
 		return binCheck(key, "code")
 	case "opencode|claude":
-		// 에이전트는 둘 중 하나만 있으면 된다.
-		if _, err := exec.LookPath("opencode"); err == nil {
+		// 에이전트는 하나만 있으면 된다 (키 이름은 카탈로그 호환 때문에 유지 — codex 도 인정).
+		if len(availableAgents()) > 0 {
 			return requirementCheck{Key: key, OK: true}
 		}
-		if _, err := exec.LookPath("claude"); err == nil {
-			return requirementCheck{Key: key, OK: true}
-		}
-		return requirementCheck{Key: key, Why: "opencode·claude 모두 PATH 에 없음"}
+		return requirementCheck{Key: key, Why: "에이전트 CLI(opencode·claude·codex) 가 PATH 에 없음"}
 	case "powershell":
 		if runtime.GOOS != "windows" {
 			return requirementCheck{Key: key, Why: "Windows 전용 요건"}

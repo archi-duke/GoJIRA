@@ -9,7 +9,7 @@ import { subscribe, onStatus } from '@platform/web-ui/runtime/sseManager';
 import { modalAlert } from '@platform/web-ui/components/AlertModal';
 import appRegistry, { loadAppManifest } from './apps/registry';
 import config from './config';
-import { detectLauncher, requestChat, UI_DEFAULT_AGENT } from '@platform/web-ui/runtime/launcher';
+import { detectLauncher, requestChat, chatAgentOf } from '@platform/web-ui/runtime/launcher';
 // 셸 인증 런타임 (계약 02) — 모듈 로드 시 window.__platformAuth 게시까지 수행.
 // 구 window.fetch monkey-patch 를 대체: 플랫폼 API 호출은 authFetch 로 명시.
 import { authFetch, __setSession } from './platform/auth';
@@ -287,7 +287,7 @@ function App() {
         return;
       }
       const code = activeProjectCode || '';
-      const res = await requestChat({ code, user, agent: UI_DEFAULT_AGENT, token: r.token });
+      const res = await requestChat({ code, user, agent: chatAgentOf(r), token: r.token });
       if (!res.ok) {
         setLaunching(null);
         modalAlert(res.error || '에이전트 실행에 실패했습니다.');

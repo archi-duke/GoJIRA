@@ -41,19 +41,19 @@ const (
 // Windows Terminal(wt.exe)이 있으면 그 새 창에서, 없으면(또는 wt 기동 자체가 실패하면)
 // 레거시 콘솔(conhost) PowerShell 창으로 폴백한다. conhost 는 에이전트 TUI 의 한글/박스문자가
 // 깨지므로 Windows Terminal 을 우선한다.
-func startAgent(bin, label, dir string, env []string) (int, func(), error) {
+func startAgent(bin string, args []string, label, dir string, env []string) (int, func(), error) {
 	title := sanitizeLabel(label)
 	if title == "" {
 		title = "GoJIRA"
 	}
 	if wt, err := exec.LookPath("wt.exe"); err == nil {
-		pid, wait, launched, err := startAgentInTerminal(wt, bin, title, dir, env)
+		pid, wait, launched, err := startAgentInTerminal(wt, bin, args, title, dir, env)
 		if launched || err == nil {
 			return pid, wait, err
 		}
 		log.Printf("Windows Terminal 기동 실패 — 콘솔 창으로 폴백: %v", err)
 	}
-	return startAgentConsole(bin, title, dir, env)
+	return startAgentConsole(bin, args, title, dir, env)
 }
 
 // startAgentInTerminal — Windows Terminal 새 창의 PowerShell 에서 에이전트를 띄운다.
@@ -63,7 +63,7 @@ func startAgent(bin, label, dir string, env []string) (int, func(), error) {
 //   - 실제 셸 PID 를 알 수 없다 → .ps1 이 자기 $PID 를 파일에 쓰고, 그걸 읽어 OpenProcess 로 추적.
 //     (세션 레지스트리·과제전환 killProcessTree 가 이 PID 로 동작)
 // launched=true 면 wt 는 떴으므로 호출측이 콘솔 폴백(=창 2개)을 하지 않아야 한다.
-func startAgentInTerminal(wt, bin, title, dir string, env []string) (int, func(), bool, error) {
+func startAgentInTerminal(wt, bin string, binArgs []string, title, dir string, env []string) (int, func(), bool, error) {
 	stamp := time.Now().UnixNano()
 	pidFile := filepath.Join(os.TempDir(), fmt.Sprintf("gojira-agent-%d.pid", stamp))
 	scriptFile := filepath.Join(os.TempDir(), fmt.Sprintf("gojira-agent-%d.ps1", stamp))
@@ -84,7 +84,11 @@ func startAgentInTerminal(wt, bin, title, dir string, env []string) (int, func()
 	if dir != "" {
 		fmt.Fprintf(&b, "Set-Location -LiteralPath %s\r\n", psQuote(dir))
 	}
-	fmt.Fprintf(&b, "& %s\r\n", psQuote(bin))
+	b.WriteString("& " + psQuote(bin))
+	for _, a := range binArgs {
+		b.WriteString(" " + psQuote(a))
+	}
+	b.WriteString("\r\n")
 
 	// UTF-8 BOM — Windows PowerShell 5.1 은 BOM 없는 .ps1 을 ANSI(CP949)로 읽어 한글 경로가 깨진다.
 	content := append([]byte{0xEF, 0xBB, 0xBF}, []byte(b.String())...)
@@ -133,17 +137,22 @@ func psQuote(s string) string {
 }
 
 // startAgentConsole — 레거시 콘솔(conhost) 폴백.
-func startAgentConsole(bin, title, dir string, env []string) (int, func(), error) {
+func startAgentConsole(bin string, binArgs []string, title, dir string, env []string) (int, func(), error) {
 	// 새 PowerShell 콘솔에서: 제목 설정 → UTF-8 코드페이지·콘솔 인코딩(한국어 Windows CP949 의
 	// U+FFFD 깨짐 방지) → 에이전트 실행. -NoExit 로 에이전트 종료 후에도 셸이 남는다(구 cmd /k 동작).
 	// -ExecutionPolicy Bypass: npm 전역 설치 CLI(claude)는 PowerShell 에서 claude.ps1 shim 으로
 	// 해석되는데, 기본 정책(Restricted)이면 실행이 막힌다.
 	// title 은 sanitizeLabel 이 ' " ` 를 제거하므로 작은따옴표 리터럴에 안전하게 들어간다.
 	// bin 은 agentBins 화이트리스트 값만 온다.
+	// 인자도 agentBins 고정값(영숫자·-)만 오므로 작은따옴표 리터럴로 안전하다.
+	call := "& '" + bin + "'"
+	for _, a := range binArgs {
+		call += " '" + a + "'"
+	}
 	script := fmt.Sprintf("$Host.UI.RawUI.WindowTitle='%s'; chcp 65001 > $null; "+
 		"$u = New-Object System.Text.UTF8Encoding $false; "+
 		"[Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; $OutputEncoding = $u; "+
-		"& '%s'", title, bin)
+		"%s", title, call)
 	cmdline := `powershell.exe -NoLogo -NoExit -ExecutionPolicy Bypass -Command "` + script + `"`
 
 	envBlock, err := makeEnvBlock(dedupEnv(append(os.Environ(), env...)))

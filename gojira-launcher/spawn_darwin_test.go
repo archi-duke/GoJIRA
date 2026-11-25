@@ -22,7 +22,7 @@ func TestWriteSpawnScript(t *testing.T) {
 		"WITH_QUOTE=it's here",
 		"TOKEN=abc'def\"ghi",
 	}
-	path, err := writeSpawnScript("/usr/bin/true", "/tmp/dir with space", "GoJIRA · TEST", env)
+	path, err := writeSpawnScript("/usr/bin/true", []string{"--no-daemon"}, "/tmp/dir with space", "GoJIRA · TEST", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestWriteSpawnScript(t *testing.T) {
 		`export SIMPLE='value'`,
 		`export WITH_SPACE='a b c'`,
 		`cd '/tmp/dir with space' || exit 1`,
-		`exec '/usr/bin/true'`,
+		`exec '/usr/bin/true' '--no-daemon'`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("스크립트에 %q 가 없다\n---\n%s", want, got)
@@ -73,7 +73,7 @@ func TestTerminalCommandUsesOpen(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("darwin 전용 경로")
 	}
-	c := terminalCommand("/usr/bin/true", "/tmp", "label", []string{"K=V"})
+	c := terminalCommand("/usr/bin/true", nil, "/tmp", "label", []string{"K=V"})
 	base := filepath.Base(c.Path)
 	if base == "osascript" {
 		t.Fatal("osascript 를 쓰고 있다 — Apple Event 권한에 막히면 조용히 실패한다")
