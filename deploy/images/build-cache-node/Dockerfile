@@ -21,13 +21,10 @@ COPY Platform-App/package.json Platform-App/package-lock.json* Platform-App/
 RUN cd GoJIRA-App && npm ci --no-audit --no-fund
 RUN cd Platform-App && npm ci --no-audit --no-fund
 
-# @platform/web-ui — Kendo 의존을 단독 소유하는 소스 패키지 (계약 04).
+# @platform/web-ui — 플랫폼 공통 UI 소스 패키지 (계약 04). 2026-11-25 부터 서드파티
+# 런타임 의존 0 (Kendo 제거, DataGrid 자체 구현). 의존이 다시 생길 때를 대비해 설치 단계는 유지.
 # .npmrc(legacy-peer-deps)가 react 자동설치를 막는다 — react 가 web-ui/node_modules
 # 에 생기면 앱과 이중 인스턴스가 되므로 반드시 함께 복사.
-# Kendo 라이선스: 외부망 캐시 빌드 시 TELERIK_LICENSE build-arg(선택) — 미지정이어도
-# 5.x 는 경고만 하고 설치는 진행된다.
-ARG TELERIK_LICENSE
-ENV TELERIK_LICENSE=${TELERIK_LICENSE}
 COPY packages/web-ui/package.json packages/web-ui/package-lock.json* packages/web-ui/.npmrc packages/web-ui/
 RUN cd packages/web-ui && npm ci --no-audit --no-fund
 

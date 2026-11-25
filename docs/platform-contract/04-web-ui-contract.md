@@ -1,17 +1,21 @@
 # 04. 디자인시스템 계약 — `@platform/web-ui`
 
-> **원칙: Kendo(Telerik KendoReact)의 유일한 소유자는 @platform/web-ui 패키지다.**
-> 제품 앱은 `@progress/kendo-*` 를 **직접 의존하지 않는다** — web-ui 가 감싼 컴포넌트만 사용한다.
+> **원칙: 플랫폼 공통 UI 의 유일한 소유자는 @platform/web-ui 패키지다.**
+> 제품 앱은 그리드 같은 공통 컴포넌트를 직접 의존하지 않고 web-ui 가 제공하는 것만 사용한다.
 
-## 0. 현황 명시 (2026-07-06 갱신)
+## 0. 현황 명시
 
-**Kendo 는 web-ui 에만 존재한다** — 같은 날 도입됨(D13): `packages/web-ui/package.json` 이 KendoReact 5.8.0 세트를
-단독 소유하고(자체 node_modules, `.npmrc` legacy-peer-deps 로 react 이중설치 차단), 첫 소비는
-`DataGrid` 래퍼(소팅/필터) → 셸 AccountManager Users 목록. **React 19 셸에서 렌더/소팅/필터 실측 통과** (콘솔 에러 0).
-두 앱 package.json 에는 여전히 `@progress/kendo-*` 0건 — 계약(§1·§5)대로 유지한다.
+**2026-11-25 — Kendo 제거, DataGrid 자체 구현.** web-ui 의 서드파티 런타임 의존은 0 이다.
+- `DataGrid` 를 외부 라이브러리 없이 다시 만들었다 (`packages/web-ui/src/components/DataGrid.jsx` + `.css`).
+  예전 Kendo 래퍼와 props 가 같아 소비 앱 코드 변경은 없다(셸 AccountManager 는 페이징만 추가).
+- 기능: 클라이언트 정렬·포함 필터·페이징(`pageSize`/`pageSizes`)·컬럼 폭 조절(`resizable`)·커스텀 셀(`cell` — Kendo 와 같은 `{dataItem}` → `<td>`).
+- **서버(제어) 모드**: `total` 을 주면 `sort`/`filter`/`skip`/`take` 를 부모가 쥐고 `onSortChange`·`onFilterChange`·`onPageChange`(·`onDataStateChange`) 로 받는다.
+  sort·filter 는 **Kendo descriptor 와 같은 JSON** (`[{field, dir}]`, `{logic:'and', filters:[{field, operator:'contains', value, ignoreCase}]}`)
+  이라 RAGaaS 백엔드의 쿼리 파라미터 계약(§5 "백엔드 결합")을 그대로 쓸 수 있다.
+- 이유: Apache 2.0 공개(2026-11-23) 시 상용 의존이 남으면 사용자마다 별도 라이선스가 필요하다. 실사용 표면이 Grid 하나라 자체 구현 비용이 작다.
+- **RAGaaS 이관(2단계)**: GraphDataTable(서버 모드)·ChunksModal(클라이언트 페이징)을 web-ui DataGrid 로 바꾸고 `@progress/kendo-*` 를 제거한다 — RAGaaS 세션 담당.
 
-**RAGaaS 도 Kendo 사용 중** (D:\works\RAGaaS\frontend 실사, 아래 §5) — 같은 5.8.0 기준이며,
-RAGaaS 의 Kendo 의존은 합류 시 web-ui 로 이관한다.
+아래 §1 이하의 Kendo 관련 서술은 2026-07-06 도입 당시 기록이며, 위 내용이 우선한다.
 
 ## 1. 패키지 소유 범위
 
