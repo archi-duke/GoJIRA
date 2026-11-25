@@ -66,15 +66,29 @@ export async function requestEdit({ code, user, file, token }) {
  *
  * 비워 보내면 런처가 `launcher.json` 의 `defaultAgent`(현재 opencode)로 떨어진다.
  * 웹에서 띄우는 경로는 **claude 로 명시**한다 (2026-11-18 사용자 지시).
- * 단, 그 PC 의 `launcher.json` 에 `chatAgent`(예: codex)가 있으면 그것을 따른다 — chatAgentOf().
+ * 단, 그 PC 에 codex 가 있거나 `launcher.json` 에 `chatAgent` 가 있으면 그쪽을 따른다 — chatAgentOf().
  * 호출 지점을 늘릴 때 이 상수를 쓸 것 — 한 곳만 claude 로 바꾸면 과제 전환 시
  * 옛 세션이 opencode 로 되살아나 조용히 어긋난다.
  */
 export const UI_DEFAULT_AGENT = 'claude';
 
-/** detectLauncher() 결과로 웹 채팅이 띄울 에이전트를 정한다 (런처 chatAgent 우선). */
+/**
+ * 웹 채팅이 우선해서 띄울 에이전트 — 그 PC 에 설치돼 있으면 codex (2026-11-25 사용자 지시).
+ * 설치돼 있지 않으면 UI_DEFAULT_AGENT(claude)로 떨어진다.
+ */
+export const UI_PREFERRED_AGENT = 'codex';
+
+/**
+ * detectLauncher() 결과로 웹 채팅이 띄울 에이전트를 정한다.
+ * 1) 런처 launcher.json 의 chatAgent (PC 별 지정)
+ * 2) 그 PC 에 codex 가 있으면 codex
+ * 3) 그 밖에는 claude
+ */
 export function chatAgentOf(launcher) {
-  return (launcher && launcher.chatAgent) || UI_DEFAULT_AGENT;
+  if (launcher && launcher.chatAgent) return launcher.chatAgent;
+  const agents = (launcher && launcher.agents) || [];
+  if (agents.includes(UI_PREFERRED_AGENT)) return UI_PREFERRED_AGENT;
+  return UI_DEFAULT_AGENT;
 }
 
 /**
