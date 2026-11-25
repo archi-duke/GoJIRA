@@ -246,14 +246,6 @@
 }
 
 /* --- 사내 임직원 조회 (Knox lookup) --- */
-.am-lookup-input {
-  margin-left: auto;
-  padding: 4px 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 13px;
-  width: 200px;
-}
 .am-lookup-btn {
   border: none;
   background: lightgray;

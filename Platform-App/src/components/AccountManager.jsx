@@ -18,17 +18,6 @@ async function fetchLookup(path) {
   return data;
 }
 
-// 조회 결과 → 등록 폼 초기값. 미등록자만 폼으로 넘어온다.
-function lookupToUserForm(found) {
-  return {
-    knoxId: found.knoxId || '',
-    name: found.name || '',
-    email: found.email || '',
-    authGroupIds: [],
-    orgUnitIds: [],
-  };
-}
-
 // 조회 결과의 부가 정보(부서/직급/회사) — 폼 상단 안내용.
 function lookupSummary(found) {
   return [found.department, found.title, found.company].filter(Boolean).join(' · ');
@@ -244,29 +233,9 @@ export default function AccountManager({ user, app = 'platform' }) {
 }
 
 // --- Users 테이블 (web-ui DataGrid — 정렬/필터/페이징, 계약 04) ---
+// 임직원 조회(Knox ID·이름)는 '+ 사용자 추가' 등록 창 안에서 한다 — 목록 위 별도 검색창은
+// DataGrid 컬럼 필터와 겹쳐 제거했다 (2026-11-25).
 function UserTable({ users, authGroups, orgUnits, isPlatform, onEdit, onDelete, onCreate }) {
-  const [lookupId, setLookupId] = useState('');
-  const [searching, setSearching] = useState(false);
-
-  // Knox ID 로 임직원을 찾아 바로 등록 폼을 연다. 이미 등록된 사람은 폼을 열지 않는다.
-  async function searchByKnoxId() {
-    const id = lookupId.trim();
-    if (!id) return;
-    setSearching(true);
-    try {
-      const found = await fetchLookup(`/lookup/${encodeURIComponent(id)}`);
-      if (found.registered) {
-        modalAlert(`'${found.knoxId}' (${found.name}) 은(는) 이미 등록된 사용자입니다.`);
-        return;
-      }
-      onCreate(lookupToUserForm(found), lookupSummary(found));
-      setLookupId('');
-    } catch (err) {
-      modalAlert(err.message);
-    } finally {
-      setSearching(false);
-    }
-  }
 
   // 파생 표시 필드를 행에 미리 평탄화 — 소팅/필터가 표시 문자열 기준으로 동작하게 한다.
   const rows = useMemo(() => {
@@ -316,16 +285,6 @@ function UserTable({ users, authGroups, orgUnits, isPlatform, onEdit, onDelete, 
     <>
       <div className="am-toolbar">
         <span className="am-count">{users.length}명</span>
-        <input
-          className="am-lookup-input"
-          placeholder="Knox ID 로 임직원 검색"
-          value={lookupId}
-          onChange={e => setLookupId(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') searchByKnoxId(); }}
-        />
-        <button className="am-lookup-btn" onClick={searchByKnoxId} disabled={searching}>
-          {searching ? '검색 중...' : '검색'}
-        </button>
         <button className="am-add-btn" onClick={() => onCreate()}>+ 사용자 추가</button>
       </div>
       <DataGrid
